@@ -5,8 +5,17 @@ All models are imported here so Alembic can discover them for migration autogene
 
 from nexus.models.agent import Agent
 from nexus.models.budget import BudgetPolicy, CostEvent
+from nexus.models.communication import Event, Group, GroupMember, Message
 from nexus.models.company import Company, CompanyMembership, Department, Team
+from nexus.models.evolution import (
+    AgentVersion,
+    EvolutionEvaluation,
+    EvolutionProposal,
+    SkillVersion,
+)
 from nexus.models.governance import Approval, AuditLog, Decision, DecisionQueue
+from nexus.models.knowledge import ExperienceRecord, KnowledgeChunk, KnowledgePage
+from nexus.models.meeting import ActionItem, Meeting, MeetingMinutes, MeetingParticipant
 from nexus.models.memory import MemoryRecord
 from nexus.models.skill import AgentSkill, Skill
 from nexus.models.task import Goal, Project, Task
@@ -44,4 +53,23 @@ __all__ = [
     # Triggers
     "Trigger",
     "TriggerExecution",
+    # Communication
+    "Message",
+    "Group",
+    "GroupMember",
+    "Event",
+    # Knowledge
+    "KnowledgePage",
+    "KnowledgeChunk",
+    "ExperienceRecord",
+    # Meetings
+    "Meeting",
+    "MeetingParticipant",
+    "MeetingMinutes",
+    "ActionItem",
+    # Evolution
+    "EvolutionProposal",
+    "EvolutionEvaluation",
+    "SkillVersion",
+    "AgentVersion",
 ]
