@@ -475,3 +475,181 @@ class TestCLIAdapterInRegistry:
         caps = registry.get_capabilities("cli")
         assert "multi_backend" in caps
         assert "execute_task" in caps
+
+
+class TestCLIAdapterEnvFiltering:
+    """Test that sensitive env vars are stripped from subprocess environment."""
+
+    @pytest.fixture
+    def adapter(self):
+        """Create a CLIAdapter instance."""
+        return CLIAdapter()
+
+    @pytest.fixture
+    def agent_id(self):
+        """Fixed agent UUID for tests."""
+        return uuid.UUID("abcdef01-abcd-abcd-abcd-abcdef012345")
+
+    @pytest.fixture
+    def task_id(self):
+        """Fixed task UUID for tests."""
+        return uuid.UUID("99999999-9999-9999-9999-999999999999")
+
+    @patch("asyncio.create_subprocess_exec")
+    @patch.dict(
+        "os.environ",
+        {
+            "OPENAI_API_KEY": "sk-secret",
+            "ANTHROPIC_API_KEY": "sk-ant-secret",
+            "DATABASE_URL": "postgres://secret",
+            "SECRET_KEY": "mysecret",
+            "HOME": "/home/user",
+            "PATH": "/usr/bin",
+        },
+        clear=True,
+    )
+    def test_sensitive_vars_stripped_for_generic_backend(
+        self, mock_exec, adapter, agent_id, task_id
+    ):
+        """Sensitive env vars are stripped for backends without allow_env."""
+        mock_process = AsyncMock()
+        mock_process.communicate = AsyncMock(return_value=(b"done", b""))
+        mock_process.returncode = 0
+        mock_exec.return_value = mock_process
+
+        config = {"backend": "opencode", "workspace": "/tmp/test_cli"}
+        session = _run(adapter.create_session(agent_id, config))
+
+        payload = {"prompt": "test"}
+        _run(adapter.execute_task(session, task_id, payload))
+
+        # Check the env passed to subprocess
+        call_kwargs = mock_exec.call_args[1]
+        env = call_kwargs["env"]
+        assert "OPENAI_API_KEY" not in env
+        assert "ANTHROPIC_API_KEY" not in env
+        assert "DATABASE_URL" not in env
+        assert "SECRET_KEY" not in env
+        # Non-sensitive vars should still be present
+        assert env.get("HOME") == "/home/user"
+        assert env.get("PATH") == "/usr/bin"
+
+    @patch("asyncio.create_subprocess_exec")
+    @patch.dict(
+        "os.environ",
+        {
+            "OPENAI_API_KEY": "sk-secret",
+            "ANTHROPIC_API_KEY": "sk-ant-secret",
+            "DATABASE_URL": "postgres://secret",
+            "HOME": "/home/user",
+        },
+        clear=True,
+    )
+    def test_allowed_vars_kept_for_claude_backend(
+        self, mock_exec, adapter, agent_id, task_id
+    ):
+        """Claude backend keeps ANTHROPIC_API_KEY (in allow_env)."""
+        mock_process = AsyncMock()
+        mock_process.communicate = AsyncMock(return_value=(b"done", b""))
+        mock_process.returncode = 0
+        mock_exec.return_value = mock_process
+
+        config = {"backend": "claude", "workspace": "/tmp/test_cli"}
+        session = _run(adapter.create_session(agent_id, config))
+
+        payload = {"prompt": "test"}
+        _run(adapter.execute_task(session, task_id, payload))
+
+        call_kwargs = mock_exec.call_args[1]
+        env = call_kwargs["env"]
+        # Claude should keep ANTHROPIC_API_KEY
+        assert env.get("ANTHROPIC_API_KEY") == "sk-ant-secret"
+        # But not OPENAI_API_KEY or DATABASE_URL
+        assert "OPENAI_API_KEY" not in env
+        assert "DATABASE_URL" not in env
+
+
+class TestCLIAdapterWorkspaceCleanup:
+    """Test that temp workspaces are cleaned up on termination."""
+
+    @pytest.fixture
+    def adapter(self):
+        """Create a CLIAdapter instance."""
+        return CLIAdapter()
+
+    @pytest.fixture
+    def agent_id(self):
+        """Fixed agent UUID for tests."""
+        return uuid.UUID("abcdef01-abcd-abcd-abcd-abcdef012345")
+
+    def test_terminate_cleans_temp_workspace(self, adapter, agent_id):
+        """Terminate removes temp workspace directory."""
+        import tempfile
+        import os
+
+        config = {"backend": "aider"}
+        session = _run(adapter.create_session(agent_id, config))
+
+        workspace = session.metadata["workspace"]
+        # Verify temp workspace was created
+        assert os.path.isdir(workspace)
+        assert workspace.startswith(tempfile.gettempdir())
+
+        # Terminate should clean it up
+        _run(adapter.terminate(session))
+        assert not os.path.isdir(workspace)
+
+    def test_terminate_does_not_remove_user_workspace(self, adapter, agent_id):
+        """Terminate does NOT remove user-specified workspace directories."""
+        import tempfile
+        import os
+
+        # Create a workspace outside of tempdir
+        user_workspace = tempfile.mkdtemp(dir="/tmp", prefix="user_ws_")
+        try:
+            config = {"backend": "claude", "workspace": user_workspace}
+            session = _run(adapter.create_session(agent_id, config))
+
+            _run(adapter.terminate(session))
+            # User workspace should still exist
+            assert os.path.isdir(user_workspace)
+        finally:
+            os.rmdir(user_workspace)
+
+
+class TestCLIBackendInfoBuildArgs:
+    """Test CLIBackendInfo.build_args extensibility."""
+
+    def test_custom_backend_build_args_default(self):
+        """Default build_args appends prompt as positional argument."""
+        backend = CLIBackendInfo(
+            id="custom",
+            name="Custom",
+            command="custom-cli",
+        )
+        args = backend.build_args("hello world")
+        assert args == ["custom-cli", "hello world"]
+
+    def test_custom_backend_build_args_with_extra(self):
+        """Default build_args includes extra_args before prompt."""
+        backend = CLIBackendInfo(
+            id="custom",
+            name="Custom",
+            command="custom-cli",
+        )
+        args = backend.build_args("hello", ["--verbose", "--fast"])
+        assert args == ["custom-cli", "--verbose", "--fast", "hello"]
+
+    def test_claude_backend_build_args_via_registry(self):
+        """Claude backend build_args produces correct output via registry."""
+        registry = CLIRegistry(auto_detect=False)
+        backend = registry.get_backend("claude")
+        args = backend.build_args("test prompt")
+        assert args == ["claude", "--print"]
+
+    def test_aider_backend_build_args_via_registry(self):
+        """Aider backend build_args produces correct output via registry."""
+        registry = CLIRegistry(auto_detect=False)
+        backend = registry.get_backend("aider")
+        args = backend.build_args("refactor this", ["--model", "gpt-4"])
+        assert args == ["aider", "--message", "refactor this", "--yes", "--model", "gpt-4"]

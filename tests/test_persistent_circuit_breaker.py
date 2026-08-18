@@ -353,3 +353,82 @@ class TestLoadState:
         states = await cb.load_state()
 
         assert states == {}
+
+
+class TestCooldownAutoReset:
+    """Tests for PersistentCircuitBreaker.is_open cooldown enforcement."""
+
+    async def test_is_open_auto_resets_when_cooldown_elapsed(self):
+        """Circuit auto-resets to closed when cooldown has elapsed."""
+        from datetime import timedelta
+
+        agent_id = uuid.uuid4()
+        # Create a record that was opened 600 seconds ago with 300s cooldown
+        opened_at = datetime(2024, 1, 1, 12, 0, 0)
+        record = _make_record(
+            agent_id,
+            consecutive_failures=5,
+            is_open=True,
+            opened_at=opened_at,
+            cooldown_seconds=300,
+        )
+
+        session = AsyncMock()
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = record
+        session.execute = AsyncMock(return_value=mock_result)
+        session.commit = AsyncMock()
+
+        factory = _make_session_factory(session)
+        cb = PersistentCircuitBreaker(factory, cooldown_seconds=300)
+
+        # Mock datetime.utcnow to return a time well past the cooldown
+        fake_now = datetime(2024, 1, 1, 12, 10, 0)  # 600s after opened_at
+        with patch(
+            "nexus.governance.persistent_circuit_breaker.datetime"
+        ) as mock_dt:
+            mock_dt.utcnow.return_value = fake_now
+            result = await cb.is_open(agent_id)
+
+        assert result is False
+        # Verify the record was auto-reset
+        assert record.is_open is False
+        assert record.opened_at is None
+        assert record.consecutive_failures == 0
+        session.commit.assert_called_once()
+
+    async def test_is_open_remains_open_within_cooldown(self):
+        """Circuit remains open when cooldown has NOT elapsed."""
+        agent_id = uuid.uuid4()
+        # Opened 100 seconds ago with 300s cooldown - should still be open
+        opened_at = datetime(2024, 1, 1, 12, 0, 0)
+        record = _make_record(
+            agent_id,
+            consecutive_failures=5,
+            is_open=True,
+            opened_at=opened_at,
+            cooldown_seconds=300,
+        )
+
+        session = AsyncMock()
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = record
+        session.execute = AsyncMock(return_value=mock_result)
+        session.commit = AsyncMock()
+
+        factory = _make_session_factory(session)
+        cb = PersistentCircuitBreaker(factory, cooldown_seconds=300)
+
+        # Mock datetime.utcnow to return a time within the cooldown
+        fake_now = datetime(2024, 1, 1, 12, 1, 40)  # 100s after opened_at
+        with patch(
+            "nexus.governance.persistent_circuit_breaker.datetime"
+        ) as mock_dt:
+            mock_dt.utcnow.return_value = fake_now
+            result = await cb.is_open(agent_id)
+
+        assert result is True
+        # Record should NOT have been modified
+        assert record.is_open is True
+        assert record.consecutive_failures == 5
+        session.commit.assert_not_called()

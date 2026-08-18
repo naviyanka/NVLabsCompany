@@ -1,0 +1,28 @@
+{
+  "id": "FEAT-005",
+  "type": "fix",
+  "description": "Address review issues 1-6: fix circuit breaker cooldown enforcement, load circuit breaker state at startup, restrict env vars leaked to CLI subprocesses, clean up temp workspaces on terminate, refactor _build_args dispatch into CLIBackendInfo, and document guardrail module deprecation plan.",
+  "status": "in_progress",
+  "steps": [
+    "Fix PersistentCircuitBreaker.is_open() to check cooldown_seconds and auto-close expired circuits",
+    "Add PersistentCircuitBreaker.load_state() call in app lifespan",
+    "Add env var filtering in CLIAdapter._do_execute to strip sensitive keys not needed by backends",
+    "Add shutil.rmtree cleanup of temp workspaces in CLIAdapter._do_terminate",
+    "Refactor _build_args dispatch into CLIBackendInfo.build_args method",
+    "Add deprecation docstring note to src/nexus/governance/guardrails.py"
+  ],
+  "acceptance_criteria": [
+    "PersistentCircuitBreaker.is_open() auto-resets circuits past cooldown",
+    "Lifespan loads circuit breaker state alongside kill switches",
+    "CLI adapter strips sensitive env vars (API keys, DATABASE_URL, SECRET_KEY) from subprocess env",
+    "Temp workspaces are cleaned up on session termination",
+    "CLIBackendInfo has a build_args method, and _build_args in the adapter delegates to it",
+    "governance/guardrails.py has a deprecation notice pointing to nexus.guardrails",
+    "All 739+ tests still pass"
+  ],
+  "verification": [
+    "python -m pytest tests/ --tb=short -q"
+  ],
+  "blocked_reason": null,
+  "findings": null
+}

@@ -31,11 +31,77 @@ class CLIBackendInfo:
     supports_native_worktree: bool = False
     supports_structured_output: bool = False
     delete_env: list[str] = field(default_factory=list)
+    allow_env: list[str] = field(default_factory=list)
+
+    def build_args(self, prompt: str, extra_args: list[str] | None = None) -> list[str]:
+        """Build the CLI command arguments for this backend.
+
+        Subclasses or instances can override this method to customize
+        argument construction without modifying the adapter source.
+
+        Args:
+            prompt: The task prompt to pass.
+            extra_args: Additional CLI arguments to append.
+
+        Returns:
+            List of command-line arguments ready for subprocess exec.
+        """
+        # Default implementation: command + extra_args + prompt as positional arg
+        cmd = [self.command]
+        if extra_args:
+            cmd.extend(extra_args)
+        cmd.append(prompt)
+        return cmd
+
+
+class _ClaudeBackendInfo(CLIBackendInfo):
+    """Claude Code backend with custom argument construction."""
+
+    def build_args(self, prompt: str, extra_args: list[str] | None = None) -> list[str]:
+        """Claude Code: uses --print for non-interactive mode, prompt via stdin."""
+        cmd = [self.command, "--print"]
+        if extra_args:
+            cmd.extend(extra_args)
+        return cmd
+
+
+class _CodexBackendInfo(CLIBackendInfo):
+    """OpenAI Codex CLI backend with custom argument construction."""
+
+    def build_args(self, prompt: str, extra_args: list[str] | None = None) -> list[str]:
+        """Codex CLI: --quiet flag, prompt as positional argument."""
+        cmd = [self.command, "--quiet"]
+        if extra_args:
+            cmd.extend(extra_args)
+        cmd.append(prompt)
+        return cmd
+
+
+class _AiderBackendInfo(CLIBackendInfo):
+    """Aider backend with custom argument construction."""
+
+    def build_args(self, prompt: str, extra_args: list[str] | None = None) -> list[str]:
+        """Aider: uses --message flag for non-interactive prompt."""
+        cmd = [self.command, "--message", prompt, "--yes"]
+        if extra_args:
+            cmd.extend(extra_args)
+        return cmd
+
+
+class _KiroBackendInfo(CLIBackendInfo):
+    """Kiro CLI backend with custom argument construction."""
+
+    def build_args(self, prompt: str, extra_args: list[str] | None = None) -> list[str]:
+        """Kiro CLI: prompt via stdin, minimal args."""
+        cmd = [self.command]
+        if extra_args:
+            cmd.extend(extra_args)
+        return cmd
 
 
 # Default backend definitions
 _DEFAULT_BACKENDS: list[CLIBackendInfo] = [
-    CLIBackendInfo(
+    _ClaudeBackendInfo(
         id="claude",
         name="Claude Code",
         command="claude",
@@ -47,8 +113,9 @@ _DEFAULT_BACKENDS: list[CLIBackendInfo] = [
         guard_type="hooks",
         supports_native_worktree=True,
         supports_structured_output=True,
+        allow_env=["ANTHROPIC_API_KEY"],
     ),
-    CLIBackendInfo(
+    _CodexBackendInfo(
         id="codex",
         name="OpenAI Codex CLI",
         command="codex",
@@ -58,8 +125,9 @@ _DEFAULT_BACKENDS: list[CLIBackendInfo] = [
         supports_agent_type=False,
         supports_stdin=True,
         guard_type="sandbox",
+        allow_env=["OPENAI_API_KEY"],
     ),
-    CLIBackendInfo(
+    _KiroBackendInfo(
         id="kiro-cli",
         name="Kiro CLI",
         command="kiro",
@@ -70,7 +138,7 @@ _DEFAULT_BACKENDS: list[CLIBackendInfo] = [
         supports_stdin=True,
         guard_type="none",
     ),
-    CLIBackendInfo(
+    _AiderBackendInfo(
         id="aider",
         name="Aider",
         command="aider",
@@ -80,6 +148,7 @@ _DEFAULT_BACKENDS: list[CLIBackendInfo] = [
         supports_agent_type=False,
         supports_stdin=True,
         guard_type="none",
+        allow_env=["OPENAI_API_KEY", "ANTHROPIC_API_KEY"],
     ),
     CLIBackendInfo(
         id="opencode",

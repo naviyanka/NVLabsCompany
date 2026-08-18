@@ -6,7 +6,7 @@ On startup, loads all open circuits from the database to restore state.
 
 import logging
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from sqlalchemy import select, update
@@ -163,6 +163,10 @@ class PersistentCircuitBreaker:
     async def is_open(self, agent_id: uuid.UUID) -> bool:
         """Check if the circuit breaker is open for an agent (from DB).
 
+        If the cooldown period has elapsed since the circuit opened,
+        the circuit auto-resets (transitions to closed), matching the
+        in-memory CircuitBreaker behavior.
+
         Args:
             agent_id: The agent to check.
 
@@ -171,13 +175,38 @@ class PersistentCircuitBreaker:
         """
         from nexus.governance.circuit_breaker_model import CircuitBreakerRecord
 
+        now = datetime.utcnow()
+
         async with self._session_factory() as session:
             stmt = select(CircuitBreakerRecord).where(
                 CircuitBreakerRecord.agent_id == agent_id,
                 CircuitBreakerRecord.is_open == True,  # noqa: E712
             )
             result = await session.execute(stmt)
-            return result.scalar_one_or_none() is not None
+            record = result.scalar_one_or_none()
+
+            if record is None:
+                return False
+
+            # Check if cooldown has elapsed - auto-reset if so
+            if record.opened_at is not None:
+                elapsed = now - record.opened_at
+                if elapsed >= timedelta(seconds=record.cooldown_seconds):
+                    # Cooldown expired: auto-close the circuit
+                    record.is_open = False
+                    record.opened_at = None
+                    record.consecutive_failures = 0
+                    record.updated_at = now
+                    await session.commit()
+                    logger.info(
+                        "Circuit breaker auto-reset for agent %s "
+                        "(cooldown of %ds elapsed)",
+                        agent_id,
+                        record.cooldown_seconds,
+                    )
+                    return False
+
+            return True
 
     async def reset(self, agent_id: uuid.UUID) -> None:
         """Manually reset the circuit breaker for an agent.

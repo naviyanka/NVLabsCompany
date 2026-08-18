@@ -8,6 +8,7 @@ from the CLIRegistry, making this a single adapter that supports multiple CLI to
 import asyncio
 import os
 import re
+import shutil
 import signal
 import tempfile
 import uuid
@@ -32,6 +33,20 @@ OUTPUT_TOKEN_PATTERN = re.compile(
 COST_PATTERN = re.compile(
     r"(?:cost|total)[:\s]+\$?([\d.]+)", re.IGNORECASE
 )
+
+# Sensitive environment variable patterns that should NOT be passed to
+# subprocess environments unless explicitly needed by the backend.
+_SENSITIVE_ENV_PATTERNS: list[str] = [
+    "OPENAI_API_KEY",
+    "ANTHROPIC_API_KEY",
+    "SECRET_KEY",
+    "DATABASE_URL",
+    "DB_PASSWORD",
+    "AWS_SECRET_ACCESS_KEY",
+    "GITHUB_TOKEN",
+    "GITLAB_TOKEN",
+    "NEXUS_SECRET_KEY",
+]
 
 
 class CLIAdapter(BaseAdapter):
@@ -92,11 +107,13 @@ class CLIAdapter(BaseAdapter):
         if workspace:
             workspace_path = workspace
             os.makedirs(workspace_path, exist_ok=True)
+            session.metadata["_temp_workspace"] = False
         else:
             backend_id = session.config.get("backend", "cli")
             workspace_path = tempfile.mkdtemp(
                 prefix=f"nexus_cli_{backend_id}_{session.session_id[:8]}_"
             )
+            session.metadata["_temp_workspace"] = True
 
         self._workspaces[session.session_id] = workspace_path
         session.metadata["workspace"] = workspace_path
@@ -141,10 +158,18 @@ class CLIAdapter(BaseAdapter):
         # Track files before execution for artifact detection
         pre_files = self._snapshot_workspace(workspace)
 
-        # Prepare environment - remove vars specified by backend
+        # Prepare environment - strip sensitive vars and backend-specific deletions.
+        # Only pass env vars that the backend actually needs. Backends that require
+        # specific API keys (e.g., claude needs ANTHROPIC_API_KEY, codex needs
+        # OPENAI_API_KEY) should declare them via allow_env on CLIBackendInfo.
         env = os.environ.copy()
         for var in backend.delete_env:
             env.pop(var, None)
+        # Strip sensitive variables unless the backend explicitly needs them
+        allowed = set(getattr(backend, "allow_env", None) or [])
+        for sensitive_var in _SENSITIVE_ENV_PATTERNS:
+            if sensitive_var not in allowed:
+                env.pop(sensitive_var, None)
 
         try:
             # Spawn subprocess
@@ -294,7 +319,14 @@ class CLIAdapter(BaseAdapter):
                 pass
 
         self._conversation_history.pop(session.session_id, None)
-        self._workspaces.pop(session.session_id, None)
+
+        # Clean up temp workspace directory if it was auto-created
+        workspace_path = self._workspaces.pop(session.session_id, None)
+        if workspace_path and session.metadata.get("_temp_workspace", False):
+            try:
+                shutil.rmtree(workspace_path, ignore_errors=True)
+            except OSError:
+                pass
 
     def _get_capabilities(self) -> list[str]:
         """Return CLI adapter capabilities.
@@ -321,8 +353,10 @@ class CLIAdapter(BaseAdapter):
     ) -> list[str]:
         """Build the CLI command arguments for the given backend.
 
-        Each backend has different conventions for how prompts and options
-        are passed. This method constructs the appropriate argument list.
+        Delegates to the backend's build_args method, which allows each
+        CLIBackendInfo subclass to define its own argument construction logic.
+        New backends only need to override build_args on their CLIBackendInfo
+        rather than editing this adapter source.
 
         Args:
             backend: The backend info describing the CLI tool.
@@ -332,53 +366,7 @@ class CLIAdapter(BaseAdapter):
         Returns:
             List of command-line arguments ready for subprocess exec.
         """
-        cmd = [backend.command]
-
-        if backend.id == "claude":
-            # Claude Code: reads prompt from stdin, supports --print for
-            # non-interactive mode
-            cmd.append("--print")
-            if extra_args:
-                cmd.extend(extra_args)
-
-        elif backend.id == "codex":
-            # Codex CLI: pass prompt as positional argument
-            cmd.append("--quiet")
-            if extra_args:
-                cmd.extend(extra_args)
-            cmd.append(prompt)
-
-        elif backend.id == "aider":
-            # Aider: uses --message flag for non-interactive prompt
-            cmd.extend(["--message", prompt])
-            cmd.append("--yes")
-            if extra_args:
-                cmd.extend(extra_args)
-
-        elif backend.id == "kiro-cli":
-            # Kiro CLI: prompt via stdin
-            if extra_args:
-                cmd.extend(extra_args)
-
-        elif backend.id == "opencode":
-            # OpenCode: prompt as positional argument
-            if extra_args:
-                cmd.extend(extra_args)
-            cmd.append(prompt)
-
-        elif backend.id == "agy":
-            # Agy: prompt as positional argument
-            if extra_args:
-                cmd.extend(extra_args)
-            cmd.append(prompt)
-
-        else:
-            # Generic fallback: append prompt as argument
-            if extra_args:
-                cmd.extend(extra_args)
-            cmd.append(prompt)
-
-        return cmd
+        return backend.build_args(prompt, extra_args)
 
     def _snapshot_workspace(self, workspace: str) -> dict[str, float]:
         """Take a snapshot of files in the workspace with modification times.
