@@ -18,6 +18,11 @@ from nexus.api.routes.approvals import router as approvals_router
 from nexus.api.routes.budgets import router as budgets_router
 from nexus.api.routes.memory import router as memory_router
 from nexus.api.routes.triggers import router as triggers_router
+from nexus.api.routes.communication import router as communication_router
+from nexus.api.routes.knowledge import router as knowledge_router
+from nexus.api.routes.meetings import router as meetings_router
+from nexus.api.routes.company_sim import router as company_sim_router
+from nexus.api.routes.evolution import router as evolution_router
 
 
 @asynccontextmanager
@@ -56,3 +61,8 @@ app.include_router(approvals_router)
 app.include_router(budgets_router)
 app.include_router(memory_router)
 app.include_router(triggers_router)
+app.include_router(communication_router)
+app.include_router(knowledge_router)
+app.include_router(meetings_router)
+app.include_router(company_sim_router)
+app.include_router(evolution_router)
