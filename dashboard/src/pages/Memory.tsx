@@ -9,8 +9,7 @@ import { agentsApi } from '@/api/agents';
 import type { MemoryEntry } from '@/types/agent';
 import type { MemoryScope } from '@/types/common';
 import { formatRelativeTime } from '@/utils/time';
-
-const COMPANY_ID = 'default';
+import { COMPANY_ID } from '@/config';
 
 function tierColor(tier: string): string {
   switch (tier) {

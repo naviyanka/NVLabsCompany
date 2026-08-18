@@ -9,12 +9,12 @@ import { agentsApi } from '@/api/agents';
 import type { Agent, AgentCreateRequest } from '@/types/agent';
 import type { PaginatedResponse } from '@/types/common';
 import { UserPlus } from 'lucide-react';
-
-const COMPANY_ID = 'default';
+import { COMPANY_ID } from '@/config';
 
 export function Agents() {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
   const navigate = useNavigate();
 
   const { data, loading, error, refetch } = useApi<PaginatedResponse<Agent>>(
@@ -30,12 +30,15 @@ export function Agents() {
 
   const handleCreateAgent = async (formData: AgentCreateRequest) => {
     setCreating(true);
+    setCreateError(null);
     try {
       await agentsApi.create(COMPANY_ID, formData);
       setShowCreateModal(false);
       refetch();
-    } catch {
-      // Error handled via toast in future
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : 'Failed to create agent';
+      setCreateError(message);
     } finally {
       setCreating(false);
     }
@@ -60,10 +63,15 @@ export function Agents() {
         onAgentClick={handleAgentClick}
       />
 
-      <Modal isOpen={showCreateModal} onClose={() => setShowCreateModal(false)} title="Hire New Agent" size="lg">
+      <Modal isOpen={showCreateModal} onClose={() => { setShowCreateModal(false); setCreateError(null); }} title="Hire New Agent" size="lg">
+        {createError && (
+          <div className="mb-4 p-3 bg-rose-50 border border-rose-200 rounded-lg text-sm text-rose-700">
+            {createError}
+          </div>
+        )}
         <AgentCreate
           onSubmit={handleCreateAgent}
-          onCancel={() => setShowCreateModal(false)}
+          onCancel={() => { setShowCreateModal(false); setCreateError(null); }}
           loading={creating}
         />
       </Modal>

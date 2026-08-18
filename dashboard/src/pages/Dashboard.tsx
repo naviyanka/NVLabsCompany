@@ -1,4 +1,4 @@
-import { useCallback } from 'react';
+import { useCallback, useMemo } from 'react';
 import { Card } from '@/components/common/Card';
 import { Spinner } from '@/components/common/Spinner';
 import { CostChart, type CostDataPoint } from '@/components/charts/CostChart';
@@ -13,8 +13,7 @@ import type { Agent } from '@/types/agent';
 import type { Task } from '@/types/task';
 import type { PaginatedResponse } from '@/types/common';
 import { Bot, ClipboardList, DollarSign, Shield } from 'lucide-react';
-
-const COMPANY_ID = 'default';
+import { COMPANY_ID } from '@/config';
 
 export function Dashboard() {
   const { data: agentsData, loading: agentsLoading, refetch: refetchAgents } = useApi<PaginatedResponse<Agent>>(
@@ -42,15 +41,15 @@ export function Dashboard() {
   const totalBudget = agents.reduce((sum, a) => sum + a.budget_monthly_cents, 0);
   const totalSpent = agents.reduce((sum, a) => sum + a.spent_monthly_cents, 0);
 
-  // Generate cost data from agents spent
-  const costData: CostDataPoint[] = Array.from({ length: 7 }, (_, i) => {
+  // Generate cost data from agents spent (memoized to avoid re-randomizing on every render)
+  const costData: CostDataPoint[] = useMemo(() => Array.from({ length: 7 }, (_, i) => {
     const date = new Date();
     date.setDate(date.getDate() - (6 - i));
     return {
       date: date.toLocaleDateString('en-US', { weekday: 'short' }),
       cost: Math.round(totalSpent / 7 * (0.8 + Math.random() * 0.4)),
     };
-  });
+  }), [totalSpent]);
 
   // Task status distribution
   const taskStatusData: TaskStatusData[] = [

@@ -6,8 +6,7 @@ import { agentsApi } from '@/api/agents';
 import type { Agent } from '@/types/agent';
 import type { PaginatedResponse } from '@/types/common';
 import { Spinner } from '@/components/common/Spinner';
-
-const COMPANY_ID = 'default';
+import { COMPANY_ID } from '@/config';
 
 export function Organization() {
   const { data, loading, error } = useApi<PaginatedResponse<Agent>>(

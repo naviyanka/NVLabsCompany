@@ -1,8 +1,7 @@
 import { useParams } from 'react-router-dom';
 import { AgentDetail } from '@/components/agents/AgentDetail';
 import { useAgent } from '@/hooks/useAgents';
-
-const COMPANY_ID = 'default';
+import { COMPANY_ID } from '@/config';
 
 export function AgentDetailPage() {
   const { id } = useParams<{ id: string }>();

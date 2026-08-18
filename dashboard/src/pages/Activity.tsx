@@ -6,8 +6,7 @@ import { tasksApi } from '@/api/tasks';
 import type { Task } from '@/types/task';
 import type { PaginatedResponse } from '@/types/common';
 import { Spinner } from '@/components/common/Spinner';
-
-const COMPANY_ID = 'default';
+import { COMPANY_ID } from '@/config';
 
 export function Activity() {
   const { data, loading, refetch } = useApi<PaginatedResponse<Task>>(

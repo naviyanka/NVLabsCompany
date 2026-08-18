@@ -7,8 +7,7 @@ import { tasksApi } from '@/api/tasks';
 import type { Task } from '@/types/task';
 import type { PaginatedResponse, TaskStatus } from '@/types/common';
 import { List, Columns3 } from 'lucide-react';
-
-const COMPANY_ID = 'default';
+import { COMPANY_ID } from '@/config';
 
 type ViewMode = 'list' | 'kanban';
 

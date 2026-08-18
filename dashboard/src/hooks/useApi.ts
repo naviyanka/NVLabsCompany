@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { ApiClientError } from '@/api/client';
 
 export interface UseApiState<T> {
@@ -21,10 +21,16 @@ export function useApi<T>(
     error: null,
   });
 
+  // Serialize deps to a stable string to avoid infinite loops when callers
+  // pass object/array literals that create new references each render.
+  const depsKey = JSON.stringify(deps);
+  const fetcherRef = useRef(fetcher);
+  fetcherRef.current = fetcher;
+
   const fetchData = useCallback(async () => {
     setState((prev) => ({ ...prev, loading: true, error: null }));
     try {
-      const data = await fetcher();
+      const data = await fetcherRef.current();
       setState({ data, loading: false, error: null });
     } catch (err) {
       const message =
@@ -36,7 +42,7 @@ export function useApi<T>(
       setState({ data: null, loading: false, error: message });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, deps);
+  }, [depsKey]);
 
   useEffect(() => {
     void fetchData();
