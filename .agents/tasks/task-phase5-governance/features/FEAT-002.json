@@ -1,0 +1,30 @@
+{
+  "id": "FEAT-002",
+  "type": "feat",
+  "description": "Create Secret Management (Part B), Persistent Audit (Part C), and Rate Limiting (Part D). Create secrets/ sub-package with vault.py and access.py, audit_persistent.py, compliance.py, and rate_limiter.py.",
+  "status": "in_progress",
+  "steps": [
+    "Create src/nexus/governance/secrets/__init__.py exporting SecretVault and SecretAccessController",
+    "Create src/nexus/governance/secrets/vault.py with: SecretCategory enum (api_key, password, token, certificate, ssh_key), SecretMetadata dataclass (id, name, category, created_at, expires_at, version, bound_agents list), SecretVault class with: create_secret (stores encrypted with Fernet from cryptography.fernet), get_secret (returns decrypted, logs access), rotate_secret (increments version, stores new value), revoke_secret, bulk_revoke_for_agent, list_secrets (metadata only, NEVER values). Use Python's cryptography library Fernet for encryption. Never include secret values in any log or error message.",
+    "Create src/nexus/governance/secrets/access.py with: SecretAccessController class with: bind_secret_to_agent, unbind_secret, check_access (verifies agent is bound), grant_time_limited_access (with expiry), grant_one_time_access (mark as used after first access), emergency_revoke_all (revoke all for agent), get_access_audit_trail.",
+    "Create src/nexus/governance/audit_persistent.py with: PersistentAuditLogger class with: log_entry (async, adds to buffer), flush_buffer (batch insert), compute_entry_hash (SHA-256 chain for tamper detection - hash includes previous entry hash), query_by_actor, query_by_time_range, export_json, export_csv, set_retention_policy, enforce_retention (archive old entries). Integrates with existing AuditLogger interface.",
+    "Create src/nexus/governance/compliance.py with: DataClassification enum (public, internal, confidential, restricted), ComplianceRule dataclass, ComplianceFramework class with: add_rule, check_compliance_health (are required policies active?), detect_violations, generate_report, get_data_handling_rules(classification), classify_data.",
+    "Create src/nexus/governance/rate_limiter.py with: TokenBucket class (capacity, refill_rate, tokens, last_refill), RateLimiter class with: check_rate_limit (O(1) operation using token bucket), consume (takes a token), get_remaining, configure_agent_limit, configure_company_limit, configure_resource_limit, get_headers (returns rate limit headers dict), SlidingWindowCounter for per-hour tracking, burst allowance config.",
+    "Create tests/test_secrets.py testing: vault create/get/rotate/revoke, encryption works (stored != plaintext), access control bindings, time-limited access expiry, one-time access consumption, emergency revocation, secret values never in metadata",
+    "Create tests/test_rate_limiter.py testing: token bucket fill/consume, rate limit check is O(1) conceptually, per-agent limits, sliding window, burst allowance, graceful degradation",
+    "Create tests/test_compliance.py testing: compliance rule evaluation, health checks, violation detection, data classification rules"
+  ],
+  "acceptance_criteria": [
+    "All files pass AST parsing",
+    "SecretVault encrypts values and never exposes them in logs/metadata",
+    "RateLimiter provides O(1) check operations via token bucket",
+    "PersistentAuditLogger maintains hash chain integrity",
+    "tests/test_secrets.py, tests/test_rate_limiter.py, tests/test_compliance.py all pass"
+  ],
+  "verification": [
+    "python -c \"import ast, pathlib; [ast.parse(f.read_text()) for f in pathlib.Path('src/nexus/governance/secrets').rglob('*.py')]; ast.parse(pathlib.Path('src/nexus/governance/audit_persistent.py').read_text()); ast.parse(pathlib.Path('src/nexus/governance/compliance.py').read_text()); ast.parse(pathlib.Path('src/nexus/governance/rate_limiter.py').read_text())\"",
+    "python -m pytest tests/test_secrets.py tests/test_rate_limiter.py tests/test_compliance.py -x -q"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}
