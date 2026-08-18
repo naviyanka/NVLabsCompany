@@ -25,6 +25,10 @@ class Settings(BaseSettings):
     server_host: str = "0.0.0.0"
     server_port: int = 8000
 
+    # API Keys
+    openai_api_key: str = ""
+    anthropic_api_key: str = ""
+
     # Application
     app_name: str = "NEXUS"
     app_version: str = "0.1.0"

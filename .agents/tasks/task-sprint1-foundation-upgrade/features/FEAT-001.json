@@ -1,0 +1,27 @@
+{
+  "id": "FEAT-001",
+  "type": "feat",
+  "description": "Wire API keys into config and add CLI backend adapter. Three parts: (1) Add openai_api_key and anthropic_api_key to Settings in config.py. (2) Create cli_registry.py that auto-detects installed CLIs. (3) Create cli_adapter.py as a generalized CLI adapter supporting multiple backends. Register the new CLI adapter in the adapter registry.",
+  "status": "in_progress",
+  "steps": [
+    "Add 'openai_api_key: str = \"\"' and 'anthropic_api_key: str = \"\"' fields to the Settings class in src/nexus/config.py. These should load from OPENAI_API_KEY and ANTHROPIC_API_KEY env vars (use Field(alias=...) or adjust the env_prefix since the current config uses empty env_prefix).",
+    "Create src/nexus/adapters/cli_registry.py with a CLIBackendInfo dataclass (fields: id, name, command, instruction_path, stability, supports_resume, supports_agent_type, supports_stdin) and a CLIRegistry class. The registry should auto-detect installed CLIs via shutil.which() and optionally probe versions via subprocess. Support these backends: claude (command 'claude'), codex (command 'codex'), kiro-cli (command 'kiro'), aider (command 'aider'), opencode (command 'opencode'), agy (command 'agy'). Reference the AIBackend TypeScript interface at /projects/sandbox/NVLabsOrg/packages/orchestrator/src/ai-backend.ts for field definitions.",
+    "Create src/nexus/adapters/cli_adapter.py with a CLIAdapter class extending BaseAdapter. It should generalize the pattern from claude_code_adapter.py: workspace isolation, stdin-based prompt passing, stdout/stderr capture, timeout handling with SIGTERM/SIGKILL, artifact detection, and cost parsing. The key difference from ClaudeCodeAdapter: the CLI command and argument building are driven by CLIBackendInfo from the registry rather than hardcoded. Include a _build_args method that constructs per-backend CLI arguments (e.g., claude uses stdin, codex may use different flags).",
+    "Register the new CLIAdapter in src/nexus/adapters/registry.py's _register_defaults method as 'cli'.",
+    "Add tests in tests/test_cli_adapter.py covering: (a) CLIRegistry detects backends via shutil.which mocking, (b) CLIAdapter.validate_config requires 'backend' key, (c) CLIAdapter._build_args produces correct args for different backends, (d) CLIAdapter._do_execute handles subprocess spawn with mocked asyncio.create_subprocess_exec. Follow the testing pattern from tests/test_adapters.py using asyncio.run() wrapper and mocking."
+  ],
+  "acceptance_criteria": [
+    "src/nexus/config.py Settings class has openai_api_key and anthropic_api_key fields that load from environment variables",
+    "src/nexus/adapters/cli_registry.py exists with CLIRegistry class supporting 6+ backends",
+    "src/nexus/adapters/cli_adapter.py exists with CLIAdapter class extending BaseAdapter",
+    "CLIAdapter is registered in the AdapterRegistry under the key 'cli'",
+    "Running 'python -m pytest tests/test_cli_adapter.py -v' passes all new tests",
+    "Running 'python -m pytest tests/ --tb=short -q' still passes all existing 600 tests"
+  ],
+  "verification": [
+    "python -m pytest tests/test_cli_adapter.py -v",
+    "python -m pytest tests/ --tb=short -q"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

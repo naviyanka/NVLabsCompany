@@ -35,6 +35,7 @@ class AdapterRegistry:
         """Register all built-in adapter types."""
         from nexus.adapters.anthropic_adapter import AnthropicAdapter
         from nexus.adapters.claude_code_adapter import ClaudeCodeAdapter
+        from nexus.adapters.cli_adapter import CLIAdapter
         from nexus.adapters.http_adapter import HTTPAdapter
         from nexus.adapters.mcp_adapter import MCPAgentAdapter
         from nexus.adapters.ollama_adapter import OllamaAdapter
@@ -44,6 +45,7 @@ class AdapterRegistry:
         self.register_adapter("anthropic", AnthropicAdapter)
         self.register_adapter("ollama", OllamaAdapter)
         self.register_adapter("claude_code", ClaudeCodeAdapter)
+        self.register_adapter("cli", CLIAdapter)
         self.register_adapter("http", HTTPAdapter)
         self.register_adapter("mcp", MCPAgentAdapter)
 

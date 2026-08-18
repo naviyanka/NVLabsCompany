@@ -1,0 +1,7 @@
+{
+  "task_id": "task-sprint1-foundation-upgrade",
+  "task_description": "Sprint 1 foundation upgrade for NEXUS: wire LLM API keys into config, create generalized CLI backend adapter, build composable guardrail system, create agent templates, persist circuit breaker state to database, and wire kill switch DB loading into app startup.",
+  "status": "in_progress",
+  "feature_order": ["FEAT-001", "FEAT-002", "FEAT-003", "FEAT-004"],
+  "blocked_reason": null
+}

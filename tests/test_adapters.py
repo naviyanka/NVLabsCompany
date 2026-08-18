@@ -299,15 +299,16 @@ class TestAdapterRegistry:
             registry.create_adapter("nonexistent")
 
     def test_default_adapters_pre_registered(self, full_registry):
-        """Auto-registered registry has all 6 default adapters."""
+        """Auto-registered registry has all 7 default adapters."""
         types = full_registry.get_adapter_types()
         assert "openai" in types
         assert "anthropic" in types
         assert "ollama" in types
         assert "claude_code" in types
+        assert "cli" in types
         assert "http" in types
         assert "mcp" in types
-        assert len(types) == 6
+        assert len(types) == 7
 
     def test_register_non_base_adapter_raises(self, registry):
         """register_adapter raises TypeError for non-BaseAdapter class."""

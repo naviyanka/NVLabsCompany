@@ -1,0 +1,25 @@
+{
+  "id": "FEAT-003",
+  "type": "feat",
+  "description": "Create an Agent Templates system with a registry that loads Markdown template files with YAML frontmatter. Create 8-10 agent role templates following the NVLabsOrg format (YAML frontmatter with name/description + Markdown body with Rules and Process sections).",
+  "status": "pending",
+  "steps": [
+    "Create src/nexus/templates/__init__.py that exports TemplateRegistry, AgentTemplate.",
+    "Create src/nexus/templates/registry.py with: (a) AgentTemplate dataclass (name: str, description: str, body: str, file_path: str), (b) TemplateRegistry class with methods: load_from_directory(path: Path) -> None, list_templates() -> list[AgentTemplate], get_template(name: str) -> AgentTemplate | None, reload() -> None. The registry should parse YAML frontmatter (between --- delimiters) and the Markdown body. Use a simple YAML parser (PyYAML is already available as a dependency) for frontmatter parsing.",
+    "Create src/nexus/templates/agents/ directory with these template Markdown files following the NVLabsOrg format (YAML frontmatter with name + description, then # Title, ## Rules section, ## Process section): software-architect.md, code-reviewer.md, backend-engineer.md, qa-engineer.md, devops-engineer.md, security-engineer.md, product-manager.md, data-engineer.md, frontend-engineer.md, sre.md. Reference /projects/sandbox/NVLabsOrg/packages/orchestrator/agents/ for style and structure but adapt content for NEXUS autonomous agents.",
+    "Add tests in tests/test_templates.py covering: (a) TemplateRegistry.load_from_directory discovers all .md files, (b) frontmatter parsing extracts name and description, (c) get_template returns correct template by name, (d) get_template returns None for unknown name, (e) list_templates returns all loaded templates."
+  ],
+  "acceptance_criteria": [
+    "src/nexus/templates/ package exists with __init__.py, registry.py, and agents/ subdirectory",
+    "agents/ contains 10 Markdown template files with valid YAML frontmatter",
+    "TemplateRegistry can load and list all templates correctly",
+    "Running 'python -m pytest tests/test_templates.py -v' passes all new tests",
+    "Running 'python -m pytest tests/ --tb=short -q' still passes all existing tests"
+  ],
+  "verification": [
+    "python -m pytest tests/test_templates.py -v",
+    "python -m pytest tests/ --tb=short -q"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}
