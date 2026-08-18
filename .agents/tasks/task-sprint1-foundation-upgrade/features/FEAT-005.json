@@ -2,7 +2,7 @@
   "id": "FEAT-005",
   "type": "fix",
   "description": "Address review issues 1-6: fix circuit breaker cooldown enforcement, load circuit breaker state at startup, restrict env vars leaked to CLI subprocesses, clean up temp workspaces on terminate, refactor _build_args dispatch into CLIBackendInfo, and document guardrail module deprecation plan.",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "Fix PersistentCircuitBreaker.is_open() to check cooldown_seconds and auto-close expired circuits",
     "Add PersistentCircuitBreaker.load_state() call in app lifespan",
@@ -24,5 +24,5 @@
     "python -m pytest tests/ --tb=short -q"
   ],
   "blocked_reason": null,
-  "findings": null
+  "findings": "All 749 tests pass (739 original + 10 new). Used subclass pattern for CLIBackendInfo to maintain backward-compatible build_args behavior while enabling extensibility. The _temp_workspace metadata flag distinguishes auto-created vs user-specified workspaces for safe cleanup. Cooldown auto-reset logic mirrors the in-memory CircuitBreaker pattern exactly."
 }
