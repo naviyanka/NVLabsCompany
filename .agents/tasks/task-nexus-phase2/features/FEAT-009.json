@@ -2,7 +2,7 @@
   "id": "FEAT-009",
   "type": "fix",
   "description": "Address 5 issues from semantic review: escape LIKE wildcards, fix delegation API persistence, filter ChangePromoter history by company_id, apply meeting agent_id filter, add promote_proposal status pre-condition check.",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "Escape LIKE wildcards (% and _) in knowledge search routes before building ilike patterns",
     "Make delegation API functional with in-memory tracking per company",
@@ -21,5 +21,5 @@
     "cd /projects/sandbox/NVLabsCompany && python -c \"import ast; [ast.parse(open(f).read()) for f in ['src/nexus/api/routes/knowledge.py', 'src/nexus/api/routes/company_sim.py', 'src/nexus/api/routes/meetings.py', 'src/nexus/api/routes/evolution.py', 'src/nexus/evolution/promoter.py']]; print('All files parse OK')\""
   ],
   "blocked_reason": null,
-  "findings": null
+  "findings": "All 5 fixes verified with ast.parse(). ChangePromoter.promote and .rollback methods now accept optional company_id kwarg (backward compatible with existing tests). Delegation uses module-level dict for in-memory persistence. promote_proposal rejects proposals in rejected/rolled_back/promoted states with HTTP 409."
 }
