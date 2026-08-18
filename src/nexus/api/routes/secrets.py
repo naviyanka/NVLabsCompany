@@ -13,7 +13,17 @@ from pydantic import BaseModel
 from sqlalchemy import select, update
 
 from nexus.api.deps import CurrentCompanyId, DbSession
+from nexus.governance.secrets.vault import _HAS_FERNET, _FernetEncryptor, _TestOnlyXOREncryptor
 from nexus.models.secret import Secret, SecretBinding, SecretVersion
+
+# TODO: In production, the encryption key should come from app config / environment
+# variable (e.g., settings.SECRET_ENCRYPTION_KEY), not a hardcoded default.
+_ENCRYPTION_KEY = b"route-level-secret-encryption-key"
+
+if _HAS_FERNET:
+    _encryptor = _FernetEncryptor()
+else:
+    _encryptor = _TestOnlyXOREncryptor(_ENCRYPTION_KEY)
 
 router = APIRouter(tags=["secrets"])
 
@@ -87,11 +97,13 @@ async def create_secret(
 
     The value is stored encrypted. Responses only include metadata.
     """
+    encrypted_value = _encryptor.encrypt(body.value).decode("utf-8")
+
     secret = Secret(
         company_id=company_id,
         name=body.name,
         category=body.category,
-        encrypted_value=body.value,  # In production, encrypt before storing
+        encrypted_value=encrypted_value,
         current_version=1,
         expires_at=body.expires_at,
     )
@@ -102,7 +114,7 @@ async def create_secret(
     version = SecretVersion(
         secret_id=secret.id,
         version_number=1,
-        encrypted_value=body.value,  # In production, encrypt before storing
+        encrypted_value=encrypted_value,
     )
     db.add(version)
     await db.flush()
@@ -245,6 +257,9 @@ async def rotate_secret(
 
     new_version_number = secret.current_version + 1
 
+    # Encrypt the new secret value before storage
+    encrypted_new_value = _encryptor.encrypt(body.new_value).decode("utf-8")
+
     # Revoke old version
     await db.execute(
         update(SecretVersion)
@@ -259,7 +274,7 @@ async def rotate_secret(
     new_version = SecretVersion(
         secret_id=secret_id,
         version_number=new_version_number,
-        encrypted_value=body.new_value,  # In production, encrypt before storing
+        encrypted_value=encrypted_new_value,
     )
     db.add(new_version)
 
@@ -269,7 +284,7 @@ async def rotate_secret(
         .where(Secret.id == secret_id)
         .values(
             current_version=new_version_number,
-            encrypted_value=body.new_value,  # In production, encrypt
+            encrypted_value=encrypted_new_value,
             updated_at=datetime.now(timezone.utc),
         )
     )

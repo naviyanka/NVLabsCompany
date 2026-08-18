@@ -9,6 +9,12 @@ from pydantic import BaseModel
 from sqlalchemy import select, update
 
 from nexus.api.deps import CurrentCompanyId, DbSession
+from nexus.governance.policies.context import PolicyContext
+from nexus.governance.policies.engine import (
+    Policy as EnginePolicy,
+    PolicyEngine,
+    PolicyRule,
+)
 from nexus.models.policy import Policy, PolicyVersion
 
 router = APIRouter(tags=["policies"])
@@ -227,8 +233,9 @@ async def evaluate_policies(
 ) -> Any:
     """Test policy evaluation against a hypothetical action.
 
-    Evaluates all active policies for the company and returns whether
-    the action would be allowed.
+    Evaluates all active policies for the company using the PolicyEngine
+    to ensure consistent evaluation semantics (deny > budget_cap >
+    rate_limit > require_approval > allow, with default deny).
     """
     # Fetch active policies ordered by priority
     stmt = (
@@ -239,30 +246,66 @@ async def evaluate_policies(
     result = await db.execute(stmt)
     policies = list(result.scalars().all())
 
-    matching_policies: list[dict[str, Any]] = []
-    allowed = True
+    # Build a PolicyEngine populated with the DB policies
+    engine = PolicyEngine()
 
-    for policy in policies:
-        if policy.rules:
-            # Check if the policy applies to this action
-            applicable_actions = policy.rules.get("actions", [])
-            if applicable_actions and body.action in applicable_actions:
-                matching_policies.append({
-                    "id": str(policy.id),
-                    "name": policy.name,
-                    "priority": policy.priority,
-                    "rules": policy.rules,
-                })
-                # Check deny rules
-                if policy.rules.get("effect") == "deny":
-                    allowed = False
+    matching_policy_info: list[dict[str, Any]] = []
 
-    reason = None
-    if not allowed:
-        reason = "Denied by policy"
+    for db_policy in policies:
+        # Convert DB policy rules (JSON) into PolicyRule objects
+        engine_rules: list[PolicyRule] = []
+        if db_policy.rules:
+            rules_data = db_policy.rules
+            # Support both single-rule format and list-of-rules format
+            rule_list = rules_data.get("rules", [])
+            if rule_list:
+                for rule_data in rule_list:
+                    engine_rules.append(PolicyRule(
+                        rule_type=rule_data.get("rule_type", "allow"),
+                        conditions=rule_data.get("conditions", {}),
+                    ))
+            else:
+                # Fallback: treat the rules dict itself as a single rule definition
+                rule_type = rules_data.get("rule_type", "allow")
+                conditions = rules_data.get("conditions", {})
+                engine_rules.append(PolicyRule(
+                    rule_type=rule_type,
+                    conditions=conditions,
+                ))
+
+        engine_policy = EnginePolicy(
+            id=db_policy.id,
+            name=db_policy.name,
+            description=db_policy.description or "",
+            rules=engine_rules,
+            priority=db_policy.priority,
+            enabled=True,
+        )
+        engine.add_policy(engine_policy)
+
+        matching_policy_info.append({
+            "id": str(db_policy.id),
+            "name": db_policy.name,
+            "priority": db_policy.priority,
+            "rules": db_policy.rules,
+        })
+
+    # Build PolicyContext from request body
+    context = PolicyContext(
+        action=body.action,
+        resource_type=body.resource_type or "",
+        resource_id=body.resource_id or "",
+        actor_type=body.context.get("actor_type", ""),
+        actor_id=body.context.get("actor_id", ""),
+        cost=body.context.get("cost", 0),
+        sensitivity_level=body.context.get("sensitivity_level", "low"),
+    )
+
+    # Evaluate using the engine
+    decision = engine.evaluate(context)
 
     return PolicyEvaluateResponse(
-        allowed=allowed,
-        matching_policies=matching_policies,
-        reason=reason,
+        allowed=decision.allowed,
+        matching_policies=matching_policy_info,
+        reason=decision.reason or None,
     )

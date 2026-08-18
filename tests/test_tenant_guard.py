@@ -90,12 +90,12 @@ class TestResourceOwnership:
         assert exc_info.value.target_tenant == tenant_a
         assert "belongs to tenant" in exc_info.value.detail
 
-    def test_unregistered_resource_allowed(self):
-        """Access to an unregistered resource is allowed (may be new)."""
+    def test_unregistered_resource_denied(self):
+        """Access to an unregistered resource is denied (secure-by-default)."""
         guard = TenantGuard()
         company_id = uuid.uuid4()
         result = guard.check_resource_ownership(company_id, "task", "new-task")
-        assert result is True
+        assert result is False
 
     def test_ownership_with_invalid_company_id_raises(self):
         """Resource ownership check with invalid company_id raises."""

@@ -194,8 +194,11 @@ class TenantGuard:
 
         owner = self._resource_registry.get(key)
         if owner is None:
-            # Resource not registered - allow (it may be new)
-            return True
+            # Resource not registered - deny access (secure-by-default behavior).
+            # Unknown resources must be explicitly registered before access is
+            # granted. This prevents untracked resources from being accessible
+            # to all tenants.
+            return False
 
         if owner != validated:
             violation = TenantViolationRecord(
@@ -263,17 +266,23 @@ class TenantGuard:
         return True
 
     def _scan_for_foreign_tenants(
-        self, company_id: uuid.UUID, data: Any
+        self, company_id: uuid.UUID, data: Any, max_depth: int = 10
     ) -> list[uuid.UUID]:
         """Recursively scan data for foreign tenant IDs.
 
         Args:
             company_id: The expected tenant.
             data: Data structure to scan.
+            max_depth: Maximum recursion depth to prevent RecursionError
+                on deeply nested or circular data structures. Returns empty
+                list when depth reaches 0.
 
         Returns:
             List of foreign tenant UUIDs found.
         """
+        if max_depth <= 0:
+            return []
+
         foreign: list[uuid.UUID] = []
 
         if isinstance(data, dict):
@@ -286,10 +295,10 @@ class TenantGuard:
                 except (ValueError, AttributeError):
                     pass
             for value in data.values():
-                foreign.extend(self._scan_for_foreign_tenants(company_id, value))
+                foreign.extend(self._scan_for_foreign_tenants(company_id, value, max_depth - 1))
         elif isinstance(data, list):
             for item in data:
-                foreign.extend(self._scan_for_foreign_tenants(company_id, item))
+                foreign.extend(self._scan_for_foreign_tenants(company_id, item, max_depth - 1))
 
         return foreign
 
