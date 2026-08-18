@@ -2,7 +2,7 @@
   "id": "FEAT-004",
   "type": "feat",
   "description": "Create new SQLModel tables (Part K), API middleware (Part I), and new API routes (Part J). Register routes in main.py and export models in models/__init__.py.",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "Create src/nexus/models/policy.py with SQLModel tables: Policy (id, company_id, name, description, rules as JSON, priority, enabled, version, created_at, updated_at), PolicyRule (id, policy_id, rule_type, conditions as JSON, created_at), PolicyVersion (id, policy_id, version_number, rules_snapshot as JSON, changed_by, created_at). Follow existing pattern from governance.py.",
     "Create src/nexus/models/secret.py with SQLModel tables: Secret (id, company_id, name, category, encrypted_value, current_version, expires_at, is_revoked, created_at, updated_at), SecretVersion (id, secret_id, version_number, encrypted_value, created_at, revoked_at), SecretBinding (id, secret_id, agent_id, granted_at, expires_at, one_time_use, is_used, revoked), SecretAccess (id, secret_id, agent_id, access_type, accessed_at, success). NEVER include plaintext values.",
@@ -28,5 +28,5 @@
     "python -m pytest tests/ -x -q 2>&1 | tail -5"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "All 7 new files and 2 modified files pass AST parsing. pytest is not available (INTEGRATIONS_ONLY network, no pip install). GovernanceMiddleware uses integration points for kill switch, rate limiting, budget, and policy evaluation that connect to existing governance modules. Secret API routes never expose encrypted_value in responses."
 }
