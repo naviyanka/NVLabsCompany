@@ -1,0 +1,27 @@
+{
+  "id": "FEAT-002",
+  "type": "feat",
+  "description": "Implement the Communication module (A2A protocol, group conversations, external channels, event bus) under src/nexus/communication/.",
+  "status": "in_progress",
+  "steps": [
+    "Create src/nexus/communication/__init__.py exporting main classes: A2AProtocol, GroupManager, ChannelRouter, EventBus.",
+    "Create src/nexus/communication/a2a.py implementing A2AProtocol class: async send_message(sender_id, recipient_id, message_type, content, priority, metadata) with at-least-once delivery using correlation_id deduplication. Include direct routing, broadcast (all agents in company), and team-scoped routing. Track message history. Use an in-memory store (dict) for the protocol layer, with DB persistence via AsyncSession. Message types: request, response, notification, delegation, handoff. Priorities: urgent, normal, low.",
+    "Create src/nexus/communication/group.py implementing GroupManager class: create_group(company_id, name, agent_ids), add_member/remove_member, send_group_message (broadcasts to all members), mention_agent (sends to specific agent with group context), handoff_in_group (delegate task from one agent to another within group), get_group_history. Use the Message model with group_id set.",
+    "Create src/nexus/communication/channels.py with abstract ChannelInterface (Protocol class with async send and async receive methods), concrete implementations: SlackChannel, DiscordChannel, WebhookChannel (all with placeholder logic suitable for testing). ChannelRouter class that routes outbound messages to appropriate channel based on config, and handles inbound messages from external channels converting them to internal Messages.",
+    "Create src/nexus/communication/event_bus.py implementing EventBus class: subscribe(event_type, handler, is_async=True), publish(event_type, payload, source_agent_id, company_id). Support both sync handlers (called immediately in-line) and async handlers (gathered with asyncio). Event types as string constants: TASK_COMPLETED, AGENT_ERROR, APPROVAL_NEEDED, BUDGET_WARNING, AGENT_HIRED, MEETING_STARTED. Persist events using Event model. Support replay(event_type, since_datetime) for replaying historical events."
+  ],
+  "acceptance_criteria": [
+    "A2AProtocol can send messages between agents with deduplication (same correlation_id not delivered twice)",
+    "GroupManager can create groups, add members, and broadcast messages",
+    "EventBus supports subscribe/publish with both sync and async handlers",
+    "ChannelRouter has a clear Protocol interface for external channels",
+    "All classes have proper docstrings and type annotations",
+    "All communication is scoped by company_id"
+  ],
+  "verification": [
+    "cd /projects/sandbox/NVLabsCompany && python -c \"from nexus.communication import A2AProtocol, GroupManager, ChannelRouter, EventBus; print('Communication module imports OK')\"",
+    "cd /projects/sandbox/NVLabsCompany && python -m pytest tests/test_communication.py -v"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}
