@@ -183,6 +183,10 @@ async def list_meetings(
         stmt = stmt.where(Meeting.status == status_filter)
     if meeting_type:
         stmt = stmt.where(Meeting.meeting_type == meeting_type)
+    if agent_id:
+        stmt = stmt.join(MeetingParticipant, MeetingParticipant.meeting_id == Meeting.id).where(
+            MeetingParticipant.agent_id == agent_id
+        )
     stmt = stmt.offset(offset).limit(limit).order_by(Meeting.created_at.desc())
     result = await db.execute(stmt)
     return list(result.scalars().all())

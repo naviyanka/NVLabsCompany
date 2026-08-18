@@ -200,8 +200,12 @@ async def get_reporting_chain(
 
 
 # ---------------------------------------------------------------------------
-# Delegation Routes
+# Delegation Routes (in-memory store keyed by company_id)
 # ---------------------------------------------------------------------------
+
+# In-memory delegation store: maps company_id -> list of delegation responses.
+# In production this would use a dedicated DB table.
+_delegation_store: dict[uuid.UUID, list[DelegationResponse]] = {}
 
 
 @router.post(
@@ -217,7 +221,7 @@ async def delegate_task(
 
     delegation_id = uuid.uuid4()
     now = datetime.now(timezone.utc)
-    return DelegationResponse(
+    delegation = DelegationResponse(
         id=delegation_id,
         task_id=body.task_id,
         from_agent_id=body.from_agent_id,
@@ -225,6 +229,11 @@ async def delegate_task(
         reason=body.reason,
         created_at=now,
     )
+    # Persist to in-memory store
+    if company_id not in _delegation_store:
+        _delegation_store[company_id] = []
+    _delegation_store[company_id].append(delegation)
+    return delegation
 
 
 @router.get(
@@ -236,10 +245,9 @@ async def list_delegations(
 ) -> Any:
     """List delegations for a company.
 
-    Note: Full delegation tracking would require a dedicated table.
-    This endpoint returns an empty list as a placeholder.
+    Uses in-memory store. In production this would query a dedicated table.
     """
-    return []
+    return _delegation_store.get(company_id, [])
 
 
 # ---------------------------------------------------------------------------

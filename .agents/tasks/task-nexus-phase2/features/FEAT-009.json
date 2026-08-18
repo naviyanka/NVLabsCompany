@@ -1,0 +1,25 @@
+{
+  "id": "FEAT-009",
+  "type": "fix",
+  "description": "Address 5 issues from semantic review: escape LIKE wildcards, fix delegation API persistence, filter ChangePromoter history by company_id, apply meeting agent_id filter, add promote_proposal status pre-condition check.",
+  "status": "in_progress",
+  "steps": [
+    "Escape LIKE wildcards (% and _) in knowledge search routes before building ilike patterns",
+    "Make delegation API functional with in-memory tracking per company",
+    "Fix ChangePromoter.get_change_history to filter by company_id",
+    "Apply meeting agent_id filter in list_meetings using join to MeetingParticipant",
+    "Add status pre-condition check in promote_proposal route"
+  ],
+  "acceptance_criteria": [
+    "Knowledge search routes escape % and _ characters in user query strings",
+    "POST /delegations persists delegation and GET /delegations returns previously created delegations",
+    "ChangePromoter.get_change_history only returns records matching the company_id parameter",
+    "list_meetings filters by agent_id when provided (via MeetingParticipant join)",
+    "promote_proposal rejects proposals not in an appropriate state (approved/evaluating)"
+  ],
+  "verification": [
+    "cd /projects/sandbox/NVLabsCompany && python -c \"import ast; [ast.parse(open(f).read()) for f in ['src/nexus/api/routes/knowledge.py', 'src/nexus/api/routes/company_sim.py', 'src/nexus/api/routes/meetings.py', 'src/nexus/api/routes/evolution.py', 'src/nexus/evolution/promoter.py']]; print('All files parse OK')\""
+  ],
+  "blocked_reason": null,
+  "findings": null
+}

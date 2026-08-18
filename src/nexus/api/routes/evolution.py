@@ -252,6 +252,7 @@ async def promote_proposal(
     """Promote a proposal (requires explicit approval_id).
 
     Promotion NEVER happens automatically - an approval gate is always required.
+    The proposal must be in an appropriate lifecycle state (approved or evaluating).
     """
     stmt = select(EvolutionProposal).where(EvolutionProposal.id == proposal_id)
     result = await db.execute(stmt)
@@ -260,6 +261,18 @@ async def promote_proposal(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Proposal {proposal_id} not found",
+        )
+
+    # Pre-condition: only proposals in an appropriate state can be promoted.
+    # Rejected, rolled_back, or already promoted proposals cannot be promoted.
+    promotable_states = {"proposed", "evaluating", "approved"}
+    if proposal.status not in promotable_states:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"Proposal cannot be promoted from status '{proposal.status}'. "
+                f"Must be in one of: {sorted(promotable_states)}"
+            ),
         )
 
     # Require approval_id for promotion gate

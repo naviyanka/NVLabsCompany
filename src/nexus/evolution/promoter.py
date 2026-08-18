@@ -32,6 +32,7 @@ class ChangePromoter:
         self,
         proposal_id: uuid.UUID,
         approval_id: uuid.UUID,
+        company_id: uuid.UUID | None = None,
     ) -> dict[str, Any]:
         """Promote a proposal to production.
 
@@ -41,6 +42,7 @@ class ChangePromoter:
         Args:
             proposal_id: The proposal to promote.
             approval_id: The approval authorizing this promotion. MUST NOT be None.
+            company_id: The company this promotion belongs to (for tenant isolation).
 
         Returns:
             Promotion record with details of the applied change.
@@ -55,6 +57,7 @@ class ChangePromoter:
             "promotion_id": str(uuid.uuid4()),
             "proposal_id": str(proposal_id),
             "approval_id": str(approval_id),
+            "company_id": str(company_id) if company_id else None,
             "status": "promoted",
             "promoted_at": datetime.now(timezone.utc).isoformat(),
         }
@@ -139,12 +142,14 @@ class ChangePromoter:
         self,
         proposal_id: uuid.UUID,
         reason: str,
+        company_id: uuid.UUID | None = None,
     ) -> dict[str, Any]:
         """Revert a promoted change and update status.
 
         Args:
             proposal_id: The proposal to roll back.
             reason: Explanation for why the rollback is needed.
+            company_id: The company this rollback belongs to (for tenant isolation).
 
         Returns:
             Rollback record with status and reason.
@@ -156,6 +161,7 @@ class ChangePromoter:
 
         rollback_record = {
             "proposal_id": str(proposal_id),
+            "company_id": str(company_id) if company_id else None,
             "status": "rolled_back",
             "reason": reason,
             "rolled_back_at": datetime.now(timezone.utc).isoformat(),
@@ -173,8 +179,10 @@ class ChangePromoter:
             company_id: The company to get history for.
 
         Returns:
-            List of all promotion/rollback records.
+            List of promotion/rollback records filtered by company_id.
         """
-        # In production, this would query the DB filtered by company_id
-        # For now, return all tracked promotions
-        return self._promotions
+        company_id_str = str(company_id)
+        return [
+            record for record in self._promotions
+            if record.get("company_id") == company_id_str
+        ]

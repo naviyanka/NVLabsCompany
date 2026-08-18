@@ -14,6 +14,15 @@ from nexus.models.knowledge import ExperienceRecord, KnowledgeChunk, KnowledgePa
 router = APIRouter(tags=["knowledge"])
 
 
+def _escape_like(value: str) -> str:
+    """Escape LIKE-special characters (% and _) in user input.
+
+    This prevents user-supplied wildcards from altering search semantics
+    or matching unintended rows.
+    """
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 # ---------------------------------------------------------------------------
 # Request / Response Models
 # ---------------------------------------------------------------------------
@@ -154,7 +163,8 @@ async def list_pages(
     if category:
         stmt = stmt.where(KnowledgePage.category == category)
     if query:
-        stmt = stmt.where(KnowledgePage.title.ilike(f"%{query}%"))
+        escaped = _escape_like(query)
+        stmt = stmt.where(KnowledgePage.title.ilike(f"%{escaped}%"))
     stmt = stmt.limit(limit).order_by(KnowledgePage.created_at.desc())
     result = await db.execute(stmt)
     return list(result.scalars().all())
@@ -249,7 +259,7 @@ async def rag_search(
     stmt = (
         select(KnowledgeChunk)
         .where(KnowledgeChunk.company_id == company_id)
-        .where(KnowledgeChunk.content.ilike(f"%{body.query}%"))
+        .where(KnowledgeChunk.content.ilike(f"%{_escape_like(body.query)}%"))
         .limit(body.top_k)
     )
     result = await db.execute(stmt)
@@ -314,7 +324,8 @@ async def search_experiences(
     if outcome:
         stmt = stmt.where(ExperienceRecord.outcome == outcome)
     if query:
-        stmt = stmt.where(ExperienceRecord.lessons_learned.ilike(f"%{query}%"))
+        escaped = _escape_like(query)
+        stmt = stmt.where(ExperienceRecord.lessons_learned.ilike(f"%{escaped}%"))
     stmt = stmt.limit(limit).order_by(ExperienceRecord.created_at.desc())
     result = await db.execute(stmt)
     return list(result.scalars().all())
