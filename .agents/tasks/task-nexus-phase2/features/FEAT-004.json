@@ -1,0 +1,25 @@
+{
+  "id": "FEAT-004",
+  "type": "feat",
+  "description": "Implement the Meetings module (scheduler, conductor, templates) under src/nexus/meetings/.",
+  "status": "in_progress",
+  "steps": [
+    "Create src/nexus/meetings/__init__.py exporting main classes: MeetingScheduler, MeetingConductor, MeetingTemplates.",
+    "Create src/nexus/meetings/scheduler.py implementing MeetingScheduler class: schedule_meeting(company_id, meeting_type, title, scheduled_at, participants: list[dict with agent_id and role], recurrence_rule=None) creates Meeting and MeetingParticipant records, cancel_meeting(meeting_id), get_upcoming_meetings(company_id, agent_id=None, limit=10), reschedule_meeting(meeting_id, new_time). The recurrence_rule is a simple string like 'daily', 'weekly', 'biweekly', 'monthly'. Integration point with trigger system: mention that recurring meetings should create a Trigger record (note in docstring, but don't require trigger system to be running).",
+    "Create src/nexus/meetings/conductor.py implementing MeetingConductor class: start_meeting(meeting_id) transitions status to in_progress, generate_agenda(meeting_id, template) uses template to build agenda items, collect_input(meeting_id, agent_id, input_text) records agent participation, extract_action_items(meeting_id, minutes_text) parses action items from text, generate_minutes(meeting_id, contributions: list[dict]) creates MeetingMinutes record with summary and decisions, end_meeting(meeting_id) transitions to completed. Action items create ActionItem records.",
+    "Create src/nexus/meetings/templates.py implementing MeetingTemplates class with static/class methods: get_standup_template() returns dict with sections [blockers, progress, next_steps] and prompts for each agent, get_planning_template() returns [goal, capacity, task_selection, assignments], get_retrospective_template() returns [went_well, improve, actions], get_design_review_template() returns [proposal, critique, decision, next_steps], get_priority_alignment_template() returns [goals, priorities, trade_offs, consensus]. Each template is a dict with 'meeting_type', 'sections' (list of dicts with name, prompt, expected_format), 'duration_minutes', 'required_roles'."
+  ],
+  "acceptance_criteria": [
+    "MeetingScheduler can schedule meetings with participants and recurrence",
+    "MeetingConductor can run a meeting lifecycle (start, collect input, generate minutes, end)",
+    "MeetingTemplates provides all 5 meeting type templates with structured sections",
+    "ActionItem records are created from meeting minutes",
+    "Meeting types match spec: standup, planning, retrospective, design_review, priority_alignment"
+  ],
+  "verification": [
+    "cd /projects/sandbox/NVLabsCompany && python -c \"from nexus.meetings import MeetingScheduler, MeetingConductor, MeetingTemplates; print('Meetings module imports OK')\"",
+    "cd /projects/sandbox/NVLabsCompany && python -m pytest tests/test_meetings.py -v"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}
