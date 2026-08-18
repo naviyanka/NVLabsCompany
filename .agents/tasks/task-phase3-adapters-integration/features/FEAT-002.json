@@ -2,7 +2,7 @@
   "id": "FEAT-002",
   "type": "feat",
   "description": "Implement the Identity System (Part C) and Workflow Integration (Part D): agent soul/personality definitions, persona management with context budgeting, company workflow orchestrator (CEO->CTO->Engineers->QA delegation chain), and single task execution flow with governance checks.",
-  "status": "pending",
+  "status": "in_progress",
   "steps": [
     "Create src/nexus/identity/__init__.py that exports Soul, SoulTemplate, Persona, WorkingContext, and ContextBudget.",
     "Create src/nexus/identity/soul.py with: Soul dataclass (name, role, personality_traits list, communication_style str, expertise list, values list, constraints list), SoulTemplate dataclass (template_id, name, description, base_soul), system_prompt_from_soul(soul) function that generates a system prompt string from soul attributes, SOUL_TEMPLATES dict with pre-built templates for: engineer (detail-oriented, code-focused), researcher (analytical, thorough), manager (strategic, delegating), qa_engineer (meticulous, testing-focused), architect (big-picture, design-focused). Include create_soul() and customize_soul() functions.",
