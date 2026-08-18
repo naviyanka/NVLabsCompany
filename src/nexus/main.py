@@ -23,6 +23,9 @@ from nexus.api.routes.knowledge import router as knowledge_router
 from nexus.api.routes.meetings import router as meetings_router
 from nexus.api.routes.company_sim import router as company_sim_router
 from nexus.api.routes.evolution import router as evolution_router
+from nexus.api.routes.adapters import router as adapters_router
+from nexus.api.routes.workflows import router as workflows_router
+from nexus.api.routes.identity import router as identity_router
 
 
 @asynccontextmanager
@@ -66,3 +69,6 @@ app.include_router(knowledge_router)
 app.include_router(meetings_router)
 app.include_router(company_sim_router)
 app.include_router(evolution_router)
+app.include_router(adapters_router)
+app.include_router(workflows_router)
+app.include_router(identity_router)

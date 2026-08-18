@@ -2,7 +2,7 @@
   "id": "FEAT-003",
   "type": "feat",
   "description": "Implement Demo Configuration (Part E) and API Routes (Part F): demo company setup with NexusCorp agents, demo scenarios, plus three new API route modules (adapters, workflows, identity) registered in main.py.",
-  "status": "pending",
+  "status": "in_progress",
   "steps": [
     "Create src/nexus/demo/__init__.py that exports setup_demo_company and SCENARIOS.",
     "Create src/nexus/demo/setup.py with setup_demo_company() function that is idempotent (checks if already set up, returns existing if so). Creates: NexusCorp company (uuid5 from name for idempotency), CEO agent (name='Atlas', role='ceo', soul from manager template, adapter_type='anthropic', model='claude-sonnet-4-20250514'), CTO agent (name='Nova', role='cto', soul from architect template, adapter_type='anthropic', model='claude-sonnet-4-20250514', manager=CEO), Senior Engineer agent (name='Forge', role='senior_engineer', soul from engineer template, adapter_type='openai', model='gpt-4o', manager=CTO), Junior Engineer agent (name='Spark', role='junior_engineer', soul from engineer template customized, adapter_type='ollama', model='codellama', manager=CTO), QA agent (name='Shield', role='qa_engineer', soul from qa_engineer template, adapter_type='openai', model='gpt-4o', manager=CTO). Sets up departments (Engineering, QA), budget policies (company: 500000 cents/mo, per-agent: 50000 cents/mo), approval gates (deployment requires CEO approval), skill assignments, tool access permissions. Returns a DemoCompany dataclass with all references.",
