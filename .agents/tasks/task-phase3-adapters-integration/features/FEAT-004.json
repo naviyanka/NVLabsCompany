@@ -2,7 +2,7 @@
   "id": "FEAT-004",
   "type": "feat",
   "description": "Implement comprehensive tests (Part G): test_adapters.py (base adapter logic, registry, factory), test_identity.py (soul generation, context assembly), test_workflows.py (delegation chain logic, task flow), and test_demo.py (demo setup creates correct structure). All tests must exercise real logic and pass with pytest.",
-  "status": "pending",
+  "status": "in_progress",
   "steps": [
     "Create tests/test_adapters.py with: TestBaseAdapter class testing session management (create_session populates tracking dict, terminate cleans up, get_cost returns accumulated cost, get_artifacts returns collected artifacts, get_logs returns buffered logs, error handling wraps exceptions), TestAdapterRegistry class testing (register_adapter adds to registry, create_adapter instantiates correct type, list_adapters returns all registered, unknown adapter raises error, default adapters are pre-registered), TestOpenAIAdapter class testing config validation (missing api_key raises ValueError), TestAnthropicAdapter testing config validation. Use AsyncMock where needed, test pure logic paths not HTTP calls.",
     "Create tests/test_identity.py with: TestSoul class testing (Soul dataclass creation with all fields, system_prompt_from_soul generates prompt containing role/traits/style, SOUL_TEMPLATES has all 5 expected templates - engineer/researcher/manager/qa_engineer/architect, create_soul creates with defaults, customize_soul modifies specific fields), TestPersona class testing (build_working_context assembles all parts, context budget allocation splits tokens proportionally, memory truncation when over budget, save_persona and load_persona round-trip, memory_namespace isolation between agents).",
