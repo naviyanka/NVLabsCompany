@@ -2,7 +2,7 @@
   "id": "FEAT-003",
   "type": "feat",
   "description": "Create an Agent Templates system with a registry that loads Markdown template files with YAML frontmatter. Create 8-10 agent role templates following the NVLabsOrg format (YAML frontmatter with name/description + Markdown body with Rules and Process sections).",
-  "status": "pending",
+  "status": "in_progress",
   "steps": [
     "Create src/nexus/templates/__init__.py that exports TemplateRegistry, AgentTemplate.",
     "Create src/nexus/templates/registry.py with: (a) AgentTemplate dataclass (name: str, description: str, body: str, file_path: str), (b) TemplateRegistry class with methods: load_from_directory(path: Path) -> None, list_templates() -> list[AgentTemplate], get_template(name: str) -> AgentTemplate | None, reload() -> None. The registry should parse YAML frontmatter (between --- delimiters) and the Markdown body. Use a simple YAML parser (PyYAML is already available as a dependency) for frontmatter parsing.",
