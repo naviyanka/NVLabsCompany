@@ -13,15 +13,21 @@ from pydantic import BaseModel
 from sqlalchemy import select, update
 
 from nexus.api.deps import CurrentCompanyId, DbSession
+from nexus.config import settings
 from nexus.governance.secrets.vault import _HAS_FERNET, _FernetEncryptor, _TestOnlyXOREncryptor
 from nexus.models.secret import Secret, SecretBinding, SecretVersion
 
-# TODO: In production, the encryption key should come from app config / environment
-# variable (e.g., settings.SECRET_ENCRYPTION_KEY), not a hardcoded default.
-_ENCRYPTION_KEY = b"route-level-secret-encryption-key"
+# Use the application secret_key for stable encryption across restarts.
+# In production, use a dedicated SECRET_ENCRYPTION_KEY from a vault/KMS.
+# For Fernet, the key must be a URL-safe base64-encoded 32-byte key.
+_ENCRYPTION_KEY = settings.secret_key.encode("utf-8") if settings.secret_key else b"fallback-dev-key"
 
 if _HAS_FERNET:
-    _encryptor = _FernetEncryptor()
+    import base64
+    import hashlib
+    # Derive a Fernet-compatible key from the app secret
+    _fernet_key = base64.urlsafe_b64encode(hashlib.sha256(_ENCRYPTION_KEY).digest())
+    _encryptor = _FernetEncryptor(_fernet_key)
 else:
     _encryptor = _TestOnlyXOREncryptor(_ENCRYPTION_KEY)
 
