@@ -1,0 +1,30 @@
+{
+  "id": "FEAT-003",
+  "type": "feat",
+  "description": "Create Tenant Guard (Part E), Rollback Manager (Part F), Incident Manager (Part F), Retention Manager (Part G), Health/Observability (Part H), and Config Governance (Part H). These are the remaining governance modules.",
+  "status": "in_progress",
+  "steps": [
+    "Create src/nexus/governance/tenant_guard.py with: TenantGuard class with: validate_company_id (validates UUID is present), inject_query_filter (returns company_id filter condition), check_resource_ownership (verify resource belongs to tenant), detect_cross_tenant_access (check if response contains data from other tenants), propagate_tenant_context (async context var for tenant), TenantViolation exception class. Middleware pattern: cannot be bypassed, no opt-out.",
+    "Create src/nexus/governance/rollback.py with: Operation dataclass (id, action, resource_type, resource_id, previous_state, new_state, timestamp, dependencies list), RollbackManager class with: record_operation, create_checkpoint, rollback_operation (undo single action), rollback_to_checkpoint (restore to known good state), cascading_rollback (undo + all dependent), safety_check (won't rollback if new dependencies exist), get_rollback_history.",
+    "Create src/nexus/governance/incidents.py with: Severity enum (critical, high, medium, low), IncidentStatus enum (open, investigating, mitigating, resolved), IncidentData dataclass (id, title, severity, status, created_at, resolved_at, timeline list, actions list, rca), IncidentManager class with: create_incident, auto_detect_incident (triggers on budget blow-up, kill switch, circuit breaker), update_severity, add_timeline_event, add_response_action (pause agents, increase logging, notify), resolve_incident, record_rca, list_incidents, get_timeline.",
+    "Create src/nexus/governance/retention.py with: DataCategory enum (audit_logs, task_results, memory, communication), RetentionPolicy dataclass (category, retention_days, archive_after_days, grace_period_days), RetentionManager class with: set_policy, get_policy, check_expiration, archive_old_data, delete_expired_data, set_legal_hold (prevent deletion), remove_legal_hold, get_storage_usage, project_storage.",
+    "Create src/nexus/governance/health.py with: ComponentHealth dataclass (name, status: healthy/degraded/unhealthy, last_check, latency_ms, details), HealthMonitor class with: register_component, check_component, check_all, get_health_history, is_system_healthy, configure_alert_threshold, get_metrics (latency, throughput, error_rate), should_circuit_break (stop accepting work if unhealthy).",
+    "Create src/nexus/governance/config_governance.py with: ConfigChange dataclass (key, old_value, new_value, changed_by, timestamp, approved), ConfigGovernance class with: register_sensitive_key, validate_change (check value is valid), request_change_approval (for sensitive keys), apply_change, rollback_change, get_change_history, encrypt_sensitive_value, check_environment_guard (prevent prod config in dev).",
+    "Create tests/test_tenant_guard.py testing: validation enforcement, cross-tenant blocking, resource ownership checks, no bypass possible",
+    "Create tests/test_incidents.py testing: incident lifecycle (create -> investigate -> resolve), auto-detection triggers, timeline tracking, severity management",
+    "Create tests/test_rollback.py testing: record and rollback operations, checkpoint restore, cascading rollback, safety checks blocking unsafe rollbacks"
+  ],
+  "acceptance_criteria": [
+    "All files pass AST parsing",
+    "TenantGuard has no opt-out mechanism",
+    "RollbackManager verifies safety before executing rollback",
+    "IncidentManager auto-creates incidents on critical governance events",
+    "tests/test_tenant_guard.py, tests/test_incidents.py, tests/test_rollback.py all pass"
+  ],
+  "verification": [
+    "python -c \"import ast, pathlib; [ast.parse(pathlib.Path(f).read_text()) for f in ['src/nexus/governance/tenant_guard.py', 'src/nexus/governance/rollback.py', 'src/nexus/governance/incidents.py', 'src/nexus/governance/retention.py', 'src/nexus/governance/health.py', 'src/nexus/governance/config_governance.py']]\"",
+    "python -m pytest tests/test_tenant_guard.py tests/test_incidents.py tests/test_rollback.py -x -q"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}
