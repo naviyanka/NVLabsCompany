@@ -210,14 +210,17 @@ class PolicyEngine:
                 )
 
         if rate_limit_matches:
-            # Rate limit rules match but actual enforcement is done externally;
-            # here we signal that a rate limit policy applies
+            # Rate limit rules match but actual enforcement is done by the
+            # RateLimiter class externally. The policy engine signals that a
+            # rate limit policy applies but does NOT deny the request itself.
+            # Callers should check the decision_type and consult the actual
+            # rate limiter for enforcement.
             policy, rule = rate_limit_matches[0]
             return PolicyDecision(
-                allowed=False,
+                allowed=True,
                 decision_type="rate_limit",
                 policy_name=policy.name,
-                reason=f"Rate limited by policy: {policy.name}",
+                reason=f"Rate limit policy applies: {policy.name} (check rate limiter for enforcement)",
             )
 
         if approval_matches:

@@ -70,18 +70,25 @@ class PersistentAuditLogger:
     chain for tamper detection.
     """
 
-    def __init__(self, buffer_size: int = 100) -> None:
+    def __init__(
+        self,
+        buffer_size: int = 100,
+        last_hash: str | None = None,
+    ) -> None:
         """Initialize the persistent audit logger.
 
         Args:
             buffer_size: Maximum entries to buffer before flush.
+            last_hash: Optional hash to resume the chain from. If provided,
+                new entries will chain from this hash instead of "genesis",
+                enabling chain resumption across process restarts.
         """
         self._buffer: list[PersistentAuditEntry] = []
         self._buffer_size = buffer_size
         # Simulated persistent storage (in production, this would be DB)
         self._entries: list[PersistentAuditEntry] = []
         self._archived: list[PersistentAuditEntry] = []
-        self._last_hash: str = "genesis"
+        self._last_hash: str = last_hash if last_hash is not None else "genesis"
         self._sequence: int = 0
         self._retention_policies: dict[uuid.UUID | None, RetentionPolicy] = {}
 

@@ -171,7 +171,7 @@ nighttime_restricted = Policy(
             rule_type="require_approval",
             conditions={
                 "action": ["deploy", "delete", "modify_policy"],
-                "time_hour_min": 17,
+                "time_hour_min": 18,
                 "time_hour_max": 8,
             },
         ),

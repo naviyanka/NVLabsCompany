@@ -1,18 +1,21 @@
 """Secret Vault - encrypted secret storage with versioning and access logging.
 
 Secret values are NEVER exposed in logs, error messages, or metadata responses.
-Uses Fernet symmetric encryption with a fallback to base64 for environments
+Uses Fernet symmetric encryption with a fallback to XOR obfuscation for environments
 where the cryptography library is not available.
 """
 
 import base64
 import hashlib
+import logging
 import os
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 # Try to import Fernet; fall back to base64 obfuscation for testing
 try:
@@ -107,11 +110,13 @@ class _FernetEncryptor:
         return self._key
 
 
-class _Base64Encryptor:
-    """Fallback encryption using XOR with a key + base64 encoding.
+class _TestOnlyXOREncryptor:
+    """Fallback obfuscation using XOR with a key + base64 encoding.
 
-    This is NOT cryptographically secure; it exists only so that tests
-    can run without the cryptography library installed.
+    WARNING: This is NOT cryptographically secure and provides NO real
+    confidentiality guarantees. It exists ONLY so that tests can run
+    without the cryptography library installed. Do NOT use in production.
+    A repeating-key XOR cipher is trivially reversible.
     """
 
     def __init__(self, key: bytes | str | None = None) -> None:
@@ -162,7 +167,12 @@ class SecretVault:
         if _HAS_FERNET:
             self._encryptor = _FernetEncryptor(encryption_key)
         else:
-            self._encryptor = _Base64Encryptor(encryption_key)
+            logger.warning(
+                "cryptography library not available - falling back to "
+                "_TestOnlyXOREncryptor which provides NO real encryption. "
+                "This is acceptable for testing only. Do NOT use in production."
+            )
+            self._encryptor = _TestOnlyXOREncryptor(encryption_key)
 
         # secret_id -> {version -> encrypted_value}
         self._secrets: dict[uuid.UUID, dict[int, bytes]] = {}
