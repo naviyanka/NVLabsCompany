@@ -14,9 +14,12 @@ from nexus.models.evolution import (
     SkillVersion,
 )
 from nexus.models.governance import Approval, AuditLog, Decision, DecisionQueue
+from nexus.models.incident import Incident, IncidentAction, IncidentEvent
 from nexus.models.knowledge import ExperienceRecord, KnowledgeChunk, KnowledgePage
 from nexus.models.meeting import ActionItem, Meeting, MeetingMinutes, MeetingParticipant
 from nexus.models.memory import MemoryRecord
+from nexus.models.policy import Policy, PolicyRule, PolicyVersion
+from nexus.models.secret import Secret, SecretAccess, SecretBinding, SecretVersion
 from nexus.models.skill import AgentSkill, Skill
 from nexus.models.task import Goal, Project, Task
 from nexus.models.tool import Tool, ToolAccess
@@ -42,6 +45,19 @@ __all__ = [
     "Decision",
     "DecisionQueue",
     "AuditLog",
+    # Policies
+    "Policy",
+    "PolicyRule",
+    "PolicyVersion",
+    # Secrets
+    "Secret",
+    "SecretVersion",
+    "SecretBinding",
+    "SecretAccess",
+    # Incidents
+    "Incident",
+    "IncidentEvent",
+    "IncidentAction",
     # Skills
     "Skill",
     "AgentSkill",

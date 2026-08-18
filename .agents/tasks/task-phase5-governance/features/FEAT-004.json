@@ -1,0 +1,32 @@
+{
+  "id": "FEAT-004",
+  "type": "feat",
+  "description": "Create new SQLModel tables (Part K), API middleware (Part I), and new API routes (Part J). Register routes in main.py and export models in models/__init__.py.",
+  "status": "in_progress",
+  "steps": [
+    "Create src/nexus/models/policy.py with SQLModel tables: Policy (id, company_id, name, description, rules as JSON, priority, enabled, version, created_at, updated_at), PolicyRule (id, policy_id, rule_type, conditions as JSON, created_at), PolicyVersion (id, policy_id, version_number, rules_snapshot as JSON, changed_by, created_at). Follow existing pattern from governance.py.",
+    "Create src/nexus/models/secret.py with SQLModel tables: Secret (id, company_id, name, category, encrypted_value, current_version, expires_at, is_revoked, created_at, updated_at), SecretVersion (id, secret_id, version_number, encrypted_value, created_at, revoked_at), SecretBinding (id, secret_id, agent_id, granted_at, expires_at, one_time_use, is_used, revoked), SecretAccess (id, secret_id, agent_id, access_type, accessed_at, success). NEVER include plaintext values.",
+    "Create src/nexus/models/incident.py with SQLModel tables: Incident (id, company_id, title, severity, status, created_at, resolved_at, rca), IncidentEvent (id, incident_id, event_type, description, timestamp, actor), IncidentAction (id, incident_id, action_type, target, executed_at, result).",
+    "Create src/nexus/api/middleware.py with: GovernanceMiddleware class (ASGI middleware for FastAPI) with: __call__ that performs policy evaluation, tenant isolation check, rate limiting header injection, audit logging for mutating requests (POST/PUT/DELETE), kill switch check, budget pre-check. Use Starlette BaseHTTPMiddleware pattern.",
+    "Create src/nexus/api/routes/policies.py with APIRouter: GET /api/v1/policies (list active), POST /api/v1/policies (create), PUT /api/v1/policies/{policy_id} (update), DELETE /api/v1/policies/{policy_id} (disable/soft-delete), POST /api/v1/policies/evaluate (test evaluation). Use DbSession and CurrentCompanyId deps.",
+    "Create src/nexus/api/routes/secrets.py with APIRouter: POST /api/v1/secrets (create), GET /api/v1/secrets (list metadata only NEVER values), POST /api/v1/secrets/{secret_id}/bind (bind to agent), POST /api/v1/secrets/{secret_id}/revoke, POST /api/v1/secrets/{secret_id}/rotate. Use DbSession and CurrentCompanyId deps.",
+    "Create src/nexus/api/routes/incidents.py with APIRouter: POST /api/v1/incidents (create), GET /api/v1/incidents (list), PUT /api/v1/incidents/{incident_id}/resolve, GET /api/v1/incidents/{incident_id}/timeline. Use DbSession and CurrentCompanyId deps.",
+    "Update src/nexus/models/__init__.py to import and export new models: Policy, PolicyRule, PolicyVersion from models.policy; Secret, SecretVersion, SecretBinding, SecretAccess from models.secret; Incident, IncidentEvent, IncidentAction from models.incident.",
+    "Update src/nexus/main.py to import and register new routers: policies_router, secrets_router, incidents_router. Add GovernanceMiddleware to the app."
+  ],
+  "acceptance_criteria": [
+    "All new files pass AST parsing",
+    "Models follow existing SQLModel pattern with uuid id and company_id",
+    "Secret API routes never return secret values in responses",
+    "All three new route modules are registered in main.py",
+    "New models are exported from models/__init__.py",
+    "GovernanceMiddleware is added to the app"
+  ],
+  "verification": [
+    "python -c \"import ast, pathlib; [ast.parse(pathlib.Path(f).read_text()) for f in ['src/nexus/models/policy.py', 'src/nexus/models/secret.py', 'src/nexus/models/incident.py', 'src/nexus/api/middleware.py', 'src/nexus/api/routes/policies.py', 'src/nexus/api/routes/secrets.py', 'src/nexus/api/routes/incidents.py']]\"",
+    "python -c \"import ast; ast.parse(open('src/nexus/models/__init__.py').read()); ast.parse(open('src/nexus/main.py').read())\"",
+    "python -m pytest tests/ -x -q 2>&1 | tail -5"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

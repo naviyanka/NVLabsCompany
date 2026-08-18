@@ -26,6 +26,10 @@ from nexus.api.routes.evolution import router as evolution_router
 from nexus.api.routes.adapters import router as adapters_router
 from nexus.api.routes.workflows import router as workflows_router
 from nexus.api.routes.identity import router as identity_router
+from nexus.api.routes.policies import router as policies_router
+from nexus.api.routes.secrets import router as secrets_router
+from nexus.api.routes.incidents import router as incidents_router
+from nexus.api.middleware import GovernanceMiddleware
 
 
 @asynccontextmanager
@@ -52,6 +56,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Governance middleware for policy enforcement, audit logging, and rate limiting
+app.add_middleware(GovernanceMiddleware)
+
 # Include route modules
 app.include_router(health_router)
 app.include_router(companies_router)
@@ -72,3 +79,6 @@ app.include_router(evolution_router)
 app.include_router(adapters_router)
 app.include_router(workflows_router)
 app.include_router(identity_router)
+app.include_router(policies_router)
+app.include_router(secrets_router)
+app.include_router(incidents_router)
