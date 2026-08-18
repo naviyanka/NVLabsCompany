@@ -6,6 +6,17 @@ from nexus.governance.guardrails import GuardrailChain
 from nexus.governance.rbac import RBACManager
 from nexus.governance.audit import AuditLogger
 from nexus.governance.kill_switch import KillSwitch, CircuitBreaker
+from nexus.governance.policies import PolicyEngine
+from nexus.governance.secrets import SecretVault
+from nexus.governance.audit_persistent import PersistentAuditLogger
+from nexus.governance.compliance import ComplianceFramework
+from nexus.governance.rate_limiter import RateLimiter
+from nexus.governance.tenant_guard import TenantGuard
+from nexus.governance.rollback import RollbackManager
+from nexus.governance.incidents import IncidentManager
+from nexus.governance.retention import RetentionManager
+from nexus.governance.health import HealthMonitor
+from nexus.governance.config_governance import ConfigGovernance
 
 __all__ = [
     "ApprovalEngine",
@@ -16,4 +27,15 @@ __all__ = [
     "AuditLogger",
     "KillSwitch",
     "CircuitBreaker",
+    "PolicyEngine",
+    "SecretVault",
+    "PersistentAuditLogger",
+    "ComplianceFramework",
+    "RateLimiter",
+    "TenantGuard",
+    "RollbackManager",
+    "IncidentManager",
+    "RetentionManager",
+    "HealthMonitor",
+    "ConfigGovernance",
 ]

@@ -1,0 +1,25 @@
+{
+  "id": "FEAT-005",
+  "type": "chore",
+  "description": "Final integration: update governance __init__.py to export new modules, verify all tests pass together, commit all changes with meaningful message.",
+  "status": "in_progress",
+  "steps": [
+    "Update src/nexus/governance/__init__.py to import and export new modules: PolicyEngine from policies, SecretVault from secrets, PersistentAuditLogger from audit_persistent, ComplianceFramework from compliance, RateLimiter from rate_limiter, TenantGuard from tenant_guard, RollbackManager from rollback, IncidentManager from incidents, RetentionManager from retention, HealthMonitor from health, ConfigGovernance from config_governance.",
+    "Run full AST validation on all new files: python -c to parse every new .py file",
+    "Run full test suite: python -m pytest tests/ -x -q to verify no regressions",
+    "Git add all new files and commit with message: 'feat: Phase 5 - Advanced Governance & Production Hardening\n\n- Policy engine with deterministic evaluation, built-in safety policies\n- Secret vault with Fernet encryption, access control, rotation\n- Persistent audit logger with hash chain tamper detection\n- Compliance framework with data classification\n- Token bucket rate limiter with sliding window\n- Tenant guard with hard isolation enforcement\n- Rollback manager with cascading undo and safety checks\n- Incident manager with auto-detection and timeline\n- Data retention manager with legal hold support\n- Health monitor with circuit breaking\n- Configuration governance with approval workflow\n- API middleware for governance enforcement\n- New API routes: policies, secrets, incidents\n- New SQLModel tables: Policy, Secret, Incident and related'"
+  ],
+  "acceptance_criteria": [
+    "governance/__init__.py exports all new modules",
+    "All Python files in the project pass AST parsing",
+    "Full test suite passes (both existing and new tests)",
+    "All changes are committed to git"
+  ],
+  "verification": [
+    "python -c \"import ast, pathlib; errors = []; [errors.append(str(f)) if not (lambda p: (ast.parse(p.read_text()), True)[-1])(f) else None for f in pathlib.Path('src').rglob('*.py')]; print(f'{len(list(pathlib.Path(\"src\").rglob(\"*.py\")))} files parsed OK') if not errors else print(errors)\"",
+    "python -m pytest tests/ -x -q",
+    "git status --short"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

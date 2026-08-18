@@ -114,9 +114,11 @@ class _Base64Encryptor:
     can run without the cryptography library installed.
     """
 
-    def __init__(self, key: bytes | None = None) -> None:
+    def __init__(self, key: bytes | str | None = None) -> None:
         if key is None:
             key = os.urandom(32)
+        if isinstance(key, str):
+            key = key.encode("utf-8")
         self._key = key
 
     def encrypt(self, plaintext: str) -> bytes:
@@ -148,13 +150,15 @@ class SecretVault:
     references, and maintains an access log for auditing.
     """
 
-    def __init__(self, encryption_key: bytes | None = None) -> None:
+    def __init__(self, encryption_key: bytes | str | None = None) -> None:
         """Initialize the secret vault.
 
         Args:
             encryption_key: Optional encryption key. If not provided,
                 a new key is generated.
         """
+        if isinstance(encryption_key, str):
+            encryption_key = encryption_key.encode("utf-8")
         if _HAS_FERNET:
             self._encryptor = _FernetEncryptor(encryption_key)
         else:
