@@ -4,85 +4,17 @@ import { usePolling } from '@/hooks/usePolling';
 import { agentsApi } from '@/api/agents';
 import { tasksApi } from '@/api/tasks';
 import { COMPANY_ID } from '@/config';
-import { defaultRooms, departmentRoomMap } from '@/config/officeLayout';
+import { defaultRooms } from '@/config/officeLayout';
+import { useAgentMovement } from '@/components/office/AgentMovement';
 import type { Agent } from '@/types/agent';
 import type { Task } from '@/types/task';
 import type { PaginatedResponse } from '@/types/common';
 import type {
   OfficeState,
-  AgentPosition,
   DelegationArrow,
   ActiveMeeting,
   OfficeEvent,
 } from '@/types/office';
-
-function getAgentRoomId(agent: Agent): string {
-  // Map agent to room based on role/title keywords
-  const roleKeywords = agent.role.toLowerCase();
-  const titleKeywords = agent.title.toLowerCase();
-
-  for (const [keyword, roomId] of Object.entries(departmentRoomMap)) {
-    if (roleKeywords.includes(keyword) || titleKeywords.includes(keyword)) {
-      return roomId;
-    }
-  }
-
-  // Default: common area
-  return 'common-area';
-}
-
-function getAgentPositionStatus(agent: Agent): AgentPosition['status'] {
-  switch (agent.status) {
-    case 'active':
-    case 'busy':
-      return 'working';
-    case 'idle':
-      return 'idle';
-    case 'offline':
-    case 'error':
-      return 'away';
-    default:
-      return 'idle';
-  }
-}
-
-function computeAgentPositions(agents: Agent[]): AgentPosition[] {
-  // Group agents by room
-  const roomAgents: Record<string, Agent[]> = {};
-  for (const agent of agents) {
-    const roomId = getAgentRoomId(agent);
-    if (!roomAgents[roomId]) {
-      roomAgents[roomId] = [];
-    }
-    roomAgents[roomId].push(agent);
-  }
-
-  const positions: AgentPosition[] = [];
-
-  for (const [roomId, agentsInRoom] of Object.entries(roomAgents)) {
-    const room = defaultRooms.find((r) => r.id === roomId);
-    if (!room) continue;
-
-    // Arrange agents in a grid within the room
-    const cols = Math.max(2, Math.ceil(Math.sqrt(agentsInRoom.length)));
-    const cellWidth = (room.width - 40) / cols;
-    const cellHeight = 50;
-
-    agentsInRoom.forEach((agent, index) => {
-      const col = index % cols;
-      const row = Math.floor(index / cols);
-      positions.push({
-        agentId: agent.id,
-        roomId,
-        x: room.x + 20 + col * cellWidth + cellWidth / 2,
-        y: room.y + 40 + row * cellHeight + cellHeight / 2,
-        status: getAgentPositionStatus(agent),
-      });
-    });
-  }
-
-  return positions;
-}
 
 function computeDelegations(tasks: Task[], agents: Agent[]): DelegationArrow[] {
   const delegations: DelegationArrow[] = [];
@@ -118,12 +50,18 @@ function computeDelegations(tasks: Task[], agents: Agent[]): DelegationArrow[] {
   return delegations;
 }
 
+/**
+ * Simulated meetings heuristic for the office visualization demo.
+ * There is no real meetings API endpoint backing this data. Meetings are
+ * fabricated when 3+ agents are simultaneously busy, as a visual cue that
+ * collaborative work may be occurring. This threshold reduces false positives
+ * compared to triggering on only 2 busy agents.
+ */
 function computeMeetings(agents: Agent[]): ActiveMeeting[] {
-  // Derive meetings from agents that are busy and in similar departments
   const busyAgents = agents.filter((a) => a.status === 'busy');
   const meetings: ActiveMeeting[] = [];
 
-  if (busyAgents.length >= 2) {
+  if (busyAgents.length >= 3) {
     meetings.push({
       id: 'meeting-active-1',
       roomId: 'meeting-room-1',
@@ -199,6 +137,7 @@ export interface UseOfficeReturn {
   officeState: OfficeState;
   events: OfficeEvent[];
   agents: Agent[];
+  tasks: Task[];
   loading: boolean;
   error: string | null;
   refetch: () => void;
@@ -240,10 +179,13 @@ export function useOffice(): UseOfficeReturn {
   const agents = agentsData?.items || [];
   const tasks = tasksData?.items || [];
 
+  const meetings = useMemo(() => computeMeetings(agents), [agents]);
+
+  // Delegate position computation to the canonical useAgentMovement hook
+  const agentPositions = useAgentMovement({ agents, rooms: defaultRooms, meetings });
+
   const officeState = useMemo<OfficeState>(() => {
-    const agentPositions = computeAgentPositions(agents);
     const delegations = computeDelegations(tasks, agents);
-    const meetings = computeMeetings(agents);
 
     return {
       rooms: defaultRooms,
@@ -251,7 +193,7 @@ export function useOffice(): UseOfficeReturn {
       delegations,
       meetings,
     };
-  }, [agents, tasks]);
+  }, [agents, tasks, agentPositions, meetings]);
 
   const events = useMemo(() => generateEvents(agents, tasks), [agents, tasks]);
 
@@ -268,6 +210,7 @@ export function useOffice(): UseOfficeReturn {
     officeState,
     events,
     agents,
+    tasks,
     loading: agentsLoading || tasksLoading,
     error: agentsError || tasksError,
     refetch,

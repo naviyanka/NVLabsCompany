@@ -1,4 +1,4 @@
-import { useRef, useCallback, useState } from 'react';
+import { useRef, useCallback, useState, useEffect } from 'react';
 import { CANVAS_WIDTH, CANVAS_HEIGHT, GRID_SIZE } from '@/config/officeLayout';
 
 interface OfficeCanvasProps {
@@ -52,15 +52,21 @@ export function OfficeCanvas({
     setIsDragging(false);
   }, []);
 
-  const handleWheel = useCallback(
-    (e: React.WheelEvent) => {
+  // Attach wheel listener imperatively with { passive: false } to allow preventDefault.
+  // React attaches wheel listeners as passive by default, which prevents preventDefault
+  // from working and causes Chromium console warnings.
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const handler = (e: WheelEvent) => {
       e.preventDefault();
       const delta = e.deltaY > 0 ? -0.1 : 0.1;
       const newZoom = Math.max(0.3, Math.min(2.5, zoom + delta));
       onZoomChange(newZoom);
-    },
-    [zoom, onZoomChange]
-  );
+    };
+    el.addEventListener('wheel', handler, { passive: false });
+    return () => el.removeEventListener('wheel', handler);
+  }, [zoom, onZoomChange]);
 
   // Generate grid pattern
   const gridLines: React.ReactNode[] = [];
@@ -99,7 +105,6 @@ export function OfficeCanvas({
       onMouseMove={handleMouseMove}
       onMouseUp={handleMouseUp}
       onMouseLeave={handleMouseUp}
-      onWheel={handleWheel}
     >
       <div
         className="origin-top-left transition-transform duration-75 ease-out"

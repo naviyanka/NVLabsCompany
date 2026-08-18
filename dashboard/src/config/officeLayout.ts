@@ -12,15 +12,13 @@ export const roomColors = {
   server: { bg: '#f1f5f9', border: '#64748b' },
 } as const;
 
-/** Agent status ring colors */
+/** Agent status ring colors (matches AgentStatus union: 'active'|'idle'|'busy'|'offline'|'error') */
 export const statusColors: Record<string, string> = {
   active: '#10b981',
   busy: '#10b981',
   idle: '#3b82f6',
-  paused: '#f59e0b',
   error: '#f43f5e',
   offline: '#9ca3af',
-  terminated: '#9ca3af',
 };
 
 /** Default floor plan - rooms positioned according to the office layout spec */

@@ -10,20 +10,10 @@ import { OfficeControls } from '@/components/office/OfficeControls';
 import { DelegationFlow } from '@/components/office/DelegationFlow';
 import type { OfficeControls as OfficeControlsState } from '@/types/office';
 import type { Task } from '@/types/task';
-import type { PaginatedResponse } from '@/types/common';
-import { useApi } from '@/hooks/useApi';
-import { tasksApi } from '@/api/tasks';
-import { COMPANY_ID } from '@/config';
 import { statusColors } from '@/config/officeLayout';
 
 export function Office() {
-  const { officeState, events, agents, loading, error, stats } = useOffice();
-
-  const { data: tasksData } = useApi<PaginatedResponse<Task>>(
-    () => tasksApi.list(COMPANY_ID, { page_size: 100 }),
-    [COMPANY_ID]
-  );
-  const tasks = tasksData?.items || [];
+  const { officeState, events, agents, tasks, loading, error, stats } = useOffice();
 
   // Controls state
   const [controls, setControls] = useState<OfficeControlsState>({
