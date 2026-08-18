@@ -16,6 +16,7 @@ import { Workflows } from '@/pages/Workflows';
 import { Meetings } from '@/pages/Meetings';
 import { Activity } from '@/pages/Activity';
 import { Settings } from '@/pages/Settings';
+import { Office } from '@/pages/Office';
 
 export default function App() {
   return (
@@ -23,6 +24,7 @@ export default function App() {
       <Routes>
         <Route element={<Layout />}>
           <Route path="/" element={<Dashboard />} />
+          <Route path="/office" element={<Office />} />
           <Route path="/agents" element={<Agents />} />
           <Route path="/agents/:id" element={<AgentDetailPage />} />
           <Route path="/tasks" element={<Tasks />} />

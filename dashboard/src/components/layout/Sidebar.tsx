@@ -10,6 +10,7 @@ import {
   Dna,
   Activity,
   Settings,
+  Building2,
 } from 'lucide-react';
 
 interface NavItem {
@@ -20,6 +21,7 @@ interface NavItem {
 
 const navItems: NavItem[] = [
   { label: 'Dashboard', path: '/', icon: <LayoutDashboard size={20} /> },
+  { label: 'Office', path: '/office', icon: <Building2 size={20} /> },
   { label: 'Agents', path: '/agents', icon: <Bot size={20} /> },
   { label: 'Tasks', path: '/tasks', icon: <ListTodo size={20} /> },
   { label: 'Organization', path: '/organization', icon: <Network size={20} /> },
