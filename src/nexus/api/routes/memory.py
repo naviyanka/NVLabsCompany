@@ -4,11 +4,11 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from fastapi import APIRouter, status
+from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy import select
 
-from nexus.api.deps import DbSession
+from nexus.api.deps import CurrentCompanyId, DbSession
 from nexus.models.memory import MemoryRecord
 
 router = APIRouter(tags=["memory"])
@@ -61,16 +61,20 @@ class MemorySearchResult(BaseModel):
     response_model=MemoryResponse,
 )
 async def store_memory(
-    agent_id: uuid.UUID, body: MemoryCreate, db: DbSession
+    agent_id: uuid.UUID, body: MemoryCreate, db: DbSession, company_id: CurrentCompanyId
 ) -> Any:
     """Store a memory for an agent."""
-    # Get agent's company_id
+    # Verify agent belongs to company
     from nexus.models.agent import Agent
 
-    agent_stmt = select(Agent).where(Agent.id == agent_id)
+    agent_stmt = select(Agent).where(Agent.id == agent_id, Agent.company_id == company_id)
     agent_result = await db.execute(agent_stmt)
     agent = agent_result.scalar_one_or_none()
-    company_id = agent.company_id if agent else uuid.UUID(int=0)
+    if agent is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Agent {agent_id} not found",
+        )
 
     record = MemoryRecord(
         company_id=company_id,
@@ -78,7 +82,7 @@ async def store_memory(
         scope=body.scope,
         scope_id=body.scope_id or agent_id,
         content=body.content,
-        metadata=body.metadata,
+        record_metadata=body.metadata,
         importance=body.importance,
         tier="warm",
     )
@@ -94,6 +98,7 @@ async def store_memory(
 async def search_memory(
     agent_id: uuid.UUID,
     db: DbSession,
+    company_id: CurrentCompanyId,
     query: str = "",
     top_k: int = 10,
 ) -> Any:
@@ -103,7 +108,7 @@ async def search_memory(
     # Fetch agent's accessible memories
     stmt = (
         select(MemoryRecord)
-        .where(MemoryRecord.agent_id == agent_id)
+        .where(MemoryRecord.agent_id == agent_id, MemoryRecord.company_id == company_id)
         .order_by(MemoryRecord.importance.desc())
         .limit(1000)
     )
@@ -129,7 +134,7 @@ async def search_memory(
                     scope=memory.scope,
                     scope_id=memory.scope_id,
                     content=memory.content,
-                    metadata=memory.metadata,
+                    metadata=memory.record_metadata,
                     importance=memory.importance,
                     access_count=memory.access_count,
                     tier=memory.tier,
@@ -150,13 +155,14 @@ async def search_memory(
 async def list_agent_memories(
     agent_id: uuid.UUID,
     db: DbSession,
+    company_id: CurrentCompanyId,
     scope: str | None = None,
     tier: str | None = None,
     limit: int = 100,
     offset: int = 0,
 ) -> Any:
     """List memories for an agent."""
-    stmt = select(MemoryRecord).where(MemoryRecord.agent_id == agent_id)
+    stmt = select(MemoryRecord).where(MemoryRecord.agent_id == agent_id, MemoryRecord.company_id == company_id)
     if scope:
         stmt = stmt.where(MemoryRecord.scope == scope)
     if tier:

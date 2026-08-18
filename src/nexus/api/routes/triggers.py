@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy import select, update
 
-from nexus.api.deps import DbSession
+from nexus.api.deps import CurrentCompanyId, DbSession
 from nexus.models.trigger import Trigger, TriggerExecution
 
 router = APIRouter(tags=["triggers"])
@@ -111,7 +111,7 @@ async def list_triggers(
 
 @router.put("/api/v1/triggers/{trigger_id}", response_model=TriggerResponse)
 async def update_trigger(
-    trigger_id: uuid.UUID, body: TriggerUpdate, db: DbSession
+    trigger_id: uuid.UUID, body: TriggerUpdate, db: DbSession, company_id: CurrentCompanyId
 ) -> Any:
     """Update a trigger."""
     updates = body.model_dump(exclude_unset=True)
@@ -120,10 +120,10 @@ async def update_trigger(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="No fields to update",
         )
-    stmt = update(Trigger).where(Trigger.id == trigger_id).values(**updates)
+    stmt = update(Trigger).where(Trigger.id == trigger_id, Trigger.company_id == company_id).values(**updates)
     await db.execute(stmt)
 
-    result = await db.execute(select(Trigger).where(Trigger.id == trigger_id))
+    result = await db.execute(select(Trigger).where(Trigger.id == trigger_id, Trigger.company_id == company_id))
     trigger = result.scalar_one_or_none()
     if trigger is None:
         raise HTTPException(
@@ -138,10 +138,10 @@ async def update_trigger(
     status_code=status.HTTP_201_CREATED,
     response_model=TriggerExecutionResponse,
 )
-async def fire_trigger(trigger_id: uuid.UUID, db: DbSession) -> Any:
+async def fire_trigger(trigger_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId) -> Any:
     """Manually fire a trigger, creating an execution record."""
     # Verify trigger exists
-    stmt = select(Trigger).where(Trigger.id == trigger_id)
+    stmt = select(Trigger).where(Trigger.id == trigger_id, Trigger.company_id == company_id)
     result = await db.execute(stmt)
     trigger = result.scalar_one_or_none()
     if trigger is None:
@@ -155,7 +155,7 @@ async def fire_trigger(trigger_id: uuid.UUID, db: DbSession) -> Any:
     # Update trigger last_fired_at
     update_stmt = (
         update(Trigger)
-        .where(Trigger.id == trigger_id)
+        .where(Trigger.id == trigger_id, Trigger.company_id == company_id)
         .values(last_fired_at=now)
     )
     await db.execute(update_stmt)

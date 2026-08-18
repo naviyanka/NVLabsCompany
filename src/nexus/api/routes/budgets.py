@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy import select, func
 
-from nexus.api.deps import DbSession
+from nexus.api.deps import CurrentCompanyId, DbSession
 from nexus.models.budget import BudgetPolicy, CostEvent
 
 router = APIRouter(tags=["budgets"])
@@ -118,7 +118,7 @@ async def get_company_budget_usage(
     response_model=BudgetUsageResponse,
 )
 async def get_agent_budget_usage(
-    agent_id: uuid.UUID, db: DbSession
+    agent_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId
 ) -> Any:
     """Get budget usage for an agent."""
     now = datetime.now(timezone.utc)
@@ -131,6 +131,7 @@ async def get_agent_budget_usage(
         func.count(CostEvent.id),
     ).where(
         CostEvent.agent_id == agent_id,
+        CostEvent.company_id == company_id,
         CostEvent.occurred_at >= window_start,
     )
 

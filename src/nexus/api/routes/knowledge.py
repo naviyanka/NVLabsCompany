@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy import select
 
-from nexus.api.deps import DbSession
+from nexus.api.deps import CurrentCompanyId, DbSession
 from nexus.models.knowledge import ExperienceRecord, KnowledgeChunk, KnowledgePage
 
 router = APIRouter(tags=["knowledge"])
@@ -174,9 +174,9 @@ async def list_pages(
     "/api/v1/knowledge/{page_id}",
     response_model=PageResponse,
 )
-async def get_page(page_id: uuid.UUID, db: DbSession) -> Any:
+async def get_page(page_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId) -> Any:
     """Get a knowledge page by ID."""
-    stmt = select(KnowledgePage).where(KnowledgePage.id == page_id)
+    stmt = select(KnowledgePage).where(KnowledgePage.id == page_id, KnowledgePage.company_id == company_id)
     result = await db.execute(stmt)
     page = result.scalar_one_or_none()
     if page is None:
@@ -192,10 +192,10 @@ async def get_page(page_id: uuid.UUID, db: DbSession) -> Any:
     response_model=PageResponse,
 )
 async def update_page(
-    page_id: uuid.UUID, body: UpdatePageRequest, db: DbSession
+    page_id: uuid.UUID, body: UpdatePageRequest, db: DbSession, company_id: CurrentCompanyId
 ) -> Any:
     """Update a knowledge page."""
-    stmt = select(KnowledgePage).where(KnowledgePage.id == page_id)
+    stmt = select(KnowledgePage).where(KnowledgePage.id == page_id, KnowledgePage.company_id == company_id)
     result = await db.execute(stmt)
     page = result.scalar_one_or_none()
     if page is None:
@@ -218,11 +218,11 @@ async def update_page(
     "/api/v1/knowledge/{page_id}/history",
     response_model=list[PageHistoryEntry],
 )
-async def get_page_history(page_id: uuid.UUID, db: DbSession) -> Any:
+async def get_page_history(page_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId) -> Any:
     """Get version history (chunks) for a knowledge page."""
     stmt = (
         select(KnowledgeChunk)
-        .where(KnowledgeChunk.page_id == page_id)
+        .where(KnowledgeChunk.page_id == page_id, KnowledgeChunk.company_id == company_id)
         .order_by(KnowledgeChunk.chunk_index)
     )
     result = await db.execute(stmt)
@@ -270,7 +270,7 @@ async def rag_search(
             page_id=c.page_id,
             content=c.content,
             chunk_index=c.chunk_index,
-            metadata=c.metadata,
+            metadata=c.chunk_metadata,
         )
         for c in chunks
     ]

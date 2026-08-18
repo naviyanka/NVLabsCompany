@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy import select, update
 
-from nexus.api.deps import DbSession
+from nexus.api.deps import CurrentCompanyId, DbSession
 from nexus.models.governance import Approval
 
 router = APIRouter(tags=["approvals"])
@@ -98,12 +98,12 @@ async def list_pending_approvals(
     response_model=ApprovalResponse,
 )
 async def approve(
-    approval_id: uuid.UUID, body: ApprovalDecision, db: DbSession
+    approval_id: uuid.UUID, body: ApprovalDecision, db: DbSession, company_id: CurrentCompanyId
 ) -> Any:
     """Approve a pending approval request."""
     stmt = (
         update(Approval)
-        .where(Approval.id == approval_id, Approval.status == "pending")
+        .where(Approval.id == approval_id, Approval.status == "pending", Approval.company_id == company_id)
         .values(
             status="approved",
             decided_by=body.decided_by,
@@ -119,7 +119,7 @@ async def approve(
             detail=f"Approval {approval_id} not found or not pending",
         )
 
-    query = await db.execute(select(Approval).where(Approval.id == approval_id))
+    query = await db.execute(select(Approval).where(Approval.id == approval_id, Approval.company_id == company_id))
     return query.scalar_one()
 
 
@@ -128,12 +128,12 @@ async def approve(
     response_model=ApprovalResponse,
 )
 async def reject(
-    approval_id: uuid.UUID, body: ApprovalDecision, db: DbSession
+    approval_id: uuid.UUID, body: ApprovalDecision, db: DbSession, company_id: CurrentCompanyId
 ) -> Any:
     """Reject a pending approval request."""
     stmt = (
         update(Approval)
-        .where(Approval.id == approval_id, Approval.status == "pending")
+        .where(Approval.id == approval_id, Approval.status == "pending", Approval.company_id == company_id)
         .values(
             status="rejected",
             decided_by=body.decided_by,
@@ -149,5 +149,5 @@ async def reject(
             detail=f"Approval {approval_id} not found or not pending",
         )
 
-    query = await db.execute(select(Approval).where(Approval.id == approval_id))
+    query = await db.execute(select(Approval).where(Approval.id == approval_id, Approval.company_id == company_id))
     return query.scalar_one()

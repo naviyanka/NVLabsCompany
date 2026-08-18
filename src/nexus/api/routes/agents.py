@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy import select, update
 
-from nexus.api.deps import DbSession
+from nexus.api.deps import CurrentCompanyId, DbSession
 from nexus.models.agent import Agent
 
 router = APIRouter(tags=["agents"])
@@ -122,9 +122,9 @@ async def list_agents(
 
 
 @router.get("/api/v1/agents/{agent_id}", response_model=AgentResponse)
-async def get_agent(agent_id: uuid.UUID, db: DbSession) -> Any:
+async def get_agent(agent_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId) -> Any:
     """Get an agent by ID."""
-    stmt = select(Agent).where(Agent.id == agent_id)
+    stmt = select(Agent).where(Agent.id == agent_id, Agent.company_id == company_id)
     result = await db.execute(stmt)
     agent = result.scalar_one_or_none()
     if agent is None:
@@ -137,7 +137,7 @@ async def get_agent(agent_id: uuid.UUID, db: DbSession) -> Any:
 
 @router.put("/api/v1/agents/{agent_id}", response_model=AgentResponse)
 async def update_agent(
-    agent_id: uuid.UUID, body: AgentUpdate, db: DbSession
+    agent_id: uuid.UUID, body: AgentUpdate, db: DbSession, company_id: CurrentCompanyId
 ) -> Any:
     """Update an agent."""
     updates = body.model_dump(exclude_unset=True)
@@ -147,10 +147,10 @@ async def update_agent(
             detail="No fields to update",
         )
     updates["updated_at"] = datetime.now(timezone.utc)
-    stmt = update(Agent).where(Agent.id == agent_id).values(**updates)
+    stmt = update(Agent).where(Agent.id == agent_id, Agent.company_id == company_id).values(**updates)
     await db.execute(stmt)
 
-    result = await db.execute(select(Agent).where(Agent.id == agent_id))
+    result = await db.execute(select(Agent).where(Agent.id == agent_id, Agent.company_id == company_id))
     agent = result.scalar_one_or_none()
     if agent is None:
         raise HTTPException(
@@ -161,9 +161,9 @@ async def update_agent(
 
 
 @router.post("/api/v1/agents/{agent_id}/wake", response_model=AgentResponse)
-async def wake_agent(agent_id: uuid.UUID, db: DbSession) -> Any:
+async def wake_agent(agent_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId) -> Any:
     """Wake an agent (transition to ready state)."""
-    stmt = select(Agent).where(Agent.id == agent_id)
+    stmt = select(Agent).where(Agent.id == agent_id, Agent.company_id == company_id)
     result = await db.execute(stmt)
     agent = result.scalar_one_or_none()
     if agent is None:
@@ -178,18 +178,18 @@ async def wake_agent(agent_id: uuid.UUID, db: DbSession) -> Any:
         )
     update_stmt = (
         update(Agent)
-        .where(Agent.id == agent_id)
+        .where(Agent.id == agent_id, Agent.company_id == company_id)
         .values(status="ready", updated_at=datetime.now(timezone.utc))
     )
     await db.execute(update_stmt)
-    result = await db.execute(select(Agent).where(Agent.id == agent_id))
+    result = await db.execute(select(Agent).where(Agent.id == agent_id, Agent.company_id == company_id))
     return result.scalar_one()
 
 
 @router.post("/api/v1/agents/{agent_id}/pause", response_model=AgentResponse)
-async def pause_agent(agent_id: uuid.UUID, db: DbSession) -> Any:
+async def pause_agent(agent_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId) -> Any:
     """Pause an agent."""
-    stmt = select(Agent).where(Agent.id == agent_id)
+    stmt = select(Agent).where(Agent.id == agent_id, Agent.company_id == company_id)
     result = await db.execute(stmt)
     agent = result.scalar_one_or_none()
     if agent is None:
@@ -204,7 +204,7 @@ async def pause_agent(agent_id: uuid.UUID, db: DbSession) -> Any:
         )
     update_stmt = (
         update(Agent)
-        .where(Agent.id == agent_id)
+        .where(Agent.id == agent_id, Agent.company_id == company_id)
         .values(
             status="paused",
             paused_at=datetime.now(timezone.utc),
@@ -212,17 +212,17 @@ async def pause_agent(agent_id: uuid.UUID, db: DbSession) -> Any:
         )
     )
     await db.execute(update_stmt)
-    result = await db.execute(select(Agent).where(Agent.id == agent_id))
+    result = await db.execute(select(Agent).where(Agent.id == agent_id, Agent.company_id == company_id))
     return result.scalar_one()
 
 
 @router.post("/api/v1/agents/{agent_id}/heartbeat")
-async def agent_heartbeat(agent_id: uuid.UUID, db: DbSession) -> dict[str, Any]:
+async def agent_heartbeat(agent_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId) -> dict[str, Any]:
     """Record a heartbeat from an agent."""
     now = datetime.now(timezone.utc)
     stmt = (
         update(Agent)
-        .where(Agent.id == agent_id)
+        .where(Agent.id == agent_id, Agent.company_id == company_id)
         .values(last_heartbeat_at=now)
     )
     result = await db.execute(stmt)

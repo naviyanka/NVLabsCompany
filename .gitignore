@@ -33,3 +33,11 @@ htmlcov/
 
 # Type checking
 .mypy_cache/
+
+# Node
+node_modules/
+package-lock.json
+
+# Database
+*.db
+nexus_dev.db

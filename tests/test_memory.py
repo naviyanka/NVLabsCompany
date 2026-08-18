@@ -332,7 +332,7 @@ class TestMemoryStorePromoteDemote:
         mock_record.scope = "agent"
         mock_record.scope_id = uuid.uuid4()
         mock_record.content = "Warm memory content"
-        mock_record.metadata = None
+        mock_record.record_metadata = None
         mock_record.importance = 0.6
         mock_record.access_count = 3
         mock_record.tier = "warm"

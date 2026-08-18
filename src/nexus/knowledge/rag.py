@@ -155,7 +155,7 @@ class RAGPipeline:
                 page_id=page_id,
                 content=chunk_content,
                 chunk_index=idx,
-                metadata={"length": len(chunk_content)},
+                chunk_metadata={"length": len(chunk_content)},
                 created_at=datetime.now(timezone.utc),
             )
             self.db.add(chunk_record)

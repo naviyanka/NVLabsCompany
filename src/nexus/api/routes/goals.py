@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy import select, update
 
-from nexus.api.deps import DbSession
+from nexus.api.deps import CurrentCompanyId, DbSession
 from nexus.models.task import Goal
 
 router = APIRouter(tags=["goals"])
@@ -95,9 +95,9 @@ async def list_goals(
 
 
 @router.get("/api/v1/goals/{goal_id}", response_model=GoalResponse)
-async def get_goal(goal_id: uuid.UUID, db: DbSession) -> Any:
+async def get_goal(goal_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId) -> Any:
     """Get a goal by ID."""
-    stmt = select(Goal).where(Goal.id == goal_id)
+    stmt = select(Goal).where(Goal.id == goal_id, Goal.company_id == company_id)
     result = await db.execute(stmt)
     goal = result.scalar_one_or_none()
     if goal is None:
@@ -110,7 +110,7 @@ async def get_goal(goal_id: uuid.UUID, db: DbSession) -> Any:
 
 @router.put("/api/v1/goals/{goal_id}", response_model=GoalResponse)
 async def update_goal(
-    goal_id: uuid.UUID, body: GoalUpdate, db: DbSession
+    goal_id: uuid.UUID, body: GoalUpdate, db: DbSession, company_id: CurrentCompanyId
 ) -> Any:
     """Update a goal."""
     updates = body.model_dump(exclude_unset=True)
@@ -120,10 +120,10 @@ async def update_goal(
             detail="No fields to update",
         )
     updates["updated_at"] = datetime.now(timezone.utc)
-    stmt = update(Goal).where(Goal.id == goal_id).values(**updates)
+    stmt = update(Goal).where(Goal.id == goal_id, Goal.company_id == company_id).values(**updates)
     await db.execute(stmt)
 
-    result = await db.execute(select(Goal).where(Goal.id == goal_id))
+    result = await db.execute(select(Goal).where(Goal.id == goal_id, Goal.company_id == company_id))
     goal = result.scalar_one_or_none()
     if goal is None:
         raise HTTPException(

@@ -9,20 +9,19 @@ Provides request-level governance enforcement including:
 - Budget pre-check for expensive operations
 - Request cost estimation
 
-TODO: This middleware currently provides request-level structure but enforcement
-is pending integration with actual domain managers (PolicyEngine, RateLimiter,
-TenantGuard, PersistentAuditLogger, etc.) in a future phase. Each stub method
-documents what it needs to connect to.
+Implemented as a pure ASGI middleware (no BaseHTTPMiddleware) to avoid
+streaming/deadlock issues with newer Starlette versions.
 """
 
 import logging
 import time
 import uuid
 from threading import Lock
+from typing import Any
 
-from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 logger = logging.getLogger(__name__)
 
@@ -73,10 +72,10 @@ class _KillSwitchRegistry:
 kill_switch_registry = _KillSwitchRegistry()
 
 
-class GovernanceMiddleware(BaseHTTPMiddleware):
-    """FastAPI middleware for governance enforcement.
+class GovernanceMiddleware:
+    """Pure ASGI middleware for governance enforcement.
 
-    Performs the following checks on every request:
+    Performs the following checks on every HTTP request:
     1. Kill switch check - rejects requests if company is killed
     2. Tenant isolation enforcement - validates company context
     3. Rate limiting - injects rate limit headers
@@ -86,21 +85,19 @@ class GovernanceMiddleware(BaseHTTPMiddleware):
     7. Request cost estimation - attaches cost metadata
     """
 
-    async def dispatch(
-        self, request: Request, call_next: RequestResponseEndpoint
-    ) -> Response:
-        """Process the request through governance checks.
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
 
-        Args:
-            request: The incoming HTTP request.
-            call_next: The next middleware or route handler.
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        """ASGI entry point."""
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
 
-        Returns:
-            The HTTP response, possibly short-circuited by governance checks.
-        """
+        request = Request(scope, receive)
         start_time = time.time()
 
-        # Extract company ID from headers (if present)
+        # Extract company ID from headers
         company_id_header = request.headers.get("x-company-id")
         company_id: uuid.UUID | None = None
         if company_id_header:
@@ -109,178 +106,107 @@ class GovernanceMiddleware(BaseHTTPMiddleware):
             except ValueError:
                 pass
 
-        # 1. Kill switch check - reject if company is killed
-        if company_id and self._is_company_killed(company_id):
-            return JSONResponse(
+        # 1. Kill switch check
+        if company_id and kill_switch_registry.is_killed(company_id):
+            response = JSONResponse(
                 status_code=503,
                 content={
                     "detail": "Service unavailable: company operations are suspended",
                     "code": "KILL_SWITCH_ACTIVE",
                 },
             )
+            await response(scope, receive, send)
+            return
 
-        # 2. Tenant isolation enforcement
+        # 2. Tenant isolation - store company_id in scope state
         if company_id:
-            request.state.company_id = company_id
+            scope.setdefault("state", {})["company_id"] = company_id
 
-        # 3. Rate limiting headers (computed before processing)
+        # 3. Rate limiting check
         rate_limit_remaining = self._get_rate_limit_remaining(company_id)
 
         # 4. Policy evaluation
         policy_result = self._evaluate_policy(request, company_id)
         if not policy_result["allowed"]:
-            return JSONResponse(
+            response = JSONResponse(
                 status_code=403,
                 content={
                     "detail": policy_result.get("reason", "Policy denied request"),
                     "code": "POLICY_DENIED",
                 },
             )
+            await response(scope, receive, send)
+            return
 
-        # 5. Budget pre-check for expensive operations
-        if request.method in MUTATING_METHODS:
+        # 5. Budget pre-check for mutating operations
+        method = scope.get("method", "GET")
+        if method in MUTATING_METHODS:
             estimated_cost = self._estimate_request_cost(request)
             if company_id and estimated_cost > 0:
-                budget_ok = self._check_budget(company_id, estimated_cost)
-                if not budget_ok:
-                    return JSONResponse(
+                if not self._check_budget(company_id, estimated_cost):
+                    response = JSONResponse(
                         status_code=429,
                         content={
                             "detail": "Budget limit exceeded for this operation",
                             "code": "BUDGET_EXCEEDED",
                         },
                     )
+                    await response(scope, receive, send)
+                    return
 
-        # Process the request
-        response = await call_next(request)
+        # Wrap send to inject headers into the response
+        response_started = False
+        status_code = 200
 
-        # Post-processing
-        duration_ms = (time.time() - start_time) * 1000
+        async def send_wrapper(message: Message) -> None:
+            nonlocal response_started, status_code
 
-        # Inject rate limiting headers
-        response.headers["X-RateLimit-Limit"] = str(DEFAULT_RATE_LIMIT)
-        response.headers["X-RateLimit-Remaining"] = str(rate_limit_remaining)
-        response.headers["X-RateLimit-Window"] = str(DEFAULT_RATE_WINDOW_SECONDS)
+            if message["type"] == "http.response.start":
+                response_started = True
+                status_code = message.get("status", 200)
+                duration_ms = (time.time() - start_time) * 1000
 
-        # Inject request cost header
-        response.headers["X-Request-Cost-Ms"] = f"{duration_ms:.1f}"
+                # Inject governance headers
+                headers = list(message.get("headers", []))
+                headers.append((b"x-ratelimit-limit", str(DEFAULT_RATE_LIMIT).encode()))
+                headers.append((b"x-ratelimit-remaining", str(rate_limit_remaining).encode()))
+                headers.append((b"x-ratelimit-window", str(DEFAULT_RATE_WINDOW_SECONDS).encode()))
+                headers.append((b"x-request-cost-ms", f"{duration_ms:.1f}".encode()))
+                message = {**message, "headers": headers}
 
-        # 6. Audit logging for mutating requests
-        if request.method in MUTATING_METHODS:
-            await self._audit_log_request(request, response, company_id, duration_ms)
+                # 6. Audit logging for mutating requests
+                if method in MUTATING_METHODS:
+                    logger.info(
+                        "audit: method=%s path=%s company=%s status=%s duration_ms=%.1f",
+                        method,
+                        scope.get("path", ""),
+                        company_id,
+                        status_code,
+                        duration_ms,
+                    )
 
-        return response
+            await send(message)
 
-    def _is_company_killed(self, company_id: uuid.UUID) -> bool:
-        """Check if the company kill switch is active.
-
-        This check is wired to the _KillSwitchRegistry singleton. Other
-        parts of the system (admin routes, incident auto-response) can call
-        kill_switch_registry.activate(company_id) to suspend a company.
-
-        Args:
-            company_id: The company to check.
-
-        Returns:
-            True if the company is killed/suspended.
-        """
-        return kill_switch_registry.is_killed(company_id)
+        await self.app(scope, receive, send_wrapper)
 
     def _get_rate_limit_remaining(self, company_id: uuid.UUID | None) -> int:
-        """Get the remaining rate limit for this company/request.
-
-        TODO: Integrate with governance.rate_limiter.RateLimiter to check
-        actual token bucket state per company. Currently returns the default
-        constant. Requires a shared RateLimiter instance injected at middleware
-        construction or resolved from app state.
-
-        Args:
-            company_id: The company to check rate limits for.
-
-        Returns:
-            Number of remaining requests in the current window.
-        """
-        # TODO: Wire to RateLimiter.check_rate_limit(company_id) for real enforcement
+        """Get the remaining rate limit for this company/request."""
+        # TODO: Wire to RateLimiter.check_rate_limit(company_id)
         return DEFAULT_RATE_LIMIT
 
     def _evaluate_policy(
         self, request: Request, company_id: uuid.UUID | None
-    ) -> dict:
-        """Evaluate request-level policies.
-
-        TODO: Integrate with governance.policies.engine.PolicyEngine to evaluate
-        active policies for this request. Requires building a PolicyContext from
-        the request (actor, action, resource) and calling engine.evaluate().
-        Currently returns permissive default.
-
-        Args:
-            request: The incoming request.
-            company_id: The company context.
-
-        Returns:
-            Dict with 'allowed' boolean and optional 'reason'.
-        """
-        # TODO: Wire to PolicyEngine.evaluate(context) for real policy enforcement
+    ) -> dict[str, Any]:
+        """Evaluate request-level policies."""
+        # TODO: Wire to PolicyEngine.evaluate(context)
         return {"allowed": True}
 
     def _estimate_request_cost(self, request: Request) -> int:
-        """Estimate the cost of processing this request.
-
-        TODO: Implement cost estimation based on route and payload size.
-        Different endpoints have different cost profiles (e.g., LLM calls
-        are expensive, CRUD reads are cheap). Currently returns 0 (free).
-
-        Args:
-            request: The incoming request.
-
-        Returns:
-            Estimated cost in abstract cost units (cents).
-        """
-        # TODO: Wire to a cost model based on route patterns and payload
+        """Estimate the cost of processing this request."""
+        # TODO: Wire to cost model based on route patterns
         return 0
 
     def _check_budget(self, company_id: uuid.UUID, estimated_cost: int) -> bool:
-        """Check if the company has sufficient budget for this operation.
-
-        TODO: Integrate with a BudgetEnforcer or company billing state to
-        verify the company has not exceeded their spending limit. Currently
-        returns True (always allows).
-
-        Args:
-            company_id: The company to check.
-            estimated_cost: The estimated cost of the operation.
-
-        Returns:
-            True if the budget allows the operation.
-        """
+        """Check if the company has sufficient budget."""
         # TODO: Wire to BudgetEnforcer.check(company_id, estimated_cost)
         return True
-
-    async def _audit_log_request(
-        self,
-        request: Request,
-        response: Response,
-        company_id: uuid.UUID | None,
-        duration_ms: float,
-    ) -> None:
-        """Log mutating requests for audit purposes.
-
-        TODO: Integrate with governance.audit_persistent.PersistentAuditLogger
-        to write entries into the hash-chained audit log instead of just
-        logging to stdout. Requires a shared logger instance.
-
-        Args:
-            request: The request that was processed.
-            response: The response being returned.
-            company_id: The company context.
-            duration_ms: How long the request took to process.
-        """
-        # TODO: Wire to PersistentAuditLogger.log_entry() for tamper-evident audit
-        logger.info(
-            "audit: method=%s path=%s company=%s status=%s duration_ms=%.1f",
-            request.method,
-            request.url.path,
-            company_id,
-            response.status_code,
-            duration_ms,
-        )
