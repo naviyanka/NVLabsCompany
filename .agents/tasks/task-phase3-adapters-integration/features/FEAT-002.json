@@ -1,0 +1,30 @@
+{
+  "id": "FEAT-002",
+  "type": "feat",
+  "description": "Implement the Identity System (Part C) and Workflow Integration (Part D): agent soul/personality definitions, persona management with context budgeting, company workflow orchestrator (CEO->CTO->Engineers->QA delegation chain), and single task execution flow with governance checks.",
+  "status": "pending",
+  "steps": [
+    "Create src/nexus/identity/__init__.py that exports Soul, SoulTemplate, Persona, WorkingContext, and ContextBudget.",
+    "Create src/nexus/identity/soul.py with: Soul dataclass (name, role, personality_traits list, communication_style str, expertise list, values list, constraints list), SoulTemplate dataclass (template_id, name, description, base_soul), system_prompt_from_soul(soul) function that generates a system prompt string from soul attributes, SOUL_TEMPLATES dict with pre-built templates for: engineer (detail-oriented, code-focused), researcher (analytical, thorough), manager (strategic, delegating), qa_engineer (meticulous, testing-focused), architect (big-picture, design-focused). Include create_soul() and customize_soul() functions.",
+    "Create src/nexus/identity/persona.py with: ContextBudget dataclass (total_tokens int, identity_tokens int, memory_tokens int, task_tokens int), WorkingContext dataclass (soul Soul, recent_memories list, task_context dict, system_prompt str, total_tokens int), Persona class with: memory_namespace (str per agent for isolation), build_working_context(soul, memories, task, budget) method that assembles context respecting token budget (truncates memories first, then task context if over budget), save_persona(agent_id, soul, namespace) and load_persona(agent_id) methods (in-memory dict storage), allocate_budget(total_tokens, identity_weight, memory_weight, task_weight) that splits tokens proportionally.",
+    "Create src/nexus/workflows/__init__.py that exports CompanyWorkflow, TaskFlow, WorkflowStatus, WorkflowTrace.",
+    "Create src/nexus/workflows/company_flow.py with: WorkflowStatus enum (pending, running, delegating, reviewing, completed, failed), WorkflowStep dataclass (step_id, agent_role, action, status, input_data, output_data, started_at, completed_at), WorkflowTrace dataclass (workflow_id, objective, steps list, status, total_cost_cents, started_at), CompanyWorkflow class that: accepts an objective string, creates strategy step (CEO role), breaks into technical tasks (CTO role), executes tasks via adapters (Engineer roles), reviews results (QA role), tracks full delegation chain with WorkflowTrace, integrates with ApprovalEngine for high-risk actions (checks approval_type='deployment'), integrates with BudgetEnforcer at each delegation step, emits events via EventBus at each state transition.",
+    "Create src/nexus/workflows/task_flow.py with: TaskFlow class that implements single task execution: accept_task(task_id, payload) -> select_agent(based on required capabilities) -> select_adapter(from agent config) -> configure_session -> execute -> validate_result -> report. Include pre-execution governance checks (BudgetEnforcer.check_can_spend, ApprovalEngine.submit_for_approval if needed, kill switch check), post-execution evaluation (simple success/failure check), result persistence (in-memory store), notification via EventBus, error handling with retry count and escalation (re-assign to senior agent after N failures)."
+  ],
+  "acceptance_criteria": [
+    "All files under src/nexus/identity/ and src/nexus/workflows/ parse without syntax errors",
+    "Soul system generates coherent system prompts from soul attributes",
+    "Persona respects token budgets when assembling working context",
+    "CompanyWorkflow implements the full CEO->CTO->Engineer->QA delegation chain",
+    "TaskFlow integrates with BudgetEnforcer, ApprovalEngine, and EventBus",
+    "WorkflowTrace captures all steps with timing and cost data",
+    "All classes have comprehensive docstrings"
+  ],
+  "verification": [
+    "Run: cd /projects/sandbox/NVLabsCompany && python -c \"import ast, pathlib; [ast.parse(f.read_text()) for f in pathlib.Path('src/nexus/identity').glob('*.py')]\" to confirm identity module parses",
+    "Run: cd /projects/sandbox/NVLabsCompany && python -c \"import ast, pathlib; [ast.parse(f.read_text()) for f in pathlib.Path('src/nexus/workflows').glob('*.py')]\" to confirm workflows module parses",
+    "Run: cd /projects/sandbox/NVLabsCompany && PYTHONPATH=src python -c \"from nexus.identity.soul import Soul, SOUL_TEMPLATES, system_prompt_from_soul; from nexus.identity.persona import Persona, ContextBudget; from nexus.workflows.company_flow import CompanyWorkflow; from nexus.workflows.task_flow import TaskFlow\""
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

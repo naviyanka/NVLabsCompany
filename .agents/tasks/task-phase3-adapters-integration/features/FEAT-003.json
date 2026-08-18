@@ -1,0 +1,33 @@
+{
+  "id": "FEAT-003",
+  "type": "feat",
+  "description": "Implement Demo Configuration (Part E) and API Routes (Part F): demo company setup with NexusCorp agents, demo scenarios, plus three new API route modules (adapters, workflows, identity) registered in main.py.",
+  "status": "pending",
+  "steps": [
+    "Create src/nexus/demo/__init__.py that exports setup_demo_company and SCENARIOS.",
+    "Create src/nexus/demo/setup.py with setup_demo_company() function that is idempotent (checks if already set up, returns existing if so). Creates: NexusCorp company (uuid5 from name for idempotency), CEO agent (name='Atlas', role='ceo', soul from manager template, adapter_type='anthropic', model='claude-sonnet-4-20250514'), CTO agent (name='Nova', role='cto', soul from architect template, adapter_type='anthropic', model='claude-sonnet-4-20250514', manager=CEO), Senior Engineer agent (name='Forge', role='senior_engineer', soul from engineer template, adapter_type='openai', model='gpt-4o', manager=CTO), Junior Engineer agent (name='Spark', role='junior_engineer', soul from engineer template customized, adapter_type='ollama', model='codellama', manager=CTO), QA agent (name='Shield', role='qa_engineer', soul from qa_engineer template, adapter_type='openai', model='gpt-4o', manager=CTO). Sets up departments (Engineering, QA), budget policies (company: 500000 cents/mo, per-agent: 50000 cents/mo), approval gates (deployment requires CEO approval), skill assignments, tool access permissions. Returns a DemoCompany dataclass with all references.",
+    "Create src/nexus/demo/scenarios.py with SCENARIOS list containing 3 Scenario dataclasses: Scenario 1 'Build a REST API' (objective, expected_delegation_path=[CEO->CTO->Forge->Shield], success_criteria=['API endpoint created', 'Tests pass', 'QA approved']), Scenario 2 'Fix a bug' (objective='Fix the authentication timeout bug', path=[CTO->Forge], criteria=['Bug identified', 'Fix implemented', 'No regression']), Scenario 3 'Research and propose architecture' (objective='Design microservices migration plan', path=[CEO->CTO->Nova(research)->CEO(review)], criteria=['Research complete', 'Proposal documented', 'CEO approved']). Each scenario has run_scenario() method that creates a CompanyWorkflow with the objective.",
+    "Create src/nexus/api/routes/adapters.py with APIRouter (prefix='/api/v1', tags=['adapters']): GET /adapters (list available adapter types from registry), GET /adapters/{type}/capabilities (adapter capabilities), POST /agents/{agent_id}/execute (execute task via agent's adapter - accepts task payload, returns TaskResult-like response), GET /agents/{agent_id}/sessions (list agent sessions), POST /agents/{agent_id}/sessions/{session_id}/pause, POST /agents/{agent_id}/sessions/{session_id}/resume, POST /agents/{agent_id}/sessions/{session_id}/terminate. Use Pydantic models for request/response following the pattern in src/nexus/api/routes/agents.py.",
+    "Create src/nexus/api/routes/workflows.py with APIRouter (prefix='/api/v1', tags=['workflows']): POST /workflows/company (start company flow - accepts objective string, returns workflow_id and initial status), POST /workflows/task (start single task flow - accepts task payload), GET /workflows/{workflow_id}/status (workflow status with current step), GET /workflows/{workflow_id}/trace (full execution trace with all steps). Use Pydantic models for request/response.",
+    "Create src/nexus/api/routes/identity.py with APIRouter (prefix='/api/v1', tags=['identity']): GET /agents/{agent_id}/soul (get agent soul definition), PUT /agents/{agent_id}/soul (update agent soul - accepts Soul-like body), GET /identity/templates (list available soul templates), POST /agents/{agent_id}/context (build working context - accepts budget params, returns assembled context). Use Pydantic models.",
+    "Modify src/nexus/main.py to import and include the 3 new routers: from nexus.api.routes.adapters import router as adapters_router, from nexus.api.routes.workflows import router as workflows_router, from nexus.api.routes.identity import router as identity_router. Add app.include_router() for each."
+  ],
+  "acceptance_criteria": [
+    "All files under src/nexus/demo/ and new route files parse without syntax errors",
+    "setup_demo_company() is idempotent and creates the full NexusCorp structure",
+    "3 demo scenarios are defined with objectives, delegation paths, and success criteria",
+    "Adapters route module has all 7 endpoints",
+    "Workflows route module has all 4 endpoints",
+    "Identity route module has all 4 endpoints",
+    "main.py includes all 3 new routers without breaking existing router registrations",
+    "All new route modules follow the existing pattern (APIRouter, Pydantic models, proper tags)"
+  ],
+  "verification": [
+    "Run: cd /projects/sandbox/NVLabsCompany && python -c \"import ast, pathlib; [ast.parse(f.read_text()) for f in pathlib.Path('src/nexus/demo').glob('*.py')]\"",
+    "Run: cd /projects/sandbox/NVLabsCompany && python -c \"import ast; ast.parse(open('src/nexus/api/routes/adapters.py').read()); ast.parse(open('src/nexus/api/routes/workflows.py').read()); ast.parse(open('src/nexus/api/routes/identity.py').read())\"",
+    "Run: cd /projects/sandbox/NVLabsCompany && python -c \"import ast; ast.parse(open('src/nexus/main.py').read())\"",
+    "Run: cd /projects/sandbox/NVLabsCompany && PYTHONPATH=src python -c \"from nexus.demo.setup import setup_demo_company; from nexus.demo.scenarios import SCENARIOS\""
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

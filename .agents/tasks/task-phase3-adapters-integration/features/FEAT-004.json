@@ -1,0 +1,26 @@
+{
+  "id": "FEAT-004",
+  "type": "feat",
+  "description": "Implement comprehensive tests (Part G): test_adapters.py (base adapter logic, registry, factory), test_identity.py (soul generation, context assembly), test_workflows.py (delegation chain logic, task flow), and test_demo.py (demo setup creates correct structure). All tests must exercise real logic and pass with pytest.",
+  "status": "pending",
+  "steps": [
+    "Create tests/test_adapters.py with: TestBaseAdapter class testing session management (create_session populates tracking dict, terminate cleans up, get_cost returns accumulated cost, get_artifacts returns collected artifacts, get_logs returns buffered logs, error handling wraps exceptions), TestAdapterRegistry class testing (register_adapter adds to registry, create_adapter instantiates correct type, list_adapters returns all registered, unknown adapter raises error, default adapters are pre-registered), TestOpenAIAdapter class testing config validation (missing api_key raises ValueError), TestAnthropicAdapter testing config validation. Use AsyncMock where needed, test pure logic paths not HTTP calls.",
+    "Create tests/test_identity.py with: TestSoul class testing (Soul dataclass creation with all fields, system_prompt_from_soul generates prompt containing role/traits/style, SOUL_TEMPLATES has all 5 expected templates - engineer/researcher/manager/qa_engineer/architect, create_soul creates with defaults, customize_soul modifies specific fields), TestPersona class testing (build_working_context assembles all parts, context budget allocation splits tokens proportionally, memory truncation when over budget, save_persona and load_persona round-trip, memory_namespace isolation between agents).",
+    "Create tests/test_workflows.py with: TestCompanyWorkflow class testing (workflow creation with objective, strategy step creation for CEO, task breakdown for CTO, execution delegation to engineer, QA review step, full trace recording, budget check at each step, event emission at state transitions), TestTaskFlow class testing (task acceptance, agent selection, adapter selection, governance pre-checks - budget denied blocks execution, approval needed pauses flow, kill switch stops execution, retry on failure, escalation after max retries, result persistence, event notification on completion).",
+    "Create tests/test_demo.py with: TestDemoSetup class testing (setup_demo_company creates company with correct name, creates all 5 agents with correct roles and adapter types, sets up departments, sets up budget policies, sets up approval gates, is idempotent - second call returns same structure), TestDemoScenarios class testing (SCENARIOS has 3 entries, each scenario has objective/delegation_path/success_criteria, scenario delegation paths are correct)."
+  ],
+  "acceptance_criteria": [
+    "All 4 test files parse without syntax errors",
+    "Tests exercise real logic from the implementation (not just mocking everything away)",
+    "pytest runs all test files successfully with PYTHONPATH=src",
+    "Tests cover: adapter session lifecycle, registry CRUD, soul prompt generation, context budgeting, workflow delegation chain, governance integration, demo idempotency",
+    "Each test would fail if the corresponding implementation were reverted",
+    "Tests follow existing patterns: pytest classes, @pytest.mark.asyncio, fixtures from conftest.py"
+  ],
+  "verification": [
+    "Run: cd /projects/sandbox/NVLabsCompany && PYTHONPATH=src python -m pytest tests/test_adapters.py tests/test_identity.py tests/test_workflows.py tests/test_demo.py -v --tb=short 2>&1 | tail -50",
+    "Confirm all tests pass (no failures or errors in output)"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

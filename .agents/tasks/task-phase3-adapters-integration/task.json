@@ -1,0 +1,7 @@
+{
+  "task_id": "task-phase3-adapters-integration",
+  "task_description": "Build Phase 3 of NEXUS: External Agent Adapters and Integration Layer. Implements concrete agent runtime adapters (OpenAI, Anthropic, Ollama, Claude Code, HTTP, MCP), adapter registry/factory, agent identity system (soul/persona), workflow orchestration (company flow and task flow), demo configuration (NexusCorp with 5 agents and 3 scenarios), and API routes for adapters/workflows/identity.",
+  "status": "in_progress",
+  "feature_order": ["FEAT-001", "FEAT-002", "FEAT-003", "FEAT-004"],
+  "blocked_reason": null
+}

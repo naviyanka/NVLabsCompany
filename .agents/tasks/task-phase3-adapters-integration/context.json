@@ -1,0 +1,30 @@
+{
+  "project_type": "Python FastAPI application - Autonomous AI Company Operating System",
+  "language": "Python 3.12",
+  "build_system": "setuptools with pyproject.toml, no Makefile",
+  "test_framework": "pytest with pytest-asyncio (auto mode), fixtures in tests/conftest.py, uses unittest.mock (AsyncMock, MagicMock)",
+  "build_command": "python -m py_compile on each source file (AST validation - no pip install available)",
+  "test_command": "python -m pytest tests/ -x (after ensuring imports work via sys.path manipulation or PYTHONPATH)",
+  "verification_instructions": "1. Validate all new Python files parse correctly with ast.parse. 2. Run pytest on new test files using PYTHONPATH=src. 3. Confirm no import errors in new modules.",
+  "snapshot_or_generated_files": null,
+  "setup_instructions": "No setup needed - INTEGRATIONS_ONLY network means no pip install. Use pre-installed Python 3.11+ and validate via AST parsing and pytest for pure-logic tests.",
+  "environment_constraints": "INTEGRATIONS_ONLY network - no pip install, no external API calls, no Docker daemon. Code must be structurally valid (pass AST parse). Tests must test pure logic without network/DB dependencies. Git push to origin works.",
+  "contribution_requirements": "Do NOT modify existing Phase 1/2 files unless necessary for integration (e.g., main.py route registration). Do NOT break existing functionality.",
+  "key_patterns": "1. AgentAdapter Protocol in runtime/adapter.py defines 11 async methods with AgentSession/TaskResult/AgentStatus dataclasses. 2. Routes use FastAPI APIRouter with Pydantic models for request/response. 3. Services are pure classes taking db session in constructor. 4. EventBus uses publish/subscribe pattern with typed event constants. 5. Tests use pytest classes (TestXxxYyy) with @pytest.mark.asyncio, AsyncMock for DB, sample fixtures in conftest.py. 6. All modules have detailed docstrings. 7. Budget/approval systems use in-memory dicts for state.",
+  "relevant_files": [
+    "src/nexus/runtime/adapter.py",
+    "src/nexus/communication/event_bus.py",
+    "src/nexus/governance/approvals.py",
+    "src/nexus/governance/budget_enforcer.py",
+    "src/nexus/governance/audit.py",
+    "src/nexus/tools/mcp_client.py",
+    "src/nexus/models_router/providers/__init__.py",
+    "src/nexus/main.py",
+    "src/nexus/company/org_chart.py",
+    "src/nexus/orchestration/planner.py",
+    "src/nexus/api/routes/agents.py",
+    "tests/conftest.py",
+    "tests/test_agents.py"
+  ],
+  "directory_structure": "src/nexus/ is the main package. api/routes/ has 16 route modules registered in main.py. models/ has 10 SQLModel modules. services/ has 5 service classes. runtime/ has adapter protocol and lifecycle. governance/ has approvals, budget, audit, rbac, guardrails, kill_switch. communication/ has event_bus, channels, a2a, group. orchestration/ has planner, router, parallel, critic, retry. tests/ has 12 test files with conftest.py."
+}

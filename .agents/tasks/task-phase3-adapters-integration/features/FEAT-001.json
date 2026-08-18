@@ -1,0 +1,33 @@
+{
+  "id": "FEAT-001",
+  "type": "feat",
+  "description": "Implement the adapters module (Part A + B): base adapter class, all 7 concrete adapters (OpenAI, Anthropic, Ollama, Claude Code, HTTP, MCP), and the adapter registry/factory pattern. All adapters implement the full 11-method AgentAdapter Protocol from src/nexus/runtime/adapter.py.",
+  "status": "in_progress",
+  "steps": [
+    "Create src/nexus/adapters/__init__.py that exports all adapter classes and the registry.",
+    "Create src/nexus/adapters/base.py with BaseAdapter class providing: session management (create, track in dict, cleanup), cost accumulation (input_tokens, output_tokens, cost_cents tracking per session), artifact collection (list per session), log buffering (list per session), error handling wrapper (try/except that logs and returns error TaskResult), heartbeat response handling, and configuration validation (abstract method). BaseAdapter should implement common logic for all 11 AgentAdapter methods with hooks (_do_execute, _do_create_session, etc.) that subclasses override.",
+    "Create src/nexus/adapters/openai_adapter.py implementing the full AgentAdapter Protocol: uses async httpx for OpenAI chat completions API, supports function calling/tool use in message format, handles streaming responses, token counting and cost tracking (per-model pricing dict), system prompt injection from agent soul/identity config, conversation history management (stored per session), retry with exponential backoff on rate limits (429 status). Config validation requires 'api_key' and 'model' in config.",
+    "Create src/nexus/adapters/anthropic_adapter.py implementing the full AgentAdapter Protocol: uses async httpx for Anthropic messages API, supports tool use (Claude native format), extended thinking support (configurable via session config), token counting and cost tracking, system prompt from agent config, conversation context management, handles Claude-specific response patterns (content blocks). Config validation requires 'api_key' and 'model'.",
+    "Create src/nexus/adapters/ollama_adapter.py implementing the full AgentAdapter Protocol: uses async httpx for Ollama REST API (localhost:11434 default), supports chat and generate endpoints, model pulling/availability checks via /api/tags, zero-cost tracking (local execution), fallback model selection if requested model not available, GPU memory estimation (from model info). Config validation requires 'model', optionally 'host'.",
+    "Create src/nexus/adapters/claude_code_adapter.py implementing AgentAdapter Protocol: spawns Claude Code CLI as asyncio.subprocess, passes task as prompt with workspace context, captures stdout/stderr for artifacts, file system monitoring for produced artifacts (tracks files changed in workspace), session management via process lifecycle, cost tracking from Claude Code output parsing (regex for token counts), workspace isolation per agent session (temp directories), timeout handling and graceful termination (SIGTERM then SIGKILL).",
+    "Create src/nexus/adapters/http_adapter.py implementing AgentAdapter Protocol: calls any HTTP endpoint conforming to NEXUS agent API via async httpx, configurable request/response mapping (jmespath-style field mapping in config), authentication (Bearer token, API key header, custom headers from config), webhook-based async result delivery (poll endpoint), health check endpoint polling for heartbeat, customizable payload transformation. Config requires 'base_url'.",
+    "Create src/nexus/adapters/mcp_adapter.py implementing AgentAdapter Protocol: connects to MCP server as execution backend, uses tool listing for capability discovery (calls list_tools on connect), routes task execution through MCP tool calls, handles MCP protocol lifecycle (initialize, list, call), multi-tool orchestration within a single task (sequential tool calls based on task payload). Uses MCPClient pattern from src/nexus/tools/mcp_client.py.",
+    "Create src/nexus/adapters/registry.py with AdapterRegistry class: register adapter types by name (dict mapping), factory method create_adapter(adapter_type, config) that instantiates the correct class, configuration validation per adapter type (delegates to adapter's validate_config), default adapters auto-registered on init, dynamic adapter loading (register_adapter method for plugins), adapter health checking (call create_session + terminate as smoke test), adapter capability advertisement (static method per adapter class listing supported features)."
+  ],
+  "acceptance_criteria": [
+    "All 9 files exist under src/nexus/adapters/ and parse without syntax errors",
+    "Each concrete adapter class implements all 11 methods from AgentAdapter Protocol",
+    "BaseAdapter provides reusable session tracking, cost accumulation, log buffering, and artifact collection",
+    "AdapterRegistry can register, create, and list adapter types",
+    "All adapters validate their required configuration keys on create_session",
+    "OpenAI and Anthropic adapters include retry logic with exponential backoff",
+    "Claude Code adapter uses asyncio.subprocess for process management",
+    "MCP adapter leverages the MCPClient pattern from tools/mcp_client.py"
+  ],
+  "verification": [
+    "Run: cd /projects/sandbox/NVLabsCompany && python -c \"import ast; import pathlib; [ast.parse(f.read_text()) for f in pathlib.Path('src/nexus/adapters').glob('*.py')]\" to confirm all files parse",
+    "Run: cd /projects/sandbox/NVLabsCompany && PYTHONPATH=src python -c \"from nexus.adapters import AdapterRegistry, OpenAIAdapter, AnthropicAdapter, OllamaAdapter, ClaudeCodeAdapter, HTTPAdapter, MCPAgentAdapter\" to verify imports work"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}
