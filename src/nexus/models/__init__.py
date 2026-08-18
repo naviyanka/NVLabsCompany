@@ -25,6 +25,7 @@ from nexus.models.task import Goal, Project, Task
 from nexus.models.tool import Tool, ToolAccess
 from nexus.models.trigger import Trigger, TriggerExecution
 from nexus.governance.kill_switch_model import KillSwitchRecord
+from nexus.governance.circuit_breaker_model import CircuitBreakerRecord
 
 __all__ = [
     # Company / Organization
@@ -89,4 +90,7 @@ __all__ = [
     "EvolutionEvaluation",
     "SkillVersion",
     "AgentVersion",
+    # Governance persistence
+    "KillSwitchRecord",
+    "CircuitBreakerRecord",
 ]
