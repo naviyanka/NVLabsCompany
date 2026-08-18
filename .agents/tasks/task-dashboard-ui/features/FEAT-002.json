@@ -1,0 +1,52 @@
+{
+  "id": "FEAT-002",
+  "type": "feat",
+  "description": "Create all page components, domain-specific components (agents, tasks, org, governance, evolution, activity, charts), wire up React Router, and produce the complete App.tsx with routing. Also create dashboard/README.md.",
+  "status": "in_progress",
+  "steps": [
+    "Create src/components/charts/ - CostChart.tsx (line chart using Recharts for cost over time), TaskPieChart.tsx (pie chart for task status distribution), PerformanceChart.tsx (bar chart for agent performance)",
+    "Create src/components/agents/ - AgentCard.tsx (summary card with name, role, department, status dot, current task, model), AgentList.tsx (grid/list toggle with filter controls), AgentDetail.tsx (tabbed detail view: Overview/Tasks/Memory/Performance/Configuration), AgentCreate.tsx (form for hiring new agent)",
+    "Create src/components/tasks/ - TaskCard.tsx (title, assigned agent, priority badge, status, date), TaskList.tsx (list with filters by project/agent/status/priority), TaskDetail.tsx (full task detail with result/error)",
+    "Create src/components/org/ - OrgChart.tsx (tree layout with CEO at top, departments, teams, agents), DepartmentCard.tsx (department summary with agent count), TeamCard.tsx (team summary)",
+    "Create src/components/governance/ - ApprovalCard.tsx (action description, requesting agent, risk level, approve/reject buttons), ApprovalList.tsx (list of pending approvals), BudgetMeter.tsx (gauge showing used/remaining budget)",
+    "Create src/components/evolution/ - ProposalCard.tsx (type, description, impact, confidence, risk, approve/reject), ProposalList.tsx (list of proposals), EvolutionTimeline.tsx (timeline of past evolutions)",
+    "Create src/components/activity/ - ActivityFeed.tsx (real-time activity stream with polling), ActivityItem.tsx (single activity entry with relative timestamp)",
+    "Create src/pages/Dashboard.tsx - main overview with 4 stat cards, CostChart, TaskPieChart, activity feed, top agents list",
+    "Create src/pages/Agents.tsx - agent management with AgentList, hire button",
+    "Create src/pages/AgentDetailPage.tsx - wraps AgentDetail with route params",
+    "Create src/pages/Tasks.tsx - task management with kanban columns or list view toggle",
+    "Create src/pages/Organization.tsx - org chart page with OrgChart and department cards",
+    "Create src/pages/Goals.tsx - goals and strategy view",
+    "Create src/pages/Skills.tsx - skills registry browser",
+    "Create src/pages/Tools.tsx - tools and integrations page",
+    "Create src/pages/Memory.tsx - memory/knowledge browser with search, scope filter, tier indicator",
+    "Create src/pages/Approvals.tsx - pending approvals center with ApprovalList",
+    "Create src/pages/Budgets.tsx - budget overview with BudgetMeter, per-department bars, per-agent cost table, cost chart",
+    "Create src/pages/Evolution.tsx - self-evolution monitor with ProposalList and EvolutionTimeline",
+    "Create src/pages/Workflows.tsx - active workflows with progress bars and delegation chains",
+    "Create src/pages/Meetings.tsx - meeting management page",
+    "Create src/pages/Activity.tsx - full activity log page",
+    "Create src/pages/Settings.tsx - system settings page",
+    "Create src/App.tsx with React Router v7 BrowserRouter, all routes defined, Layout wrapping all pages",
+    "Create dashboard/README.md explaining how to install, run dev server, and build for production"
+  ],
+  "acceptance_criteria": [
+    "All 16 page components exist in src/pages/",
+    "All domain component directories (agents, tasks, org, governance, evolution, activity, charts) exist with their components",
+    "App.tsx defines routes for every page using React Router v7",
+    "Dashboard page uses stat cards, charts, activity feed, and top agents",
+    "All components use TypeScript with proper Props interfaces",
+    "Layout component wraps all page routes",
+    "README.md exists with setup and run instructions",
+    "No any types where avoidable",
+    "Design system colors are used consistently (indigo primary, dark sidebar, etc.)"
+  ],
+  "verification": [
+    "Verify all files exist: ls -R dashboard/src/pages/ dashboard/src/components/",
+    "Check App.tsx imports all pages and defines routes",
+    "Verify Dashboard.tsx uses chart components and stat cards",
+    "Check README.md exists and contains dev/build instructions"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}
