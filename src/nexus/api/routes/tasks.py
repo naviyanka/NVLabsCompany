@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy import select, update
 
-from nexus.api.deps import DbSession
+from nexus.api.deps import CurrentCompanyId, DbSession
 from nexus.models.task import Task
 
 router = APIRouter(tags=["tasks"])
@@ -103,9 +103,9 @@ async def list_tasks(
 
 
 @router.get("/api/v1/tasks/{task_id}", response_model=TaskResponse)
-async def get_task(task_id: uuid.UUID, db: DbSession) -> Any:
+async def get_task(task_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId) -> Any:
     """Get a task by ID."""
-    stmt = select(Task).where(Task.id == task_id)
+    stmt = select(Task).where(Task.id == task_id, Task.company_id == company_id)
     result = await db.execute(stmt)
     task = result.scalar_one_or_none()
     if task is None:
@@ -118,12 +118,12 @@ async def get_task(task_id: uuid.UUID, db: DbSession) -> Any:
 
 @router.put("/api/v1/tasks/{task_id}/assign", response_model=TaskResponse)
 async def assign_task(
-    task_id: uuid.UUID, body: TaskAssign, db: DbSession
+    task_id: uuid.UUID, body: TaskAssign, db: DbSession, company_id: CurrentCompanyId
 ) -> Any:
     """Assign a task to an agent."""
     stmt = (
         update(Task)
-        .where(Task.id == task_id)
+        .where(Task.id == task_id, Task.company_id == company_id)
         .values(
             assigned_agent_id=body.agent_id,
             updated_at=datetime.now(timezone.utc),
@@ -131,7 +131,7 @@ async def assign_task(
     )
     await db.execute(stmt)
 
-    result = await db.execute(select(Task).where(Task.id == task_id))
+    result = await db.execute(select(Task).where(Task.id == task_id, Task.company_id == company_id))
     task = result.scalar_one_or_none()
     if task is None:
         raise HTTPException(
@@ -143,7 +143,7 @@ async def assign_task(
 
 @router.put("/api/v1/tasks/{task_id}/status", response_model=TaskResponse)
 async def update_task_status(
-    task_id: uuid.UUID, body: TaskStatusUpdate, db: DbSession
+    task_id: uuid.UUID, body: TaskStatusUpdate, db: DbSession, company_id: CurrentCompanyId
 ) -> Any:
     """Update the status of a task."""
     values: dict[str, Any] = {
@@ -161,10 +161,10 @@ async def update_task_status(
         if body.error:
             values["error"] = body.error
 
-    stmt = update(Task).where(Task.id == task_id).values(**values)
+    stmt = update(Task).where(Task.id == task_id, Task.company_id == company_id).values(**values)
     await db.execute(stmt)
 
-    result = await db.execute(select(Task).where(Task.id == task_id))
+    result = await db.execute(select(Task).where(Task.id == task_id, Task.company_id == company_id))
     task = result.scalar_one_or_none()
     if task is None:
         raise HTTPException(

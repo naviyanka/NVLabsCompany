@@ -545,7 +545,7 @@ class TestSkillEvolution:
 
         comparison = evo.compare_versions(version_a, version_b)
         assert comparison["better_version"] == "b"
-        assert comparison["improvement_percent"] == 20.0
+        assert comparison["improvement_percent"] == pytest.approx(20.0)
 
     @pytest.mark.asyncio
     async def test_promote_version_requires_approval(self, company_id, skill_id):

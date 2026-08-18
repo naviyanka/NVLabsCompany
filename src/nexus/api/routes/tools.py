@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy import select
 
-from nexus.api.deps import DbSession
+from nexus.api.deps import CurrentCompanyId, DbSession
 from nexus.models.tool import Tool, ToolAccess
 
 router = APIRouter(tags=["tools"])
@@ -113,11 +113,11 @@ async def list_tools(
     response_model=ToolAccessResponse,
 )
 async def grant_tool_access(
-    agent_id: uuid.UUID, body: ToolAccessGrant, db: DbSession
+    agent_id: uuid.UUID, body: ToolAccessGrant, db: DbSession, company_id: CurrentCompanyId
 ) -> Any:
     """Grant an agent access to a tool."""
-    # Look up tool to get company_id
-    tool_stmt = select(Tool).where(Tool.id == body.tool_id)
+    # Verify tool belongs to company
+    tool_stmt = select(Tool).where(Tool.id == body.tool_id, Tool.company_id == company_id)
     tool_result = await db.execute(tool_stmt)
     tool = tool_result.scalar_one_or_none()
     if tool is None:
@@ -126,8 +126,20 @@ async def grant_tool_access(
             detail=f"Tool {body.tool_id} not found",
         )
 
+    # Verify agent belongs to company
+    from nexus.models.agent import Agent
+
+    agent_stmt = select(Agent).where(Agent.id == agent_id, Agent.company_id == company_id)
+    agent_result = await db.execute(agent_stmt)
+    agent = agent_result.scalar_one_or_none()
+    if agent is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Agent {agent_id} not found",
+        )
+
     access = ToolAccess(
-        company_id=tool.company_id,
+        company_id=company_id,
         agent_id=agent_id,
         tool_id=body.tool_id,
         granted_by=body.granted_by,
@@ -144,9 +156,9 @@ async def grant_tool_access(
     response_model=list[ToolAccessResponse],
 )
 async def list_agent_tools(
-    agent_id: uuid.UUID, db: DbSession
+    agent_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId
 ) -> Any:
     """List tools an agent has access to."""
-    stmt = select(ToolAccess).where(ToolAccess.agent_id == agent_id)
+    stmt = select(ToolAccess).where(ToolAccess.agent_id == agent_id, ToolAccess.company_id == company_id)
     result = await db.execute(stmt)
     return list(result.scalars().all())

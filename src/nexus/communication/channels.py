@@ -308,8 +308,8 @@ class ChannelRouter:
         if channel_name not in self._channels:
             return None
 
-        msg_metadata = metadata or {}
-        msg_metadata["source_channel"] = channel_name
+        channel_meta = metadata or {}
+        channel_meta["source_channel"] = channel_name
 
         msg = Message(
             id=uuid.uuid4(),
@@ -320,7 +320,7 @@ class ChannelRouter:
             message_type=message_type,
             priority="normal",
             content=content,
-            metadata=msg_metadata,
+            msg_metadata=channel_meta,
             correlation_id=str(uuid.uuid4()),
             delivered=True,
             delivery_route="direct",

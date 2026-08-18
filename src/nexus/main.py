@@ -35,7 +35,47 @@ from nexus.api.middleware import GovernanceMiddleware
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan handler for startup and shutdown events."""
-    # Startup: initialize connections, caches, etc.
+    from nexus.database import engine, async_session_factory
+    from nexus.config import settings
+    import uuid
+
+    # Startup: create tables if using SQLite (for local dev convenience)
+    if settings.database_url.startswith("sqlite"):
+        from sqlmodel import SQLModel
+        import nexus.models  # noqa: F401 - register all models
+        async with engine.begin() as conn:
+            await conn.run_sync(SQLModel.metadata.create_all)
+
+    # Seed default company for the dashboard
+    from nexus.models.company import Company
+    from sqlalchemy import select
+    from datetime import datetime, timezone
+    default_company_id = uuid.UUID("00000000-0000-4000-8000-000000000001")
+    async with async_session_factory() as session:
+        result = await session.execute(
+            select(Company).where(Company.id == default_company_id)
+        )
+        if result.scalar_one_or_none() is None:
+            now = datetime.utcnow()
+            company = Company(
+                id=default_company_id,
+                name="NVLabs",
+                description="Default development company",
+                status="active",
+                created_at=now,
+                updated_at=now,
+            )
+            session.add(company)
+            await session.commit()
+
+    # Seed demo data (agents, tasks, etc.)
+    from nexus.demo.seed import seed_database
+    async with async_session_factory() as session:
+        counts = await seed_database(session)
+        if any(v > 0 for v in counts.values()):
+            import logging
+            logging.getLogger(__name__).info("Seeded demo data: %s", counts)
+
     yield
     # Shutdown: close connections, flush buffers, etc.
 

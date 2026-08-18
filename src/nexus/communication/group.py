@@ -197,7 +197,7 @@ class GroupManager:
                 message_type=message_type,
                 priority=priority,
                 content=content,
-                metadata=metadata,
+                msg_metadata=metadata,
                 correlation_id=str(uuid.uuid4()),
                 delivered=True,
                 delivery_route="team",
@@ -249,7 +249,7 @@ class GroupManager:
             message_type="notification",
             priority="normal",
             content=content,
-            metadata={"mention": True, "target_agent_id": str(target_agent_id)},
+            msg_metadata={"mention": True, "target_agent_id": str(target_agent_id)},
             correlation_id=str(uuid.uuid4()),
             delivered=True,
             delivery_route="direct",
@@ -299,7 +299,7 @@ class GroupManager:
             message_type="handoff",
             priority="urgent",
             content=task_context,
-            metadata={
+            msg_metadata={
                 "handoff": True,
                 "from_agent_id": str(from_agent_id),
                 "to_agent_id": str(to_agent_id),

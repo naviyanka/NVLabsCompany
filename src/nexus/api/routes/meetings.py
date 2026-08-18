@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy import select
 
-from nexus.api.deps import DbSession
+from nexus.api.deps import CurrentCompanyId, DbSession
 from nexus.models.meeting import ActionItem, Meeting, MeetingMinutes, MeetingParticipant
 
 router = APIRouter(tags=["meetings"])
@@ -196,9 +196,9 @@ async def list_meetings(
     "/api/v1/meetings/{meeting_id}",
     response_model=MeetingResponse,
 )
-async def get_meeting(meeting_id: uuid.UUID, db: DbSession) -> Any:
+async def get_meeting(meeting_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId) -> Any:
     """Get meeting details by ID."""
-    stmt = select(Meeting).where(Meeting.id == meeting_id)
+    stmt = select(Meeting).where(Meeting.id == meeting_id, Meeting.company_id == company_id)
     result = await db.execute(stmt)
     meeting = result.scalar_one_or_none()
     if meeting is None:
@@ -213,9 +213,9 @@ async def get_meeting(meeting_id: uuid.UUID, db: DbSession) -> Any:
     "/api/v1/meetings/{meeting_id}/start",
     response_model=MeetingResponse,
 )
-async def start_meeting(meeting_id: uuid.UUID, db: DbSession) -> Any:
+async def start_meeting(meeting_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId) -> Any:
     """Start a scheduled meeting."""
-    stmt = select(Meeting).where(Meeting.id == meeting_id)
+    stmt = select(Meeting).where(Meeting.id == meeting_id, Meeting.company_id == company_id)
     result = await db.execute(stmt)
     meeting = result.scalar_one_or_none()
     if meeting is None:
@@ -238,9 +238,9 @@ async def start_meeting(meeting_id: uuid.UUID, db: DbSession) -> Any:
     "/api/v1/meetings/{meeting_id}/end",
     response_model=MeetingResponse,
 )
-async def end_meeting(meeting_id: uuid.UUID, db: DbSession) -> Any:
+async def end_meeting(meeting_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId) -> Any:
     """End an in-progress meeting."""
-    stmt = select(Meeting).where(Meeting.id == meeting_id)
+    stmt = select(Meeting).where(Meeting.id == meeting_id, Meeting.company_id == company_id)
     result = await db.execute(stmt)
     meeting = result.scalar_one_or_none()
     if meeting is None:
@@ -264,11 +264,11 @@ async def end_meeting(meeting_id: uuid.UUID, db: DbSession) -> Any:
     status_code=status.HTTP_201_CREATED,
 )
 async def add_contribution(
-    meeting_id: uuid.UUID, body: ContributionRequest, db: DbSession
+    meeting_id: uuid.UUID, body: ContributionRequest, db: DbSession, company_id: CurrentCompanyId
 ) -> dict[str, Any]:
     """Add a contribution from an agent during a meeting."""
     # Verify meeting exists and is in progress
-    stmt = select(Meeting).where(Meeting.id == meeting_id)
+    stmt = select(Meeting).where(Meeting.id == meeting_id, Meeting.company_id == company_id)
     result = await db.execute(stmt)
     meeting = result.scalar_one_or_none()
     if meeting is None:
@@ -300,9 +300,9 @@ async def add_contribution(
     "/api/v1/meetings/{meeting_id}/minutes",
     response_model=MinutesResponse,
 )
-async def get_minutes(meeting_id: uuid.UUID, db: DbSession) -> Any:
+async def get_minutes(meeting_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId) -> Any:
     """Get minutes for a meeting."""
-    stmt = select(MeetingMinutes).where(MeetingMinutes.meeting_id == meeting_id)
+    stmt = select(MeetingMinutes).where(MeetingMinutes.meeting_id == meeting_id, MeetingMinutes.company_id == company_id)
     result = await db.execute(stmt)
     minutes = result.scalar_one_or_none()
     if minutes is None:
@@ -317,11 +317,11 @@ async def get_minutes(meeting_id: uuid.UUID, db: DbSession) -> Any:
     "/api/v1/meetings/{meeting_id}/action-items",
     response_model=list[ActionItemResponse],
 )
-async def get_action_items(meeting_id: uuid.UUID, db: DbSession) -> Any:
+async def get_action_items(meeting_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId) -> Any:
     """Get action items from a meeting."""
     stmt = (
         select(ActionItem)
-        .where(ActionItem.meeting_id == meeting_id)
+        .where(ActionItem.meeting_id == meeting_id, ActionItem.company_id == company_id)
         .order_by(ActionItem.created_at)
     )
     result = await db.execute(stmt)

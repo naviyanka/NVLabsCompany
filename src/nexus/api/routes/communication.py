@@ -5,10 +5,10 @@ from datetime import datetime
 from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 
-from nexus.api.deps import DbSession
+from nexus.api.deps import CurrentCompanyId, DbSession
 from nexus.models.communication import Event, Group, GroupMember, Message
 
 router = APIRouter(tags=["communication"])
@@ -33,6 +33,8 @@ class SendMessageRequest(BaseModel):
 class MessageResponse(BaseModel):
     """Response model for a message."""
 
+    model_config = {"from_attributes": True, "populate_by_name": True}
+
     id: uuid.UUID
     company_id: uuid.UUID
     sender_agent_id: uuid.UUID
@@ -41,7 +43,7 @@ class MessageResponse(BaseModel):
     message_type: str
     priority: str
     content: str
-    metadata: Optional[dict[str, Any]] = None
+    metadata: Optional[dict[str, Any]] = Field(default=None, validation_alias="msg_metadata")
     delivered: bool
     delivery_route: str
     created_at: datetime
@@ -116,7 +118,7 @@ async def send_message(
         message_type=body.message_type,
         content=body.content,
         priority=body.priority,
-        metadata=body.metadata,
+        msg_metadata=body.metadata,
         delivery_route="direct",
     )
     db.add(message)
@@ -198,11 +200,11 @@ async def list_groups(company_id: uuid.UUID, db: DbSession) -> Any:
     response_model=MessageResponse,
 )
 async def send_group_message(
-    group_id: uuid.UUID, body: SendGroupMessageRequest, db: DbSession
+    group_id: uuid.UUID, body: SendGroupMessageRequest, db: DbSession, company_id: CurrentCompanyId
 ) -> Any:
     """Send a message to a group."""
-    # Verify group exists
-    stmt = select(Group).where(Group.id == group_id)
+    # Verify group exists and belongs to company
+    stmt = select(Group).where(Group.id == group_id, Group.company_id == company_id)
     result = await db.execute(stmt)
     group = result.scalar_one_or_none()
     if group is None:
@@ -218,7 +220,7 @@ async def send_group_message(
         message_type=body.message_type,
         content=body.content,
         priority=body.priority,
-        metadata=body.metadata,
+        msg_metadata=body.metadata,
         delivery_route="team",
     )
     db.add(message)
@@ -233,13 +235,24 @@ async def send_group_message(
 async def get_group_messages(
     group_id: uuid.UUID,
     db: DbSession,
+    company_id: CurrentCompanyId,
     limit: int = 100,
     offset: int = 0,
 ) -> Any:
     """Get message history for a group."""
+    # Verify group belongs to company
+    group_stmt = select(Group).where(Group.id == group_id, Group.company_id == company_id)
+    group_result = await db.execute(group_stmt)
+    group = group_result.scalar_one_or_none()
+    if group is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Group {group_id} not found",
+        )
+
     stmt = (
         select(Message)
-        .where(Message.group_id == group_id)
+        .where(Message.group_id == group_id, Message.company_id == company_id)
         .offset(offset)
         .limit(limit)
         .order_by(Message.created_at.desc())

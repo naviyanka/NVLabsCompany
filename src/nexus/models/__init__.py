@@ -24,6 +24,7 @@ from nexus.models.skill import AgentSkill, Skill
 from nexus.models.task import Goal, Project, Task
 from nexus.models.tool import Tool, ToolAccess
 from nexus.models.trigger import Trigger, TriggerExecution
+from nexus.governance.kill_switch_model import KillSwitchRecord
 
 __all__ = [
     # Company / Organization

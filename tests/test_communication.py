@@ -224,7 +224,7 @@ class TestA2AProtocol:
             company_id=company_id,
         )
         assert msg is not None
-        assert msg.metadata == metadata
+        assert msg.msg_metadata == metadata
 
 
 class TestGroupManager:
@@ -349,8 +349,8 @@ class TestGroupManager:
         assert msg is not None
         assert msg.recipient_agent_id == agent_b_id
         assert msg.group_id == group.id
-        assert msg.metadata is not None
-        assert msg.metadata["mention"] is True
+        assert msg.msg_metadata is not None
+        assert msg.msg_metadata["mention"] is True
 
     @pytest.mark.asyncio
     async def test_handoff_in_group(self, company_id, agent_a_id, agent_b_id):
@@ -373,7 +373,7 @@ class TestGroupManager:
         assert msg.priority == "urgent"
         assert msg.sender_agent_id == agent_a_id
         assert msg.recipient_agent_id == agent_b_id
-        assert "handoff" in msg.metadata
+        assert "handoff" in msg.msg_metadata
 
     @pytest.mark.asyncio
     async def test_get_group_history(self, company_id, agent_a_id, agent_b_id):
@@ -500,8 +500,8 @@ class TestChannelRouter:
         )
         assert msg is not None
         assert msg.content == "Message from Slack"
-        assert msg.metadata is not None
-        assert msg.metadata["source_channel"] == "slack"
+        assert msg.msg_metadata is not None
+        assert msg.msg_metadata["source_channel"] == "slack"
 
     @pytest.mark.asyncio
     async def test_channel_router_inbound_unknown_channel(self, company_id, agent_a_id):

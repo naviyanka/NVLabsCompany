@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy import select
 
-from nexus.api.deps import DbSession
+from nexus.api.deps import CurrentCompanyId, DbSession
 from nexus.models.evolution import (
     EvolutionEvaluation,
     EvolutionProposal,
@@ -195,9 +195,9 @@ async def list_proposals(
     "/api/v1/evolution/proposals/{proposal_id}",
     response_model=ProposalResponse,
 )
-async def get_proposal(proposal_id: uuid.UUID, db: DbSession) -> Any:
+async def get_proposal(proposal_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId) -> Any:
     """Get an evolution proposal by ID."""
-    stmt = select(EvolutionProposal).where(EvolutionProposal.id == proposal_id)
+    stmt = select(EvolutionProposal).where(EvolutionProposal.id == proposal_id, EvolutionProposal.company_id == company_id)
     result = await db.execute(stmt)
     proposal = result.scalar_one_or_none()
     if proposal is None:
@@ -212,9 +212,9 @@ async def get_proposal(proposal_id: uuid.UUID, db: DbSession) -> Any:
     "/api/v1/evolution/proposals/{proposal_id}/evaluate",
     response_model=EvaluationResponse,
 )
-async def evaluate_proposal(proposal_id: uuid.UUID, db: DbSession) -> Any:
+async def evaluate_proposal(proposal_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId) -> Any:
     """Trigger evaluation for a proposal."""
-    stmt = select(EvolutionProposal).where(EvolutionProposal.id == proposal_id)
+    stmt = select(EvolutionProposal).where(EvolutionProposal.id == proposal_id, EvolutionProposal.company_id == company_id)
     result = await db.execute(stmt)
     proposal = result.scalar_one_or_none()
     if proposal is None:
@@ -247,14 +247,14 @@ async def evaluate_proposal(proposal_id: uuid.UUID, db: DbSession) -> Any:
     response_model=ProposalResponse,
 )
 async def promote_proposal(
-    proposal_id: uuid.UUID, body: PromoteRequest, db: DbSession
+    proposal_id: uuid.UUID, body: PromoteRequest, db: DbSession, company_id: CurrentCompanyId
 ) -> Any:
     """Promote a proposal (requires explicit approval_id).
 
     Promotion NEVER happens automatically - an approval gate is always required.
     The proposal must be in an appropriate lifecycle state (approved or evaluating).
     """
-    stmt = select(EvolutionProposal).where(EvolutionProposal.id == proposal_id)
+    stmt = select(EvolutionProposal).where(EvolutionProposal.id == proposal_id, EvolutionProposal.company_id == company_id)
     result = await db.execute(stmt)
     proposal = result.scalar_one_or_none()
     if proposal is None:
@@ -288,10 +288,10 @@ async def promote_proposal(
     response_model=ProposalResponse,
 )
 async def rollback_proposal(
-    proposal_id: uuid.UUID, body: RollbackRequest, db: DbSession
+    proposal_id: uuid.UUID, body: RollbackRequest, db: DbSession, company_id: CurrentCompanyId
 ) -> Any:
     """Rollback a promoted proposal."""
-    stmt = select(EvolutionProposal).where(EvolutionProposal.id == proposal_id)
+    stmt = select(EvolutionProposal).where(EvolutionProposal.id == proposal_id, EvolutionProposal.company_id == company_id)
     result = await db.execute(stmt)
     proposal = result.scalar_one_or_none()
     if proposal is None:

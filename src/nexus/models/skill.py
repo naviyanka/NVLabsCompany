@@ -1,7 +1,7 @@
 """Skill registry models."""
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any, Optional
 
 from sqlalchemy import JSON
@@ -22,7 +22,7 @@ class Skill(SQLModel, table=True):
     schema_def: Optional[dict[str, Any]] = Field(
         default=None, sa_column=Column(JSON)
     )
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=lambda: datetime.utcnow())
 
 
 class AgentSkill(SQLModel, table=True):
@@ -34,4 +34,4 @@ class AgentSkill(SQLModel, table=True):
     agent_id: uuid.UUID = Field(foreign_key="agents.id", index=True)
     skill_id: uuid.UUID = Field(foreign_key="skills.id", index=True)
     proficiency: float = Field(default=0.5)
-    acquired_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    acquired_at: datetime = Field(default_factory=lambda: datetime.utcnow())
