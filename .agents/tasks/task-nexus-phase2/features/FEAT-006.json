@@ -1,0 +1,33 @@
+{
+  "id": "FEAT-006",
+  "type": "feat",
+  "description": "Implement the Evolution Engine module (observer, analyzer, proposer, sandbox, evaluator, promoter, skill evolution, agent evolution) under src/nexus/evolution/.",
+  "status": "in_progress",
+  "steps": [
+    "Create src/nexus/evolution/__init__.py exporting main classes: EvolutionObserver, FailureAnalyzer, ImprovementProposer, EvolutionSandbox, ProposalEvaluator, ChangePromoter, SkillEvolution, AgentEvolution.",
+    "Create src/nexus/evolution/observer.py implementing EvolutionObserver class: track_execution(company_id, agent_id, task_id, outcome, duration, cost, metadata) records execution data, detect_patterns(company_id, window_days=7) analyzes recent executions to find recurring failures/slow tasks/cost spikes returning list of Pattern dataclass (pattern_type, description, severity, occurrences, examples), detect_anomalies(company_id, metric, threshold_std=2.0) flags values outside normal range, classify_pattern(pattern) returns 'systemic' or 'one_off' based on occurrence count and time spread.",
+    "Create src/nexus/evolution/analyzer.py implementing FailureAnalyzer class: root_cause_analysis(company_id, failed_executions: list[dict]) groups failures by common factors (agent, task_type, time, tool) returning RootCause dataclass, extract_success_factors(company_id, successful_executions: list[dict]) identifies what successful tasks have in common, compare_outcomes(successes, failures) returns comparative analysis dict highlighting differences, identify_bottlenecks(company_id, execution_history) finds stages/agents/tools that slow things down, cost_effectiveness_analysis(company_id, executions) calculates cost per quality unit for different approaches.",
+    "Create src/nexus/evolution/proposer.py implementing ImprovementProposer class: propose_skill_improvement(company_id, skill_id, failure_analysis) generates EvolutionProposal for better prompts/tools, propose_workflow_change(company_id, bottleneck_analysis) proposes reordering/parallelism, propose_agent_config(company_id, agent_id, performance_data) proposes model/budget changes, propose_org_change(company_id, performance_data, org_structure) proposes new agent or restructure. Each method returns EvolutionProposal with expected_impact, confidence (0-1), risk_level, estimated_cost_cents. All proposals are auditable with proposer identity and timestamp.",
+    "Create src/nexus/evolution/sandbox.py implementing EvolutionSandbox class: create_sandbox(proposal_id, config: dict) returns sandbox_id with isolated environment config, run_benchmark(sandbox_id, test_cases: list[dict]) executes proposal against historical data returning results list, compare_with_baseline(sandbox_results, baseline_results) computes improvement metrics, enforce_resource_limits(sandbox_id, max_cost_cents, max_duration_seconds) applies limits, cleanup(sandbox_id) marks sandbox as cleaned. Sandbox is logical (in-memory dict tracking state) not actual process isolation.",
+    "Create src/nexus/evolution/evaluator.py implementing ProposalEvaluator class: evaluate(proposal_id, sandbox_results, baseline_results) creates EvolutionEvaluation record with scores across dimensions (quality, speed, cost, safety), check_significance(improvement_percent, sample_size, confidence_level=0.95) returns bool using simple threshold heuristic, check_promotion_criteria(evaluation, min_improvement_percent=5.0) returns pass/fail, reject_with_explanation(proposal_id, reasons: list[str]) updates proposal status to rejected with notes.",
+    "Create src/nexus/evolution/promoter.py implementing ChangePromoter class: promote(proposal_id, evaluation_id) - REQUIRES approval_id to be set on proposal (governance gate, raises error if no approval), apply_change(proposal) applies the proposed change to production config, configure_canary(proposal_id, percentage=10) sets up gradual rollout tracking, monitor_canary(proposal_id, metrics) checks if canary is degrading, rollback(proposal_id, reason) reverts change and updates status to rolled_back, get_change_history(company_id) returns all promotions with before/after metrics. CRITICAL: promote() must verify proposal.approval_id is not None - evolution never auto-promotes.",
+    "Create src/nexus/evolution/skill_evolution.py implementing SkillEvolution class: create_version(company_id, skill_id, prompt_template) creates new SkillVersion record, track_performance(version_id, task_results: list[dict]) updates performance_score, compare_versions(skill_id, version_a_id, version_b_id) returns comparison dict, promote_version(version_id) - REQUIRES approval gate - activates new version and deactivates old, rollback_version(skill_id) reactivates previous version, get_version_history(skill_id) returns all versions with scores.",
+    "Create src/nexus/evolution/agent_evolution.py implementing AgentEvolution class: create_candidate(company_id, agent_id, proposed_config: dict) creates AgentVersion snapshot, optimize_model_selection(agent_id, task_type_performance: dict) recommends best model per task type, optimize_tools(agent_id, tool_usage_stats: dict) recommends tool set changes, optimize_budget(agent_id, cost_history, quality_history) recommends budget adjustment, promote_candidate(version_id) - REQUIRES approval gate - applies new config to agent, get_evolution_history(agent_id) returns version history."
+  ],
+  "acceptance_criteria": [
+    "EvolutionObserver can track executions and detect patterns/anomalies",
+    "FailureAnalyzer provides root cause analysis and success factor extraction",
+    "ImprovementProposer generates proposals with impact/confidence/risk/cost",
+    "EvolutionSandbox provides isolated testing environment with resource limits",
+    "ProposalEvaluator scores proposals and checks promotion criteria",
+    "ChangePromoter REFUSES to promote without approval_id (governance gate enforced)",
+    "SkillEvolution and AgentEvolution both require approval for promotion",
+    "All proposals are auditable (who, when, why, outcome)"
+  ],
+  "verification": [
+    "cd /projects/sandbox/NVLabsCompany && python -c \"from nexus.evolution import EvolutionObserver, FailureAnalyzer, ImprovementProposer, EvolutionSandbox, ProposalEvaluator, ChangePromoter, SkillEvolution, AgentEvolution; print('Evolution module imports OK')\"",
+    "cd /projects/sandbox/NVLabsCompany && python -m pytest tests/test_evolution.py -v"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}
