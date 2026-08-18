@@ -1,0 +1,7 @@
+{
+  "task_id": "task-phase5-governance",
+  "task_description": "Build Phase 5 of NEXUS - Advanced Governance & Production Hardening. Transform in-memory prototype governance into production-ready safety layer with policy engine, secret management, compliance, rate limiting, tenant isolation, rollback, incidents, retention, health monitoring, config governance, API middleware, and new routes.",
+  "status": "in_progress",
+  "feature_order": ["FEAT-001", "FEAT-002", "FEAT-003", "FEAT-004", "FEAT-005"],
+  "blocked_reason": null
+}

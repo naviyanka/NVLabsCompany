@@ -1,0 +1,26 @@
+{
+  "id": "FEAT-001",
+  "type": "feat",
+  "description": "Create the Policy Engine (Part A) - Policy definition framework, built-in policies, and evaluation context. Create the policies/ sub-package under src/nexus/governance/ with engine.py, builtin.py, and context.py.",
+  "status": "in_progress",
+  "steps": [
+    "Create src/nexus/governance/policies/__init__.py exporting PolicyEngine, PolicyContext, and built-in policy names",
+    "Create src/nexus/governance/policies/engine.py with: Policy dataclass (name, description, rules, priority, enabled, version), PolicyRule dataclass (rule_type from allow/deny/require_approval/rate_limit/budget_cap, conditions dict with actor/resource/action/time/cost/context matching), PolicyEngine class with add_policy, remove_policy, evaluate (returns PolicyDecision), policy caching (dict-based), policy versioning (increment version on update). Evaluation order: deny > require_approval > allow. Default-deny for unmatched. Deterministic evaluation.",
+    "Create src/nexus/governance/policies/context.py with: PolicyContext dataclass containing actor_type, actor_id, resource_type, resource_id, action, timestamp, cost, environment dict. ContextBuilder class with methods: with_actor(type, id), with_resource(type, id, sensitivity_level), with_action(action_name), with_cost(amount), with_environment(time, load, incidents), build() -> PolicyContext.",
+    "Create src/nexus/governance/policies/builtin.py with 10 pre-configured Policy instances: production_deploy_requires_approval, financial_operations_require_approval, agent_creation_requires_approval, external_communication_requires_approval, data_deletion_requires_approval, self_modification_denied, cross_tenant_access_denied, budget_exceeded_deny, rate_limit_per_agent, nighttime_restricted. Each with appropriate rule_type, conditions, and priority.",
+    "Create tests/test_policies.py with comprehensive tests: policy evaluation ordering (deny beats allow), default-deny behavior, condition matching (actor, resource, action, time, cost), built-in policy correctness, policy caching, policy versioning, context building."
+  ],
+  "acceptance_criteria": [
+    "All files pass AST parsing",
+    "PolicyEngine evaluates deny rules before allow rules",
+    "Default-deny returns deny for unmatched actions",
+    "Built-in policies are correctly defined with appropriate rule types",
+    "tests/test_policies.py passes with pytest"
+  ],
+  "verification": [
+    "python -c \"import ast, pathlib; [ast.parse(f.read_text()) for f in pathlib.Path('src/nexus/governance/policies').rglob('*.py')]\"",
+    "python -m pytest tests/test_policies.py -x -q"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

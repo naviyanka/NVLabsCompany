@@ -1,0 +1,30 @@
+{
+  "project_type": "Python FastAPI application - Autonomous AI Company Operating System (NEXUS)",
+  "language": "Python 3.12",
+  "build_system": "setuptools with pyproject.toml, src/ layout",
+  "test_framework": "pytest with pytest-asyncio (auto mode), tests/ at project root, conftest.py with mock fixtures",
+  "build_command": "cd /projects/sandbox/NVLabsCompany && python -c \"import ast, pathlib; [ast.parse(f.read_text()) for f in pathlib.Path('src').rglob('*.py')]\"",
+  "test_command": "cd /projects/sandbox/NVLabsCompany && python -m pytest tests/ -x -q 2>&1 | head -50",
+  "verification_instructions": "1. AST parse all new Python files to verify syntax. 2. Run pytest on new test files. 3. Verify imports resolve correctly.",
+  "snapshot_or_generated_files": null,
+  "setup_instructions": "No setup needed - INTEGRATIONS_ONLY network, use pre-installed Python 3.11+",
+  "environment_constraints": "INTEGRATIONS_ONLY network - no pip install, no Docker, no external HTTP. Use only pre-installed runtimes. Validate with AST parsing and pytest on pure logic tests.",
+  "contribution_requirements": "Do NOT modify existing Phase 1-4 files unless strictly necessary. Register new routes only in main.py. Export new models in models/__init__.py.",
+  "key_patterns": "Models: SQLModel with table=True, uuid.UUID id + company_id fields, Field(default_factory=uuid.uuid4). API routes: APIRouter with tags, Pydantic BaseModel for request/response, DbSession and CurrentCompanyId deps. Governance modules: dataclass-based state, in-memory storage, async methods. Tests: class-based grouping, pytest fixtures from conftest.py, test pure logic without DB.",
+  "relevant_files": [
+    "src/nexus/governance/__init__.py",
+    "src/nexus/governance/audit.py",
+    "src/nexus/governance/rbac.py",
+    "src/nexus/governance/kill_switch.py",
+    "src/nexus/governance/budget_enforcer.py",
+    "src/nexus/models/__init__.py",
+    "src/nexus/models/governance.py",
+    "src/nexus/api/deps.py",
+    "src/nexus/api/routes/approvals.py",
+    "src/nexus/main.py",
+    "src/nexus/config.py",
+    "tests/conftest.py",
+    "tests/test_governance.py"
+  ],
+  "directory_structure": "src/nexus/ - main package. src/nexus/api/routes/ - FastAPI route modules. src/nexus/governance/ - governance layer (in-memory). src/nexus/models/ - SQLModel table definitions. tests/ - pytest test files."
+}
