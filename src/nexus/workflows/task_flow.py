@@ -136,12 +136,28 @@ class BudgetEnforcerProtocol(Protocol):
     ) -> Any: ...
 
 
+class AdapterRegistryProtocol(Protocol):
+    """Protocol for AdapterRegistry dependency."""
+
+    def create_adapter(
+        self,
+        adapter_type: str,
+        config: dict[str, Any] | None = None,
+    ) -> Any: ...
+
+    def is_registered(self, adapter_type: str) -> bool: ...
+
+
 class TaskFlow:
     """Manages single task execution with governance integration.
 
     Handles the complete task lifecycle from acceptance through execution
     to reporting. Integrates with budget, approval, and event systems
     to ensure governed, observable, and auditable execution.
+
+    When an adapter_registry is provided, execution is wired through the
+    registry to create real adapter instances. Without a registry, execution
+    falls back to simulated results for demo/testing purposes.
 
     Features:
     - Agent selection based on required capabilities
@@ -157,6 +173,7 @@ class TaskFlow:
             event_bus=event_bus,
             budget_enforcer=budget_enforcer,
             approval_engine=approval_engine,
+            adapter_registry=registry,
         )
         execution = await flow.execute_task(
             task_id="task-1",
@@ -173,6 +190,7 @@ class TaskFlow:
         budget_enforcer: BudgetEnforcerProtocol | None = None,
         approval_engine: ApprovalEngineProtocol | None = None,
         kill_switch_active: bool = False,
+        adapter_registry: AdapterRegistryProtocol | None = None,
     ) -> None:
         """Initialize the task flow manager.
 
@@ -182,12 +200,15 @@ class TaskFlow:
             budget_enforcer: Optional BudgetEnforcer for cost checking.
             approval_engine: Optional ApprovalEngine for approval gates.
             kill_switch_active: Whether the kill switch is engaged.
+            adapter_registry: Optional AdapterRegistry for real adapter execution.
+                If None, execution is simulated.
         """
         self.company_id = company_id
         self._event_bus = event_bus
         self._budget_enforcer = budget_enforcer
         self._approval_engine = approval_engine
         self._kill_switch_active = kill_switch_active
+        self._adapter_registry = adapter_registry
         # In-memory stores
         self._executions: dict[str, TaskExecution] = {}
         self._results: dict[str, dict[str, Any]] = {}
@@ -513,8 +534,9 @@ class TaskFlow:
     ) -> tuple[bool, dict[str, Any]]:
         """Execute the task via the selected adapter.
 
-        In a real implementation, this would call the adapter's execute_task
-        method. Here it produces a simulated result.
+        If an adapter_registry is available, creates a real adapter instance,
+        establishes a session, and executes the task through it. Otherwise,
+        falls back to simulated results for demo/testing purposes.
 
         Args:
             execution: The current execution record.
@@ -523,7 +545,42 @@ class TaskFlow:
         Returns:
             Tuple of (success: bool, result: dict).
         """
-        # Simulated execution - in production this calls the actual adapter
+        # If adapter registry is available, wire through real adapter
+        if self._adapter_registry is not None:
+            adapter_type = agent["adapter_type"]
+            config = agent.get("config", {})
+
+            if self._adapter_registry.is_registered(adapter_type):
+                try:
+                    adapter = self._adapter_registry.create_adapter(adapter_type, config)
+                    agent_uuid = uuid.UUID(agent["agent_id"]) if self._is_valid_uuid(agent["agent_id"]) else uuid.uuid4()
+                    session = await adapter.create_session(agent_uuid, config)
+
+                    task_uuid = uuid.UUID(execution.task_id) if self._is_valid_uuid(execution.task_id) else uuid.uuid4()
+                    task_result = await adapter.execute_task(session, task_uuid, execution.payload)
+
+                    await adapter.terminate(session)
+
+                    result = {
+                        "task_id": execution.task_id,
+                        "agent_id": agent["agent_id"],
+                        "adapter_type": adapter_type,
+                        "output": task_result.output or "",
+                        "status": "success" if task_result.success else "failed",
+                        "cost_cents": task_result.cost_cents,
+                        "input_tokens": task_result.input_tokens,
+                        "output_tokens": task_result.output_tokens,
+                        "error": task_result.error,
+                    }
+                    return task_result.success, result
+                except Exception as e:
+                    return False, {
+                        "task_id": execution.task_id,
+                        "error": f"Adapter execution failed: {type(e).__name__}: {e}",
+                        "status": "failed",
+                    }
+
+        # Fallback: simulated execution for demo/testing
         result = {
             "task_id": execution.task_id,
             "agent_id": agent["agent_id"],
@@ -532,6 +589,22 @@ class TaskFlow:
             "status": "success",
         }
         return True, result
+
+    @staticmethod
+    def _is_valid_uuid(value: str) -> bool:
+        """Check if a string is a valid UUID.
+
+        Args:
+            value: String to validate.
+
+        Returns:
+            True if the string is a valid UUID.
+        """
+        try:
+            uuid.UUID(value)
+            return True
+        except (ValueError, AttributeError):
+            return False
 
     def _validate_result(self, result: dict[str, Any]) -> bool:
         """Post-execution critic - validate the execution result.

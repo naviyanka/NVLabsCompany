@@ -5,19 +5,21 @@ backend, using tool listing for capability discovery and routing task
 execution through MCP tool calls.
 """
 
-import importlib
-import importlib.util
-import pathlib
-import sys
 import uuid
 from typing import Any
 
 from nexus.adapters.base import BaseAdapter
 from nexus.runtime.adapter import AgentSession, TaskResult
 
-# Import MCP client directly from module file to avoid triggering
-# nexus.tools.__init__.py which may have heavy dependencies.
-if "nexus.tools.mcp_client" not in sys.modules:
+try:
+    from nexus.tools.mcp_client import MCPClient, MCPResult, MCPTool
+except ImportError:
+    # Fallback: import directly if the package structure is not fully
+    # installed (e.g., running with PYTHONPATH=src without pip install).
+    import importlib.util
+    import pathlib
+    import sys
+
     _mcp_path = (
         pathlib.Path(__file__).parent.parent / "tools" / "mcp_client.py"
     )
@@ -29,7 +31,7 @@ if "nexus.tools.mcp_client" not in sys.modules:
         sys.modules["nexus.tools.mcp_client"] = _module
         _spec.loader.exec_module(_module)
 
-from nexus.tools.mcp_client import MCPClient, MCPResult, MCPTool
+    from nexus.tools.mcp_client import MCPClient, MCPResult, MCPTool
 
 
 class MCPAgentAdapter(BaseAdapter):

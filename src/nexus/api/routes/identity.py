@@ -175,86 +175,24 @@ async def list_soul_templates() -> list[dict[str, Any]]:
     """List all available soul templates.
 
     Returns the pre-built soul templates that can be used to create
-    agent identities for common organizational roles.
+    agent identities for common organizational roles. Reads directly
+    from the authoritative SOUL_TEMPLATES in the identity domain module.
 
     Returns:
         List of soul template summaries.
     """
-    # Template definitions matching SOUL_TEMPLATES in identity.soul
-    templates = [
-        {
-            "template_id": "engineer",
-            "name": "Software Engineer",
-            "description": "Detail-oriented engineer focused on code quality and implementation.",
-            "default_role": "senior_software_engineer",
-            "personality_traits": ["detail-oriented", "methodical", "pragmatic", "collaborative"],
-            "expertise": [
-                "software architecture",
-                "code review",
-                "debugging",
-                "performance optimization",
-                "testing strategies",
-            ],
-        },
-        {
-            "template_id": "researcher",
-            "name": "Research Analyst",
-            "description": "Analytical researcher focused on thorough investigation and evidence.",
-            "default_role": "research_analyst",
-            "personality_traits": ["analytical", "thorough", "curious", "skeptical", "systematic"],
-            "expertise": [
-                "literature review",
-                "data analysis",
-                "methodology design",
-                "technical writing",
-                "comparative analysis",
-            ],
-        },
-        {
-            "template_id": "manager",
-            "name": "Project Manager",
-            "description": "Strategic manager focused on delegation, coordination, and delivery.",
-            "default_role": "project_manager",
-            "personality_traits": ["strategic", "delegating", "communicative", "decisive", "organized"],
-            "expertise": [
-                "project planning",
-                "team coordination",
-                "risk management",
-                "stakeholder communication",
-                "resource allocation",
-            ],
-        },
-        {
-            "template_id": "qa_engineer",
-            "name": "QA Engineer",
-            "description": "Meticulous QA engineer focused on testing and quality assurance.",
-            "default_role": "qa_engineer",
-            "personality_traits": ["meticulous", "systematic", "skeptical", "persistent", "observant"],
-            "expertise": [
-                "test strategy",
-                "test automation",
-                "regression testing",
-                "edge case identification",
-                "bug reporting",
-                "performance testing",
-            ],
-        },
-        {
-            "template_id": "architect",
-            "name": "System Architect",
-            "description": "Big-picture architect focused on system design and technical strategy.",
-            "default_role": "system_architect",
-            "personality_traits": ["visionary", "analytical", "pragmatic", "communicative", "patient"],
-            "expertise": [
-                "system design",
-                "distributed systems",
-                "API design",
-                "scalability patterns",
-                "technology evaluation",
-                "technical debt management",
-            ],
-        },
-    ]
+    from nexus.identity.soul import SOUL_TEMPLATES
+
+    templates = []
+    for template_id, template in SOUL_TEMPLATES.items():
+        templates.append({
+            "template_id": template_id,
+            "name": template.name,
+            "description": template.description,
+            "default_role": template.base_soul.role,
+            "personality_traits": list(template.base_soul.personality_traits),
+            "expertise": list(template.base_soul.expertise),
+        })
     return templates
 
 

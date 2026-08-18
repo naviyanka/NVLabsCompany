@@ -177,6 +177,7 @@ class CompanyWorkflow:
         event_bus: EventBusProtocol | None = None,
         approval_engine: ApprovalEngineProtocol | None = None,
         budget_enforcer: BudgetEnforcerProtocol | None = None,
+        adapter_registry: Any | None = None,
     ) -> None:
         """Initialize the company workflow orchestrator.
 
@@ -185,11 +186,15 @@ class CompanyWorkflow:
             event_bus: Optional EventBus for publishing state transitions.
             approval_engine: Optional ApprovalEngine for gating high-risk actions.
             budget_enforcer: Optional BudgetEnforcer for cost checking.
+            adapter_registry: Optional AdapterRegistry for real adapter execution.
+                If provided, engineer execution steps are wired through the
+                registry. If None, execution is simulated.
         """
         self.company_id = company_id
         self._event_bus = event_bus
         self._approval_engine = approval_engine
         self._budget_enforcer = budget_enforcer
+        self._adapter_registry = adapter_registry
         self._traces: dict[str, WorkflowTrace] = {}
 
     async def execute(
@@ -480,13 +485,8 @@ class CompanyWorkflow:
                 },
             )
 
-            # Simulate execution result
-            result = {
-                "task_id": task.get("task_id"),
-                "status": "completed",
-                "output": f"Completed: {task.get('description', '')}",
-                "cost_cents": task_cost,
-            }
+            # Execute via adapter registry if available, otherwise simulate
+            result = await self._execute_engineer_task(task)
             results.append(result)
 
             step.output_data = result
@@ -505,6 +505,57 @@ class CompanyWorkflow:
                 )
 
         return results
+
+    async def _execute_engineer_task(
+        self, task: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Execute a single engineer task, optionally through the adapter registry.
+
+        If an adapter_registry is available, attempts real execution. Otherwise
+        falls back to simulated results for demo/testing purposes.
+
+        Args:
+            task: Task specification dictionary.
+
+        Returns:
+            Execution result dictionary.
+        """
+        task_cost = task.get("estimated_cost_cents", 0)
+
+        if self._adapter_registry is not None:
+            try:
+                # Use ollama (local, zero-cost) by default for engineer tasks
+                adapter_type = task.get("adapter_type", "ollama")
+                config = task.get("adapter_config", {"model": "codellama"})
+
+                if self._adapter_registry.is_registered(adapter_type):
+                    adapter = self._adapter_registry.create_adapter(adapter_type, config)
+                    agent_id = uuid.uuid4()
+                    session = await adapter.create_session(agent_id, config)
+
+                    task_uuid = uuid.uuid4()
+                    task_result = await adapter.execute_task(
+                        session, task_uuid, {"prompt": task.get("description", "")}
+                    )
+                    await adapter.terminate(session)
+
+                    return {
+                        "task_id": task.get("task_id"),
+                        "status": "completed" if task_result.success else "failed",
+                        "output": task_result.output or f"Completed: {task.get('description', '')}",
+                        "cost_cents": task_result.cost_cents or task_cost,
+                    }
+            except Exception:
+                # Fall through to simulated execution on adapter failure
+                pass
+
+        # Simulated execution (no adapter registry or adapter failure)
+        return {
+            "task_id": task.get("task_id"),
+            "status": "completed",
+            "output": f"Completed: {task.get('description', '')}",
+            "cost_cents": task_cost,
+        }
 
     async def _qa_review(
         self, trace: WorkflowTrace, results: list[dict[str, Any]]

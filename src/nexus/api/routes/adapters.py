@@ -95,17 +95,29 @@ _task_results: dict[str, dict[str, Any]] = {}
 async def list_adapters() -> list[dict[str, Any]]:
     """List all available adapter types.
 
-    Returns registered adapter types that can be used for agent execution.
+    Returns registered adapter types from the AdapterRegistry that can
+    be used for agent execution.
     """
-    # Default adapter types (matches the AdapterRegistry defaults)
-    adapter_types = [
-        {"adapter_type": "openai", "description": "OpenAI chat completions (GPT-4o, o1, o3)"},
-        {"adapter_type": "anthropic", "description": "Anthropic Claude models"},
-        {"adapter_type": "ollama", "description": "Local Ollama models"},
-        {"adapter_type": "claude_code", "description": "Claude Code CLI as subprocess"},
-        {"adapter_type": "http", "description": "Generic HTTP agent endpoints"},
-        {"adapter_type": "mcp", "description": "MCP server-based execution"},
-    ]
+    from nexus.adapters.registry import AdapterRegistry
+
+    registry = AdapterRegistry(auto_register=True)
+
+    # Descriptions for registered adapter types
+    descriptions: dict[str, str] = {
+        "openai": "OpenAI chat completions (GPT-4o, o1, o3)",
+        "anthropic": "Anthropic Claude models",
+        "ollama": "Local Ollama models",
+        "claude_code": "Claude Code CLI as subprocess",
+        "http": "Generic HTTP agent endpoints",
+        "mcp": "MCP server-based execution",
+    }
+
+    adapter_types = []
+    for adapter_type in registry.get_adapter_types():
+        adapter_types.append({
+            "adapter_type": adapter_type,
+            "description": descriptions.get(adapter_type, ""),
+        })
     return adapter_types
 
 
@@ -116,6 +128,9 @@ async def list_adapters() -> list[dict[str, Any]]:
 async def get_adapter_capabilities(adapter_type: str) -> dict[str, Any]:
     """Get capabilities for a specific adapter type.
 
+    Queries the AdapterRegistry for the actual capabilities advertised
+    by the adapter implementation.
+
     Args:
         adapter_type: The adapter type to query capabilities for.
 
@@ -125,57 +140,21 @@ async def get_adapter_capabilities(adapter_type: str) -> dict[str, Any]:
     Raises:
         HTTPException: If the adapter type is unknown.
     """
-    capabilities_map: dict[str, list[str]] = {
-        "openai": [
-            "chat_completion",
-            "function_calling",
-            "streaming",
-            "vision",
-            "json_mode",
-        ],
-        "anthropic": [
-            "chat_completion",
-            "function_calling",
-            "streaming",
-            "vision",
-            "long_context",
-            "tool_use",
-        ],
-        "ollama": [
-            "chat_completion",
-            "local_execution",
-            "custom_models",
-            "streaming",
-        ],
-        "claude_code": [
-            "code_generation",
-            "file_editing",
-            "terminal_execution",
-            "multi_file_operations",
-        ],
-        "http": [
-            "custom_endpoints",
-            "webhook_integration",
-            "stateless_execution",
-        ],
-        "mcp": [
-            "tool_execution",
-            "resource_access",
-            "prompt_serving",
-            "server_management",
-        ],
-    }
+    from nexus.adapters.registry import AdapterRegistry
 
-    if adapter_type not in capabilities_map:
+    registry = AdapterRegistry(auto_register=True)
+
+    if not registry.is_registered(adapter_type):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Unknown adapter type: '{adapter_type}'. "
-            f"Available: {list(capabilities_map.keys())}",
+            f"Available: {registry.get_adapter_types()}",
         )
 
+    capabilities = registry.get_capabilities(adapter_type)
     return {
         "adapter_type": adapter_type,
-        "capabilities": capabilities_map[adapter_type],
+        "capabilities": capabilities,
     }
 
 

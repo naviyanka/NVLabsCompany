@@ -47,7 +47,7 @@ class HTTPAdapter(BaseAdapter):
         """
         base_url = session.config["base_url"].rstrip("/")
         session.metadata["base_url"] = base_url
-        session.metadata["headers"] = self._build_headers(session.config)
+        session.metadata["_headers"] = self._build_headers(session.config)
         session.metadata["timeout"] = session.config.get("timeout", 60.0)
 
         # Configurable endpoint paths
@@ -126,7 +126,7 @@ class HTTPAdapter(BaseAdapter):
         import httpx
 
         base_url = session.metadata["base_url"]
-        headers = session.metadata["headers"]
+        headers = session.metadata["_headers"]
         timeout = session.metadata["timeout"]
         execute_path = session.metadata["execute_path"]
         response_mapping = session.metadata["response_mapping"]
@@ -217,6 +217,9 @@ class HTTPAdapter(BaseAdapter):
     ) -> dict[str, Any]:
         """Poll a URL until a result is available.
 
+        Reuses a single httpx.AsyncClient across all poll iterations
+        to avoid creating a new TCP connection for each request.
+
         Args:
             session: The active agent session.
             poll_url: The URL to poll for results.
@@ -228,23 +231,23 @@ class HTTPAdapter(BaseAdapter):
 
         import httpx
 
-        headers = session.metadata["headers"]
+        headers = session.metadata["_headers"]
         poll_interval = session.metadata["poll_interval"]
         timeout = session.metadata["timeout"]
         max_polls = int(timeout / poll_interval)
 
-        for _ in range(max_polls):
-            await asyncio.sleep(poll_interval)
-            try:
-                async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            for _ in range(max_polls):
+                await asyncio.sleep(poll_interval)
+                try:
                     response = await client.get(poll_url, headers=headers)
                     if response.status_code == 200:
                         data = response.json()
                         status = data.get("status", "")
                         if status in ("completed", "done", "finished", "error"):
                             return data
-            except Exception:
-                continue
+                except Exception:
+                    continue
 
         return {"success": False, "error": "Polling timed out"}
 
@@ -316,7 +319,7 @@ class HTTPAdapter(BaseAdapter):
 
         base_url = session.metadata["base_url"]
         health_path = session.metadata["health_path"]
-        headers = session.metadata["headers"]
+        headers = session.metadata["_headers"]
 
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:

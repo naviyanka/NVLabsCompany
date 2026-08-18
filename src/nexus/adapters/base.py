@@ -10,19 +10,20 @@ This module provides the BaseAdapter abstract class that handles:
 - Configuration validation (abstract method for subclasses)
 """
 
-import importlib
-import importlib.util
-import pathlib
-import sys
 import uuid
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
 from typing import Any
 
-# Import adapter types directly from the module file to avoid triggering
-# nexus.runtime.__init__.py which has heavy dependencies (sqlalchemy etc.)
-# that may not be available in all environments.
-if "nexus.runtime.adapter" not in sys.modules:
+try:
+    from nexus.runtime.adapter import AgentSession, AgentStatus, TaskResult
+except ImportError:
+    # Fallback: import directly if the package structure is not fully
+    # installed (e.g., running with PYTHONPATH=src without pip install).
+    import importlib.util
+    import pathlib
+    import sys
+
     _adapter_path = (
         pathlib.Path(__file__).parent.parent / "runtime" / "adapter.py"
     )
@@ -34,7 +35,7 @@ if "nexus.runtime.adapter" not in sys.modules:
         sys.modules["nexus.runtime.adapter"] = _module
         _spec.loader.exec_module(_module)
 
-from nexus.runtime.adapter import AgentSession, AgentStatus, TaskResult
+    from nexus.runtime.adapter import AgentSession, AgentStatus, TaskResult
 
 
 class BaseAdapter(ABC):
@@ -247,6 +248,9 @@ class BaseAdapter(ABC):
     async def terminate(self, session: AgentSession) -> bool:
         """Terminate the agent session and release all resources.
 
+        Cleans up all internal tracking state for the session including
+        cost tracking, artifacts, logs, and conversation history.
+
         Args:
             session: The agent session to terminate.
 
@@ -256,9 +260,12 @@ class BaseAdapter(ABC):
         if session.session_id in self._sessions:
             await self._do_terminate(session)
             session.status = AgentStatus.TERMINATED
-            self._add_log(session.session_id, "Session terminated")
-            # Clean up tracking
+            # Clean up all tracking state for this session
             self._sessions.pop(session.session_id, None)
+            self._cost_tracking.pop(session.session_id, None)
+            self._artifacts.pop(session.session_id, None)
+            self._logs.pop(session.session_id, None)
+            self._conversation_history.pop(session.session_id, None)
             return True
         return False
 
@@ -397,15 +404,66 @@ class BaseAdapter(ABC):
             self._cost_tracking[session_id]["output_tokens"] += output_tokens
 
     def _add_log(self, session_id: str, message: str) -> None:
-        """Add a log entry for a session.
+        """Add a log entry for a session with credential scrubbing.
+
+        Automatically scrubs sensitive values (api_key, bearer_token)
+        from log messages to prevent credential exposure.
 
         Args:
             session_id: The session to log to.
             message: The log message.
         """
         if session_id in self._logs:
+            # Scrub sensitive credentials from log messages
+            scrubbed = self._scrub_credentials(message)
             timestamp = datetime.now(timezone.utc).isoformat()
-            self._logs[session_id].append(f"[{timestamp}] {message}")
+            self._logs[session_id].append(f"[{timestamp}] {scrubbed}")
+
+    @staticmethod
+    def _scrub_credentials(text: str) -> str:
+        """Remove sensitive credential values from text.
+
+        Replaces known credential patterns with redacted placeholders.
+
+        Args:
+            text: The text to scrub.
+
+        Returns:
+            Text with credentials redacted.
+        """
+        import re
+
+        # Scrub common API key patterns
+        patterns = [
+            (r'(api_key["\']?\s*[:=]\s*["\']?)(sk-[a-zA-Z0-9_-]+)', r'\1[REDACTED]'),
+            (r'(Bearer\s+)(sk-[a-zA-Z0-9_-]+)', r'\1[REDACTED]'),
+            (r'(x-api-key["\']?\s*[:=]\s*["\']?)([a-zA-Z0-9_-]{20,})', r'\1[REDACTED]'),
+        ]
+        result = text
+        for pattern, replacement in patterns:
+            result = re.sub(pattern, replacement, result, flags=re.IGNORECASE)
+        return result
+
+    @staticmethod
+    def _safe_config(config: dict[str, Any]) -> dict[str, Any]:
+        """Return a copy of config with sensitive fields redacted.
+
+        Use this when serializing config for external responses or logs.
+
+        Args:
+            config: The original configuration dictionary.
+
+        Returns:
+            A copy with api_key, bearer_token, and similar fields redacted.
+        """
+        sensitive_keys = {"api_key", "bearer_token", "secret", "password", "token"}
+        safe = {}
+        for key, value in config.items():
+            if key.lower() in sensitive_keys:
+                safe[key] = "[REDACTED]"
+            else:
+                safe[key] = value
+        return safe
 
     def _add_artifact(
         self, session_id: str, artifact: dict[str, Any]

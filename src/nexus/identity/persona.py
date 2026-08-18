@@ -147,11 +147,14 @@ class Persona:
     methods for assembling working context within token budgets.
 
     The in-memory store enables persistence and loading without requiring
-    a database connection.
+    a database connection. Store has a configurable max size with LRU
+    eviction to prevent unbounded memory growth in long-lived servers.
     """
 
-    # Class-level storage for persistence (in-memory)
+    # Class-level storage for persistence (in-memory) with max size
     _store: dict[str, dict[str, Any]] = {}
+    _store_max_size: int = 10000
+    _store_access_order: list[str] = []
 
     def __init__(self, agent_id: str, namespace: str | None = None) -> None:
         """Initialize a Persona for a specific agent.
@@ -274,6 +277,8 @@ class Persona:
         """Persist this persona's state to the in-memory store.
 
         Saves the soul definition and memory namespace for later retrieval.
+        Enforces a maximum store size with LRU eviction to prevent
+        unbounded memory growth in long-lived servers.
         """
         data: dict[str, Any] = {
             "agent_id": self.agent_id,
@@ -292,11 +297,24 @@ class Persona:
                 "background": self._soul.background,
                 "tone": self._soul.tone,
             }
+
+        # Update access order for LRU tracking
+        if self.agent_id in Persona._store_access_order:
+            Persona._store_access_order.remove(self.agent_id)
+        Persona._store_access_order.append(self.agent_id)
+
+        # Evict oldest entries if over max size
+        while len(Persona._store) >= Persona._store_max_size and Persona._store_access_order:
+            oldest_id = Persona._store_access_order.pop(0)
+            Persona._store.pop(oldest_id, None)
+
         Persona._store[self.agent_id] = data
 
     @classmethod
     def load_persona(cls, agent_id: str) -> "Persona | None":
         """Load a persona from the in-memory store.
+
+        Updates access order for LRU tracking.
 
         Args:
             agent_id: The agent identifier to load.
@@ -307,6 +325,11 @@ class Persona:
         data = cls._store.get(agent_id)
         if data is None:
             return None
+
+        # Update access order (move to most recently used)
+        if agent_id in cls._store_access_order:
+            cls._store_access_order.remove(agent_id)
+        cls._store_access_order.append(agent_id)
 
         persona = cls(
             agent_id=data["agent_id"],
@@ -324,3 +347,4 @@ class Persona:
     def clear_store(cls) -> None:
         """Clear the in-memory persona store (useful for testing)."""
         cls._store.clear()
+        cls._store_access_order.clear()

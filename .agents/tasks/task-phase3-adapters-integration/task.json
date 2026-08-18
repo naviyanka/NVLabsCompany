@@ -3,5 +3,21 @@
   "task_description": "Build Phase 3 of NEXUS: External Agent Adapters and Integration Layer. Implements concrete agent runtime adapters (OpenAI, Anthropic, Ollama, Claude Code, HTTP, MCP), adapter registry/factory, agent identity system (soul/persona), workflow orchestration (company flow and task flow), demo configuration (NexusCorp with 5 agents and 3 scenarios), and API routes for adapters/workflows/identity.",
   "status": "in_progress",
   "feature_order": ["FEAT-001", "FEAT-002", "FEAT-003", "FEAT-004"],
-  "blocked_reason": null
+  "blocked_reason": null,
+  "verification": {
+    "build": "pass",
+    "tests": "pass",
+    "test_quality": "pass",
+    "docker_build": "skipped",
+    "summary": "All 21 new source files pass AST parsing. All 125 new tests pass (pytest). Review issues addressed: terminate cleanup, adapter registry wiring, credential scrubbing, importlib fix, API route deduplication, Persona eviction, httpx client reuse."
+  },
+  "review_fixes": {
+    "issue_1_terminate_leak": "Fixed: BaseAdapter.terminate now cleans up _cost_tracking, _artifacts, _logs, and _conversation_history for the session.",
+    "issue_2_workflow_adapter_gap": "Fixed: Added adapter_registry parameter to TaskFlow and CompanyWorkflow. _do_execute in TaskFlow and _execute_engineer_task in CompanyWorkflow wire through the registry when available, falling back to simulation when not.",
+    "issue_3_credential_exposure": "Fixed: Added _scrub_credentials() and _safe_config() methods to BaseAdapter. _add_log now automatically scrubs API key patterns. HTTP adapter stores headers under _headers (underscore-prefixed internal key) instead of headers.",
+    "issue_4_importlib_hack": "Fixed: Replaced module-level spec_from_file_location with try/except ImportError pattern in both base.py and mcp_adapter.py.",
+    "issue_5_api_route_duplication": "Fixed: routes/identity.py now imports from SOUL_TEMPLATES in identity.soul. routes/adapters.py now uses AdapterRegistry.get_adapter_types() and .get_capabilities().",
+    "issue_6_persona_unbounded_store": "Fixed: Added _store_max_size (default 10000) with LRU eviction via _store_access_order tracking. save_persona evicts oldest entries when over limit.",
+    "issue_7_http_polling_overhead": "Fixed: _poll_for_result now creates a single httpx.AsyncClient and reuses it across all poll iterations."
+  }
 }
