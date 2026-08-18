@@ -1,0 +1,7 @@
+{
+  "task_id": "task-nexus-office",
+  "task_description": "Build Phase 6 of NEXUS - The NEXUS Office (Visual AI Company Simulation). Create an immersive 2D virtual office visualization showing agents as employees working in a visual company space with pan/zoom canvas, department rooms, agent avatars, delegation flows, activity ticker, and controls.",
+  "status": "completed",
+  "feature_order": ["FEAT-001"],
+  "blocked_reason": null
+}

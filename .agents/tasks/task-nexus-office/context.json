@@ -1,0 +1,30 @@
+{
+  "project_type": "React SPA with TypeScript, Vite, Tailwind CSS",
+  "language": "TypeScript/TSX",
+  "build_system": "Vite 6 with TypeScript compiler",
+  "test_framework": "None configured (no test scripts in package.json)",
+  "build_command": "cd dashboard && npx tsc --noEmit (type-check only, no npm install available)",
+  "test_command": "N/A - no test infrastructure",
+  "verification_instructions": "TypeScript type-checking only. Cannot install deps or run build in INTEGRATIONS_ONLY network mode.",
+  "snapshot_or_generated_files": null,
+  "setup_instructions": "N/A - INTEGRATIONS_ONLY network mode. Node.js 22 available but no npm install possible.",
+  "environment_constraints": "INTEGRATIONS_ONLY network - no npm install, no runtime verification. Code must be structurally correct TypeScript/React that will compile when dependencies are available. Git push works.",
+  "contribution_requirements": "All new code in /projects/sandbox/NVLabsCompany/dashboard/. Only modify App.tsx (add route) and Sidebar.tsx (add nav link) from existing files. Do NOT modify any Python backend files.",
+  "key_patterns": "Pages export named function components. Hooks use useApi() wrapper with usePolling() for auto-refresh. API modules export objects with CRUD methods. Types in src/types/. COMPANY_ID from src/config.ts. Path alias @/ maps to src/. Components in organized subdirectories. Lucide for icons. Tailwind for styling. Cards/Badge/StatusIndicator reusable components.",
+  "relevant_files": [
+    "dashboard/src/App.tsx",
+    "dashboard/src/components/layout/Sidebar.tsx",
+    "dashboard/src/hooks/useApi.ts",
+    "dashboard/src/hooks/usePolling.ts",
+    "dashboard/src/hooks/useAgents.ts",
+    "dashboard/src/types/agent.ts",
+    "dashboard/src/types/task.ts",
+    "dashboard/src/types/common.ts",
+    "dashboard/src/api/agents.ts",
+    "dashboard/src/api/tasks.ts",
+    "dashboard/src/config.ts",
+    "dashboard/src/pages/Dashboard.tsx",
+    "dashboard/src/pages/Meetings.tsx"
+  ],
+  "directory_structure": "dashboard/src/ contains: api/ (API client modules), components/ (layout/, common/, charts/, agents/, tasks/, org/, governance/, evolution/, activity/), hooks/ (useApi, useAgents, usePolling), pages/ (16 page components), types/ (agent, task, company, evolution, common), config.ts"
+}
