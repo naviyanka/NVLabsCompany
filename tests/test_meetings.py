@@ -223,13 +223,120 @@ Regular line with no action items.
         assert items == []
 
 
-class TestMeetingSchedulerInit:
-    """Tests for MeetingScheduler initialization."""
+class TestMeetingScheduler:
+    """Tests for MeetingScheduler scheduling and cancellation."""
 
     def test_scheduler_stores_db_session(self, mock_db):
         """Scheduler stores the provided db session."""
         scheduler = MeetingScheduler(db=mock_db)
         assert scheduler.db is mock_db
+
+    @pytest.mark.asyncio
+    async def test_schedule_meeting_creates_proper_structure(
+        self, mock_db, company_id, agent_a_id, agent_b_id
+    ):
+        """schedule_meeting creates a Meeting and MeetingParticipant records."""
+        scheduler = MeetingScheduler(db=mock_db)
+        scheduled_at = datetime.now(timezone.utc) + timedelta(hours=1)
+
+        participants = [
+            {"agent_id": agent_a_id, "role": "facilitator"},
+            {"agent_id": agent_b_id, "role": "required"},
+        ]
+
+        meeting = await scheduler.schedule_meeting(
+            company_id=company_id,
+            meeting_type="standup",
+            title="Daily Standup",
+            scheduled_at=scheduled_at,
+            participants=participants,
+        )
+
+        # Verify db.add was called for meeting + 2 participants = 3 times
+        assert mock_db.add.call_count == 3
+        assert mock_db.flush.await_count == 1
+        assert mock_db.commit.await_count == 1
+        assert mock_db.refresh.await_count == 1
+
+        # The meeting object should have correct fields
+        assert meeting.meeting_type == "standup"
+        assert meeting.title == "Daily Standup"
+        assert meeting.status == "scheduled"
+        assert meeting.scheduled_at == scheduled_at
+        assert meeting.company_id == company_id
+
+    @pytest.mark.asyncio
+    async def test_schedule_meeting_with_recurrence(
+        self, mock_db, company_id, agent_a_id
+    ):
+        """schedule_meeting stores recurrence_rule when provided."""
+        scheduler = MeetingScheduler(db=mock_db)
+        scheduled_at = datetime.now(timezone.utc) + timedelta(hours=1)
+
+        participants = [{"agent_id": agent_a_id, "role": "required"}]
+
+        meeting = await scheduler.schedule_meeting(
+            company_id=company_id,
+            meeting_type="standup",
+            title="Recurring Standup",
+            scheduled_at=scheduled_at,
+            participants=participants,
+            recurrence_rule="daily",
+        )
+
+        assert meeting.recurrence_rule == "daily"
+
+    @pytest.mark.asyncio
+    async def test_schedule_meeting_no_recurrence(
+        self, mock_db, company_id, agent_a_id
+    ):
+        """schedule_meeting sets recurrence_rule to None for one-off meetings."""
+        scheduler = MeetingScheduler(db=mock_db)
+        scheduled_at = datetime.now(timezone.utc) + timedelta(hours=1)
+
+        participants = [{"agent_id": agent_a_id, "role": "required"}]
+
+        meeting = await scheduler.schedule_meeting(
+            company_id=company_id,
+            meeting_type="planning",
+            title="One-off Planning",
+            scheduled_at=scheduled_at,
+            participants=participants,
+        )
+
+        assert meeting.recurrence_rule is None
+
+    @pytest.mark.asyncio
+    async def test_cancel_meeting(self, mock_db):
+        """cancel_meeting sets status to cancelled."""
+        scheduler = MeetingScheduler(db=mock_db)
+
+        # Mock finding a meeting
+        from unittest.mock import MagicMock as MockMeeting
+        mock_meeting = MockMeeting()
+        mock_meeting.id = uuid.uuid4()
+        mock_meeting.status = "scheduled"
+
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = mock_meeting
+        mock_db.execute.return_value = mock_result
+
+        result = await scheduler.cancel_meeting(mock_meeting.id)
+
+        assert result.status == "cancelled"
+        mock_db.commit.assert_awaited()
+
+    @pytest.mark.asyncio
+    async def test_cancel_meeting_not_found_raises(self, mock_db):
+        """cancel_meeting raises ValueError when meeting not found."""
+        scheduler = MeetingScheduler(db=mock_db)
+
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = None
+        mock_db.execute.return_value = mock_result
+
+        with pytest.raises(ValueError, match="Meeting .* not found"):
+            await scheduler.cancel_meeting(uuid.uuid4())
 
 
 class TestMeetingConductorInit:

@@ -1,0 +1,27 @@
+{
+  "id": "FEAT-008",
+  "type": "feat",
+  "description": "Add comprehensive tests for all new modules: communication, knowledge, meetings, company simulation, and evolution.",
+  "status": "in_progress",
+  "steps": [
+    "Create tests/test_communication.py with test classes: TestA2AProtocol (test send/receive message, test deduplication with same correlation_id, test broadcast delivery, test team-scoped routing, test message priorities, test message types), TestGroupManager (test create group, test add/remove members, test group broadcast, test mention specific agent), TestEventBus (test subscribe and publish, test async handler called, test sync handler called immediately, test event persistence, test replay). Tests should instantiate classes directly with mock/in-memory state, not requiring DB.",
+    "Create tests/test_knowledge.py with test classes: TestKnowledgePlaza (test publish page, test update page increments version, test search pages with BM25, test category filtering, test company_id isolation), TestRAGPipeline (test chunk_document paragraph strategy, test chunk_document fixed_size strategy, test search returns relevant chunks, test rerank reorders results, test assemble_context respects token budget), TestExperienceManager (test record experience, test find similar experiences, test success pattern extraction). Use in-memory data and mock DB sessions.",
+    "Create tests/test_meetings.py with test classes: TestMeetingScheduler (test schedule meeting creates record, test cancel meeting, test get upcoming meetings, test recurrence rule storage), TestMeetingConductor (test start meeting changes status, test generate agenda from template, test extract action items, test generate minutes), TestMeetingTemplates (test standup template has correct sections, test all template types exist, test template structure is consistent). Pure logic tests on template data structures.",
+    "Create tests/test_company.py with test classes: TestOrgChart (test build hierarchy from agents, test get reporting chain, test get direct reports, test span of control calculation, test empty company), TestDelegationEngine (test find best delegate by skills, test cascade delegation, test capacity-based scoring), TestPerformanceManager (test calculate score formula, test get metrics breakdown, test recommendations based on thresholds, test trend detection), TestHiringManager (test generate job description, test onboarding plan structure, test team placement recommendation). Use Agent model instances created directly.",
+    "Create tests/test_evolution.py with test classes: TestEvolutionObserver (test track execution, test detect patterns from repeated failures, test anomaly detection, test classify pattern), TestFailureAnalyzer (test root cause grouping, test success factor extraction, test compare outcomes), TestImprovementProposer (test proposal generation with all required fields, test confidence/risk included), TestEvolutionSandbox (test create sandbox, test resource limits enforcement, test cleanup), TestProposalEvaluator (test evaluation scoring, test significance check, test promotion criteria), TestChangePromoter (test promote REFUSES without approval_id, test promote succeeds with approval_id, test rollback), TestSkillEvolution (test version creation, test promote requires approval), TestAgentEvolution (test candidate creation, test model optimization recommendation). CRITICAL: test that promotion always requires approval."
+  ],
+  "acceptance_criteria": [
+    "All 5 test files exist with comprehensive test classes",
+    "Tests run without requiring database or external services",
+    "Tests cover the core logic of each module (not just imports)",
+    "Evolution tests explicitly verify the governance gate (no promotion without approval)",
+    "All tests pass with python -m pytest tests/ -v",
+    "Tests follow existing pattern: pytest classes, direct model instantiation, mock sessions where needed"
+  ],
+  "verification": [
+    "cd /projects/sandbox/NVLabsCompany && python -m pytest tests/test_communication.py tests/test_knowledge.py tests/test_meetings.py tests/test_company.py tests/test_evolution.py -v",
+    "cd /projects/sandbox/NVLabsCompany && python -m pytest tests/ -v --tb=short"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}
