@@ -1,0 +1,38 @@
+{
+  "id": "FEAT-001",
+  "type": "feat",
+  "description": "Create the dashboard project scaffolding: config files, entry point, type definitions, API client layer, custom hooks, and common/layout components. This establishes the foundation everything else builds on.",
+  "status": "in_progress",
+  "steps": [
+    "Create dashboard/ directory with package.json listing: react 19, react-dom 19, react-router-dom 7, lucide-react, recharts, typescript 5.x, vite 6.x, @vitejs/plugin-react, tailwindcss 4.x, postcss, autoprefixer, @types/react, @types/react-dom",
+    "Create vite.config.ts with React plugin and proxy to localhost:8000 for /api",
+    "Create tsconfig.json with strict mode, path aliases (@/ -> src/), and tsconfig.node.json for vite config",
+    "Create tailwind.config.js scanning ./src/**/*.{ts,tsx} and postcss.config.js",
+    "Create index.html with root div and script module pointing to src/main.tsx",
+    "Create public/favicon.svg with a simple NEXUS-themed icon",
+    "Create src/index.css with Tailwind directives (@tailwind base/components/utilities) and global styles (dark sidebar colors, Inter font)",
+    "Create src/main.tsx mounting React app to #root",
+    "Create src/types/ with all type definition files: agent.ts, task.ts, company.ts, evolution.ts, common.ts - matching the backend response models (UUID ids as strings, datetime as strings, etc.)",
+    "Create src/api/client.ts - fetch wrapper with configurable BASE_URL defaulting to http://localhost:8000, error handling, JSON parsing, GET/POST/PUT/PATCH/DELETE methods",
+    "Create src/api/agents.ts, companies.ts, tasks.ts, workflows.ts, evolution.ts, budgets.ts - each with typed API call functions using the client",
+    "Create src/hooks/useApi.ts (generic hook with loading/error/data state), useAgents.ts (agent-specific), usePolling.ts (auto-refresh with configurable interval)",
+    "Create src/components/common/ - Card.tsx, Badge.tsx, Button.tsx, Table.tsx, Modal.tsx, Spinner.tsx, EmptyState.tsx, StatusIndicator.tsx",
+    "Create src/components/layout/ - Sidebar.tsx (dark #1e1e2e, navigation links with lucide icons), Header.tsx (breadcrumb, company info), Layout.tsx (sidebar + header + main content wrapper), Breadcrumb.tsx"
+  ],
+  "acceptance_criteria": [
+    "dashboard/ directory exists with all config files (package.json, vite.config.ts, tsconfig.json, tsconfig.node.json, tailwind.config.js, postcss.config.js, index.html)",
+    "All type definitions in src/types/ match backend response models",
+    "API client properly wraps fetch with error handling and typed methods",
+    "All 6 API module files exist with proper typed functions",
+    "All 3 hook files exist with proper React hook patterns",
+    "All 8 common components and 4 layout components exist with proper TypeScript interfaces",
+    "No any types used where avoidable"
+  ],
+  "verification": [
+    "Run node -c on key .ts/.tsx files to check basic syntax (or use tsc --noEmit if available)",
+    "Verify all files exist with correct directory structure using ls -R",
+    "Check that imports between files are consistent (e.g. api files import from types, hooks import from api)"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}
