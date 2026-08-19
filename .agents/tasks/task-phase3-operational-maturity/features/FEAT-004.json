@@ -2,7 +2,7 @@
   "id": "FEAT-004",
   "type": "feat",
   "description": "Git Worktree Real Operations - The WorktreeManager already has full real git operations implemented (using asyncio.create_subprocess_exec). Verify the existing test suite passes and add any missing edge case tests for error handling paths.",
-  "status": "pending",
+  "status": "in_progress",
   "steps": [
     "Run the existing tests/test_worktree.py to confirm the already-implemented WorktreeManager passes all tests (it already uses real git subprocess calls)",
     "Review src/nexus/runtime/worktree.py for any gap between the task requirements and current implementation: (a) verify worktree path convention matches spec (should be <repo_path>/../worktrees/<agent_name>-<short_id>/), (b) verify error handling returns structured errors (not throws) where specified",
