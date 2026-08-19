@@ -55,7 +55,7 @@ const systemStatus: SystemStatusItem[] = [
 
 export function Sidebar() {
   return (
-    <aside className="fixed left-0 top-0 bottom-0 w-64 bg-[#12131f] flex flex-col z-30">
+    <aside className="fixed left-0 top-0 bottom-0 w-64 bg-dark-sidebar flex flex-col z-30">
       {/* Logo */}
       <div className="flex items-center gap-3 px-5 py-5 border-b border-white/[0.08]">
         <div className="h-9 w-9 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-lg flex items-center justify-center">

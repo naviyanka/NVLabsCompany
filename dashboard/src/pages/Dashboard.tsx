@@ -1,4 +1,5 @@
 import { Card } from '@/components/common/Card';
+import { Link } from 'react-router-dom';
 import {
   Sparkles,
   Bot,
@@ -28,11 +29,14 @@ import {
   ComposedChart,
 } from 'recharts';
 
-// Token & Cost chart data
+// Static demo data - this dashboard intentionally uses hardcoded mock data
+// to match the mission-control screenshot design. No live API integration.
+
+// Token & Cost chart data (deterministic - no randomness)
 const tokenCostData = Array.from({ length: 25 }, (_, i) => {
   const hour = i;
-  const baseTokens = 80000 + Math.sin(i * 0.5) * 40000 + Math.random() * 20000;
-  const baseCost = 30 + Math.sin(i * 0.4) * 20 + Math.random() * 10;
+  const baseTokens = 80000 + Math.sin(i * 0.5) * 40000 + Math.cos(i * 0.3) * 15000 + Math.sin(i * 1.2) * 5000;
+  const baseCost = 30 + Math.sin(i * 0.4) * 20 + Math.cos(i * 0.7) * 8 + Math.sin(i * 1.5) * 2;
   return {
     time: `${String(hour).padStart(2, '0')}:00`,
     tokens: Math.round(baseTokens),
@@ -172,12 +176,12 @@ export function Dashboard() {
               <h3 className="text-white font-semibold">Agent Network</h3>
               <p className="text-xs text-gray-400">24 Active Agents</p>
             </div>
-            <a href="/office" className="text-xs text-blue-400 hover:text-blue-300">
+            <Link to="/office" className="text-xs text-blue-400 hover:text-blue-300">
               View Office &rarr;
-            </a>
+            </Link>
           </div>
           {/* Office visualization */}
-          <div className="bg-[#0f1117] rounded-lg p-3 border border-white/[0.05]">
+          <div className="bg-dark-bg rounded-lg p-3 border border-white/[0.05]">
             <svg viewBox="0 0 300 185" className="w-full h-auto">
               {officeZones.map((zone) => (
                 <g key={zone.name}>
@@ -224,9 +228,9 @@ export function Dashboard() {
               <h3 className="text-white font-semibold">Pipeline Execution</h3>
               <p className="text-xs text-gray-400">7 Running Pipelines</p>
             </div>
-            <a href="/pipelines" className="text-xs text-blue-400 hover:text-blue-300">
+            <Link to="/pipelines" className="text-xs text-blue-400 hover:text-blue-300">
               View All &rarr;
-            </a>
+            </Link>
           </div>
           <div className="space-y-4">
             {pipelines.map((pipeline) => (
@@ -273,9 +277,9 @@ export function Dashboard() {
               </div>
             ))}
           </div>
-          <a href="/activity" className="text-xs text-blue-400 hover:text-blue-300 mt-4 block">
+          <Link to="/activity" className="text-xs text-blue-400 hover:text-blue-300 mt-4 block">
             View All Activity &rarr;
-          </a>
+          </Link>
         </Card>
       </div>
 
@@ -304,7 +308,7 @@ export function Dashboard() {
         <Card padding="lg">
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-white font-semibold">Recent Tasks</h3>
-            <a href="/tasks" className="text-xs text-blue-400 hover:text-blue-300">View All &rarr;</a>
+            <Link to="/tasks" className="text-xs text-blue-400 hover:text-blue-300">View All &rarr;</Link>
           </div>
           <div className="space-y-3">
             {recentTasks.map((task) => (
@@ -335,7 +339,7 @@ export function Dashboard() {
         <Card padding="lg">
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-white font-semibold">Top Agents</h3>
-            <a href="/agents" className="text-xs text-blue-400 hover:text-blue-300">View All &rarr;</a>
+            <Link to="/agents" className="text-xs text-blue-400 hover:text-blue-300">View All &rarr;</Link>
           </div>
           <div className="space-y-3">
             {topAgents.map((agent) => (
@@ -447,8 +451,8 @@ export function Dashboard() {
 
       {/* (G) Command Bar */}
       <div className="relative">
-        <div className="flex items-center bg-[#1a1b2e] border border-white/[0.08] rounded-xl px-4 py-3">
-          <span className="text-[10px] text-gray-500 bg-[#0f1117] border border-white/[0.08] rounded px-1.5 py-0.5 mr-3">
+        <div className="flex items-center bg-dark-surface border border-white/[0.08] rounded-xl px-4 py-3">
+          <span className="text-[10px] text-gray-500 bg-dark-bg border border-white/[0.08] rounded px-1.5 py-0.5 mr-3">
             Ctrl K
           </span>
           <input

@@ -3,7 +3,7 @@ import { NavLink } from 'react-router-dom';
 
 export function Header() {
   return (
-    <header className="h-14 bg-[#1a1b2e] border-b border-white/[0.08] flex items-center justify-between px-6">
+    <header className="h-14 bg-dark-surface border-b border-white/[0.08] flex items-center justify-between px-6">
       {/* Search */}
       <div className="flex items-center gap-4">
         <div className="relative">
@@ -11,22 +11,22 @@ export function Header() {
           <input
             type="text"
             placeholder="Search agents, tasks, pipelines..."
-            className="w-72 pl-9 pr-16 py-1.5 bg-[#0f1117] border border-white/[0.08] rounded-lg text-sm text-gray-300 placeholder-gray-500 focus:outline-none focus:border-indigo-500/50"
+            className="w-72 pl-9 pr-16 py-1.5 bg-dark-bg border border-white/[0.08] rounded-lg text-sm text-gray-300 placeholder-gray-500 focus:outline-none focus:border-indigo-500/50"
           />
-          <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-gray-500 bg-[#1a1b2e] border border-white/[0.08] rounded px-1.5 py-0.5">
+          <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-gray-500 bg-dark-surface border border-white/[0.08] rounded px-1.5 py-0.5">
             Ctrl+K
           </span>
         </div>
       </div>
 
       {/* Toggle Buttons */}
-      <div className="flex items-center gap-1 bg-[#0f1117] rounded-lg p-1">
+      <div className="flex items-center gap-1 bg-dark-bg rounded-lg p-1">
         <NavLink
           to="/"
           end
           className={({ isActive }) =>
             `px-3 py-1 text-sm rounded-md font-medium transition-colors ${
-              isActive ? 'bg-[#1a1b2e] text-white' : 'text-gray-400 hover:text-gray-200'
+              isActive ? 'bg-dark-surface text-white' : 'text-gray-400 hover:text-gray-200'
             }`
           }
         >
