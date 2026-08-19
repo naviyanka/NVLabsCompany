@@ -1,0 +1,26 @@
+{
+  "id": "FEAT-002",
+  "type": "feat",
+  "description": "Create StatisticalAnalyzer (src/nexus/evolution/statistical.py) and ABTestFramework (src/nexus/evolution/ab_testing.py) - pure statistics with stdlib only, plus A/B testing with early stopping.",
+  "status": "completed",
+  "steps": [
+    "Create src/nexus/evolution/statistical.py with class StatisticalAnalyzer containing: compute_significance(control: list[float], treatment: list[float], alpha: float = 0.05) -> dict using two-sample t-test (Welch's) via math+statistics stdlib; detect_trend(values: list[float]) -> dict with linear regression (slope, r_squared, direction); compute_confidence_interval(data: list[float], confidence: float = 0.95) -> dict with mean, lower, upper bounds using normal approximation; is_significant_improvement(control: list[float], treatment: list[float], min_effect_size: float = 0.2) -> dict combining significance + Cohen's d effect size.",
+    "Create src/nexus/evolution/ab_testing.py with class ABTestFramework(statistical_analyzer: StatisticalAnalyzer | None = None) containing: design_test(baseline_mean: float, baseline_std: float, min_detectable_effect: float, alpha: float = 0.05, power: float = 0.8) -> dict that calculates required sample size; run_test(control_results: list[float], treatment_results: list[float], alpha: float = 0.05) -> dict with p_value, confidence_interval, effect_size, power_estimate, verdict (improved/degraded/inconclusive); early_stopping(control_results: list[float], treatment_results: list[float], num_looks: int, current_look: int, alpha: float = 0.05) -> dict implementing O'Brien-Fleming alpha spending for interim analysis.",
+    "Add both new classes to src/nexus/evolution/__init__.py exports",
+    "Create tests/test_statistical.py with TestStatisticalAnalyzer class testing: identical data returns p_value near 1.0 and is_significant=False; clearly different distributions return is_significant=True; detect_trend identifies upward/downward/flat trends; confidence_interval contains the true mean; is_significant_improvement detects large effect sizes. All tests use hand-crafted deterministic data.",
+    "Create tests/test_ab_testing.py with TestABTestFramework class testing: design_test returns positive sample_size; run_test with identical data returns 'inconclusive' verdict; run_test with clearly different data returns 'improved' or 'degraded'; early_stopping adjusts alpha based on look number (first look has stricter alpha than final look); integration with StatisticalAnalyzer."
+  ],
+  "acceptance_criteria": [
+    "StatisticalAnalyzer uses only math and statistics stdlib modules (no numpy/scipy)",
+    "All statistical methods return dicts with documented keys",
+    "ABTestFramework.run_test returns verdict field with values 'improved', 'degraded', or 'inconclusive'",
+    "ABTestFramework.early_stopping implements spending function that adjusts alpha based on information fraction",
+    "All new tests pass: python3.12 -m pytest tests/test_statistical.py tests/test_ab_testing.py",
+    "Existing tests still pass: python3.12 -m pytest tests/test_evolution.py"
+  ],
+  "verification": [
+    "export PATH=/opt/toolchains/.pyenv/shims:$PATH && cd /projects/sandbox/NVLabsCompany && python3.12 -m pytest tests/test_statistical.py tests/test_ab_testing.py tests/test_evolution.py --tb=short -q"
+  ],
+  "blocked_reason": null,
+  "findings": "All 38 new tests pass. Full test suite passes (2099 tests). Used Abramowitz-Stegun rational approximation for inverse normal CDF, regularized incomplete beta function with Lentz continued fraction for t-distribution p-values. O'Brien-Fleming alpha spending uses erfc for normal CDF. Cohen's d computed with pooled standard deviation."
+}

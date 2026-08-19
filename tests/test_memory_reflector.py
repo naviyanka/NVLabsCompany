@@ -629,3 +629,339 @@ class TestTypesImportable:
         assert section.heading == "## Test"
         memory = rt.ParsedMemory(header="# H")
         assert memory.header == "# H"
+
+
+# ── Test: LLM Integration ───────────────────────────────────────────────────
+
+import json
+from unittest.mock import AsyncMock
+
+from nexus.memory.reflector import CONDENSE_PROMPT
+
+
+class TestLLMSummarizer:
+    """Tests for LLM-based summarization via _summarize_evicted."""
+
+    async def test_llm_called_with_correct_prompt_structure(self):
+        """LLM callable receives a prompt containing CONDENSE_PROMPT structure."""
+        mock_llm = AsyncMock(return_value=json.dumps({
+            "condensed": "Summary of evicted work.",
+            "hoist_lines": ["- Important decision"],
+        }))
+        reflector = MemoryReflector(llm_callable=mock_llm)
+
+        evicted = [
+            Section(heading="## Task: old work", body="Did some old work."),
+            Section(heading="## Task: more old", body="Did more old work."),
+        ]
+
+        result = await reflector._summarize_evicted(
+            "Previous summary.", evicted, "pinned stuff"
+        )
+
+        mock_llm.assert_called_once()
+        prompt_arg = mock_llm.call_args[0][0]
+        # Prompt should contain evicted section text
+        assert "Did some old work." in prompt_arg
+        assert "Did more old work." in prompt_arg
+        # Prompt should contain existing condensed context
+        assert "Previous summary." in prompt_arg
+        # Result should be parsed from mock response
+        assert result == ("Summary of evicted work.", ["- Important decision"])
+
+    async def test_llm_returns_empty_hoist_lines(self):
+        """LLM response with empty hoist_lines returns empty list."""
+        mock_llm = AsyncMock(return_value=json.dumps({
+            "condensed": "Condensed output.",
+            "hoist_lines": [],
+        }))
+        reflector = MemoryReflector(llm_callable=mock_llm)
+
+        evicted = [Section(heading="## Task: x", body="Body text.")]
+        result = await reflector._summarize_evicted(None, evicted, None)
+
+        assert result == ("Condensed output.", [])
+
+    async def test_llm_failure_falls_back_to_heuristic(self):
+        """When LLM raises an exception, heuristic fallback is used."""
+        mock_llm = AsyncMock(side_effect=RuntimeError("LLM unavailable"))
+        reflector = MemoryReflector(llm_callable=mock_llm)
+
+        evicted = [
+            Section(
+                heading="## Task: work",
+                body="First sentence. Second sentence. Third sentence.",
+            ),
+        ]
+        result = await reflector._summarize_evicted(None, evicted, None)
+
+        # Heuristic: first 2 sentences
+        condensed, hoist = result
+        assert "First sentence" in condensed
+        assert "Second sentence" in condensed
+        assert "Third sentence" not in condensed
+        assert hoist == []
+
+    async def test_llm_invalid_json_falls_back(self):
+        """When LLM returns invalid JSON, heuristic fallback is used."""
+        mock_llm = AsyncMock(return_value="not valid json at all")
+        reflector = MemoryReflector(llm_callable=mock_llm)
+
+        evicted = [
+            Section(heading="## Task: x", body="Sentence one. Sentence two."),
+        ]
+        result = await reflector._summarize_evicted("old", evicted, None)
+
+        condensed, hoist = result
+        assert "old" in condensed
+        assert "Sentence one" in condensed
+        assert hoist == []
+
+
+class TestHeuristicFallback:
+    """Tests for heuristic summarization fallback."""
+
+    def test_takes_first_two_sentences(self):
+        """Heuristic returns first 2 sentences of each evicted section."""
+        reflector = MemoryReflector()
+        evicted = [
+            Section(
+                heading="## Task: alpha",
+                body="First alpha. Second alpha. Third alpha. Fourth alpha.",
+            ),
+            Section(
+                heading="## Task: beta",
+                body="First beta. Second beta. Third beta.",
+            ),
+        ]
+        condensed, hoist = reflector._heuristic_fallback(None, evicted)
+
+        assert "First alpha. Second alpha." in condensed
+        assert "Third alpha" not in condensed
+        assert "First beta. Second beta." in condensed
+        assert "Third beta" not in condensed
+        assert hoist == []
+
+    def test_prepends_existing_condensed_text(self):
+        """Existing condensed text is prepended to the output."""
+        reflector = MemoryReflector()
+        evicted = [
+            Section(heading="## Task: x", body="New sentence. Another one."),
+        ]
+        condensed, hoist = reflector._heuristic_fallback(
+            "Old summary.", evicted
+        )
+
+        lines = condensed.split("\n")
+        assert lines[0] == "Old summary."
+        assert "New sentence" in condensed
+        assert hoist == []
+
+    def test_bounded_output_single_sentence(self):
+        """Sections with a single sentence produce bounded output."""
+        reflector = MemoryReflector()
+        evicted = [
+            Section(heading="## Task: short", body="Only one sentence"),
+        ]
+        condensed, hoist = reflector._heuristic_fallback(None, evicted)
+
+        assert "Only one sentence" in condensed
+        assert hoist == []
+
+    def test_empty_evicted_returns_condensed_only(self):
+        """Empty evicted list returns only existing condensed text."""
+        reflector = MemoryReflector()
+        condensed, hoist = reflector._heuristic_fallback("Prior.", [])
+
+        assert condensed == "Prior."
+        assert hoist == []
+
+    def test_make_summarizer_without_llm_uses_heuristic(self):
+        """make_summarizer() without llm_callable uses heuristic directly."""
+        reflector = MemoryReflector()
+        summarizer = reflector.make_summarizer()
+
+        evicted = [
+            Section(
+                heading="## Task: test",
+                body="Sentence A. Sentence B. Sentence C.",
+            ),
+        ]
+        condensed, hoist = summarizer(None, evicted, None)
+
+        assert "Sentence A. Sentence B." in condensed
+        assert "Sentence C" not in condensed
+        assert hoist == []
+
+    def test_heuristic_fallback_hoists_durable_facts(self):
+        """Heuristic fallback returns durable facts as hoist_lines."""
+        reflector = MemoryReflector()
+        evicted = [
+            Section(
+                heading="## Task: deploy",
+                body=(
+                    "We decided to use PostgreSQL for persistence.\n"
+                    "Modified src/nexus/memory/reflector.py.\n"
+                    "Just a regular line with no facts."
+                ),
+            ),
+        ]
+        condensed, hoist = reflector._heuristic_fallback(None, evicted)
+
+        assert "We decided to use PostgreSQL for persistence." in hoist
+        assert "Modified src/nexus/memory/reflector.py." in hoist
+        assert "Just a regular line with no facts." not in hoist
+
+
+class TestExtractDurableFacts:
+    """Tests for _extract_durable_facts method."""
+
+    def test_identifies_decision_keywords(self):
+        """Lines with 'decided', 'decision', or 'chose' are extracted."""
+        reflector = MemoryReflector()
+        evicted = [
+            Section(
+                heading="## Task: choices",
+                body=(
+                    "We decided to use PostgreSQL.\n"
+                    "This was a major decision for the team.\n"
+                    "The team chose React for the frontend.\n"
+                    "Nothing special about this line."
+                ),
+            ),
+        ]
+        facts = reflector._extract_durable_facts(evicted)
+
+        assert "We decided to use PostgreSQL." in facts
+        assert "This was a major decision for the team." in facts
+        assert "The team chose React for the frontend." in facts
+        assert "Nothing special about this line." not in facts
+
+    def test_identifies_file_paths(self):
+        """Lines with file path patterns are extracted."""
+        reflector = MemoryReflector()
+        evicted = [
+            Section(
+                heading="## Task: refactor",
+                body=(
+                    "Modified src/nexus/memory/reflector.py to add LLM.\n"
+                    "Also updated *.py files in the test directory.\n"
+                    "Regular text with no paths."
+                ),
+            ),
+        ]
+        facts = reflector._extract_durable_facts(evicted)
+
+        assert "Modified src/nexus/memory/reflector.py to add LLM." in facts
+        assert "Also updated *.py files in the test directory." in facts
+        assert "Regular text with no paths." not in facts
+
+    def test_identifies_commit_shas(self):
+        """Lines with 8+ hex character strings are extracted."""
+        reflector = MemoryReflector()
+        evicted = [
+            Section(
+                heading="## Task: deploy",
+                body=(
+                    "Deployed commit abc12345 to production.\n"
+                    "Fixed in deadbeef.\n"
+                    "Short hex abc1234 should not match.\n"
+                    "No hex here at all."
+                ),
+            ),
+        ]
+        facts = reflector._extract_durable_facts(evicted)
+
+        assert "Deployed commit abc12345 to production." in facts
+        assert "Fixed in deadbeef." in facts
+        assert "Short hex abc1234 should not match." not in facts
+        assert "No hex here at all." not in facts
+
+    def test_identifies_dollar_amounts_and_percentages(self):
+        """Lines with $ amounts or % are extracted."""
+        reflector = MemoryReflector()
+        evicted = [
+            Section(
+                heading="## Task: costs",
+                body=(
+                    "Monthly cost is $1,200.\n"
+                    "Achieved 95% test coverage.\n"
+                    "Plain text without numbers."
+                ),
+            ),
+        ]
+        facts = reflector._extract_durable_facts(evicted)
+
+        assert "Monthly cost is $1,200." in facts
+        assert "Achieved 95% test coverage." in facts
+        assert "Plain text without numbers." not in facts
+
+    def test_deduplicates_lines(self):
+        """Duplicate lines across sections are not repeated."""
+        reflector = MemoryReflector()
+        evicted = [
+            Section(heading="## A", body="We decided to use Python."),
+            Section(heading="## B", body="We decided to use Python."),
+        ]
+        facts = reflector._extract_durable_facts(evicted)
+
+        assert facts.count("We decided to use Python.") == 1
+
+    def test_empty_evicted(self):
+        """Empty evicted list returns empty results."""
+        reflector = MemoryReflector()
+        assert reflector._extract_durable_facts([]) == []
+
+
+class TestCondensePipelineWithLLM:
+    """Tests for the full condense pipeline with mocked LLM callable."""
+
+    async def test_condense_with_make_summarizer_llm(self):
+        """Full pipeline works with make_summarizer() backed by LLM."""
+        mock_llm = AsyncMock(return_value=json.dumps({
+            "condensed": "LLM condensed all the evicted sections.",
+            "hoist_lines": [],
+        }))
+        reflector = MemoryReflector(
+            settings=ReflectSettings(recent_keep=2),
+            llm_callable=mock_llm,
+        )
+        text = _make_large_file(section_count=10)
+        summarizer = reflector.make_summarizer()
+        result = reflector.condense("agent-llm", text, summarizer)
+
+        assert result.condensed is True
+        assert result.reason == "condensed"
+        assert mock_llm.called
+
+    def test_backward_compat_external_summarizer(self):
+        """MemoryReflector() still works with external summarizer passed to condense."""
+        reflector = MemoryReflector(settings=ReflectSettings(recent_keep=2))
+        text = _make_large_file(section_count=10)
+        # Use the original _dummy_summarizer directly
+        result = reflector.condense("agent-1", text, _dummy_summarizer)
+        assert result.condensed is True
+        assert result.reason == "condensed"
+
+    def test_backward_compat_no_llm_callable(self):
+        """MemoryReflector without llm_callable still initializes correctly."""
+        reflector = MemoryReflector()
+        assert reflector._llm_callable is None
+        assert reflector.settings is not None
+
+    async def test_make_summarizer_with_llm_callable(self):
+        """make_summarizer with LLM returns correct results via condense."""
+        mock_llm = AsyncMock(return_value=json.dumps({
+            "condensed": "Summarized by LLM with important context.",
+            "hoist_lines": ["- Hoisted fact from LLM"],
+        }))
+        reflector = MemoryReflector(
+            settings=ReflectSettings(recent_keep=2),
+            llm_callable=mock_llm,
+        )
+        text = _make_large_file(section_count=10)
+        summarizer = reflector.make_summarizer()
+        result = reflector.condense("agent-2", text, summarizer)
+
+        assert result.condensed is True
+        assert mock_llm.called

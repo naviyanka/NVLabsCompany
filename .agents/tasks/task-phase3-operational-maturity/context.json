@@ -1,0 +1,28 @@
+{
+  "project_type": "Python FastAPI backend for autonomous AI company operating system",
+  "language": "Python 3.12+",
+  "build_system": "setuptools via pyproject.toml; pip install -e '.[dev]'",
+  "test_framework": "pytest with pytest-asyncio (asyncio_mode='auto'), tests in tests/ directory",
+  "build_command": "eval \"$(pyenv init -)\" && pip install -e '.[dev]'",
+  "test_command": "eval \"$(pyenv init -)\" && cd /projects/sandbox/NVLabsCompany && python -m pytest tests/ -x -q",
+  "verification_instructions": "1. Run full test suite with pytest to confirm no regressions. 2. Verify new test files pass independently.",
+  "snapshot_or_generated_files": null,
+  "setup_instructions": "eval \"$(pyenv init -)\" to activate Python 3.12.13; pip install -e '.[dev]' for dev dependencies",
+  "environment_constraints": "Python 3.12 available via pyenv (pyenv init needed). OPEN_INTERNET mode. No Docker needed. Dashboard (frontend) must NOT be touched.",
+  "contribution_requirements": "ruff lint (line-length=100), type hints everywhere, docstrings on all public classes/methods, Python 3.12 features (type | syntax), asyncio_mode='auto' for pytest-asyncio",
+  "key_patterns": "LLM integration uses llm_callable: Callable[[str], Awaitable[str]] pattern (see llm_planner.py, llm_critic.py, llm_extract.py). Tests use unittest.mock.AsyncMock for LLM mocking. Atomic file writes use temp + os.replace pattern. Existing test file naming: tests/test_<module>.py. Classes use dataclass or pydantic BaseModel.",
+  "relevant_files": [
+    "src/nexus/memory/reflector.py",
+    "src/nexus/memory/reflector_types.py",
+    "src/nexus/memory/llm_extract.py",
+    "src/nexus/communication/webhook_server.py",
+    "src/nexus/communication/webhook_types.py",
+    "src/nexus/governance/approvals.py",
+    "src/nexus/runtime/worktree.py",
+    "tests/test_memory_reflector.py",
+    "tests/test_webhook_server.py",
+    "tests/test_governance.py",
+    "tests/test_worktree.py"
+  ],
+  "directory_structure": "src/nexus/ - main source (adapters/, api/, communication/, company/, governance/, memory/, orchestration/, runtime/, etc.); tests/ - all test files flat; dashboard/ - frontend (DO NOT TOUCH)"
+}

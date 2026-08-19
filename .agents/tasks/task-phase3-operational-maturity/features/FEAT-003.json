@@ -1,0 +1,30 @@
+{
+  "id": "FEAT-003",
+  "type": "feat",
+  "description": "Approvals DB Persistence - Add file-backed persistence to ApprovalEngine with atomic writes, approval history query, and notification hook for new pending approvals.",
+  "status": "completed",
+  "steps": [
+    "In src/nexus/governance/approvals.py, add optional `persist_path: Path | None = None` and `on_approval_needed: Callable[[ApprovalRequest], None] | None = None` parameters to ApprovalEngine.__init__()",
+    "Implement _load() method: if persist_path exists and file is present, read JSON and reconstruct _approvals dict (deserialize UUID keys, datetime fields, etc.)",
+    "Implement _save() method: serialize _approvals to JSON (handling UUID, datetime serialization), write atomically using tempfile + os.replace",
+    "Call _save() at the end of submit_for_approval() and process_approval() when persist_path is set",
+    "Call on_approval_needed(request) at the end of submit_for_approval() when the request status is still 'pending' and callback is set",
+    "Add get_approval_history(company_id: uuid.UUID, limit: int = 50) -> list[ApprovalRequest] method that returns resolved approvals (status in ('approved', 'denied')) for the given company, sorted by decided_at descending, limited to `limit` entries",
+    "Add tests in tests/test_approvals_persistence.py covering: (a) persist_path=None keeps in-memory-only behavior (backward compat), (b) submit + persist + new instance loads correct state, (c) process_approval persists updated state, (d) get_approval_history returns only resolved approvals sorted by decided_at, (e) on_approval_needed callback fires for pending requests, (f) on_approval_needed does NOT fire for auto-approved requests, (g) atomic write safety"
+  ],
+  "acceptance_criteria": [
+    "ApprovalEngine with persist_path=None behaves identically to before (backward compatible)",
+    "ApprovalEngine with persist_path persists approvals to JSON file",
+    "State survives simulated restart (new instance reads file)",
+    "get_approval_history returns resolved approvals sorted by decided_at desc",
+    "on_approval_needed callback fires only for pending approvals (not auto-approved)",
+    "Atomic file writes (temp + os.replace) prevent corruption",
+    "All existing tests in test_governance.py still pass"
+  ],
+  "verification": [
+    "eval \"$(pyenv init -)\" && cd /projects/sandbox/NVLabsCompany && python -m pytest tests/test_approvals_persistence.py -x -q",
+    "eval \"$(pyenv init -)\" && cd /projects/sandbox/NVLabsCompany && python -m pytest tests/test_governance.py -x -q"
+  ],
+  "blocked_reason": null,
+  "findings": "All 11 new tests pass. Full suite (2050 tests) passes with no regressions. Existing test_governance.py tests (38) continue to pass unchanged. Used from __future__ import annotations for proper type hint forward references."
+}

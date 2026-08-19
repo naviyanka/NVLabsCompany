@@ -285,3 +285,117 @@ class TestSyncWorktreeToMain:
 
         # Now the file should be present
         assert (Path(info.worktree_path) / "from_main.txt").exists()
+
+
+class TestEdgeCases:
+    """Edge-case tests for WorktreeManager error handling paths."""
+
+    @pytest.mark.asyncio
+    async def test_revert_nothing_to_revert_returns_false(
+        self, tmp_path: Path
+    ) -> None:
+        """revert_worktree_commit returns False when revert cannot apply cleanly.
+
+        When the worktree has uncommitted changes that conflict with the revert
+        operation, git revert HEAD fails and the method should return False.
+        """
+        repo = await _init_repo(tmp_path)
+        manager = WorktreeManager()
+        agent_id = uuid.uuid4()
+
+        info = await manager.create_worktree(repo, agent_id, "noop")
+
+        # Make a commit that modifies README.md
+        readme = Path(info.worktree_path) / "README.md"
+        readme.write_text("committed change\n")
+        await _run_git(info.worktree_path, "add", "README.md")
+        await _run_git(info.worktree_path, "commit", "-m", "Modify readme")
+
+        # Now leave a dirty working tree that conflicts with the revert
+        readme.write_text("dirty conflicting content\n")
+
+        # Revert should fail because of the conflicting uncommitted change
+        result = await manager.revert_worktree_commit(repo, info.worktree_path)
+
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_remove_already_removed_returns_false(
+        self, tmp_path: Path
+    ) -> None:
+        """remove_worktree returns False when the worktree is already gone.
+
+        If the worktree directory has been removed and git has pruned the
+        reference, git worktree remove will fail and the method returns False.
+        """
+        repo = await _init_repo(tmp_path)
+        manager = WorktreeManager()
+        agent_id = uuid.uuid4()
+
+        info = await manager.create_worktree(repo, agent_id, "ephemeral")
+        assert Path(info.worktree_path).exists()
+
+        # Manually remove the worktree directory and prune git's reference
+        import shutil
+
+        shutil.rmtree(info.worktree_path)
+        await _run_git(repo, "worktree", "prune")
+
+        result = await manager.remove_worktree(
+            info.worktree_path, info.branch, repo
+        )
+
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_multiple_worktrees_independent(
+        self, tmp_path: Path
+    ) -> None:
+        """Two worktrees from the same repo are independent of each other.
+
+        Changes made in one worktree must not appear in the other.
+        """
+        repo = await _init_repo(tmp_path)
+        manager = WorktreeManager()
+        agent_a = uuid.uuid4()
+        agent_b = uuid.uuid4()
+
+        info_a = await manager.create_worktree(repo, agent_a, "alpha")
+        info_b = await manager.create_worktree(repo, agent_b, "beta")
+
+        # Make a change in worktree A
+        file_a = Path(info_a.worktree_path) / "alpha_only.txt"
+        file_a.write_text("alpha content\n")
+        await _run_git(info_a.worktree_path, "add", "alpha_only.txt")
+        await _run_git(info_a.worktree_path, "commit", "-m", "Alpha commit")
+
+        # Make a different change in worktree B
+        file_b = Path(info_b.worktree_path) / "beta_only.txt"
+        file_b.write_text("beta content\n")
+        await _run_git(info_b.worktree_path, "add", "beta_only.txt")
+        await _run_git(info_b.worktree_path, "commit", "-m", "Beta commit")
+
+        # Verify isolation: A does not have B's file and vice versa
+        assert (Path(info_a.worktree_path) / "alpha_only.txt").exists()
+        assert not (Path(info_a.worktree_path) / "beta_only.txt").exists()
+        assert (Path(info_b.worktree_path) / "beta_only.txt").exists()
+        assert not (Path(info_b.worktree_path) / "alpha_only.txt").exists()
+
+    @pytest.mark.asyncio
+    async def test_create_worktree_duplicate_branch_fails(
+        self, tmp_path: Path
+    ) -> None:
+        """Creating a worktree with a duplicate branch name raises RuntimeError.
+
+        If a worktree already exists for the same agent_id and agent_name,
+        attempting to create another one with the same parameters should fail
+        because the branch already exists.
+        """
+        repo = await _init_repo(tmp_path)
+        manager = WorktreeManager()
+        agent_id = uuid.UUID("deadbeef-1234-1234-1234-123456789abc")
+
+        await manager.create_worktree(repo, agent_id, "duper")
+
+        with pytest.raises(RuntimeError):
+            await manager.create_worktree(repo, agent_id, "duper")

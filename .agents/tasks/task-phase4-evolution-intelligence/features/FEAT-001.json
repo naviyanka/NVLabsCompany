@@ -1,0 +1,20 @@
+{
+  "id": "FEAT-001",
+  "type": "feat",
+  "description": "Environment setup and baseline verification - install dependencies and confirm all existing 2061+ tests pass.",
+  "status": "completed",
+  "steps": [
+    "Run: export PATH=/opt/toolchains/.pyenv/shims:$PATH && cd /projects/sandbox/NVLabsCompany && python3.12 -m pip install -e '.[dev]' --quiet",
+    "Run: python3.12 -m pytest tests/ --tb=short -q to verify baseline green (expect 2000+ tests passing)",
+    "If any failures, diagnose and document but do not fix (they are pre-existing)"
+  ],
+  "acceptance_criteria": [
+    "pip install -e '.[dev]' succeeds",
+    "pytest runs and all tests pass (or only pre-existing failures documented)"
+  ],
+  "verification": [
+    "export PATH=/opt/toolchains/.pyenv/shims:$PATH && cd /projects/sandbox/NVLabsCompany && python3.12 -m pytest tests/ --tb=no -q 2>&1 | tail -3"
+  ],
+  "blocked_reason": null,
+  "findings": "pip install -e '.[dev]' succeeded (warnings only about pip version and running as root). All 2061 tests pass in 8.38s with 158 deprecation warnings (mostly datetime.utcnow usage in persistent_circuit_breaker). No failures. Baseline is green on branch feat/sprint-6-production-hardening at commit 4aa58b2."
+}

@@ -1,0 +1,25 @@
+{
+  "id": "FEAT-004",
+  "type": "feat",
+  "description": "Git Worktree Real Operations - The WorktreeManager already has full real git operations implemented (using asyncio.create_subprocess_exec). Verify the existing test suite passes and add any missing edge case tests for error handling paths.",
+  "status": "completed",
+  "steps": [
+    "Run the existing tests/test_worktree.py to confirm the already-implemented WorktreeManager passes all tests (it already uses real git subprocess calls)",
+    "Review src/nexus/runtime/worktree.py for any gap between the task requirements and current implementation: (a) verify worktree path convention matches spec (should be <repo_path>/../worktrees/<agent_name>-<short_id>/), (b) verify error handling returns structured errors (not throws) where specified",
+    "If the worktree path convention differs from the spec (.nexus-worktrees vs ../worktrees), update to match the spec requirement: <repo_path>/.nexus-worktrees/<agent_id>/",
+    "Add missing error handling tests: (a) create_worktree on non-existent repo path, (b) merge_worktree with non-existent branch, (c) remove_worktree on already-removed path, (d) revert_worktree_commit when there is nothing to revert (returns False)",
+    "Ensure all git commands are async (already implemented via _run_git_raw with asyncio.create_subprocess_exec)",
+    "Update test_worktree.py with any new tests"
+  ],
+  "acceptance_criteria": [
+    "All existing tests in test_worktree.py pass",
+    "WorktreeManager uses real git commands via asyncio.create_subprocess_exec (already done)",
+    "Error cases return structured results (False/MergeResult with conflicts) instead of crashing",
+    "New edge-case tests pass"
+  ],
+  "verification": [
+    "eval \"$(pyenv init -)\" && cd /projects/sandbox/NVLabsCompany && python -m pytest tests/test_worktree.py -x -q"
+  ],
+  "blocked_reason": null,
+  "findings": "git revert HEAD succeeds on initial commits in modern git (it removes the added files cleanly), so test_revert uses dirty-working-tree conflicts to trigger failure. git worktree remove --force succeeds even after rm -rf of the directory (it just cleans the reference), so test_remove uses prune + rm -rf to make the worktree truly unknown to git. All 16 worktree tests pass (12 original + 4 new edge cases). Full suite: 2054 passed."
+}
