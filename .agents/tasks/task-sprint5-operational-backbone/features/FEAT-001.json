@@ -2,7 +2,7 @@
   "id": "FEAT-001",
   "type": "feat",
   "description": "Real-time Cost Tracking (Per-Model Pricing) and Agent Provider Presets - standalone modules with no dependencies on other Sprint 5 features",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "Create src/nexus/models_router/pricing.py porting logic from /projects/sandbox/munder-difflin/src/main/pricing.ts. Include: ModelPrice frozen dataclass (input_per_m, output_per_m, cache_read_per_m, cache_write_per_m), price constants for Anthropic (OPUS/SONNET/HAIKU), OpenAI (GPT4O/GPT4O_MINI/O1), and Google Gemini families. Include normalize_model() that strips variant suffixes like [1m], price_for() that resolves model family by keyword matching with Sonnet fallback, TokenSplit dataclass, and estimate_cost_usd() function.",
     "Update src/nexus/models_router/__init__.py to export the new pricing module classes (ModelPrice, TokenSplit, normalize_model, price_for, estimate_cost_usd).",
@@ -28,5 +28,5 @@
     "python3.12 -m pytest tests/ --tb=short -q"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "All 71 new tests pass. Full suite now at 1301 tests (up from 1230 baseline). No issues encountered. Used unused import field in pricing.py dataclass removed during review. Gemini pricing set to 1.25/5/0.315/0 as reasonable defaults since the TS source didn't include Gemini explicitly."
 }
