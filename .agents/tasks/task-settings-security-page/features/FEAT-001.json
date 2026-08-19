@@ -1,0 +1,34 @@
+{
+  "id": "FEAT-001",
+  "type": "feat",
+  "description": "Replace Settings.tsx Profile tab content with Security tab content. Change the active nav item from 'Profile' to 'Security'. Implement the center content (Password section, Two-Factor Authentication section, Active Sessions section) and right sidebar (Security Overview, Account Recovery, Recent Security Activity) exactly as specified in the design.",
+  "status": "in_progress",
+  "steps": [
+    "In dashboard/src/pages/Settings.tsx, update the navItems array: set 'Profile' active to false and 'Security' active to true.",
+    "Replace all Profile-specific imports (Pencil, Camera, Monitor, Sun, Moon, Plus) with Security-specific imports from lucide-react: Eye, EyeOff, ShieldCheck, Smartphone, Laptop, CheckCircle2, ChevronRight, Lock (or appropriate icons for password/shield/key).",
+    "Replace the static mock data section: remove sessionActivity, linkedAccounts. Add new mock data for active sessions table (3 rows: Windows Chrome current device in Kolkata, Android Chrome OnePlus 11 in Delhi, macOS Safari MacBook Pro in Bangalore), security activity timeline (5 items with colored dots), and account recovery info.",
+    "Replace the center content Card with Security content containing three sections: (1) Password section with title 'Password', subtitle 'Ensure your password is strong and unique.', three password inputs (Current, New, Confirm) each with eye toggle icons and type=password, 'Last changed: May 12, 2024' annotation on current password, strength indicator with colored bars showing 'Strong' on new password, and 'Update Password' teal/green button. (2) Two-Factor Authentication section with title, subtitle, status row showing 'Enabled' green badge + descriptive text + 'Manage 2FA' outlined button, and method subsection showing Authenticator App (shield icon, 'Using Google Authenticator', 'Primary' badge, 'Change Method' button) and Backup Codes (key icon, description text, 'View Backup Codes' button). (3) Active Sessions section with title, subtitle, a table with columns DEVICE, LOCATION/IP, LAST ACTIVE, STATUS, ACTION, three data rows as specified, and 'View All Sessions' teal link.",
+    "Replace the right sidebar with three Card sections: (1) Security Overview - large green shield icon with checkmark, 'Your account is secure' green text, 'Last security check: Just now', and 4 checklist items all with green checkmarks. (2) Account Recovery - subtitle, recovery email (navi.yanka@nvlabs.dev) with 'Verified' green indicator, recovery phone (+91 98765 43210) with 'Verified' green indicator, and 'Manage Recovery Options >' link. (3) Recent Security Activity - with 'View All' link header, 5 activity items each with colored dot (green/orange/blue/purple/orange), title, subtitle, timestamp, and chevron.",
+    "Keep the page header and footer sections exactly as they are (Settings icon, title, subtitle, copyright, and footer links).",
+    "Ensure all TypeScript types are correct - use React.useState<boolean> for eye toggle state if needed, and ensure the component compiles with zero errors."
+  ],
+  "acceptance_criteria": [
+    "Running `cd dashboard && npx tsc -b` produces zero errors",
+    "Running `cd dashboard && npx vite build` succeeds",
+    "The 'Security' nav item is highlighted (active: true) instead of 'Profile'",
+    "Center content has Password section with 3 password inputs with eye toggle icons",
+    "Center content has Two-Factor Authentication section with Enabled badge and method details",
+    "Center content has Active Sessions table with 3 rows and proper columns",
+    "Right sidebar has Security Overview with green shield and 4 checklist items",
+    "Right sidebar has Account Recovery with verified email and phone",
+    "Right sidebar has Recent Security Activity with 5 color-coded items",
+    "All styling uses Tailwind classes consistent with existing dark theme patterns",
+    "Card component is used for all card-like containers"
+  ],
+  "verification": [
+    "cd /projects/sandbox/NVLabsCompany/dashboard && npx tsc -b",
+    "cd /projects/sandbox/NVLabsCompany/dashboard && npx vite build"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}
