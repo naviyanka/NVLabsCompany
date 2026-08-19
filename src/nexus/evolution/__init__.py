@@ -5,6 +5,7 @@ proposes improvements, evaluates them in sandboxes, and promotes changes
 ONLY with explicit approval gates. Auto-promotion is never allowed.
 """
 
+from nexus.evolution.ab_testing import ABTestFramework
 from nexus.evolution.agent_evolution import AgentEvolution
 from nexus.evolution.analyzer import FailureAnalyzer
 from nexus.evolution.evaluator import ProposalEvaluator
@@ -14,8 +15,10 @@ from nexus.evolution.promoter import ChangePromoter
 from nexus.evolution.proposer import ImprovementProposer
 from nexus.evolution.sandbox import EvolutionSandbox
 from nexus.evolution.skill_evolution import SkillEvolution
+from nexus.evolution.statistical import StatisticalAnalyzer
 
 __all__ = [
+    "ABTestFramework",
     "EvolutionObserver",
     "FailureAnalyzer",
     "FailureAlchemist",
@@ -25,4 +28,5 @@ __all__ = [
     "ChangePromoter",
     "SkillEvolution",
     "AgentEvolution",
+    "StatisticalAnalyzer",
 ]

@@ -2,7 +2,7 @@
   "id": "FEAT-002",
   "type": "feat",
   "description": "Create StatisticalAnalyzer (src/nexus/evolution/statistical.py) and ABTestFramework (src/nexus/evolution/ab_testing.py) - pure statistics with stdlib only, plus A/B testing with early stopping.",
-  "status": "pending",
+  "status": "in_progress",
   "steps": [
     "Create src/nexus/evolution/statistical.py with class StatisticalAnalyzer containing: compute_significance(control: list[float], treatment: list[float], alpha: float = 0.05) -> dict using two-sample t-test (Welch's) via math+statistics stdlib; detect_trend(values: list[float]) -> dict with linear regression (slope, r_squared, direction); compute_confidence_interval(data: list[float], confidence: float = 0.95) -> dict with mean, lower, upper bounds using normal approximation; is_significant_improvement(control: list[float], treatment: list[float], min_effect_size: float = 0.2) -> dict combining significance + Cohen's d effect size.",
     "Create src/nexus/evolution/ab_testing.py with class ABTestFramework(statistical_analyzer: StatisticalAnalyzer | None = None) containing: design_test(baseline_mean: float, baseline_std: float, min_detectable_effect: float, alpha: float = 0.05, power: float = 0.8) -> dict that calculates required sample size; run_test(control_results: list[float], treatment_results: list[float], alpha: float = 0.05) -> dict with p_value, confidence_interval, effect_size, power_estimate, verdict (improved/degraded/inconclusive); early_stopping(control_results: list[float], treatment_results: list[float], num_looks: int, current_look: int, alpha: float = 0.05) -> dict implementing O'Brien-Fleming alpha spending for interim analysis.",
