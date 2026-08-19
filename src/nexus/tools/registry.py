@@ -53,6 +53,37 @@ class ToolDefinition:
     tags: list[str] = field(default_factory=list)
 
 
+@dataclass
+class CatalogEntry:
+    """In-memory representation of a discovered tool from a connection.
+
+    Attributes:
+        id: Unique catalog entry identifier.
+        company_id: The company this entry belongs to.
+        connection_id: The connection this tool was discovered from.
+        tool_name: The canonical tool name.
+        display_name: Human-friendly display name.
+        description: What the tool does.
+        risk_level: Risk classification (read, write, destructive).
+        input_schema: JSON Schema for tool input.
+        output_schema: JSON Schema for tool output.
+        version: Tool version string.
+        is_active: Whether the entry is currently available.
+    """
+
+    id: uuid.UUID = field(default_factory=uuid.uuid4)
+    company_id: uuid.UUID | None = None
+    connection_id: uuid.UUID | None = None
+    tool_name: str = ""
+    display_name: str | None = None
+    description: str = ""
+    risk_level: str = "read"
+    input_schema: dict[str, Any] | None = None
+    output_schema: dict[str, Any] | None = None
+    version: str | None = None
+    is_active: bool = True
+
+
 class ToolRegistry:
     """Central registry for all tools available within the system.
 
@@ -64,6 +95,7 @@ class ToolRegistry:
         """Initialize an empty tool registry."""
         self._tools: dict[uuid.UUID, ToolDefinition] = {}
         self._agent_access: dict[uuid.UUID, set[uuid.UUID]] = {}
+        self._catalog_entries: dict[uuid.UUID, CatalogEntry] = {}
 
     def register_tool(self, tool: ToolDefinition) -> ToolDefinition:
         """Register a new tool in the registry.
@@ -198,5 +230,65 @@ class ToolRegistry:
                 if company_id and tool.company_id != company_id:
                     continue
                 results.append(tool)
+
+        return results
+
+    # --- Catalog Entry Methods ---
+
+    def register_catalog_entry(self, entry: CatalogEntry) -> CatalogEntry:
+        """Register a catalog entry discovered from a connection.
+
+        Args:
+            entry: The catalog entry to register.
+
+        Returns:
+            The registered catalog entry.
+        """
+        self._catalog_entries[entry.id] = entry
+        return entry
+
+    def discover_from_connection(self, connection_id: uuid.UUID) -> list[CatalogEntry]:
+        """Return all catalog entries discovered from a specific connection.
+
+        Args:
+            connection_id: The connection to filter by.
+
+        Returns:
+            List of CatalogEntry objects for the given connection.
+        """
+        return [
+            entry
+            for entry in self._catalog_entries.values()
+            if entry.connection_id == connection_id and entry.is_active
+        ]
+
+    def list_catalog_entries(
+        self,
+        company_id: uuid.UUID | None = None,
+        risk_level: str | None = None,
+        connection_id: uuid.UUID | None = None,
+    ) -> list[CatalogEntry]:
+        """List catalog entries with optional filters.
+
+        Args:
+            company_id: Filter by company. None means all.
+            risk_level: Filter by risk level (read, write, destructive).
+            connection_id: Filter by connection. None means all.
+
+        Returns:
+            List of matching CatalogEntry objects.
+        """
+        results: list[CatalogEntry] = []
+
+        for entry in self._catalog_entries.values():
+            if not entry.is_active:
+                continue
+            if company_id and entry.company_id != company_id:
+                continue
+            if risk_level and entry.risk_level != risk_level:
+                continue
+            if connection_id and entry.connection_id != connection_id:
+                continue
+            results.append(entry)
 
         return results
