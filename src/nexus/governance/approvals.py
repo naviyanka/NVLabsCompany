@@ -1,8 +1,19 @@
-"""Approval Engine - manages approval requests, decisions, and auto-approve policies."""
+"""Approval Engine - manages approval requests, decisions, and auto-approve policies.
 
+Supports optional file-backed persistence with atomic writes, approval history
+queries, and notification hooks for new pending approvals.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import tempfile
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 
@@ -58,13 +69,134 @@ class ApprovalEngine:
     """Manages the approval lifecycle: submission, auto-approve checks, and decisions.
 
     Supports human-in-the-loop gates with configurable auto-approval policies
-    for low-risk operations.
+    for low-risk operations. Optionally persists state to a JSON file using
+    atomic writes (tempfile + os.replace) to prevent corruption.
     """
 
-    def __init__(self) -> None:
-        """Initialize the approval engine."""
+    def __init__(
+        self,
+        persist_path: Path | None = None,
+        on_approval_needed: Callable[[ApprovalRequest], None] | None = None,
+    ) -> None:
+        """Initialize the approval engine.
+
+        Args:
+            persist_path: Optional path to a JSON file for state persistence.
+                If None, operates in memory-only mode (backward compatible).
+            on_approval_needed: Optional callback invoked when a new approval
+                request enters the pending queue (not called for auto-approved).
+        """
         self._approvals: dict[uuid.UUID, ApprovalRequest] = {}
         self._policies: list[AutoApprovalPolicy] = []
+        self._persist_path = persist_path
+        self._on_approval_needed = on_approval_needed
+
+        if self._persist_path is not None:
+            self._load()
+
+    def _load(self) -> None:
+        """Load persisted state from the JSON file.
+
+        If the file does not exist or is corrupt/invalid, starts with empty state.
+        """
+        if self._persist_path is None:
+            return
+
+        if not self._persist_path.exists():
+            return
+
+        try:
+            raw = self._persist_path.read_text(encoding="utf-8")
+            data = json.loads(raw)
+            self._approvals = {}
+            for key_str, val in data.items():
+                req_id = uuid.UUID(key_str)
+                self._approvals[req_id] = self._deserialize_request(val)
+        except (json.JSONDecodeError, KeyError, TypeError, ValueError, OSError):
+            self._approvals = {}
+
+    def _save(self) -> None:
+        """Persist current state to file atomically.
+
+        Writes to a temporary file in the same directory, then uses os.replace
+        for an atomic swap. This prevents corruption if the process dies mid-write.
+        Does nothing if persist_path is None.
+        """
+        if self._persist_path is None:
+            return
+
+        data = {
+            str(req_id): self._serialize_request(req)
+            for req_id, req in self._approvals.items()
+        }
+        content = json.dumps(data, indent=2)
+
+        # Ensure parent directory exists
+        self._persist_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Atomic write: temp file in same dir + os.replace
+        fd = tempfile.NamedTemporaryFile(
+            mode="w",
+            dir=self._persist_path.parent,
+            suffix=".tmp",
+            delete=False,
+            encoding="utf-8",
+        )
+        try:
+            fd.write(content)
+            fd.flush()
+            os.fsync(fd.fileno())
+            fd.close()
+            os.replace(fd.name, self._persist_path)
+        except BaseException:
+            fd.close()
+            try:
+                os.unlink(fd.name)
+            except OSError:
+                pass
+            raise
+
+    @staticmethod
+    def _serialize_request(req: ApprovalRequest) -> dict[str, Any]:
+        """Serialize an ApprovalRequest to a JSON-compatible dictionary."""
+        return {
+            "id": str(req.id),
+            "company_id": str(req.company_id) if req.company_id else None,
+            "type": req.type,
+            "requested_by_agent_id": (
+                str(req.requested_by_agent_id) if req.requested_by_agent_id else None
+            ),
+            "payload": req.payload,
+            "status": req.status,
+            "decision_note": req.decision_note,
+            "decided_by": req.decided_by,
+            "decided_at": req.decided_at.isoformat() if req.decided_at else None,
+            "created_at": req.created_at.isoformat(),
+        }
+
+    @staticmethod
+    def _deserialize_request(data: dict[str, Any]) -> ApprovalRequest:
+        """Deserialize an ApprovalRequest from a dictionary."""
+        return ApprovalRequest(
+            id=uuid.UUID(data["id"]),
+            company_id=uuid.UUID(data["company_id"]) if data.get("company_id") else None,
+            type=data.get("type", ""),
+            requested_by_agent_id=(
+                uuid.UUID(data["requested_by_agent_id"])
+                if data.get("requested_by_agent_id")
+                else None
+            ),
+            payload=data.get("payload", {}),
+            status=data.get("status", "pending"),
+            decision_note=data.get("decision_note"),
+            decided_by=data.get("decided_by"),
+            decided_at=(
+                datetime.fromisoformat(data["decided_at"])
+                if data.get("decided_at")
+                else None
+            ),
+            created_at=datetime.fromisoformat(data["created_at"]),
+        )
 
     def add_policy(self, policy: AutoApprovalPolicy) -> None:
         """Add an auto-approval policy.
@@ -111,6 +243,12 @@ class ApprovalEngine:
             request.decided_at = datetime.now(timezone.utc)
 
         self._approvals[request.id] = request
+        self._save()
+
+        # Notify callback only for pending (not auto-approved) requests
+        if request.status == "pending" and self._on_approval_needed is not None:
+            self._on_approval_needed(request)
+
         return request
 
     async def process_approval(
@@ -142,6 +280,8 @@ class ApprovalEngine:
         request.decided_by = decided_by
         request.decision_note = note
         request.decided_at = datetime.now(timezone.utc)
+
+        self._save()
 
         return request
 
@@ -242,3 +382,31 @@ class ApprovalEngine:
             The ApprovalRequest, or None if not found.
         """
         return self._approvals.get(approval_id)
+
+    def get_approval_history(
+        self, company_id: uuid.UUID, limit: int = 50
+    ) -> list[ApprovalRequest]:
+        """Return resolved approvals for a company, sorted by decision time.
+
+        Filters for approvals with status 'approved' or 'denied', belonging to
+        the specified company. Results are sorted by decided_at descending (most
+        recent first) and limited to the specified count.
+
+        Args:
+            company_id: The company to filter by.
+            limit: Maximum number of results to return (default 50).
+
+        Returns:
+            List of resolved ApprovalRequest objects, most recent first.
+        """
+        resolved = [
+            req
+            for req in self._approvals.values()
+            if req.status in ("approved", "denied")
+            and req.company_id == company_id
+        ]
+        resolved.sort(
+            key=lambda r: r.decided_at or datetime.min.replace(tzinfo=timezone.utc),
+            reverse=True,
+        )
+        return resolved[:limit]
