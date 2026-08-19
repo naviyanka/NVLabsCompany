@@ -1,0 +1,34 @@
+{
+  "id": "FEAT-001",
+  "type": "feat",
+  "description": "RAG Pipeline Enhancement - Create pluggable rankers, multiple retriever strategies, and document parsers for the knowledge subsystem. Add BM25Ranker, CrossEncoderRanker protocol at src/nexus/knowledge/rankers.py. Add DenseRetriever, SparseRetriever, HybridRetriever protocol at src/nexus/knowledge/retrievers.py. Add TextParser, MarkdownParser, CodeParser at src/nexus/knowledge/parsers.py. Enhance existing rag.py to integrate these components.",
+  "status": "completed",
+  "steps": [
+    "Create src/nexus/knowledge/rankers.py with: (1) Ranker Protocol defining rank(query, results) -> list interface, (2) BM25Ranker class implementing the protocol using token-overlap scoring from nexus.memory.retriever.tokenize and bm25_score, (3) CrossEncoderRanker class implementing the protocol with a configurable scoring function (default: combined BM25 + token overlap as cross-encoder proxy since no new deps allowed), (4) RerankerPipeline class that chains multiple rankers sequentially",
+    "Create src/nexus/knowledge/retrievers.py with: (1) Retriever Protocol defining retrieve(query, top_k) -> list interface, (2) DenseRetriever class using embedding provider from embeddings.py for vector similarity search, (3) SparseRetriever class using BM25 from nexus.memory.retriever, (4) HybridRetriever class combining dense + sparse with configurable alpha weight, (5) RetrieverFactory function to create retrievers by name",
+    "Create src/nexus/knowledge/parsers.py with: (1) DocumentParser Protocol defining parse(content) -> list[ParsedChunk] interface, (2) ParsedChunk dataclass with content, metadata, chunk_type fields, (3) TextParser class splitting on paragraphs/sentences, (4) MarkdownParser class preserving structure (headers, code blocks, lists), (5) CodeParser class splitting on function/class boundaries using regex patterns for Python/JS/TS",
+    "Enhance src/nexus/knowledge/rag.py to accept optional ranker, retriever, and parser components via constructor parameters. Add a from_config class method that builds a RAGPipeline with specified components. Maintain full backward compatibility - existing constructor signature still works.",
+    "Update src/nexus/knowledge/__init__.py to export new classes: BM25Ranker, CrossEncoderRanker, DenseRetriever, SparseRetriever, HybridRetriever, TextParser, MarkdownParser, CodeParser, ParsedChunk, Ranker, Retriever, DocumentParser",
+    "Create tests/test_rag_pipeline_enhanced.py with comprehensive tests covering: all ranker implementations and protocol conformance, all retriever implementations with mock embedding providers, all parser implementations with sample documents of each type, RAGPipeline integration with new components, backward compatibility of existing RAGPipeline usage"
+  ],
+  "acceptance_criteria": [
+    "src/nexus/knowledge/rankers.py exists with Ranker Protocol, BM25Ranker, CrossEncoderRanker, and RerankerPipeline classes",
+    "src/nexus/knowledge/retrievers.py exists with Retriever Protocol, DenseRetriever, SparseRetriever, HybridRetriever, and RetrieverFactory",
+    "src/nexus/knowledge/parsers.py exists with DocumentParser Protocol, ParsedChunk dataclass, TextParser, MarkdownParser, CodeParser",
+    "src/nexus/knowledge/rag.py enhanced to optionally accept ranker, retriever, parser components while maintaining backward compatibility",
+    "src/nexus/knowledge/__init__.py exports all new public classes",
+    "tests/test_rag_pipeline_enhanced.py has tests for all new classes with at least 3 test methods per class",
+    "All files pass Python AST parsing without errors",
+    "No new external dependencies added"
+  ],
+  "verification": [
+    "Run: python3 -c \"import ast; ast.parse(open('src/nexus/knowledge/rankers.py').read())\"",
+    "Run: python3 -c \"import ast; ast.parse(open('src/nexus/knowledge/retrievers.py').read())\"",
+    "Run: python3 -c \"import ast; ast.parse(open('src/nexus/knowledge/parsers.py').read())\"",
+    "Run: python3 -c \"import ast; ast.parse(open('src/nexus/knowledge/rag.py').read())\"",
+    "Run: python3 -c \"import ast; ast.parse(open('tests/test_rag_pipeline_enhanced.py').read())\"",
+    "Run: python3 -c \"import ast; [ast.parse(open(f'src/nexus/knowledge/{f}').read()) for f in ['rankers.py','retrievers.py','parsers.py','rag.py','__init__.py']]\" to verify all knowledge module files parse cleanly"
+  ],
+  "blocked_reason": null,
+  "findings": "All 6 files pass AST validation. Backward compatibility maintained: RAGPipeline(db) still works without new params. New optional params (ranker, retriever, parser) and from_config class method added. Test file has 60+ test methods covering all classes."
+}

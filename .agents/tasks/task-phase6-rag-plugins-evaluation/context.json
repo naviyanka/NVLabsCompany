@@ -1,0 +1,30 @@
+{
+  "project_type": "Python 3.12+ FastAPI backend - Autonomous AI Company Operating System",
+  "language": "Python",
+  "build_system": "setuptools via pyproject.toml, pip install -e '.[dev]'",
+  "test_framework": "pytest with pytest-asyncio (asyncio_mode=auto), tests in tests/ directory, mock-based for DB-dependent code",
+  "build_command": "python3 -c \"import ast; import pathlib; [ast.parse(p.read_text()) for p in pathlib.Path('src').rglob('*.py')]\" (AST validation - Python 3.12 required but sandbox has 3.9)",
+  "test_command": "python3 -m pytest tests/ -q (requires Python 3.12+ which is not available in sandbox)",
+  "verification_instructions": "1. AST-parse all new Python files to verify syntax validity. 2. Verify imports are consistent (no circular deps). 3. Check that new modules follow existing patterns (Protocol classes, dataclasses, async methods). 4. Verify test files cover all public methods.",
+  "snapshot_or_generated_files": null,
+  "setup_instructions": "pip install -e '.[dev]' (requires Python 3.12+)",
+  "environment_constraints": "Python 3.9.25 in sandbox - project requires 3.12+. Cannot run tests or install deps. Use AST validation only (parse with ast module using type_comment mode). No new external dependencies allowed per requirements. Network mode allows package access but Python version mismatch prevents installation.",
+  "contribution_requirements": "No new dependencies. No frontend changes. All new code must have tests. Follow existing patterns: Protocol classes for interfaces, dataclasses for configs, async methods for I/O.",
+  "key_patterns": "Protocol classes for interfaces (see EmbeddingProvider in knowledge/embeddings.py). Dataclasses for configuration. AsyncMock-based tests for DB-dependent code. Modules export via __init__.py with __all__. Tests use pytest fixtures, classes for grouping, and descriptive docstrings.",
+  "relevant_files": [
+    "src/nexus/knowledge/rag.py",
+    "src/nexus/knowledge/embeddings.py",
+    "src/nexus/knowledge/__init__.py",
+    "src/nexus/knowledge/graph.py",
+    "src/nexus/memory/retriever.py",
+    "src/nexus/main.py",
+    "src/nexus/adapters/base.py",
+    "src/nexus/adapters/registry.py",
+    "src/nexus/realtime/events.py",
+    "src/nexus/realtime/event_bus.py",
+    "tests/test_knowledge.py",
+    "tests/test_realtime_websocket.py",
+    "tests/test_session_compaction.py"
+  ],
+  "directory_structure": "src/nexus/ is the main package with 20+ subsystem directories. tests/ contains 101 test files. Key subsystems: knowledge/ (RAG, embeddings, graph, plaza, experience), memory/ (layered, retriever, compaction), adapters/ (7 LLM adapters), realtime/ (websocket, sse, event_bus), governance/ (RBAC, rate limiting, kill switches), evolution/ (AB testing, proposals). Each subsystem has an __init__.py with __all__ exports."
+}

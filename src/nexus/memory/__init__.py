@@ -22,6 +22,12 @@ from nexus.memory.dedup import (
 )
 from nexus.memory.promotion import PromotionCriteria, PromotionEngine
 from nexus.memory.semantic import EmbeddingModel, SemanticMemoryManager
+from nexus.memory.token_counter import TokenCounter
+from nexus.memory.compaction import (
+    CompactionConfig,
+    CompactionStrategy,
+    SessionCompactor,
+)
 
 __all__ = [
     "MemoryStore",
@@ -43,4 +49,8 @@ __all__ = [
     "PromotionEngine",
     "EmbeddingModel",
     "SemanticMemoryManager",
+    "TokenCounter",
+    "CompactionConfig",
+    "CompactionStrategy",
+    "SessionCompactor",
 ]

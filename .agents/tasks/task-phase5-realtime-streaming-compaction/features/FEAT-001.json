@@ -1,0 +1,34 @@
+{
+  "id": "FEAT-001",
+  "type": "feat",
+  "description": "WebSocket Real-time Runtime and Server-Sent Events - Create a new src/nexus/realtime/ package providing WebSocket connection management (broadcast, channels, connection tracking), typed event dataclasses, channel-based routing, SSE streaming via FastAPI StreamingResponse, and an async pub/sub event bus with bounded queues. Wire endpoints into main.py.",
+  "status": "completed",
+  "steps": [
+    "Create src/nexus/realtime/__init__.py exporting all public classes (WebSocketManager, RealtimeEvent, RealtimeChannel, EventStream, RealtimeEventBus)",
+    "Create src/nexus/realtime/websocket_manager.py with class WebSocketManager: manages connected WebSocket clients in a dict keyed by client_id (UUID), supports connect/disconnect/send_personal/broadcast/subscribe_channel/unsubscribe_channel/broadcast_to_channel. Track connections per channel. All async methods.",
+    "Create src/nexus/realtime/events.py with typed event dataclasses: RealtimeEvent (id: UUID, event_type: str, channel: str | None, payload: dict, timestamp: datetime, source_agent_id: UUID | None). Define event type constants: AGENT_STATUS_CHANGED, TASK_PROGRESS, TASK_COMPLETED, AGENT_MESSAGE, SYSTEM_ALERT.",
+    "Create src/nexus/realtime/channels.py with class RealtimeChannel: manages named channels that clients subscribe to. class ChannelRegistry: registry of active channels, create/delete/list channels, get subscribers per channel.",
+    "Create src/nexus/realtime/sse.py with class EventStream: uses asyncio.Queue (bounded, maxsize configurable) to buffer events. Method stream() is an async generator yielding 'data: {json}\\n\\n' formatted SSE strings. Method push(event: RealtimeEvent) adds to queue. Method close() signals end.",
+    "Create src/nexus/realtime/event_bus.py with class RealtimeEventBus: async pub/sub with topic-based subscriptions. subscribe(topic, queue) adds a bounded asyncio.Queue as subscriber. publish(topic, event) fans out to all subscriber queues (non-blocking put_nowait, drops if full). unsubscribe(topic, queue) removes. Separate from the existing communication/event_bus.py.",
+    "Create src/nexus/api/routes/ws.py with WebSocket endpoint at /ws/{client_id}: accepts connection, registers with WebSocketManager, listens for incoming JSON messages (subscribe/unsubscribe channel commands), broadcasts received messages. Handle WebSocketDisconnect gracefully.",
+    "Create src/nexus/api/routes/events.py with GET /events/stream endpoint: accepts query params (event_types: optional comma-separated filter, channel: optional channel filter). Returns StreamingResponse with media_type='text/event-stream'. Creates an EventStream, subscribes to RealtimeEventBus, yields SSE data until client disconnects.",
+    "Wire both new routers into src/nexus/main.py: import ws_router from nexus.api.routes.ws and events_router from nexus.api.routes.events, add app.include_router() calls.",
+    "Create tests/test_realtime_websocket.py with comprehensive tests: test WebSocketManager connect/disconnect/broadcast/channel operations, test RealtimeEvent creation, test ChannelRegistry, test EventStream push/stream/close, test RealtimeEventBus publish/subscribe fan-out and bounded queue overflow behavior. Use pytest-asyncio and asyncio.Queue directly (no actual WebSocket connections needed for unit tests). At least 15 test functions.",
+    "Create tests/test_realtime_sse.py with tests for the SSE endpoint and event bus integration: test EventStream yields correct SSE format, test filtering by event_type, test filtering by channel, test queue bounds, test graceful close. At least 8 test functions."
+  ],
+  "acceptance_criteria": [
+    "python3.12 -c 'from nexus.realtime import WebSocketManager, RealtimeEvent, RealtimeChannel, ChannelRegistry, EventStream, RealtimeEventBus' succeeds",
+    "python3.12 -c 'from nexus.api.routes.ws import router' succeeds",
+    "python3.12 -c 'from nexus.api.routes.events import router' succeeds",
+    "python3.12 -m pytest tests/test_realtime_websocket.py -x -q passes all tests",
+    "python3.12 -m pytest tests/test_realtime_sse.py -x -q passes all tests",
+    "Existing tests still pass: python3.12 -m pytest tests/ -x -q shows no regressions",
+    "No new dependencies added to pyproject.toml"
+  ],
+  "verification": [
+    "python3.12 -m pytest tests/test_realtime_websocket.py tests/test_realtime_sse.py -v",
+    "python3.12 -m pytest tests/ -x -q"
+  ],
+  "blocked_reason": null,
+  "findings": "All 45 new tests pass (34 websocket, 11 SSE). Full suite of 2568 tests pass with no regressions. No new dependencies added. All acceptance criteria met. Post-review fixes applied: (1) event bus __all__ fan-out added, (2) auth added to SSE/WS endpoints, (3) dual registry documented, (4) dead code removed, (5) socket close on disconnect added. All 2599 tests pass after fixes. Review v2 fixes: (6) tenant isolation via company_id field on RealtimeEvent + filtering in SSE generator + broadcast_to_company in WS manager, (7) __all__ catch-all fan-out tests added, (8) auth enforcement integration tests added for both SSE and WS endpoints. All 2613 tests pass after v2 fixes."
+}

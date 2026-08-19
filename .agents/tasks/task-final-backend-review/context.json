@@ -1,0 +1,25 @@
+{
+  "project_type": "Python FastAPI async backend - Autonomous AI Company Operating System (NEXUS)",
+  "language": "Python 3.12+",
+  "build_system": "setuptools via pyproject.toml, Docker Compose for full stack",
+  "test_framework": "pytest with pytest-asyncio, asyncio_mode=auto, 2505 test functions in 101 test files",
+  "build_command": "pip install -e '.[dev]'",
+  "test_command": "pytest tests/",
+  "verification_instructions": "Cannot run pytest in sandbox (Python 3.9 available, project requires 3.12+). Verify document content via reading.",
+  "snapshot_or_generated_files": null,
+  "setup_instructions": "python -m venv .venv && source .venv/bin/activate && pip install -e '.[dev]'",
+  "environment_constraints": "Python 3.9.25 in sandbox but project requires 3.12+. Cannot install or run tests. Document generation only.",
+  "contribution_requirements": "Do NOT touch dashboard/frontend. Backend review document only.",
+  "key_patterns": "FastAPI routers in src/nexus/api/routes/, SQLModel models in src/nexus/models/, services in src/nexus/services/, multi-tenant company_id scoping, async throughout, lifespan handler for startup/shutdown, governance middleware, Prometheus telemetry",
+  "relevant_files": [
+    "src/nexus/main.py",
+    "src/nexus/config.py",
+    "src/nexus/models/__init__.py",
+    "src/nexus/database.py",
+    "src/nexus/telemetry.py",
+    "src/nexus/logging_config.py",
+    "src/nexus/config_validator.py",
+    "docs/"
+  ],
+  "directory_structure": "src/nexus/ contains 20+ subsystems: adapters, api, communication, company, evolution, governance, guardrails, identity, knowledge, meetings, memory, models, models_router, orchestration, runtime, services, templates, tools, triggers, workflows. tests/ has 101 test files. docs/ has architecture docs and analysis."
+}
