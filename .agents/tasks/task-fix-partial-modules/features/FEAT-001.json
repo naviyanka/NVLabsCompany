@@ -2,7 +2,7 @@
   "id": "FEAT-001",
   "type": "feat",
   "description": "Enhance HTTP Adapter with robust polling and webhook callback support",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "In src/nexus/adapters/http_adapter.py, enhance _poll_for_result() to accept configurable poll_interval, max_polls, timeout parameters with proper error handling (distinct timeout vs connection errors, exponential backoff option)",
     "Add register_callback_handler(callback_url, session, handler_fn) method that stores callback handlers keyed by session/task and provides a way for the adapter to receive async webhook results instead of polling",
@@ -23,5 +23,5 @@
     "pytest tests/test_adapters.py -v"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "All 24 new tests pass, all 35 existing adapter tests pass, full suite of 2160 tests passes. Used pyenv shell 3.12.13 for Python 3.12+ requirement (default system Python is 3.9.25). ruff auto-fixed import sorting and timezone.utc -> UTC alias issues. Callable/Awaitable imported from collections.abc per UP035."
 }
