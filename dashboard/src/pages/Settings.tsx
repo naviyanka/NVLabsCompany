@@ -16,17 +16,16 @@ import {
   Palette,
   Wrench,
   ExternalLink,
-  Search,
-  Filter,
-  Calendar,
-  Download,
-  ArrowUpDown,
-  Info,
-  ChevronLeft,
-  ChevronRight,
-  ChevronDown,
-  FileBarChart,
-  ShieldCheck,
+  Monitor,
+  Sun,
+  Moon,
+  PanelLeft,
+  PanelLeftClose,
+  Square,
+  Check,
+  Lightbulb,
+  Sparkles,
+  Eye,
 } from 'lucide-react';
 
 // ─── Static Mock Data ──────────────────────────────────────────────────────────
@@ -44,8 +43,8 @@ const navItems = [
   { label: 'Notifications', icon: Bell, active: false },
   { label: 'Data & Storage', icon: Database, active: false },
   { label: 'Backup & Restore', icon: ArchiveRestore, active: false },
-  { label: 'Audit Logs', icon: FileText, active: true },
-  { label: 'Appearance', icon: Palette, active: false },
+  { label: 'Audit Logs', icon: FileText, active: false },
+  { label: 'Appearance', icon: Palette, active: true },
   { label: 'Advanced', icon: Wrench, active: false },
 ];
 
@@ -57,178 +56,85 @@ const footerLinks = [
 ];
 
 const tabs = [
-  { label: 'All Logs', active: true },
-  { label: 'Admin Actions', active: false },
-  { label: 'User Activity', active: false },
-  { label: 'Security Events', active: false },
-  { label: 'System Events', active: false },
-  { label: 'Data Changes', active: false },
+  { label: 'Theme', active: true },
+  { label: 'Layout', active: false },
+  { label: 'Colors', active: false },
+  { label: 'Typography', active: false },
+  { label: 'Icons', active: false },
+  { label: 'Custom CSS', active: false },
 ];
 
-interface LogEntry {
-  time: string;
-  timeAgo: string;
-  userName: string;
-  userEmail: string;
-  avatarColor: string;
-  initial: string;
-  action: string;
-  actionCategory: string;
-  actionBadgeColor: string;
-  resource: string;
-  ipAddress: string;
-  location: string;
-}
-
-const logEntries: LogEntry[] = [
-  {
-    time: 'May 19, 2024 02:30 PM',
-    timeAgo: '2 minutes ago',
-    userName: 'Navi Yanka',
-    userEmail: 'navi.yanka@nvlabs.dev',
-    avatarColor: 'bg-purple-500',
-    initial: 'N',
-    action: 'User Login',
-    actionCategory: 'Auth',
-    actionBadgeColor: 'bg-teal-500/10 text-teal-400',
-    resource: 'Auth Service',
-    ipAddress: '203.0.113.24',
-    location: 'India, Gurgaon',
-  },
-  {
-    time: 'May 19, 2024 02:25 PM',
-    timeAgo: '7 minutes ago',
-    userName: 'Aman Verma',
-    userEmail: 'aman.verma@nvlabs.dev',
-    avatarColor: 'bg-blue-500',
-    initial: 'A',
-    action: 'Pipeline Triggered',
-    actionCategory: 'Pipeline',
-    actionBadgeColor: 'bg-purple-500/10 text-purple-400',
-    resource: 'Pipeline / Login Service',
-    ipAddress: '203.0.113.24',
-    location: 'India, Gurgaon',
-  },
-  {
-    time: 'May 19, 2024 02:20 PM',
-    timeAgo: '12 minutes ago',
-    userName: 'Sneha Iyer',
-    userEmail: 'sneha.iyer@nvlabs.dev',
-    avatarColor: 'bg-orange-500',
-    initial: 'S',
-    action: 'Role Updated',
-    actionCategory: 'Admin',
-    actionBadgeColor: 'bg-orange-500/10 text-orange-400',
-    resource: 'Role / Developer',
-    ipAddress: '198.51.100.11',
-    location: 'India, Bangalore',
-  },
-  {
-    time: 'May 19, 2024 02:15 PM',
-    timeAgo: '17 minutes ago',
-    userName: 'System',
-    userEmail: 'system@nvlabs.dev',
-    avatarColor: 'bg-green-500',
-    initial: 'S',
-    action: 'Backup Created',
-    actionCategory: 'System',
-    actionBadgeColor: 'bg-green-500/10 text-green-400',
-    resource: 'Backup / Manual Backup',
-    ipAddress: '10.0.0.5',
-    location: '-',
-  },
-  {
-    time: 'May 19, 2024 02:10 PM',
-    timeAgo: '22 minutes ago',
-    userName: 'Aman Verma',
-    userEmail: 'aman.verma@nvlabs.dev',
-    avatarColor: 'bg-blue-500',
-    initial: 'A',
-    action: 'Data Exported',
-    actionCategory: 'Data',
-    actionBadgeColor: 'bg-blue-500/10 text-blue-400',
-    resource: 'Export / Agents Data',
-    ipAddress: '203.0.113.24',
-    location: 'India, Gurgaon',
-  },
-  {
-    time: 'May 19, 2024 02:05 PM',
-    timeAgo: '27 minutes ago',
-    userName: 'Navi Yanka',
-    userEmail: 'navi.yanka@nvlabs.dev',
-    avatarColor: 'bg-purple-500',
-    initial: 'N',
-    action: 'API Key Created',
-    actionCategory: 'API',
-    actionBadgeColor: 'bg-gray-500/10 text-gray-400',
-    resource: 'API Key / OpenAI Key',
-    ipAddress: '203.0.113.24',
-    location: 'India, Gurgaon',
-  },
-  {
-    time: 'May 19, 2024 01:55 PM',
-    timeAgo: '37 minutes ago',
-    userName: 'Sneha Iyer',
-    userEmail: 'sneha.iyer@nvlabs.dev',
-    avatarColor: 'bg-orange-500',
-    initial: 'S',
-    action: 'Permission Changed',
-    actionCategory: 'Secr',
-    actionBadgeColor: 'bg-red-500/10 text-red-400',
-    resource: 'Permission / Agents: Read',
-    ipAddress: '198.51.100.11',
-    location: 'India, Bangalore',
-  },
-  {
-    time: 'May 19, 2024 01:45 PM',
-    timeAgo: '47 minutes ago',
-    userName: 'Rohan Mehta',
-    userEmail: 'rohan.mehta@nvlabs.dev',
-    avatarColor: 'bg-cyan-500',
-    initial: 'R',
-    action: 'Agent Created',
-    actionCategory: 'Agents',
-    actionBadgeColor: 'bg-blue-500/10 text-blue-400',
-    resource: 'Agent / Recon Agent',
-    ipAddress: '203.0.113.14',
-    location: 'India, Mumbai',
-  },
-  {
-    time: 'May 19, 2024 01:30 PM',
-    timeAgo: '1 hour ago',
-    userName: 'System',
-    userEmail: 'system@nvlabs.dev',
-    avatarColor: 'bg-green-500',
-    initial: 'S',
-    action: 'System Update',
-    actionCategory: 'System',
-    actionBadgeColor: 'bg-green-500/10 text-green-400',
-    resource: 'System / v2.4.1',
-    ipAddress: '10.0.0.5',
-    location: '-',
-  },
-  {
-    time: 'May 19, 2024 01:15 PM',
-    timeAgo: '1 hour ago',
-    userName: 'Navi Yanka',
-    userEmail: 'navi.yanka@nvlabs.dev',
-    avatarColor: 'bg-purple-500',
-    initial: 'N',
-    action: 'Settings Updated',
-    actionCategory: 'Settings',
-    actionBadgeColor: 'bg-teal-500/10 text-teal-400',
-    resource: 'Settings / Notification',
-    ipAddress: '203.0.113.24',
-    location: 'India, Gurgaon',
-  },
+const themeOptions = [
+  { label: 'System', description: 'Use system preference', icon: Monitor, selected: false },
+  { label: 'Light', description: 'Clean and bright', icon: Sun, selected: false },
+  { label: 'Dark', description: 'Easy on the eyes', icon: Moon, selected: true },
 ];
 
-const topActions = [
-  { label: 'User Login', count: 342, percent: 27.4, color: 'border-teal-400', barColor: 'bg-teal-400' },
-  { label: 'Pipeline Triggered', count: 258, percent: 20.5, color: 'border-purple-400', barColor: 'bg-purple-400' },
-  { label: 'Data Exported', count: 187, percent: 15.0, color: 'border-blue-400', barColor: 'bg-blue-400' },
-  { label: 'Role Updated', count: 142, percent: 11.4, color: 'border-orange-400', barColor: 'bg-orange-400' },
-  { label: 'Settings Updated', count: 98, percent: 7.8, color: 'border-green-400', barColor: 'bg-green-400' },
+const accentColors = [
+  { color: 'bg-red-500', selected: true },
+  { color: 'bg-blue-600', selected: false },
+  { color: 'bg-blue-400', selected: false },
+  { color: 'bg-cyan-500', selected: false },
+  { color: 'bg-teal-500', selected: false },
+  { color: 'bg-green-600', selected: false },
+  { color: 'bg-green-400', selected: false },
+  { color: 'bg-emerald-500', selected: false },
+  { color: 'bg-lime-500', selected: false },
+  { color: 'bg-yellow-500', selected: false },
+  { color: 'bg-orange-500', selected: false },
+  { color: 'bg-orange-700', selected: false },
+  { color: 'bg-pink-500', selected: false },
+];
+
+const sidebarStyles = [
+  { label: 'Full', description: 'Full width sidebar', selected: true },
+  { label: 'Compact', description: 'Narrower sidebar', selected: false },
+  { label: 'Icon Only', description: 'Minimal icons only', selected: false },
+];
+
+const darkModeToggles = [
+  { label: 'Sidebar', description: 'Use a slightly darker tone for the sidebar.', enabled: true },
+  { label: 'Card Style', description: 'Use elevated cards with soft borders.', enabled: true },
+  { label: 'Reduce Contrast', description: 'Reduces contrast for a softer look.', enabled: false },
+];
+
+const backgroundStyles = [
+  { label: 'Solid', selected: true },
+  { label: 'Subtle Grid', selected: false },
+  { label: 'Minimal Dots', selected: false },
+  { label: 'Topography', selected: false },
+  { label: 'Gradient', selected: false },
+];
+
+const otherPreferences = [
+  { label: 'Animations', description: 'Enable smooth UI transitions.', enabled: true },
+  { label: 'Blur Effects', description: 'Enable blur for overlays and modals.', enabled: true },
+  { label: 'Show Splash Screen', description: 'Show splash screen on app launch.', enabled: true },
+  { label: 'Compact Mode', description: 'Reduce spacing for a denser UI.', enabled: false },
+];
+
+const themeTips = [
+  {
+    icon: Lightbulb,
+    iconBg: 'bg-purple-500/10',
+    iconColor: 'text-purple-400',
+    title: 'Consistent Experience',
+    description: 'Choose a theme that reduces eye strain and improves productivity.',
+  },
+  {
+    icon: Sparkles,
+    iconBg: 'bg-blue-500/10',
+    iconColor: 'text-blue-400',
+    title: 'Brand Alignment',
+    description: "Use accent colors that match your organization's brand identity.",
+  },
+  {
+    icon: Eye,
+    iconBg: 'bg-green-500/10',
+    iconColor: 'text-green-400',
+    title: 'Accessibility',
+    description: 'Ensure sufficient contrast for better readability and accessibility.',
+  },
 ];
 
 // ─── Main Component ────────────────────────────────────────────────────────────
@@ -272,6 +178,20 @@ export function Settings() {
                 );
               })}
             </nav>
+
+            {/* Footer Links */}
+            <div className="border-t border-white/[0.08] mt-4 pt-4 space-y-1">
+              {footerLinks.map((link) => (
+                <a
+                  key={link.label}
+                  href="#"
+                  className="flex items-center gap-2 px-3 py-1.5 text-xs text-gray-400 hover:text-white transition-colors"
+                >
+                  <ExternalLink size={12} />
+                  <span>{link.label}</span>
+                </a>
+              ))}
+            </div>
           </Card>
         </div>
 
@@ -279,9 +199,9 @@ export function Settings() {
         <div className="flex-1 min-w-0 space-y-6">
           {/* Section Header */}
           <div>
-            <h2 className="text-lg font-semibold text-white">Audit Logs</h2>
+            <h2 className="text-lg font-semibold text-white">Appearance</h2>
             <p className="text-sm text-gray-400 mt-0.5">
-              View and search all system activity and changes across your organization.
+              Customize the look and feel of NVLABS Mission Control.
             </p>
           </div>
 
@@ -301,233 +221,300 @@ export function Settings() {
             ))}
           </div>
 
-          {/* Search and Filter Bar */}
-          <div className="flex items-center gap-3">
-            <div className="flex-1 relative">
-              <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-              <input
-                type="text"
-                placeholder="Search logs by user, action, resource, IP..."
-                className="w-full pl-9 pr-16 py-2 text-sm text-gray-300 bg-white/[0.04] border border-white/[0.08] rounded-lg placeholder-gray-500 focus:outline-none focus:border-primary-500/50"
-              />
-              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] text-gray-500 bg-white/[0.06] px-1.5 py-0.5 rounded border border-white/[0.08]">
-                Ctrl F
-              </span>
-            </div>
-            <button className="flex items-center gap-2 px-3 py-2 text-sm text-gray-300 bg-white/[0.04] border border-white/[0.08] rounded-lg hover:bg-white/[0.06] transition-colors">
-              <Filter size={14} />
-              <span>Filters</span>
-              <ChevronDown size={14} />
-            </button>
-            <button className="flex items-center gap-2 px-3 py-2 text-sm text-gray-300 bg-white/[0.04] border border-white/[0.08] rounded-lg hover:bg-white/[0.06] transition-colors">
-              <Calendar size={14} />
-              <span>May 12, 2024 - May 19, 2024</span>
-            </button>
-            <button className="flex items-center gap-2 px-3 py-2 text-sm text-gray-300 bg-white/[0.04] border border-white/[0.08] rounded-lg hover:bg-white/[0.06] transition-colors">
-              <Download size={14} />
-              <span>Export</span>
-              <ChevronDown size={14} />
-            </button>
-          </div>
-
-          {/* Log Table */}
-          <Card padding="none">
-            {/* Table Header */}
-            <div className="grid grid-cols-[1.4fr_1.6fr_1.4fr_1.2fr_1.2fr_0.3fr] gap-4 items-center px-4 py-3 border-b border-white/[0.08]">
-              <div className="flex items-center gap-1">
-                <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">Time</span>
-                <ArrowUpDown size={12} className="text-gray-500" />
-              </div>
-              <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">User</span>
-              <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">Action</span>
-              <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">Resource</span>
-              <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">IP Address</span>
-              <span />
+          {/* Section 1: Theme Mode */}
+          <Card padding="lg">
+            <div className="mb-4">
+              <h3 className="text-sm font-semibold text-white">1. Theme Mode</h3>
+              <p className="text-xs text-gray-400 mt-0.5">
+                Choose your preferred theme for the application.
+              </p>
             </div>
 
-            {/* Table Rows */}
-            <div className="divide-y divide-white/[0.08]">
-              {logEntries.map((entry, index) => (
-                <div
-                  key={index}
-                  className="grid grid-cols-[1.4fr_1.6fr_1.4fr_1.2fr_1.2fr_0.3fr] gap-4 items-center px-4 py-3 hover:bg-white/[0.02] transition-colors"
+            <div className="grid grid-cols-3 gap-4">
+              {themeOptions.map((option) => {
+                const Icon = option.icon;
+                return (
+                  <div
+                    key={option.label}
+                    className={`relative rounded-lg border p-4 cursor-pointer transition-colors ${
+                      option.selected
+                        ? 'border-primary-500 bg-primary-500/5'
+                        : 'border-white/[0.08] bg-dark-bg hover:border-white/[0.16]'
+                    }`}
+                  >
+                    <div className="flex flex-col items-center text-center gap-3">
+                      <div className={`p-3 rounded-lg ${option.selected ? 'bg-primary-500/10' : 'bg-white/[0.04]'}`}>
+                        <Icon size={24} className={option.selected ? 'text-primary-400' : 'text-gray-400'} />
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium text-white">{option.label}</p>
+                        <p className="text-xs text-gray-400 mt-0.5">{option.description}</p>
+                      </div>
+                    </div>
+                    {/* Radio indicator */}
+                    <div className="absolute top-3 right-3">
+                      <div
+                        className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${
+                          option.selected
+                            ? 'border-primary-500 bg-primary-500'
+                            : 'border-gray-500'
+                        }`}
+                      >
+                        {option.selected && (
+                          <div className="w-1.5 h-1.5 rounded-full bg-white" />
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </Card>
+
+          {/* Section 2: Accent Color */}
+          <Card padding="lg">
+            <div className="mb-4">
+              <h3 className="text-sm font-semibold text-white">2. Accent Color</h3>
+              <p className="text-xs text-gray-400 mt-0.5">
+                Choose the primary accent color used across the platform.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-3 flex-wrap">
+              {accentColors.map((item, idx) => (
+                <button
+                  key={idx}
+                  className={`relative w-8 h-8 rounded-full ${item.color} transition-transform hover:scale-110 ${
+                    item.selected ? 'ring-2 ring-white ring-offset-2 ring-offset-dark-surface' : ''
+                  }`}
                 >
-                  {/* Time */}
-                  <div>
-                    <p className="text-sm text-white">{entry.time}</p>
-                    <p className="text-xs text-gray-500">{entry.timeAgo}</p>
-                  </div>
+                  {item.selected && (
+                    <Check size={14} className="absolute inset-0 m-auto text-white" />
+                  )}
+                </button>
+              ))}
+            </div>
+          </Card>
 
-                  {/* User */}
-                  <div className="flex items-center gap-2.5">
-                    <div className={`w-7 h-7 rounded-full ${entry.avatarColor} flex items-center justify-center flex-shrink-0`}>
-                      <span className="text-xs font-bold text-white">{entry.initial}</span>
+          {/* Section 3: Sidebar Style */}
+          <Card padding="lg">
+            <div className="mb-4">
+              <h3 className="text-sm font-semibold text-white">3. Sidebar Style</h3>
+              <p className="text-xs text-gray-400 mt-0.5">
+                Choose how the sidebar should behave.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-3 gap-4">
+              {sidebarStyles.map((style, idx) => (
+                <div
+                  key={style.label}
+                  className={`relative rounded-lg border p-4 cursor-pointer transition-colors ${
+                    style.selected
+                      ? 'border-primary-500 bg-primary-500/5'
+                      : 'border-white/[0.08] bg-dark-bg hover:border-white/[0.16]'
+                  }`}
+                >
+                  <div className="flex flex-col items-center text-center gap-3">
+                    <div className={`p-3 rounded-lg ${style.selected ? 'bg-primary-500/10' : 'bg-white/[0.04]'}`}>
+                      {idx === 0 && <PanelLeft size={24} className={style.selected ? 'text-primary-400' : 'text-gray-400'} />}
+                      {idx === 1 && <PanelLeftClose size={24} className={style.selected ? 'text-primary-400' : 'text-gray-400'} />}
+                      {idx === 2 && <Square size={24} className={style.selected ? 'text-primary-400' : 'text-gray-400'} />}
                     </div>
-                    <div className="min-w-0">
-                      <p className="text-sm text-white truncate">{entry.userName}</p>
-                      <p className="text-xs text-gray-500 truncate">{entry.userEmail}</p>
+                    <div>
+                      <p className="text-sm font-medium text-white">{style.label}</p>
+                      <p className="text-xs text-gray-400 mt-0.5">{style.description}</p>
                     </div>
                   </div>
-
-                  {/* Action */}
-                  <div>
-                    <span className="text-sm text-white">{entry.action}</span>
-                    <span className={`ml-2 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium ${entry.actionBadgeColor}`}>
-                      {entry.actionCategory}
-                    </span>
-                  </div>
-
-                  {/* Resource */}
-                  <span className="text-sm text-gray-300">{entry.resource}</span>
-
-                  {/* IP Address */}
-                  <div>
-                    <p className="text-sm text-gray-300">{entry.ipAddress}</p>
-                    <p className="text-xs text-gray-500">{entry.location}</p>
-                  </div>
-
-                  {/* Detail Button */}
-                  <div className="flex justify-end">
-                    <button className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-white/[0.06] transition-colors">
-                      <Info size={14} />
-                    </button>
+                  {/* Toggle indicator */}
+                  <div className="absolute top-3 right-3">
+                    <div
+                      className={`w-9 h-5 rounded-full transition-colors ${
+                        style.selected ? 'bg-primary-500' : 'bg-gray-600'
+                      }`}
+                    >
+                      <div
+                        className={`w-3.5 h-3.5 rounded-full bg-white shadow-sm transition-transform mt-[3px] ${
+                          style.selected ? 'translate-x-[18px]' : 'translate-x-[3px]'
+                        }`}
+                      />
+                    </div>
                   </div>
                 </div>
               ))}
             </div>
+          </Card>
 
-            {/* Pagination Footer */}
-            <div className="flex items-center justify-between px-4 py-3 border-t border-white/[0.08]">
-              <p className="text-xs text-gray-400">Showing 1 to 10 of 1,248 logs</p>
-              <div className="flex items-center gap-1">
-                <button className="p-1.5 rounded text-gray-400 hover:text-white hover:bg-white/[0.06] transition-colors">
-                  <ChevronLeft size={14} />
-                </button>
-                <button className="px-2.5 py-1 rounded text-xs font-medium bg-primary-500/10 text-primary-400">1</button>
-                <button className="px-2.5 py-1 rounded text-xs text-gray-400 hover:text-white hover:bg-white/[0.06] transition-colors">2</button>
-                <button className="px-2.5 py-1 rounded text-xs text-gray-400 hover:text-white hover:bg-white/[0.06] transition-colors">3</button>
-                <button className="px-2.5 py-1 rounded text-xs text-gray-400 hover:text-white hover:bg-white/[0.06] transition-colors">4</button>
-                <button className="px-2.5 py-1 rounded text-xs text-gray-400 hover:text-white hover:bg-white/[0.06] transition-colors">5</button>
-                <span className="px-1 text-xs text-gray-500">...</span>
-                <button className="px-2.5 py-1 rounded text-xs text-gray-400 hover:text-white hover:bg-white/[0.06] transition-colors">125</button>
-                <button className="p-1.5 rounded text-gray-400 hover:text-white hover:bg-white/[0.06] transition-colors">
-                  <ChevronRight size={14} />
-                </button>
+          {/* Section 4: Dark Mode Settings */}
+          <Card padding="lg">
+            <div className="mb-4">
+              <h3 className="text-sm font-semibold text-white">4. Dark Mode Settings</h3>
+              <p className="text-xs text-gray-400 mt-0.5">
+                Fine tune your dark mode experience.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-2 gap-6">
+              {/* Left column: Toggles */}
+              <div className="space-y-4">
+                {darkModeToggles.map((toggle) => (
+                  <div key={toggle.label} className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium text-white">{toggle.label}</p>
+                      <p className="text-xs text-gray-400 mt-0.5">{toggle.description}</p>
+                    </div>
+                    <div
+                      className={`w-9 h-5 rounded-full flex-shrink-0 transition-colors ${
+                        toggle.enabled ? 'bg-primary-500' : 'bg-gray-600'
+                      }`}
+                    >
+                      <div
+                        className={`w-3.5 h-3.5 rounded-full bg-white shadow-sm transition-transform mt-[3px] ${
+                          toggle.enabled ? 'translate-x-[18px]' : 'translate-x-[3px]'
+                        }`}
+                      />
+                    </div>
+                  </div>
+                ))}
               </div>
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-gray-400">Rows per page</span>
-                <div className="relative">
-                  <select className="px-2 py-1 text-xs text-gray-300 bg-white/[0.04] border border-white/[0.08] rounded appearance-none pr-6">
-                    <option>10</option>
-                  </select>
-                  <ChevronDown size={12} className="absolute right-1.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+
+              {/* Right column: Background Style */}
+              <div>
+                <p className="text-sm font-medium text-white mb-1">Background Style</p>
+                <p className="text-xs text-gray-400 mb-3">Choose the background pattern.</p>
+                <div className="space-y-2">
+                  {backgroundStyles.map((bg) => (
+                    <div
+                      key={bg.label}
+                      className={`flex items-center justify-between px-3 py-2 rounded-lg border cursor-pointer transition-colors ${
+                        bg.selected
+                          ? 'border-primary-500 bg-primary-500/5'
+                          : 'border-white/[0.08] hover:border-white/[0.16]'
+                      }`}
+                    >
+                      <span className={`text-xs font-medium ${bg.selected ? 'text-primary-400' : 'text-gray-300'}`}>
+                        {bg.label}
+                      </span>
+                      {bg.selected && <Check size={14} className="text-primary-400" />}
+                    </div>
+                  ))}
                 </div>
               </div>
             </div>
           </Card>
 
-          {/* Footer */}
-          <div className="border-t border-white/[0.08] pt-6 pb-4">
-            <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
-              <p className="text-sm text-gray-400">
-                &copy; 2024 NVLABS Mission Control. All rights reserved.
+          {/* Section 5: Other Preferences */}
+          <Card padding="lg">
+            <div className="mb-4">
+              <h3 className="text-sm font-semibold text-white">5. Other Preferences</h3>
+              <p className="text-xs text-gray-400 mt-0.5">
+                Additional UI preferences and settings.
               </p>
-              <div className="flex items-center gap-4">
-                {footerLinks.map((link) => (
-                  <a
-                    key={link.label}
-                    href="#"
-                    className="flex items-center gap-1 text-sm text-gray-400 hover:text-white transition-colors"
-                  >
-                    {link.label}
-                    <ExternalLink size={12} />
-                  </a>
-                ))}
-              </div>
             </div>
-          </div>
+
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+              {otherPreferences.map((pref) => (
+                <div
+                  key={pref.label}
+                  className="rounded-lg border border-white/[0.08] bg-dark-bg p-4"
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-sm font-medium text-white">{pref.label}</p>
+                    <div
+                      className={`w-9 h-5 rounded-full flex-shrink-0 transition-colors ${
+                        pref.enabled ? 'bg-primary-500' : 'bg-gray-600'
+                      }`}
+                    >
+                      <div
+                        className={`w-3.5 h-3.5 rounded-full bg-white shadow-sm transition-transform mt-[3px] ${
+                          pref.enabled ? 'translate-x-[18px]' : 'translate-x-[3px]'
+                        }`}
+                      />
+                    </div>
+                  </div>
+                  <p className="text-xs text-gray-400">{pref.description}</p>
+                </div>
+              ))}
+            </div>
+          </Card>
         </div>
 
         {/* Right Sidebar */}
         <div className="w-[25%] flex-shrink-0 space-y-6">
-          {/* Log Summary */}
+          {/* Live Preview */}
           <Card padding="lg">
-            <h3 className="text-sm font-semibold text-white mb-1">Log Summary</h3>
+            <h3 className="text-sm font-semibold text-white mb-1">Live Preview</h3>
             <p className="text-xs text-gray-400 mb-4">
-              Overview of audit logs for the selected period.
+              See how your changes look in real-time.
             </p>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="rounded-lg bg-dark-bg border border-white/[0.08] p-3">
-                <div className="flex items-center gap-2 mb-1.5">
-                  <FileBarChart size={14} className="text-blue-400" />
-                </div>
-                <p className="text-lg font-bold text-white">1,248</p>
-                <p className="text-xs text-gray-400">Total Logs</p>
+
+            {/* Mini Preview Mockup */}
+            <div className="rounded-lg border border-white/[0.08] bg-dark-bg p-3 overflow-hidden">
+              {/* Mock header */}
+              <div className="flex items-center gap-2 mb-3">
+                <div className="w-3 h-3 rounded-sm bg-primary-500/60" />
+                <div className="h-2 w-24 rounded bg-white/20" />
               </div>
-              <div className="rounded-lg bg-dark-bg border border-white/[0.08] p-3">
-                <div className="flex items-center gap-2 mb-1.5">
-                  <Users size={14} className="text-green-400" />
-                </div>
-                <p className="text-lg font-bold text-white">156</p>
-                <p className="text-xs text-gray-400">Unique Users</p>
+              <p className="text-[9px] text-gray-500 mb-2">NVLABS Mission Control</p>
+              {/* Mock content blocks */}
+              <div className="flex gap-1.5 mb-2">
+                <div className="flex-1 h-6 rounded bg-purple-500/30" />
+                <div className="flex-1 h-6 rounded bg-blue-500/30" />
               </div>
-              <div className="rounded-lg bg-dark-bg border border-white/[0.08] p-3">
-                <div className="flex items-center gap-2 mb-1.5">
-                  <ShieldCheck size={14} className="text-purple-400" />
-                </div>
-                <p className="text-lg font-bold text-white">78</p>
-                <p className="text-xs text-gray-400">Security Events</p>
+              <div className="flex gap-1.5 mb-2">
+                <div className="flex-1 h-6 rounded bg-teal-500/30" />
+                <div className="flex-1 h-6 rounded bg-green-500/30" />
               </div>
-              <div className="rounded-lg bg-dark-bg border border-white/[0.08] p-3">
-                <div className="flex items-center gap-2 mb-1.5">
-                  <Database size={14} className="text-orange-400" />
-                </div>
-                <p className="text-lg font-bold text-white">312</p>
-                <p className="text-xs text-gray-400">Data Changes</p>
+              <div className="flex gap-1.5">
+                <div className="flex-1 h-4 rounded bg-orange-500/30" />
+                <div className="flex-1 h-4 rounded bg-pink-500/30" />
               </div>
             </div>
           </Card>
 
-          {/* Top Actions */}
+          {/* Theme Tips */}
           <Card padding="lg">
-            <h3 className="text-sm font-semibold text-white mb-1">Top Actions</h3>
+            <h3 className="text-sm font-semibold text-white mb-1">Theme Tips</h3>
             <p className="text-xs text-gray-400 mb-4">
-              Most performed actions in this period.
+              Best practices for customization.
             </p>
-            <div className="space-y-3">
-              {topActions.map((action) => (
-                <div key={action.label} className={`border-l-2 ${action.color} pl-3`}>
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-xs text-gray-300">{action.label}</span>
-                    <span className="text-xs text-gray-400">
-                      {action.count} ({action.percent}%)
-                    </span>
+
+            <div className="space-y-4">
+              {themeTips.map((tip) => {
+                const Icon = tip.icon;
+                return (
+                  <div key={tip.title} className="flex items-start gap-3">
+                    <div className={`p-1.5 rounded-lg ${tip.iconBg} flex-shrink-0`}>
+                      <Icon size={14} className={tip.iconColor} />
+                    </div>
+                    <div>
+                      <p className="text-xs font-medium text-white">{tip.title}</p>
+                      <p className="text-xs text-gray-400 mt-0.5">{tip.description}</p>
+                    </div>
                   </div>
-                  <div className="w-full h-1.5 rounded-full bg-white/[0.08]">
-                    <div
-                      className={`h-full rounded-full ${action.barColor}`}
-                      style={{ width: `${action.percent}%` }}
-                    />
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
-            <button className="mt-4 w-full px-3 py-1.5 text-xs font-medium text-primary-400 border border-primary-500/30 rounded-lg hover:bg-primary-500/10 transition-colors">
-              View All Actions &rarr;
-            </button>
+
+            <a
+              href="#"
+              className="inline-flex items-center gap-1 text-xs text-primary-400 hover:text-primary-300 mt-4 transition-colors"
+            >
+              Learn more about appearance settings &rarr;
+            </a>
           </Card>
 
           {/* Need Help? */}
           <Card padding="lg">
             <h3 className="text-sm font-semibold text-white mb-1">Need Help?</h3>
             <p className="text-xs text-gray-400 mb-4">
-              Learn more about audit logs.
+              Learn more about customizing the appearance.
             </p>
             <div className="space-y-3">
               <a href="#" className="flex items-center gap-2 group">
                 <ExternalLink size={12} className="text-gray-400 flex-shrink-0" />
                 <span className="text-xs font-medium text-gray-300 group-hover:text-white transition-colors">
-                  Audit Logs Guide
+                  Appearance Guide
                 </span>
               </a>
               <a href="#" className="flex items-center gap-2 group">
