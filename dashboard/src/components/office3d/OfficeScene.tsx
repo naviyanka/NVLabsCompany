@@ -35,11 +35,11 @@ export function OfficeScene({ selectedAgent, onAgentClick, onBackgroundClick, pa
       onPointerMissed={onBackgroundClick}
       frameloop={paused ? 'demand' : 'always'}
     >
-      {/* Isometric-style orthographic camera */}
+      {/* Isometric-style orthographic camera - zoomed out to show all 9 zones */}
       <OrthographicCamera
         makeDefault
-        position={[15, 20, 15]}
-        zoom={28}
+        position={[20, 25, 20]}
+        zoom={18}
         near={0.1}
         far={200}
       />

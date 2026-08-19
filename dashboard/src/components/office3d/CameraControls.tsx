@@ -3,10 +3,12 @@ import { OrbitControls } from '@react-three/drei';
 /**
  * Camera controls configured for isometric-style pan/zoom.
  * Allows drag-to-pan and scroll-to-zoom with limits.
+ * Target is centered on the office layout to show all 9 zones.
  */
 export function CameraControls() {
   return (
     <OrbitControls
+      target={[-3, 0, -3]}
       enableRotate={true}
       enablePan={true}
       enableZoom={true}

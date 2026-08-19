@@ -13,13 +13,13 @@ interface ZoneLabelProps {
 export function ZoneLabel({ text, position, color }: ZoneLabelProps) {
   return (
     <Html
-      position={[position[0], position[1] + 2.5, position[2]]}
+      position={[position[0], position[1] + 1.5, position[2]]}
       center
-      distanceFactor={20}
+      distanceFactor={8}
       style={{ pointerEvents: 'none' }}
     >
       <div
-        className="px-2 py-0.5 rounded text-[10px] font-semibold whitespace-nowrap select-none"
+        className="px-1.5 py-0.5 rounded text-[10px] font-semibold whitespace-nowrap select-none"
         style={{
           color,
           backgroundColor: 'rgba(15, 17, 23, 0.85)',
