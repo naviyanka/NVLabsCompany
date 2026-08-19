@@ -14,12 +14,32 @@ import json
 import logging
 import os
 import tempfile
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
 from cryptography.fernet import Fernet, InvalidToken
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class RotationPolicy:
+    """Policy defining when a secret should be rotated.
+
+    Attributes:
+        max_age_days: Maximum number of days before rotation is needed.
+        auto_rotate: Whether to automatically rotate when max_age is exceeded.
+    """
+
+    max_age_days: int = 90
+    auto_rotate: bool = False
+
+    def __post_init__(self) -> None:
+        """Validate rotation policy values."""
+        if self.max_age_days <= 0:
+            raise ValueError("max_age_days must be positive")
 
 
 @runtime_checkable
@@ -104,6 +124,8 @@ class FernetSecretBackend:
         self._fernet: Fernet | None = None
         self._store: dict[str, bytes] = {}
         self._persist_path: Path | None = None
+        self._rotation_policies: dict[str, RotationPolicy] = {}
+        self.rotation_history: dict[str, datetime] = {}
 
         if persist_path is not None:
             self._persist_path = Path(persist_path)
@@ -310,3 +332,53 @@ class FernetSecretBackend:
         self._save_to_file()
 
         return len(plaintext_map)
+
+    def set_rotation_policy(self, ref: str, policy: RotationPolicy) -> None:
+        """Set a rotation policy for a specific secret reference.
+
+        Args:
+            ref: The secret reference key.
+            policy: The rotation policy to apply.
+        """
+        self._rotation_policies[ref] = policy
+
+    def check_rotation_needed(self, ref: str) -> bool:
+        """Check whether a secret needs rotation based on its policy.
+
+        A secret needs rotation if it has a rotation policy configured and
+        either has never been rotated or was last rotated more than
+        max_age_days ago.
+
+        Args:
+            ref: The secret reference key to check.
+
+        Returns:
+            True if rotation is needed, False otherwise.
+        """
+        policy = self._rotation_policies.get(ref)
+        if policy is None:
+            return False
+
+        last_rotated = self.rotation_history.get(ref)
+        if last_rotated is None:
+            # Never rotated - rotation is needed
+            return True
+
+        now = datetime.now(timezone.utc)
+        age_days = (now - last_rotated).days
+        return age_days >= policy.max_age_days
+
+    def get_secrets_needing_rotation(self) -> list[str]:
+        """Return all secret references that need rotation.
+
+        Checks each secret that has a rotation policy configured and
+        returns those that are past their max age.
+
+        Returns:
+            List of secret reference keys needing rotation.
+        """
+        needing: list[str] = []
+        for ref in self._rotation_policies:
+            if ref in self._store and self.check_rotation_needed(ref):
+                needing.append(ref)
+        return needing

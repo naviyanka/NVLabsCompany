@@ -31,7 +31,9 @@ from nexus.api.routes.policies import router as policies_router
 from nexus.api.routes.secrets import router as secrets_router
 from nexus.api.routes.incidents import router as incidents_router
 from nexus.api.routes.degradation import router as degradation_router
+from nexus.api.routes.rotation import router as rotation_router
 from nexus.api.middleware import GovernanceMiddleware
+from nexus.api.versioning import APIVersionMiddleware
 from nexus.logging_config import RequestIDMiddleware, configure_logging
 from nexus.telemetry import MetricsMiddleware, metrics_router
 
@@ -131,6 +133,9 @@ app.add_middleware(
 # Governance middleware for policy enforcement, audit logging, and rate limiting
 app.add_middleware(GovernanceMiddleware)
 
+# API version middleware for X-API-Version header
+app.add_middleware(APIVersionMiddleware, version="1.0")
+
 # Metrics middleware for HTTP request tracking
 app.add_middleware(MetricsMiddleware)
 
@@ -162,3 +167,4 @@ app.include_router(policies_router)
 app.include_router(secrets_router)
 app.include_router(incidents_router)
 app.include_router(degradation_router)
+app.include_router(rotation_router)
