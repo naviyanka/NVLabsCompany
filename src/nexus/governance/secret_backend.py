@@ -14,8 +14,8 @@ import json
 import logging
 import os
 import tempfile
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
@@ -364,7 +364,7 @@ class FernetSecretBackend:
             # Never rotated - rotation is needed
             return True
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         age_days = (now - last_rotated).days
         return age_days >= policy.max_age_days
 

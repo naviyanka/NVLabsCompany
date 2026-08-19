@@ -10,15 +10,15 @@ from __future__ import annotations
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from enum import Enum
+from datetime import UTC, datetime
+from enum import StrEnum
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from nexus.governance.budget_enforcer import BudgetEnforcer
 
 
-class AlertSeverity(str, Enum):
+class AlertSeverity(StrEnum):
     """Severity levels for cost alerts.
 
     Values:
@@ -76,7 +76,7 @@ class CostAlert:
     limit: int = 0
     severity: AlertSeverity = AlertSeverity.WARNING
     timestamp: datetime = field(
-        default_factory=lambda: datetime.now(timezone.utc)
+        default_factory=lambda: datetime.now(UTC)
     )
     message: str = ""
 

@@ -10,16 +10,15 @@ import csv
 import io
 import json
 import threading
-import uuid
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from enum import Enum
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from enum import StrEnum
 from typing import Any
 
 from nexus.governance.audit import AuditEntry, AuditLogger
 
 
-class ExportFormat(str, Enum):
+class ExportFormat(StrEnum):
     """Supported export formats.
 
     Values:
@@ -189,7 +188,7 @@ class AuditExporter:
         Returns:
             Dictionary with counts: archived, purged, remaining.
         """
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         archived_count = 0
         purged_count = 0
 

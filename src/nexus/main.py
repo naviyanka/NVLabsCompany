@@ -1,40 +1,41 @@
 """NEXUS FastAPI application entry point."""
 
 import os
-from contextlib import asynccontextmanager
 from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
+from datetime import UTC
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from nexus import __version__
-from nexus.config import settings
-from nexus.api.routes.health import router as health_router
-from nexus.api.routes.companies import router as companies_router
+from nexus.api.middleware import GovernanceMiddleware
+from nexus.api.routes.adapters import router as adapters_router
 from nexus.api.routes.agents import router as agents_router
-from nexus.api.routes.tasks import router as tasks_router
-from nexus.api.routes.goals import router as goals_router
-from nexus.api.routes.skills import router as skills_router
-from nexus.api.routes.tools import router as tools_router
 from nexus.api.routes.approvals import router as approvals_router
 from nexus.api.routes.budgets import router as budgets_router
-from nexus.api.routes.memory import router as memory_router
-from nexus.api.routes.triggers import router as triggers_router
 from nexus.api.routes.communication import router as communication_router
+from nexus.api.routes.companies import router as companies_router
+from nexus.api.routes.company_sim import router as company_sim_router
+from nexus.api.routes.degradation import router as degradation_router
+from nexus.api.routes.evolution import router as evolution_router
+from nexus.api.routes.goals import router as goals_router
+from nexus.api.routes.health import router as health_router
+from nexus.api.routes.identity import router as identity_router
+from nexus.api.routes.incidents import router as incidents_router
 from nexus.api.routes.knowledge import router as knowledge_router
 from nexus.api.routes.meetings import router as meetings_router
-from nexus.api.routes.company_sim import router as company_sim_router
-from nexus.api.routes.evolution import router as evolution_router
-from nexus.api.routes.adapters import router as adapters_router
-from nexus.api.routes.workflows import router as workflows_router
-from nexus.api.routes.identity import router as identity_router
+from nexus.api.routes.memory import router as memory_router
 from nexus.api.routes.policies import router as policies_router
-from nexus.api.routes.secrets import router as secrets_router
-from nexus.api.routes.incidents import router as incidents_router
-from nexus.api.routes.degradation import router as degradation_router
 from nexus.api.routes.rotation import router as rotation_router
-from nexus.api.middleware import GovernanceMiddleware
+from nexus.api.routes.secrets import router as secrets_router
+from nexus.api.routes.skills import router as skills_router
+from nexus.api.routes.tasks import router as tasks_router
+from nexus.api.routes.tools import router as tools_router
+from nexus.api.routes.triggers import router as triggers_router
+from nexus.api.routes.workflows import router as workflows_router
 from nexus.api.versioning import APIVersionMiddleware
+from nexus.config import settings
 from nexus.logging_config import RequestIDMiddleware, configure_logging
 from nexus.telemetry import MetricsMiddleware, metrics_router
 
@@ -45,28 +46,32 @@ configure_logging()
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan handler for startup and shutdown events."""
-    from nexus.database import engine, async_session_factory
-    from nexus.config import settings
     import uuid
+
+    from nexus.config import settings
+    from nexus.database import async_session_factory, engine
 
     # Startup: create tables if using SQLite (for local dev convenience)
     if settings.database_url.startswith("sqlite"):
         from sqlmodel import SQLModel
+
         import nexus.models  # noqa: F401 - register all models
         async with engine.begin() as conn:
             await conn.run_sync(SQLModel.metadata.create_all)
 
     # Seed default company for the dashboard
-    from nexus.models.company import Company
+    from datetime import datetime
+
     from sqlalchemy import select
-    from datetime import datetime, timezone
+
+    from nexus.models.company import Company
     default_company_id = uuid.UUID("00000000-0000-4000-8000-000000000001")
     async with async_session_factory() as session:
         result = await session.execute(
             select(Company).where(Company.id == default_company_id)
         )
         if result.scalar_one_or_none() is None:
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
             company = Company(
                 id=default_company_id,
                 name="NVLabs",
@@ -90,8 +95,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     import logging
     _logger = logging.getLogger(__name__)
     try:
-        from nexus.governance.persistent_kill_switch import PersistentKillSwitch
         from nexus.governance.persistent_circuit_breaker import PersistentCircuitBreaker
+        from nexus.governance.persistent_kill_switch import PersistentKillSwitch
 
         persistent_ks = PersistentKillSwitch(async_session_factory)
         loaded_count = await persistent_ks.load_active()
