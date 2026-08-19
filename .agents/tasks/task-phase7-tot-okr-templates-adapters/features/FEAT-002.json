@@ -2,7 +2,7 @@
   "id": "FEAT-002",
   "type": "feat",
   "description": "Agent Template Library (20+ Python archetype dataclasses) and Additional LLM Providers (Azure OpenAI, AWS Bedrock, Google Gemini adapters). Expands the template system from Markdown-only to include rich Python dataclasses, and adds 3 new LLM adapters following the existing BaseAdapter pattern.",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "Create src/nexus/templates/archetypes.py with: (1) AgentArchetype dataclass (name str, role str, capabilities list[str], constraints list[str], system_prompt str, tools_allowed list[str], interaction_style str, description str). (2) Define 20 archetype instances: SOFTWARE_ARCHITECT, BACKEND_ENGINEER, FRONTEND_ENGINEER, QA_ENGINEER, DEVOPS_ENGINEER, SECURITY_ENGINEER, DATA_ENGINEER, ML_ENGINEER, PRODUCT_MANAGER, TECH_WRITER, DESIGNER, RESEARCHER, PROJECT_MANAGER, SCRUM_MASTER, SITE_RELIABILITY_ENGINEER, DATABASE_ADMIN, MOBILE_DEVELOPER, PERFORMANCE_ENGINEER, ACCESSIBILITY_SPECIALIST, TEAM_LEAD. Each must have meaningful capabilities (3-6 items), constraints (2-4 items), a system_prompt (multi-line string describing role), tools_allowed (2-5 items), and interaction_style (e.g., 'collaborative', 'directive', 'analytical'). (3) Create an ArchetypeRegistry class with get_archetype(name), list_archetypes(), get_archetypes_by_role(role) methods.",
     "Create src/nexus/adapters/azure_adapter.py following the pattern in openai_adapter.py: AzureOpenAIAdapter extending BaseAdapter. adapter_type='azure_openai'. validate_config requires 'api_key', 'model', 'azure_endpoint', 'api_version'. _do_execute calls Azure OpenAI endpoint (https://{endpoint}/openai/deployments/{model}/chat/completions?api-version={version}). Include MODEL_PRICING dict, retry logic, proper headers (api-key header). Capabilities: execute_task, function_calling, conversation_history, system_prompt, retry_on_rate_limit.",
@@ -37,5 +37,5 @@
     "Verify registry.py includes all 3 new adapters in _register_defaults()"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "All 9 files pass AST validation. Bedrock adapter uses hmac.new (verified working). Registry updated from 7 to 10 adapters. Archetype registry provides 20 frozen dataclass instances. Test files include 12+ and 15+ test methods respectively."
 }
