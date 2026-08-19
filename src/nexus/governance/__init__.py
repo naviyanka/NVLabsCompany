@@ -29,6 +29,7 @@ from nexus.governance.breaker_types import (
     BreakerState,
 )
 from nexus.governance.circuit_breaker_advanced import AdvancedCircuitBreaker
+from nexus.governance.ssrf_protection import SSRFGuard
 
 __all__ = [
     "ApprovalEngine",
@@ -64,4 +65,5 @@ __all__ = [
     "BreakerLevel",
     "BreakerState",
     "AdvancedCircuitBreaker",
+    "SSRFGuard",
 ]

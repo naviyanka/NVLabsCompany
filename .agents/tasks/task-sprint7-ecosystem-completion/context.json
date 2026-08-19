@@ -1,0 +1,27 @@
+{
+  "project_type": "Python FastAPI backend (Autonomous AI Company OS)",
+  "language": "Python 3.12",
+  "build_system": "setuptools via pyproject.toml, pip install -e '.[dev]'",
+  "test_framework": "pytest with pytest-asyncio (auto mode), conftest.py fixtures, unittest.mock",
+  "build_command": "python3.12 -c \"import nexus\"",
+  "test_command": "python3.12 -m pytest tests/ -x -q",
+  "verification_instructions": "1. Run pytest to verify all tests pass. 2. Verify new modules import cleanly.",
+  "snapshot_or_generated_files": null,
+  "setup_instructions": "pip install -e '.[dev]' (already done). Python 3.12 available at /usr/bin/python3.12",
+  "environment_constraints": "OPEN_INTERNET network mode. Python 3.12 pre-installed. cryptography package already available (used in governance/secrets/vault.py). Do NOT touch dashboard/ directory.",
+  "contribution_requirements": "Type hints required, docstrings required, 100 char line length (ruff), Python 3.12 features (| union types). Each module independently testable.",
+  "key_patterns": "Dataclasses with frozen=True for immutable records, str Enum for string enums, field(default_factory=...) for mutable defaults, __all__ in __init__.py, test files at tests/test_*.py using fixtures from conftest.py",
+  "relevant_files": [
+    "src/nexus/governance/__init__.py",
+    "src/nexus/governance/secrets/vault.py",
+    "src/nexus/triggers/__init__.py",
+    "src/nexus/triggers/executor.py",
+    "src/nexus/tools/__init__.py",
+    "src/nexus/tools/registry.py",
+    "src/nexus/memory/__init__.py",
+    "src/nexus/memory/layered.py",
+    "src/nexus/adapters/provider_presets.py",
+    "tests/conftest.py"
+  ],
+  "directory_structure": "src/nexus/ has: governance/ (policy, secrets, audit, rbac), triggers/ (scheduler, webhook, executor), tools/ (registry, executor, mcp_client, policy_engine, audit), memory/ (store, retriever, layered, reflector, dedup, promotion), adapters/ (provider_presets, registry, multiple adapters). Tests at tests/test_*.py (1651 existing tests)."
+}

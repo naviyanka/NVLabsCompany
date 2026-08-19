@@ -1,0 +1,32 @@
+{
+  "id": "FEAT-002",
+  "type": "feat",
+  "description": "Tool Catalog + Integration Registry + Encrypted Secrets (Features 13-14 from the import plan). Implements the tool catalog with setup prerequisites derived from provider presets, and the integration registry with Fernet-based encrypted secret storage.",
+  "status": "pending",
+  "steps": [
+    "Create src/nexus/tools/tool_catalog.py with: ToolKind(str, Enum) with values 'prerequisite', 'memory', 'engine'; ToolSpec dataclass (id, bin, label, kind, why, essential, install_posix, install_win32, docs_url); BASE_TOOLS list containing uv, mempalace, git, node entries matching the TypeScript BASE_TOOLS; tool_catalog() function that derives engine entries from PROVIDER_PRESETS in src/nexus/adapters/provider_presets.py (filter out 'custom', map each preset's default_command/install_command/docs_url); probe_tool(bin) function using shutil.which(); get_setup_status() returning list of all tools with availability boolean",
+    "Create src/nexus/governance/secret_backend.py with: SecretBackend protocol class (encrypt, decrypt, has, delete methods); FernetSecretBackend class implementation using cryptography.fernet.Fernet for at-rest encryption. Key derivation from app secret_key via PBKDF2 (hashlib.pbkdf2_hmac + base64 encoding to create Fernet-compatible key). encrypt(ref, plaintext) stores encrypted value, decrypt(ref) returns plaintext or None, has(ref) checks existence, delete(ref) removes. In-memory dict storage (config-backed). Fail-closed: refuse to store if no key configured.",
+    "Create src/nexus/governance/integration_registry.py with: IntegrationRecord dataclass (id, name, auth_type, enabled, secret_ref, created_at, updated_at); IntegrationRegistry class with: list_records(), get_record(id), upsert_record(record), remove_record(id) (cascades to delete secret via SecretBackend), set_secret(id, plaintext), has_secret(id), get_secret(id) (internal only), list_records_redacted() (has_secret bool not actual value), enabled_ids(). JSON file-backed storage. Fail-closed: refuse to store secret if SecretBackend unavailable.",
+    "Create tests/test_tool_catalog.py with tests for: tool_catalog() returns BASE_TOOLS plus engine entries derived from presets, probe_tool finds/misses executables (mock shutil.which), get_setup_status returns all tools with availability, ToolKind enum values, ToolSpec fields",
+    "Create tests/test_integration_registry.py with tests for: full CRUD lifecycle (upsert, get, list, remove), secret storage and retrieval via FernetSecretBackend, remove_record cascades to delete secret, list_records_redacted shows has_secret boolean not value, enabled_ids filters correctly, fail-closed behavior when no encryption key"
+  ],
+  "acceptance_criteria": [
+    "tool_catalog() returns BASE_TOOLS (uv, mempalace, git, node) plus one engine entry per non-custom provider preset",
+    "probe_tool() correctly uses shutil.which to detect tool availability",
+    "get_setup_status() returns all catalog entries annotated with found boolean",
+    "FernetSecretBackend encrypts/decrypts secrets correctly using derived Fernet key",
+    "FernetSecretBackend refuses to store if no secret_key configured (fail-closed)",
+    "IntegrationRegistry CRUD operations work correctly",
+    "remove_record cascades to delete the associated secret",
+    "list_records_redacted never exposes actual secret values",
+    "get_secret is internal-only (returns decrypted value for internal use)",
+    "All new tests pass with python3.12 -m pytest"
+  ],
+  "verification": [
+    "python3.12 -m pytest tests/test_tool_catalog.py -v",
+    "python3.12 -m pytest tests/test_integration_registry.py -v",
+    "python3.12 -m pytest tests/ -x -q (full suite still passes)"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

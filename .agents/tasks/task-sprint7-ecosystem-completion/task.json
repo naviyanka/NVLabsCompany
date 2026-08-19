@@ -1,0 +1,7 @@
+{
+  "task_id": "task-sprint7-ecosystem-completion",
+  "task_description": "Sprint 7 (final sprint) of the Munder Difflin import plan - Ecosystem Completion. Implements 6 features: SSRF Protection, Trigger System (4 Types), Tool Catalog, Integration Registry + Encrypted Secrets, Skills Discovery + Catalog, and Semantic Memory.",
+  "status": "in_progress",
+  "feature_order": ["FEAT-001", "FEAT-002", "FEAT-003"],
+  "blocked_reason": null
+}
