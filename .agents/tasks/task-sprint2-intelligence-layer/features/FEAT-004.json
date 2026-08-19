@@ -1,0 +1,24 @@
+{
+  "id": "FEAT-004",
+  "type": "chore",
+  "description": "Generate Alembic migration for all SQLModel tables and verify schema completeness. Since no PostgreSQL is running, generate the migration in offline mode or use a SQLite-based approach to validate the schema.",
+  "status": "in_progress",
+  "steps": [
+    "Create alembic/versions/sprint2_initial_complete_schema.py as a manual migration file that consolidates all ~50 SQLModel tables. Use 'alembic revision --autogenerate' pattern but since no DB is running, create the migration manually by: (1) reading all model definitions from src/nexus/models/, (2) writing the upgrade() function with op.create_table() for each table not already covered by existing migrations, and (3) writing the downgrade() function with op.drop_table() in reverse order. Reference existing migrations in alembic/versions/ (db96cb66effc_initial_schema.py and ca7238bc6797_add_kill_switch_records_table.py) to avoid duplicating tables they already create.",
+    "Verify the migration file is syntactically valid by importing it with Python. Run: python -c 'import alembic.versions.sprint2_...' or use ast.parse to validate syntax.",
+    "Create a test in tests/test_alembic_migration.py that: (1) imports all models from nexus.models, (2) verifies SQLModel.metadata.tables contains all expected table names, (3) verifies the new migration file exists and is valid Python, (4) optionally uses SQLite in-memory to test create_all works with the metadata."
+  ],
+  "acceptance_criteria": [
+    "New migration file exists in alembic/versions/ with proper revision ID and dependencies",
+    "Migration file covers all tables from nexus.models.__init__ not in prior migrations",
+    "Migration file is syntactically valid Python",
+    "Test confirms all model tables are discoverable in SQLModel.metadata",
+    "All tests pass alongside the existing 749 tests"
+  ],
+  "verification": [
+    "/root/.pyenv/versions/3.12.13/bin/python -m pytest tests/test_alembic_migration.py -v",
+    "/root/.pyenv/versions/3.12.13/bin/python -m pytest tests/ --tb=short -q"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}
