@@ -1,0 +1,7 @@
+{
+  "task_id": "task-knowledge-base-page",
+  "task_description": "Implement the Knowledge Base page for the NVLabs dashboard, replacing the placeholder with a full-featured page including stat cards, filter bar, articles table, charts, and sidebar",
+  "status": "in_progress",
+  "feature_order": ["FEAT-001"],
+  "blocked_reason": null
+}

@@ -1,0 +1,21 @@
+{
+  "project_type": "React SPA dashboard with Vite",
+  "language": "TypeScript",
+  "build_system": "Vite 6 with TypeScript 5.6",
+  "test_framework": "No test framework configured",
+  "build_command": "cd /projects/sandbox/NVLabsCompany/dashboard && npm run build",
+  "test_command": "N/A - no tests configured",
+  "verification_instructions": "Run npm run build (tsc -b && vite build) and confirm zero errors",
+  "snapshot_or_generated_files": null,
+  "setup_instructions": "cd /projects/sandbox/NVLabsCompany/dashboard && npm install",
+  "environment_constraints": "No test framework. Verification is TypeScript compilation + Vite build success.",
+  "contribution_requirements": "All pages use static mock data, no API calls, no randomness. Use dark theme tokens. Use existing Card component.",
+  "key_patterns": "Pages use: lucide-react icons, recharts for charts, Card component from @/components/common/Card, flex gap layout with w-80 sidebar, static mock data at top of file, Tailwind CSS for all styling, dark theme colors (dark-bg #0f1117, dark-surface #1a1b2e, dark-card #1e2035)",
+  "relevant_files": [
+    "dashboard/src/pages/KnowledgeBase.tsx",
+    "dashboard/src/pages/Tasks.tsx",
+    "dashboard/src/pages/GitRepos.tsx",
+    "dashboard/src/components/common/Card.tsx"
+  ],
+  "directory_structure": "dashboard/src/pages/ - all page components, dashboard/src/components/common/ - shared components like Card"
+}
