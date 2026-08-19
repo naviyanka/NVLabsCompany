@@ -2,7 +2,7 @@
   "id": "FEAT-002",
   "type": "fix",
   "description": "Replace all datetime.utcnow() with datetime.now(timezone.utc) across the codebase, add Configuration Validation on Startup, and implement Graceful Shutdown Hooks",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "Replace all 72 occurrences of datetime.utcnow() with datetime.now(timezone.utc) across src/nexus/. Files affected: main.py (1), demo/seed.py (4), governance/kill_switch_model.py (1), governance/persistent_kill_switch.py (2), governance/circuit_breaker_model.py (1), governance/persistent_circuit_breaker.py (4), runtime/heartbeat_service.py (3), and all model files in src/nexus/models/ (56 occurrences). Add 'from datetime import timezone' import where needed.",
     "Create src/nexus/config_validator.py with a validate_config() async function that checks Settings on startup: warns about missing API keys (openai_api_key, anthropic_api_key), validates URLs (database_url format), checks Redis connectivity (non-blocking, just logs warning), checks writable data directories. Does NOT block startup - only logs warnings. Use standard logging module.",
@@ -23,5 +23,5 @@
     "pytest (full suite passes)"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "All 72 datetime.utcnow() occurrences replaced successfully. Tests that mocked datetime.utcnow in persistent_circuit_breaker and heartbeat_service had to be updated to mock datetime.now instead, and test datetime objects needed timezone.utc tzinfo for arithmetic compatibility. Telemetry registry.reset() in shutdown tests caused ordering issues with telemetry endpoint tests - fixed by re-registering default metrics after reset. Final test count: 2519 passed. New files pass ruff lint cleanly."
 }
