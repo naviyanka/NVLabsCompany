@@ -16,9 +16,17 @@ import {
   Palette,
   Wrench,
   ExternalLink,
+  Search,
+  Filter,
+  Calendar,
+  Download,
+  ArrowUpDown,
+  Info,
+  ChevronLeft,
+  ChevronRight,
   ChevronDown,
-  AlertTriangle,
-  Cloud,
+  FileBarChart,
+  ShieldCheck,
 } from 'lucide-react';
 
 // ─── Static Mock Data ──────────────────────────────────────────────────────────
@@ -36,9 +44,9 @@ const navItems = [
   { label: 'Notifications', icon: Bell, active: false },
   { label: 'Data & Storage', icon: Database, active: false },
   { label: 'Backup & Restore', icon: ArchiveRestore, active: false },
-  { label: 'Audit Logs', icon: FileText, active: false },
+  { label: 'Audit Logs', icon: FileText, active: true },
   { label: 'Appearance', icon: Palette, active: false },
-  { label: 'Advanced', icon: Wrench, active: true },
+  { label: 'Advanced', icon: Wrench, active: false },
 ];
 
 const footerLinks = [
@@ -48,60 +56,179 @@ const footerLinks = [
   { label: 'Terms of Service' },
 ];
 
-const advancedTabs = [
-  { label: 'System', active: true },
-  { label: 'Developer', active: false },
-  { label: 'Performance', active: false },
-  { label: 'Experimental Features', active: false },
-  { label: 'Maintenance', active: false },
-  { label: 'Diagnostics', active: false },
+const tabs = [
+  { label: 'All Logs', active: true },
+  { label: 'Admin Actions', active: false },
+  { label: 'User Activity', active: false },
+  { label: 'Security Events', active: false },
+  { label: 'System Events', active: false },
+  { label: 'Data Changes', active: false },
 ];
 
-const advancedOptionsCards = [
+interface LogEntry {
+  time: string;
+  timeAgo: string;
+  userName: string;
+  userEmail: string;
+  avatarColor: string;
+  initial: string;
+  action: string;
+  actionCategory: string;
+  actionBadgeColor: string;
+  resource: string;
+  ipAddress: string;
+  location: string;
+}
+
+const logEntries: LogEntry[] = [
   {
-    title: 'Database Optimization',
-    description: 'Enable advanced query cache and index recommendations.',
-    icon: Database,
-    hasToggle: true,
-    toggleOn: true,
+    time: 'May 19, 2024 02:30 PM',
+    timeAgo: '2 minutes ago',
+    userName: 'Navi Yanka',
+    userEmail: 'navi.yanka@nvlabs.dev',
+    avatarColor: 'bg-purple-500',
+    initial: 'N',
+    action: 'User Login',
+    actionCategory: 'Auth',
+    actionBadgeColor: 'bg-teal-500/10 text-teal-400',
+    resource: 'Auth Service',
+    ipAddress: '203.0.113.24',
+    location: 'India, Gurgaon',
   },
   {
-    title: 'Background Jobs',
-    description: 'Configure concurrency and retry policies.',
-    icon: Cog,
-    hasToggle: false,
-    toggleOn: false,
+    time: 'May 19, 2024 02:25 PM',
+    timeAgo: '7 minutes ago',
+    userName: 'Aman Verma',
+    userEmail: 'aman.verma@nvlabs.dev',
+    avatarColor: 'bg-blue-500',
+    initial: 'A',
+    action: 'Pipeline Triggered',
+    actionCategory: 'Pipeline',
+    actionBadgeColor: 'bg-purple-500/10 text-purple-400',
+    resource: 'Pipeline / Login Service',
+    ipAddress: '203.0.113.24',
+    location: 'India, Gurgaon',
   },
   {
-    title: 'Cache Management',
-    description: 'Manage cache providers and expiration policies.',
-    icon: Cloud,
-    hasToggle: false,
-    toggleOn: false,
+    time: 'May 19, 2024 02:20 PM',
+    timeAgo: '12 minutes ago',
+    userName: 'Sneha Iyer',
+    userEmail: 'sneha.iyer@nvlabs.dev',
+    avatarColor: 'bg-orange-500',
+    initial: 'S',
+    action: 'Role Updated',
+    actionCategory: 'Admin',
+    actionBadgeColor: 'bg-orange-500/10 text-orange-400',
+    resource: 'Role / Developer',
+    ipAddress: '198.51.100.11',
+    location: 'India, Bangalore',
   },
   {
-    title: 'Security Headers',
-    description: 'Configure HTTP security headers and policies.',
-    icon: Shield,
-    hasToggle: false,
-    toggleOn: false,
+    time: 'May 19, 2024 02:15 PM',
+    timeAgo: '17 minutes ago',
+    userName: 'System',
+    userEmail: 'system@nvlabs.dev',
+    avatarColor: 'bg-green-500',
+    initial: 'S',
+    action: 'Backup Created',
+    actionCategory: 'System',
+    actionBadgeColor: 'bg-green-500/10 text-green-400',
+    resource: 'Backup / Manual Backup',
+    ipAddress: '10.0.0.5',
+    location: '-',
+  },
+  {
+    time: 'May 19, 2024 02:10 PM',
+    timeAgo: '22 minutes ago',
+    userName: 'Aman Verma',
+    userEmail: 'aman.verma@nvlabs.dev',
+    avatarColor: 'bg-blue-500',
+    initial: 'A',
+    action: 'Data Exported',
+    actionCategory: 'Data',
+    actionBadgeColor: 'bg-blue-500/10 text-blue-400',
+    resource: 'Export / Agents Data',
+    ipAddress: '203.0.113.24',
+    location: 'India, Gurgaon',
+  },
+  {
+    time: 'May 19, 2024 02:05 PM',
+    timeAgo: '27 minutes ago',
+    userName: 'Navi Yanka',
+    userEmail: 'navi.yanka@nvlabs.dev',
+    avatarColor: 'bg-purple-500',
+    initial: 'N',
+    action: 'API Key Created',
+    actionCategory: 'API',
+    actionBadgeColor: 'bg-gray-500/10 text-gray-400',
+    resource: 'API Key / OpenAI Key',
+    ipAddress: '203.0.113.24',
+    location: 'India, Gurgaon',
+  },
+  {
+    time: 'May 19, 2024 01:55 PM',
+    timeAgo: '37 minutes ago',
+    userName: 'Sneha Iyer',
+    userEmail: 'sneha.iyer@nvlabs.dev',
+    avatarColor: 'bg-orange-500',
+    initial: 'S',
+    action: 'Permission Changed',
+    actionCategory: 'Secr',
+    actionBadgeColor: 'bg-red-500/10 text-red-400',
+    resource: 'Permission / Agents: Read',
+    ipAddress: '198.51.100.11',
+    location: 'India, Bangalore',
+  },
+  {
+    time: 'May 19, 2024 01:45 PM',
+    timeAgo: '47 minutes ago',
+    userName: 'Rohan Mehta',
+    userEmail: 'rohan.mehta@nvlabs.dev',
+    avatarColor: 'bg-cyan-500',
+    initial: 'R',
+    action: 'Agent Created',
+    actionCategory: 'Agents',
+    actionBadgeColor: 'bg-blue-500/10 text-blue-400',
+    resource: 'Agent / Recon Agent',
+    ipAddress: '203.0.113.14',
+    location: 'India, Mumbai',
+  },
+  {
+    time: 'May 19, 2024 01:30 PM',
+    timeAgo: '1 hour ago',
+    userName: 'System',
+    userEmail: 'system@nvlabs.dev',
+    avatarColor: 'bg-green-500',
+    initial: 'S',
+    action: 'System Update',
+    actionCategory: 'System',
+    actionBadgeColor: 'bg-green-500/10 text-green-400',
+    resource: 'System / v2.4.1',
+    ipAddress: '10.0.0.5',
+    location: '-',
+  },
+  {
+    time: 'May 19, 2024 01:15 PM',
+    timeAgo: '1 hour ago',
+    userName: 'Navi Yanka',
+    userEmail: 'navi.yanka@nvlabs.dev',
+    avatarColor: 'bg-purple-500',
+    initial: 'N',
+    action: 'Settings Updated',
+    actionCategory: 'Settings',
+    actionBadgeColor: 'bg-teal-500/10 text-teal-400',
+    resource: 'Settings / Notification',
+    ipAddress: '203.0.113.24',
+    location: 'India, Gurgaon',
   },
 ];
 
-const systemHealthItems = [
-  { label: 'Configuration', status: 'Healthy', healthy: true },
-  { label: 'Cache', status: 'Healthy', healthy: true },
-  { label: 'Background Jobs', status: 'Healthy', healthy: true },
-  { label: 'Message Queue', status: 'Healthy', healthy: true },
-  { label: 'External Services', status: 'Degraded', healthy: false },
-  { label: 'File Storage', status: 'Healthy', healthy: true },
-];
-
-const developerTools = [
-  { title: 'API Explorer', description: 'Test and explore API endpoints.' },
-  { title: 'Database Viewer', description: 'View and query database (read-only).' },
-  { title: 'Log Viewer', description: 'Search and analyze system logs.' },
-  { title: 'Queue Inspector', description: 'Inspect job queues and workers.' },
+const topActions = [
+  { label: 'User Login', count: 342, percent: 27.4, color: 'border-teal-400', barColor: 'bg-teal-400' },
+  { label: 'Pipeline Triggered', count: 258, percent: 20.5, color: 'border-purple-400', barColor: 'bg-purple-400' },
+  { label: 'Data Exported', count: 187, percent: 15.0, color: 'border-blue-400', barColor: 'bg-blue-400' },
+  { label: 'Role Updated', count: 142, percent: 11.4, color: 'border-orange-400', barColor: 'bg-orange-400' },
+  { label: 'Settings Updated', count: 98, percent: 7.8, color: 'border-green-400', barColor: 'bg-green-400' },
 ];
 
 // ─── Main Component ────────────────────────────────────────────────────────────
@@ -145,20 +272,6 @@ export function Settings() {
                 );
               })}
             </nav>
-
-            {/* Footer Links */}
-            <div className="border-t border-white/[0.08] mt-4 pt-4 space-y-1">
-              {footerLinks.map((link) => (
-                <a
-                  key={link.label}
-                  href="#"
-                  className="flex items-center gap-2 px-3 py-1.5 text-xs text-gray-400 hover:text-white transition-colors"
-                >
-                  <ExternalLink size={12} />
-                  <span>{link.label}</span>
-                </a>
-              ))}
-            </div>
           </Card>
         </div>
 
@@ -166,15 +279,15 @@ export function Settings() {
         <div className="flex-1 min-w-0 space-y-6">
           {/* Section Header */}
           <div>
-            <h2 className="text-lg font-semibold text-white">Advanced</h2>
+            <h2 className="text-lg font-semibold text-white">Audit Logs</h2>
             <p className="text-sm text-gray-400 mt-0.5">
-              Configure advanced settings and developer options for your platform.
+              View and search all system activity and changes across your organization.
             </p>
           </div>
 
           {/* Tab Navigation */}
           <div className="flex items-center gap-1 border-b border-white/[0.08]">
-            {advancedTabs.map((tab) => (
+            {tabs.map((tab) => (
               <button
                 key={tab.label}
                 className={`px-4 py-2.5 text-sm font-medium transition-colors border-b-2 ${
@@ -188,202 +301,128 @@ export function Settings() {
             ))}
           </div>
 
-          {/* Settings List Card */}
-          <Card padding="lg">
-            <div className="divide-y divide-white/[0.08]">
-              {/* Environment Mode */}
-              <div className="flex items-start justify-between py-4 first:pt-0">
-                <div className="flex-1">
-                  <h4 className="text-sm font-medium text-white">Environment Mode</h4>
-                  <p className="text-xs text-gray-400 mt-0.5">
-                    Control the runtime environment for the platform.
-                  </p>
-                  <p className="text-xs text-gray-500 mt-1">
-                    Changes require restart to take effect.
-                  </p>
-                </div>
-                <div className="flex-shrink-0 ml-4">
-                  <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-white/[0.08] bg-dark-bg text-sm text-white">
-                    <span>Production</span>
-                    <ChevronDown size={14} className="text-gray-400" />
-                  </div>
-                </div>
-              </div>
-
-              {/* Debug Mode */}
-              <div className="flex items-start justify-between py-4">
-                <div className="flex-1">
-                  <h4 className="text-sm font-medium text-white">Debug Mode</h4>
-                  <p className="text-xs text-gray-400 mt-0.5">
-                    Enable verbose logging and detailed error reporting.
-                  </p>
-                  <p className="text-xs text-gray-500 mt-1">Disabled in production</p>
-                </div>
-                <div className="flex-shrink-0 ml-4">
-                  <div className="w-9 h-5 rounded-full bg-white/[0.08] relative cursor-pointer">
-                    <div className="absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-gray-400 transition-transform" />
-                  </div>
-                </div>
-              </div>
-
-              {/* Feature Flags */}
-              <div className="flex items-start justify-between py-4">
-                <div className="flex-1">
-                  <h4 className="text-sm font-medium text-white">Feature Flags</h4>
-                  <p className="text-xs text-gray-400 mt-0.5">
-                    Manage feature flags and rollouts for your organization.
-                  </p>
-                </div>
-                <div className="flex-shrink-0 ml-4">
-                  <button className="text-sm font-medium text-primary-400 hover:text-primary-300 transition-colors">
-                    Manage Feature Flags &rarr;
-                  </button>
-                </div>
-              </div>
-
-              {/* Request Timeout */}
-              <div className="flex items-start justify-between py-4">
-                <div className="flex-1">
-                  <h4 className="text-sm font-medium text-white">Request Timeout</h4>
-                  <p className="text-xs text-gray-400 mt-0.5">
-                    Set the default timeout for API and internal requests.
-                  </p>
-                  <p className="text-xs text-gray-500 mt-1">Range: 5 - 300 seconds</p>
-                </div>
-                <div className="flex-shrink-0 ml-4 flex items-center gap-2">
-                  <input
-                    type="text"
-                    defaultValue="30"
-                    className="w-16 px-2.5 py-1.5 text-sm text-white bg-dark-bg border border-white/[0.08] rounded-lg text-center"
-                    readOnly
-                  />
-                  <span className="text-xs text-gray-400">seconds</span>
-                </div>
-              </div>
-
-              {/* Session Timeout */}
-              <div className="flex items-start justify-between py-4">
-                <div className="flex-1">
-                  <h4 className="text-sm font-medium text-white">Session Timeout</h4>
-                  <p className="text-xs text-gray-400 mt-0.5">
-                    Set the inactive session timeout for users.
-                  </p>
-                  <p className="text-xs text-gray-500 mt-1">Range: 15 - 1440 minutes</p>
-                </div>
-                <div className="flex-shrink-0 ml-4 flex items-center gap-2">
-                  <input
-                    type="text"
-                    defaultValue="60"
-                    className="w-16 px-2.5 py-1.5 text-sm text-white bg-dark-bg border border-white/[0.08] rounded-lg text-center"
-                    readOnly
-                  />
-                  <span className="text-xs text-gray-400">minutes</span>
-                </div>
-              </div>
-
-              {/* Rate Limiting */}
-              <div className="flex items-start justify-between py-4">
-                <div className="flex-1">
-                  <h4 className="text-sm font-medium text-white">Rate Limiting</h4>
-                  <p className="text-xs text-gray-400 mt-0.5">
-                    Configure global rate limiting for API requests.
-                  </p>
-                </div>
-                <div className="flex-shrink-0 ml-4 flex items-center gap-3">
-                  <div className="w-9 h-5 rounded-full bg-primary-500 relative cursor-pointer">
-                    <div className="absolute top-0.5 right-0.5 w-4 h-4 rounded-full bg-white transition-transform" />
-                  </div>
-                  <button className="text-sm font-medium text-primary-400 hover:text-primary-300 transition-colors">
-                    Configure Limits &rarr;
-                  </button>
-                </div>
-              </div>
-
-              {/* IP Allowlist */}
-              <div className="flex items-start justify-between py-4">
-                <div className="flex-1">
-                  <h4 className="text-sm font-medium text-white">IP Allowlist</h4>
-                  <p className="text-xs text-gray-400 mt-0.5">
-                    Allow requests only from trusted IP addresses and ranges.
-                  </p>
-                </div>
-                <div className="flex-shrink-0 ml-4 flex items-center gap-3">
-                  <span className="text-sm text-white font-medium">12</span>
-                  <span className="text-xs text-gray-400">IPs configured</span>
-                  <button className="text-sm font-medium text-primary-400 hover:text-primary-300 transition-colors">
-                    Manage IPs &rarr;
-                  </button>
-                </div>
-              </div>
-
-              {/* Webhooks Security */}
-              <div className="flex items-start justify-between py-4 last:pb-0">
-                <div className="flex-1">
-                  <h4 className="text-sm font-medium text-white">Webhooks Security</h4>
-                  <p className="text-xs text-gray-400 mt-0.5">
-                    Enforce webhook signing and verify signatures.
-                  </p>
-                </div>
-                <div className="flex-shrink-0 ml-4 flex items-center gap-3">
-                  <div className="w-9 h-5 rounded-full bg-primary-500 relative cursor-pointer">
-                    <div className="absolute top-0.5 right-0.5 w-4 h-4 rounded-full bg-white transition-transform" />
-                  </div>
-                  <button className="text-sm font-medium text-primary-400 hover:text-primary-300 transition-colors">
-                    Configure Webhooks &rarr;
-                  </button>
-                </div>
-              </div>
+          {/* Search and Filter Bar */}
+          <div className="flex items-center gap-3">
+            <div className="flex-1 relative">
+              <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+              <input
+                type="text"
+                placeholder="Search logs by user, action, resource, IP..."
+                className="w-full pl-9 pr-16 py-2 text-sm text-gray-300 bg-white/[0.04] border border-white/[0.08] rounded-lg placeholder-gray-500 focus:outline-none focus:border-primary-500/50"
+              />
+              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] text-gray-500 bg-white/[0.06] px-1.5 py-0.5 rounded border border-white/[0.08]">
+                Ctrl F
+              </span>
             </div>
-          </Card>
-
-          {/* Advanced Options Section */}
-          <div>
-            <h3 className="text-sm font-semibold text-white mb-4">Advanced Options</h3>
-            <div className="grid grid-cols-4 gap-4">
-              {advancedOptionsCards.map((card) => {
-                const Icon = card.icon;
-                return (
-                  <Card key={card.title} padding="md">
-                    <div className="flex flex-col h-full">
-                      <div className="p-2 rounded-lg bg-primary-500/10 w-fit mb-3">
-                        <Icon size={18} className="text-primary-400" />
-                      </div>
-                      <h4 className="text-sm font-medium text-white mb-1">{card.title}</h4>
-                      <p className="text-xs text-gray-400 mb-4 flex-1">{card.description}</p>
-                      {card.hasToggle && (
-                        <div className="mb-3">
-                          <div className="w-9 h-5 rounded-full bg-primary-500 relative cursor-pointer">
-                            <div className="absolute top-0.5 right-0.5 w-4 h-4 rounded-full bg-white transition-transform" />
-                          </div>
-                        </div>
-                      )}
-                      <button className="w-full px-3 py-2 text-xs font-medium text-primary-400 border border-primary-500/30 rounded-lg hover:bg-primary-500/10 transition-colors">
-                        Configure
-                      </button>
-                    </div>
-                  </Card>
-                );
-              })}
-            </div>
+            <button className="flex items-center gap-2 px-3 py-2 text-sm text-gray-300 bg-white/[0.04] border border-white/[0.08] rounded-lg hover:bg-white/[0.06] transition-colors">
+              <Filter size={14} />
+              <span>Filters</span>
+              <ChevronDown size={14} />
+            </button>
+            <button className="flex items-center gap-2 px-3 py-2 text-sm text-gray-300 bg-white/[0.04] border border-white/[0.08] rounded-lg hover:bg-white/[0.06] transition-colors">
+              <Calendar size={14} />
+              <span>May 12, 2024 - May 19, 2024</span>
+            </button>
+            <button className="flex items-center gap-2 px-3 py-2 text-sm text-gray-300 bg-white/[0.04] border border-white/[0.08] rounded-lg hover:bg-white/[0.06] transition-colors">
+              <Download size={14} />
+              <span>Export</span>
+              <ChevronDown size={14} />
+            </button>
           </div>
 
-          {/* Danger Zone Section */}
-          <Card padding="lg">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="p-2 rounded-lg bg-red-500/10">
-                  <AlertTriangle size={18} className="text-red-400" />
+          {/* Log Table */}
+          <Card padding="none">
+            {/* Table Header */}
+            <div className="grid grid-cols-[1.4fr_1.6fr_1.4fr_1.2fr_1.2fr_0.3fr] gap-4 items-center px-4 py-3 border-b border-white/[0.08]">
+              <div className="flex items-center gap-1">
+                <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">Time</span>
+                <ArrowUpDown size={12} className="text-gray-500" />
+              </div>
+              <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">User</span>
+              <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">Action</span>
+              <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">Resource</span>
+              <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">IP Address</span>
+              <span />
+            </div>
+
+            {/* Table Rows */}
+            <div className="divide-y divide-white/[0.08]">
+              {logEntries.map((entry, index) => (
+                <div
+                  key={index}
+                  className="grid grid-cols-[1.4fr_1.6fr_1.4fr_1.2fr_1.2fr_0.3fr] gap-4 items-center px-4 py-3 hover:bg-white/[0.02] transition-colors"
+                >
+                  {/* Time */}
+                  <div>
+                    <p className="text-sm text-white">{entry.time}</p>
+                    <p className="text-xs text-gray-500">{entry.timeAgo}</p>
+                  </div>
+
+                  {/* User */}
+                  <div className="flex items-center gap-2.5">
+                    <div className={`w-7 h-7 rounded-full ${entry.avatarColor} flex items-center justify-center flex-shrink-0`}>
+                      <span className="text-xs font-bold text-white">{entry.initial}</span>
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-sm text-white truncate">{entry.userName}</p>
+                      <p className="text-xs text-gray-500 truncate">{entry.userEmail}</p>
+                    </div>
+                  </div>
+
+                  {/* Action */}
+                  <div>
+                    <span className="text-sm text-white">{entry.action}</span>
+                    <span className={`ml-2 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium ${entry.actionBadgeColor}`}>
+                      {entry.actionCategory}
+                    </span>
+                  </div>
+
+                  {/* Resource */}
+                  <span className="text-sm text-gray-300">{entry.resource}</span>
+
+                  {/* IP Address */}
+                  <div>
+                    <p className="text-sm text-gray-300">{entry.ipAddress}</p>
+                    <p className="text-xs text-gray-500">{entry.location}</p>
+                  </div>
+
+                  {/* Detail Button */}
+                  <div className="flex justify-end">
+                    <button className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-white/[0.06] transition-colors">
+                      <Info size={14} />
+                    </button>
+                  </div>
                 </div>
-                <div>
-                  <h3 className="text-sm font-semibold text-red-400">Danger Zone</h3>
-                  <p className="text-xs text-gray-400 mt-0.5">
-                    Irreversible and potentially dangerous actions.
-                  </p>
+              ))}
+            </div>
+
+            {/* Pagination Footer */}
+            <div className="flex items-center justify-between px-4 py-3 border-t border-white/[0.08]">
+              <p className="text-xs text-gray-400">Showing 1 to 10 of 1,248 logs</p>
+              <div className="flex items-center gap-1">
+                <button className="p-1.5 rounded text-gray-400 hover:text-white hover:bg-white/[0.06] transition-colors">
+                  <ChevronLeft size={14} />
+                </button>
+                <button className="px-2.5 py-1 rounded text-xs font-medium bg-primary-500/10 text-primary-400">1</button>
+                <button className="px-2.5 py-1 rounded text-xs text-gray-400 hover:text-white hover:bg-white/[0.06] transition-colors">2</button>
+                <button className="px-2.5 py-1 rounded text-xs text-gray-400 hover:text-white hover:bg-white/[0.06] transition-colors">3</button>
+                <button className="px-2.5 py-1 rounded text-xs text-gray-400 hover:text-white hover:bg-white/[0.06] transition-colors">4</button>
+                <button className="px-2.5 py-1 rounded text-xs text-gray-400 hover:text-white hover:bg-white/[0.06] transition-colors">5</button>
+                <span className="px-1 text-xs text-gray-500">...</span>
+                <button className="px-2.5 py-1 rounded text-xs text-gray-400 hover:text-white hover:bg-white/[0.06] transition-colors">125</button>
+                <button className="p-1.5 rounded text-gray-400 hover:text-white hover:bg-white/[0.06] transition-colors">
+                  <ChevronRight size={14} />
+                </button>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-gray-400">Rows per page</span>
+                <div className="relative">
+                  <select className="px-2 py-1 text-xs text-gray-300 bg-white/[0.04] border border-white/[0.08] rounded appearance-none pr-6">
+                    <option>10</option>
+                  </select>
+                  <ChevronDown size={12} className="absolute right-1.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
                 </div>
               </div>
-              <button className="px-4 py-2 text-sm font-medium text-red-400 border border-red-500/30 rounded-lg hover:bg-red-500/10 transition-colors">
-                Open Danger Zone
-              </button>
             </div>
           </Card>
 
@@ -411,58 +450,70 @@ export function Settings() {
 
         {/* Right Sidebar */}
         <div className="w-[25%] flex-shrink-0 space-y-6">
-          {/* System Health */}
+          {/* Log Summary */}
           <Card padding="lg">
-            <h3 className="text-sm font-semibold text-white mb-1">System Health</h3>
+            <h3 className="text-sm font-semibold text-white mb-1">Log Summary</h3>
             <p className="text-xs text-gray-400 mb-4">
-              Real-time status of advanced systems.
+              Overview of audit logs for the selected period.
             </p>
-
-            <div className="space-y-3 mb-4">
-              {systemHealthItems.map((item) => (
-                <div key={item.label} className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span
-                      className={`w-2 h-2 rounded-full ${
-                        item.healthy ? 'bg-green-400' : 'bg-red-400'
-                      }`}
-                    />
-                    <span className="text-xs text-gray-300">{item.label}</span>
-                  </div>
-                  <span
-                    className={`text-xs font-medium ${
-                      item.healthy ? 'text-green-400' : 'text-red-400'
-                    }`}
-                  >
-                    {item.status}
-                  </span>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="rounded-lg bg-dark-bg border border-white/[0.08] p-3">
+                <div className="flex items-center gap-2 mb-1.5">
+                  <FileBarChart size={14} className="text-blue-400" />
                 </div>
-              ))}
+                <p className="text-lg font-bold text-white">1,248</p>
+                <p className="text-xs text-gray-400">Total Logs</p>
+              </div>
+              <div className="rounded-lg bg-dark-bg border border-white/[0.08] p-3">
+                <div className="flex items-center gap-2 mb-1.5">
+                  <Users size={14} className="text-green-400" />
+                </div>
+                <p className="text-lg font-bold text-white">156</p>
+                <p className="text-xs text-gray-400">Unique Users</p>
+              </div>
+              <div className="rounded-lg bg-dark-bg border border-white/[0.08] p-3">
+                <div className="flex items-center gap-2 mb-1.5">
+                  <ShieldCheck size={14} className="text-purple-400" />
+                </div>
+                <p className="text-lg font-bold text-white">78</p>
+                <p className="text-xs text-gray-400">Security Events</p>
+              </div>
+              <div className="rounded-lg bg-dark-bg border border-white/[0.08] p-3">
+                <div className="flex items-center gap-2 mb-1.5">
+                  <Database size={14} className="text-orange-400" />
+                </div>
+                <p className="text-lg font-bold text-white">312</p>
+                <p className="text-xs text-gray-400">Data Changes</p>
+              </div>
             </div>
-
-            <button className="text-xs font-medium text-primary-400 hover:text-primary-300 transition-colors">
-              View System Health &rarr;
-            </button>
           </Card>
 
-          {/* Developer Tools */}
+          {/* Top Actions */}
           <Card padding="lg">
-            <h3 className="text-sm font-semibold text-white mb-1">Developer Tools</h3>
+            <h3 className="text-sm font-semibold text-white mb-1">Top Actions</h3>
             <p className="text-xs text-gray-400 mb-4">
-              Useful tools for developers and admins.
+              Most performed actions in this period.
             </p>
-
-            <div className="space-y-3 mb-4">
-              {developerTools.map((tool) => (
-                <div key={tool.title}>
-                  <h4 className="text-xs font-medium text-white">{tool.title}</h4>
-                  <p className="text-xs text-gray-400 mt-0.5">{tool.description}</p>
+            <div className="space-y-3">
+              {topActions.map((action) => (
+                <div key={action.label} className={`border-l-2 ${action.color} pl-3`}>
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-xs text-gray-300">{action.label}</span>
+                    <span className="text-xs text-gray-400">
+                      {action.count} ({action.percent}%)
+                    </span>
+                  </div>
+                  <div className="w-full h-1.5 rounded-full bg-white/[0.08]">
+                    <div
+                      className={`h-full rounded-full ${action.barColor}`}
+                      style={{ width: `${action.percent}%` }}
+                    />
+                  </div>
                 </div>
               ))}
             </div>
-
-            <button className="text-xs font-medium text-primary-400 hover:text-primary-300 transition-colors">
-              View All Tools &rarr;
+            <button className="mt-4 w-full px-3 py-1.5 text-xs font-medium text-primary-400 border border-primary-500/30 rounded-lg hover:bg-primary-500/10 transition-colors">
+              View All Actions &rarr;
             </button>
           </Card>
 
@@ -470,13 +521,13 @@ export function Settings() {
           <Card padding="lg">
             <h3 className="text-sm font-semibold text-white mb-1">Need Help?</h3>
             <p className="text-xs text-gray-400 mb-4">
-              Learn more about advanced settings.
+              Learn more about audit logs.
             </p>
             <div className="space-y-3">
               <a href="#" className="flex items-center gap-2 group">
                 <ExternalLink size={12} className="text-gray-400 flex-shrink-0" />
                 <span className="text-xs font-medium text-gray-300 group-hover:text-white transition-colors">
-                  Advanced Settings Guide
+                  Audit Logs Guide
                 </span>
               </a>
               <a href="#" className="flex items-center gap-2 group">
