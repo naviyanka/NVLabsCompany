@@ -2,7 +2,7 @@
   "id": "FEAT-003",
   "type": "feat",
   "description": "Durable Execution Checkpoints: Create a checkpointing system for crash recovery of long-running tasks, including SQLModel table, CheckpointManager class, state serialization, and startup recovery routine.",
-  "status": "pending",
+  "status": "in_progress",
   "steps": [
     "1. Create src/nexus/runtime/checkpoint.py with: ExecutionCheckpoint SQLModel table (id UUID PK, task_id UUID indexed, step_index int, state_json dict/JSON, status str [active/completed/abandoned], created_at datetime, updated_at datetime). Add CheckpointStatus enum: active, completed, abandoned.",
     "2. Create CheckpointManager class in the same file: __init__(max_checkpoint_age_hours: int = 24). Methods: save_checkpoint(task_id, step_index, state: dict) -> ExecutionCheckpoint, load_latest(task_id) -> ExecutionCheckpoint | None, cleanup(task_id) to mark old checkpoints as completed, abandon_stale() to mark checkpoints older than max_checkpoint_age_hours as abandoned, list_active() -> list[ExecutionCheckpoint], resume_from_checkpoint(task_id) -> dict | None (deserializes state_json from latest active checkpoint).",
