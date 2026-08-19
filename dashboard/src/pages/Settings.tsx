@@ -16,20 +16,11 @@ import {
   Palette,
   Wrench,
   ExternalLink,
-  Plus,
-  Search,
-  ChevronDown,
-  MoreVertical,
-  Filter,
-  Code,
-  BarChart3,
-  Eye,
-  Lock,
-  Layers,
-  ShieldCheck,
+  Diamond,
+  Download,
+  Trash2,
+  ChevronRight,
   Check,
-  Minus,
-  Pencil,
 } from 'lucide-react';
 
 // ─── Static Mock Data ──────────────────────────────────────────────────────────
@@ -41,8 +32,8 @@ const navItems = [
   { label: 'API Keys', icon: Key, active: false },
   { label: 'Integrations', icon: Puzzle, active: false },
   { label: 'Teams & Users', icon: Users, active: false },
-  { label: 'Roles & Permissions', icon: UserCog, active: true },
-  { label: 'Billing & Subscription', icon: CreditCard, active: false },
+  { label: 'Roles & Permissions', icon: UserCog, active: false },
+  { label: 'Billing & Subscription', icon: CreditCard, active: true },
   { label: 'System Configuration', icon: SettingsIcon, active: false },
   { label: 'Notifications', icon: Bell, active: false },
   { label: 'Data & Storage', icon: Database, active: false },
@@ -59,118 +50,35 @@ const footerLinks = [
   { label: 'Terms of Service' },
 ];
 
-const roleTabs = [
-  { label: 'Roles', active: true },
-  { label: 'Permissions', active: false },
+const planFeatures = [
+  'Unlimited agents & tasks',
+  'Advanced AI models',
+  'Private pipelines',
+  'SLA & priority support',
+  'Advanced security & SSO',
+  'Custom integrations',
 ];
 
-const rolesData = [
-  {
-    name: 'Administrator',
-    icon: Shield,
-    iconColor: 'text-blue-400',
-    iconBg: 'bg-blue-500/20',
-    description: 'Full access to all features, settings, and user management.',
-    users: 6,
-    status: 'Active' as const,
-  },
-  {
-    name: 'Security Manager',
-    icon: Shield,
-    iconColor: 'text-purple-400',
-    iconBg: 'bg-purple-500/20',
-    description: 'Manage security settings, agents, tasks, and reports.',
-    users: 4,
-    status: 'Active' as const,
-  },
-  {
-    name: 'Developer',
-    icon: Code,
-    iconColor: 'text-teal-400',
-    iconBg: 'bg-teal-500/20',
-    description: 'Access to development tools, pipelines, and repositories.',
-    users: 7,
-    status: 'Active' as const,
-  },
-  {
-    name: 'Analyst',
-    icon: BarChart3,
-    iconColor: 'text-blue-400',
-    iconBg: 'bg-blue-500/20',
-    description: 'View and analyze data, reports, and dashboards.',
-    users: 5,
-    status: 'Active' as const,
-  },
-  {
-    name: 'Operator',
-    icon: Cog,
-    iconColor: 'text-orange-400',
-    iconBg: 'bg-orange-500/20',
-    description: 'Run tasks, view dashboards, and manage assigned pipelines.',
-    users: 12,
-    status: 'Active' as const,
-  },
-  {
-    name: 'Viewer',
-    icon: Eye,
-    iconColor: 'text-gray-400',
-    iconBg: 'bg-gray-500/20',
-    description: 'Read-only access to dashboards and reports.',
-    users: 8,
-    status: 'Inactive' as const,
-  },
+const usageLimits = [
+  { label: 'Agents', used: '124', total: 'Unlimited', percentage: 100 },
+  { label: 'Tasks', used: '12,548', total: 'Unlimited', percentage: 100 },
+  { label: 'Pipelines', used: '85', total: 'Unlimited', percentage: 100 },
+  { label: 'Storage', used: '1.2 TB', total: '5 TB', percentage: 24 },
+  { label: 'API Calls', used: '2.4M', total: '10M', percentage: 24 },
 ];
 
-const permissionMatrix = [
-  { permission: 'Dashboard: View', values: [true, true, true, true, true, true] },
-  { permission: 'Agents: Manage', values: [true, true, false, false, false, false] },
-  { permission: 'Tasks: Create / Run', values: [true, true, true, true, false, false] },
-  { permission: 'Pipelines: Manage', values: [true, true, true, false, false, false] },
-  { permission: 'Users: Manage', values: [true, false, false, false, false, false] },
-  { permission: 'Settings: Manage', values: [true, true, false, false, false, false] },
-  { permission: 'Reports: Export', values: [true, true, true, true, false, false] },
-];
-
-const roleColumns = [
-  { name: 'Administrator', color: 'bg-blue-400' },
-  { name: 'Security Manager', color: 'bg-purple-400' },
-  { name: 'Developer', color: 'bg-teal-400' },
-  { name: 'Analyst', color: 'bg-blue-400' },
-  { name: 'Operator', color: 'bg-orange-400' },
-  { name: 'Viewer', color: 'bg-gray-400' },
-];
-
-const sidebarFeatures = [
-  {
-    icon: Lock,
-    title: 'Granular Control',
-    description: 'Set fine-grained permissions for each resource and action.',
-  },
-  {
-    icon: Layers,
-    title: 'Inherited Permissions',
-    description: 'Permissions cascade from role to user to simplify management.',
-  },
-  {
-    icon: ShieldCheck,
-    title: 'Secure by Default',
-    description: 'New users inherit the safest permissions by default.',
-  },
+const invoices = [
+  { id: 'INV-2024-0489', date: 'May 1, 2024', amount: '$499.00', status: 'Paid' },
+  { id: 'INV-2024-0410', date: 'Apr 1, 2024', amount: '$499.00', status: 'Paid' },
+  { id: 'INV-2024-0331', date: 'Mar 1, 2024', amount: '$499.00', status: 'Paid' },
+  { id: 'INV-2024-0229', date: 'Feb 1, 2024', amount: '$499.00', status: 'Paid' },
+  { id: 'INV-2024-0129', date: 'Jan 1, 2024', amount: '$499.00', status: 'Paid' },
 ];
 
 const helpLinks = [
-  {
-    title: 'Roles & Permissions Guide',
-    description: 'Learn how to create roles and assign permissions.',
-  },
-  {
-    title: 'Permission Reference',
-    description: 'View all available permissions and actions.',
-  },
-  {
-    title: 'Best Practices',
-    description: 'Follow security best practices for role management.',
-  },
+  { title: 'Billing & Subscription FAQ' },
+  { title: 'Contact Support' },
+  { title: 'Request a Call' },
 ];
 
 // ─── Main Component ────────────────────────────────────────────────────────────
@@ -220,166 +128,160 @@ export function Settings() {
         {/* Center Content */}
         <div className="flex-1 min-w-0 space-y-6">
           {/* Section Header */}
-          <div className="flex items-center justify-between">
-            <div>
-              <h2 className="text-lg font-semibold text-white">Roles &amp; Permissions</h2>
-              <p className="text-sm text-gray-400 mt-0.5">
-                Define roles and control access permissions across NVLABS Mission Control.
-              </p>
-            </div>
-            <button className="flex items-center gap-2 px-4 py-2 bg-green-500 text-white text-sm font-medium rounded-lg hover:bg-green-600 transition-colors">
-              <Plus size={16} />
-              Create Role
-            </button>
+          <div>
+            <h2 className="text-lg font-semibold text-white">Billing &amp; Subscription</h2>
+            <p className="text-sm text-gray-400 mt-0.5">
+              Manage your subscription, payment methods, and billing history.
+            </p>
           </div>
 
-          {/* Tab Navigation */}
-          <div className="border-b border-white/[0.08]">
-            <div className="flex items-center gap-6">
-              {roleTabs.map((tab) => (
-                <button
-                  key={tab.label}
-                  className={`pb-3 text-sm font-medium transition-colors relative ${
-                    tab.active
-                      ? 'text-primary-400'
-                      : 'text-gray-400 hover:text-white'
-                  }`}
-                >
-                  {tab.label}
-                  {tab.active && (
-                    <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary-500 rounded-full" />
-                  )}
+          {/* Current Plan Card */}
+          <Card padding="lg">
+            <div className="grid grid-cols-3 gap-6">
+              {/* Left: Plan Info */}
+              <div className="space-y-3">
+                <p className="text-xs font-medium text-gray-400 uppercase tracking-wider">Current Plan</p>
+                <div className="flex items-center gap-2">
+                  <Diamond size={18} className="text-red-400" />
+                  <span className="text-lg font-bold text-white">Enterprise</span>
+                </div>
+                <div>
+                  <span className="text-2xl font-bold text-white">$499</span>
+                  <span className="text-sm text-gray-400"> / month</span>
+                </div>
+                <p className="text-xs text-gray-400">Billed monthly</p>
+                <span className="inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-full bg-green-500/20 text-green-400">
+                  Active
+                </span>
+              </div>
+
+              {/* Center: Plan Features */}
+              <div className="space-y-3">
+                <p className="text-xs font-medium text-gray-400">Everything in Professional, plus:</p>
+                <div className="space-y-2">
+                  {planFeatures.map((feature) => (
+                    <div key={feature} className="flex items-center gap-2">
+                      <Check size={14} className="text-green-400 flex-shrink-0" />
+                      <span className="text-sm text-gray-300">{feature}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Right: Billing Details */}
+              <div className="space-y-3">
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-gray-400">Next billing date:</span>
+                    <span className="text-xs text-gray-300">June 1, 2024</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-gray-400">Billing cycle:</span>
+                    <span className="text-xs text-gray-300">Monthly</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-gray-400">Seats:</span>
+                    <span className="text-xs text-gray-300">24 / 50</span>
+                  </div>
+                </div>
+                <button className="w-full mt-3 px-4 py-2 border border-white/[0.12] rounded-lg text-sm text-gray-300 hover:bg-white/[0.04] transition-colors">
+                  Manage Plan
                 </button>
+              </div>
+            </div>
+          </Card>
+
+          {/* Usage & Plan Limits */}
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-white">Usage &amp; Plan Limits</h3>
+              <a href="#" className="text-xs text-primary-400 hover:text-primary-300 transition-colors">
+                View all limits
+              </a>
+            </div>
+            <div className="grid grid-cols-5 gap-3">
+              {usageLimits.map((item) => (
+                <Card key={item.label} padding="sm">
+                  <div className="space-y-2">
+                    <p className="text-xs text-gray-400">{item.label}</p>
+                    <p className="text-sm font-semibold text-white">
+                      {item.used} / {item.total}
+                    </p>
+                    <div className="w-full h-1.5 bg-dark-bg rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-primary-500 rounded-full"
+                        style={{ width: `${item.percentage}%` }}
+                      />
+                    </div>
+                  </div>
+                </Card>
               ))}
             </div>
           </div>
 
-          {/* Search/Filter Bar */}
-          <div className="flex items-center gap-3">
-            <div className="relative flex-1">
-              <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-              <input
-                type="text"
-                placeholder="Search roles by name or description..."
-                className="w-full bg-dark-bg border border-white/[0.08] rounded-lg pl-9 pr-3 py-2 text-white text-sm placeholder-gray-500 focus:outline-none focus:border-primary-500"
-              />
+          {/* Payment Method */}
+          <div className="space-y-4">
+            <div>
+              <h3 className="text-sm font-semibold text-white">Payment Method</h3>
+              <p className="text-xs text-gray-400 mt-0.5">Manage your saved payment methods.</p>
             </div>
-            <button className="flex items-center gap-2 px-3 py-2 bg-dark-bg border border-white/[0.08] rounded-lg text-sm text-gray-300 hover:bg-white/[0.04] transition-colors">
-              All Status
-              <ChevronDown size={14} className="text-gray-400" />
-            </button>
-            <button className="flex items-center gap-2 px-3 py-2 bg-dark-bg border border-white/[0.08] rounded-lg text-sm text-gray-300 hover:bg-white/[0.04] transition-colors">
-              <Filter size={14} className="text-gray-400" />
-              Filters
+            <Card padding="md">
+              <div className="flex items-center gap-4">
+                {/* VISA text logo */}
+                <div className="w-12 h-8 bg-white rounded flex items-center justify-center">
+                  <span className="text-[10px] font-bold text-blue-900 italic tracking-tight">VISA</span>
+                </div>
+                <div className="flex-1">
+                  <p className="text-sm text-white font-medium">
+                    Visa &bull;&bull;&bull;&bull; &bull;&bull;&bull;&bull; &bull;&bull;&bull;&bull; 4242
+                  </p>
+                </div>
+                <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-green-500/20 text-green-400">
+                  Default
+                </span>
+                <span className="text-xs text-gray-400">Expires 08/27</span>
+                <button className="px-3 py-1.5 text-xs text-gray-300 border border-white/[0.12] rounded-lg hover:bg-white/[0.04] transition-colors">
+                  Edit
+                </button>
+                <button className="text-gray-400 hover:text-red-400 transition-colors">
+                  <Trash2 size={16} />
+                </button>
+              </div>
+            </Card>
+            <button className="w-full px-4 py-2 border border-white/[0.12] border-dashed rounded-lg text-sm text-gray-400 hover:text-white hover:border-white/[0.2] transition-colors">
+              + Add Payment Method
             </button>
           </div>
 
-          {/* Roles Table */}
-          <Card padding="none">
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead>
-                  <tr className="border-b border-white/[0.08]">
-                    <th className="text-left text-xs font-medium text-gray-400 uppercase tracking-wider px-4 py-3">Role</th>
-                    <th className="text-left text-xs font-medium text-gray-400 uppercase tracking-wider px-4 py-3">Description</th>
-                    <th className="text-left text-xs font-medium text-gray-400 uppercase tracking-wider px-4 py-3">Users</th>
-                    <th className="text-left text-xs font-medium text-gray-400 uppercase tracking-wider px-4 py-3">Status</th>
-                    <th className="text-left text-xs font-medium text-gray-400 uppercase tracking-wider px-4 py-3">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {rolesData.map((role) => {
-                    const RoleIcon = role.icon;
-                    return (
-                      <tr key={role.name} className="border-b border-white/[0.06] last:border-b-0 hover:bg-white/[0.02] transition-colors">
-                        <td className="px-4 py-3">
-                          <div className="flex items-center gap-3">
-                            <div className={`w-8 h-8 rounded-full flex items-center justify-center ${role.iconBg}`}>
-                              <RoleIcon size={14} className={role.iconColor} />
-                            </div>
-                            <span className="text-sm font-medium text-white">{role.name}</span>
-                          </div>
-                        </td>
-                        <td className="px-4 py-3">
-                          <span className="text-sm text-gray-400">{role.description}</span>
-                        </td>
-                        <td className="px-4 py-3">
-                          <span className="text-sm text-gray-300">{role.users}</span>
-                        </td>
-                        <td className="px-4 py-3">
-                          <span className="flex items-center gap-1.5 text-sm">
-                            <span className={`w-2 h-2 rounded-full ${role.status === 'Active' ? 'bg-green-400' : 'bg-gray-400'}`} />
-                            <span className={role.status === 'Active' ? 'text-green-400' : 'text-gray-400'}>
-                              {role.status}
-                            </span>
-                          </span>
-                        </td>
-                        <td className="px-4 py-3">
-                          <button className="text-gray-400 hover:text-white transition-colors">
-                            <MoreVertical size={16} />
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </Card>
-
-          {/* Showing info */}
-          <p className="text-sm text-gray-400">Showing 1 to 6 of 6 roles</p>
-
-          {/* Permission Matrix */}
+          {/* Billing Information */}
           <div className="space-y-4">
             <div>
-              <h3 className="text-lg font-semibold text-white">Permission Matrix</h3>
-              <p className="text-sm text-gray-400 mt-0.5">
-                Overview of permissions by role. Click on a permission to view details.
-              </p>
+              <h3 className="text-sm font-semibold text-white">Billing Information</h3>
+              <p className="text-xs text-gray-400 mt-0.5">Update your billing details and download invoices.</p>
             </div>
-
-            <Card padding="none">
-              <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead>
-                    <tr className="border-b border-white/[0.08]">
-                      <th className="text-left text-xs font-medium text-gray-400 uppercase tracking-wider px-4 py-3">Permission</th>
-                      {roleColumns.map((col) => (
-                        <th key={col.name} className="text-center text-xs font-medium text-gray-400 uppercase tracking-wider px-3 py-3">
-                          <div className="flex items-center justify-center gap-1.5">
-                            <span className={`w-2 h-2 rounded-full ${col.color}`} />
-                            <span>{col.name}</span>
-                          </div>
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {permissionMatrix.map((row) => (
-                      <tr key={row.permission} className="border-b border-white/[0.06] last:border-b-0 hover:bg-white/[0.02] transition-colors">
-                        <td className="px-4 py-3">
-                          <span className="text-sm text-gray-300">{row.permission}</span>
-                        </td>
-                        {row.values.map((allowed, idx) => (
-                          <td key={idx} className="px-3 py-3 text-center">
-                            {allowed ? (
-                              <Check size={16} className="text-green-400 inline-block" />
-                            ) : (
-                              <Minus size={16} className="text-gray-500 inline-block" />
-                            )}
-                          </td>
-                        ))}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+            <Card padding="md">
+              <div className="grid grid-cols-3 gap-6">
+                <div className="space-y-2">
+                  <p className="text-xs text-gray-400">Billing Email</p>
+                  <p className="text-sm text-white">billing@nvlabs.dev</p>
+                  <a href="#" className="text-xs text-teal-400 hover:text-teal-300 transition-colors">Edit</a>
+                </div>
+                <div className="space-y-2">
+                  <p className="text-xs text-gray-400">Billing Address</p>
+                  <p className="text-sm text-white leading-relaxed">
+                    NVLABS Technologies Pvt. Ltd.<br />
+                    Gurgaon, Haryana 122001<br />
+                    India
+                  </p>
+                  <a href="#" className="text-xs text-teal-400 hover:text-teal-300 transition-colors">Edit</a>
+                </div>
+                <div className="space-y-2">
+                  <p className="text-xs text-gray-400">Tax ID / GSTIN</p>
+                  <p className="text-sm text-white">06AAGCN1234H1Z5</p>
+                  <a href="#" className="text-xs text-teal-400 hover:text-teal-300 transition-colors">Edit</a>
+                </div>
               </div>
             </Card>
-
-            <button className="px-4 py-2 bg-teal-500/20 text-teal-400 text-sm font-medium rounded-lg hover:bg-teal-500/30 transition-colors">
-              View All Permissions
-            </button>
           </div>
 
           {/* Footer */}
@@ -406,103 +308,98 @@ export function Settings() {
 
         {/* Right Sidebar */}
         <div className="w-[25%] flex-shrink-0 space-y-6">
-          {/* About Roles & Permissions */}
+          {/* Invoices */}
           <Card padding="lg">
-            <div className="flex items-center gap-2 mb-3">
-              <UserCog size={16} className="text-primary-400" />
-              <h3 className="text-sm font-semibold text-white">About Roles &amp; Permissions</h3>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-sm font-semibold text-white">Invoices</h3>
+              <a href="#" className="text-xs text-primary-400 hover:text-primary-300 transition-colors">
+                View all invoices
+              </a>
             </div>
-            <p className="text-xs text-gray-400 mb-4">
-              Roles help you group users with similar responsibilities. Permissions define exactly what each role can access or modify.
-            </p>
             <div className="space-y-3">
-              {sidebarFeatures.map((feature) => {
-                const FeatureIcon = feature.icon;
-                return (
-                  <div key={feature.title} className="flex items-start gap-2.5">
-                    <div className="p-1.5 rounded-md bg-white/[0.05] mt-0.5">
-                      <FeatureIcon size={12} className="text-gray-400" />
-                    </div>
-                    <div>
-                      <p className="text-xs font-medium text-gray-300">{feature.title}</p>
-                      <p className="text-xs text-gray-500 mt-0.5">{feature.description}</p>
-                    </div>
+              {invoices.map((invoice) => (
+                <div key={invoice.id} className="flex items-center gap-2 text-xs">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-gray-300 font-medium truncate">{invoice.id}</p>
+                    <p className="text-gray-500">{invoice.date}</p>
                   </div>
-                );
-              })}
+                  <span className="text-gray-300">{invoice.amount}</span>
+                  <span className="px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-green-500/20 text-green-400">
+                    {invoice.status}
+                  </span>
+                  <button className="text-gray-400 hover:text-white transition-colors">
+                    <Download size={12} />
+                  </button>
+                </div>
+              ))}
             </div>
           </Card>
 
-          {/* Selected Role Details */}
+          {/* Payment Method (Sidebar) */}
           <Card padding="lg">
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="text-sm font-semibold text-white">Selected Role Details</h3>
+            <h3 className="text-sm font-semibold text-white mb-2">Payment Method</h3>
+            <p className="text-xs text-gray-400 mb-3">Default payment method for recurring billing.</p>
+            <div className="flex items-center gap-3 mb-2">
+              <div className="w-10 h-6 bg-white rounded flex items-center justify-center">
+                <span className="text-[8px] font-bold text-blue-900 italic tracking-tight">VISA</span>
+              </div>
+              <div className="flex-1">
+                <p className="text-xs text-white font-medium">
+                  Visa &bull;&bull;&bull;&bull; &bull;&bull;&bull;&bull; &bull;&bull;&bull;&bull; 4242
+                </p>
+              </div>
+              <span className="px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-green-500/20 text-green-400">
+                Default
+              </span>
             </div>
+            <p className="text-xs text-gray-400 mb-3">Expires 08/27</p>
+            <a href="#" className="flex items-center gap-1 text-xs text-primary-400 hover:text-primary-300 transition-colors">
+              Update Payment Method
+              <ChevronRight size={12} />
+            </a>
+          </Card>
+
+          {/* Usage This Month */}
+          <Card padding="lg">
+            <h3 className="text-sm font-semibold text-white mb-2">Usage This Month</h3>
+            <p className="text-xs text-gray-400 mb-4">Your usage will reset on June 1, 2024.</p>
             <div className="space-y-4">
-              <div className="flex items-center gap-2">
-                <span className="text-sm font-medium text-white">Administrator</span>
-                <span className="px-1.5 py-0.5 text-xs font-medium rounded bg-green-500/20 text-green-400">Active</span>
-              </div>
-              <p className="text-xs text-gray-400">
-                Full access to all features, settings, and user management.
-              </p>
-              <div className="flex items-center gap-1">
-                <span className="text-xs text-gray-400">6 Users assigned</span>
-                <div className="flex items-center ml-2">
-                  <div className="w-6 h-6 rounded-full bg-gradient-to-br from-indigo-500 to-purple-500 border-2 border-dark-card text-[8px] text-white flex items-center justify-center font-medium">NY</div>
-                  <div className="w-6 h-6 rounded-full bg-pink-500/30 border-2 border-dark-card -ml-1.5 text-[8px] text-white flex items-center justify-center font-medium">AS</div>
-                  <div className="w-6 h-6 rounded-full bg-blue-500/30 border-2 border-dark-card -ml-1.5 text-[8px] text-white flex items-center justify-center font-medium">RV</div>
-                  <div className="w-6 h-6 rounded-full bg-purple-600/30 border-2 border-dark-card -ml-1.5 text-[8px] text-white flex items-center justify-center font-medium">PS</div>
-                  <div className="w-6 h-6 rounded-full bg-gray-600 border-2 border-dark-card -ml-1.5 text-[8px] text-white flex items-center justify-center font-medium">+2</div>
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-gray-400">Compute Minutes</span>
+                  <span className="text-xs text-gray-300">1,245 / 5,000 min</span>
+                </div>
+                <div className="w-full h-1.5 bg-dark-bg rounded-full overflow-hidden">
+                  <div className="h-full bg-primary-500 rounded-full" style={{ width: '25%' }} />
                 </div>
               </div>
-              <div className="border-t border-white/[0.08] pt-3">
-                <p className="text-xs font-medium text-gray-300 mb-2">Permissions Summary</p>
-                <div className="space-y-1.5">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs text-gray-400">Total Permissions</span>
-                    <span className="text-xs text-white font-medium">42</span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs text-gray-400">Allowed</span>
-                    <span className="text-xs text-green-400 font-medium">42</span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs text-gray-400">Restricted</span>
-                    <span className="text-xs text-red-400 font-medium">0</span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs text-gray-400">Inherited</span>
-                    <span className="text-xs text-gray-500 font-medium">&mdash;</span>
-                  </div>
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-gray-400">AI Tokens</span>
+                  <span className="text-xs text-gray-300">24.6M / 100M tokens</span>
+                </div>
+                <div className="w-full h-1.5 bg-dark-bg rounded-full overflow-hidden">
+                  <div className="h-full bg-primary-500 rounded-full" style={{ width: '24.6%' }} />
                 </div>
               </div>
-              <button className="w-full flex items-center justify-center gap-2 px-3 py-2 border border-white/[0.12] rounded-lg text-sm text-gray-300 hover:bg-white/[0.04] transition-colors">
-                <Pencil size={14} />
-                Edit Role
-              </button>
             </div>
           </Card>
 
           {/* Need Help? */}
           <Card padding="lg">
-            <h3 className="text-sm font-semibold text-white mb-3">Need Help?</h3>
+            <h3 className="text-sm font-semibold text-white mb-2">Need Help?</h3>
+            <p className="text-xs text-gray-400 mb-3">Our support team is here to help you.</p>
             <div className="space-y-3">
               {helpLinks.map((link) => (
                 <a
                   key={link.title}
                   href="#"
-                  className="flex items-start gap-2.5 group"
+                  className="flex items-center gap-2 group"
                 >
-                  <ExternalLink size={12} className="text-gray-400 mt-0.5 flex-shrink-0" />
-                  <div>
-                    <p className="text-xs font-medium text-gray-300 group-hover:text-white transition-colors">
-                      {link.title}
-                    </p>
-                    <p className="text-xs text-gray-500 mt-0.5">
-                      {link.description}
-                    </p>
-                  </div>
+                  <ExternalLink size={12} className="text-gray-400 flex-shrink-0" />
+                  <span className="text-xs font-medium text-gray-300 group-hover:text-white transition-colors">
+                    {link.title}
+                  </span>
                 </a>
               ))}
             </div>
