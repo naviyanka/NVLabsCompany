@@ -1,0 +1,27 @@
+{
+  "id": "FEAT-002",
+  "type": "feat",
+  "description": "Restrict CORS to configured origins and add health/readiness probes that actually check dependencies.",
+  "status": "completed",
+  "steps": [
+    "Modify src/nexus/config.py: Add cors_origins: str = 'http://localhost:3000,http://localhost:5173' to Settings class. This is a comma-separated string that gets split at runtime.",
+    "Modify src/nexus/main.py: Replace allow_origins=['*'] with allow_origins=settings.cors_origins.split(',') (import settings from nexus.config). Strip whitespace from each origin.",
+    "Rewrite src/nexus/api/routes/health.py: Keep the existing /health endpoint signature but make it comprehensive. Add three endpoints: (1) GET /health/live - always returns 200 {status: 'alive'} for liveness probes, (2) GET /health/ready - checks DB connectivity by executing 'SELECT 1' via the async engine, returns 200 if OK or 503 if DB unreachable, (3) GET /health - comprehensive status with uptime (track app start time), db connectivity check, memory usage (via resource module or psutil-free approach using /proc/self/status or gc), version. Return 200 with {status: 'healthy', uptime_seconds, db: 'connected'|'disconnected', memory_mb, version}.",
+    "Add tests in tests/test_health_probes.py: Test /health/live always returns 200, test /health/ready returns 200 when DB works and 503 when DB fails (mock the engine), test /health returns comprehensive info, test CORS origins are restricted (not '*').",
+    "Verify: python3.12 -m pytest tests/test_health_probes.py -v && python3.12 -m pytest tests/ -q --tb=short"
+  ],
+  "acceptance_criteria": [
+    "CORS allow_origins no longer contains '*' - uses settings.cors_origins",
+    "GET /health/live always returns 200",
+    "GET /health/ready checks DB connectivity and returns 503 on failure",
+    "GET /health returns comprehensive status with uptime, db status, memory, version",
+    "All existing tests continue to pass",
+    "New tests in tests/test_health_probes.py pass"
+  ],
+  "verification": [
+    "python3.12 -m pytest tests/test_health_probes.py -v",
+    "python3.12 -m pytest tests/ -q --tb=short"
+  ],
+  "blocked_reason": null,
+  "findings": "Pre-existing ruff lint issues (I001 import sorting, F401 unused import) in main.py were present before this change (6 errors) and remain unchanged. All new/modified files pass ruff cleanly. All 2305 tests pass."
+}

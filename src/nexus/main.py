@@ -7,6 +7,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from nexus import __version__
+from nexus.config import settings
 from nexus.api.routes.health import router as health_router
 from nexus.api.routes.companies import router as companies_router
 from nexus.api.routes.agents import router as agents_router
@@ -29,7 +30,13 @@ from nexus.api.routes.identity import router as identity_router
 from nexus.api.routes.policies import router as policies_router
 from nexus.api.routes.secrets import router as secrets_router
 from nexus.api.routes.incidents import router as incidents_router
+from nexus.api.routes.degradation import router as degradation_router
 from nexus.api.middleware import GovernanceMiddleware
+from nexus.logging_config import RequestIDMiddleware, configure_logging
+from nexus.telemetry import MetricsMiddleware, metrics_router
+
+# Configure structured JSON logging at module level
+configure_logging()
 
 
 @asynccontextmanager
@@ -112,10 +119,10 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS middleware for development
+# CORS middleware - restrict to configured origins
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[o.strip() for o in settings.cors_origins.split(",")],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -124,8 +131,15 @@ app.add_middleware(
 # Governance middleware for policy enforcement, audit logging, and rate limiting
 app.add_middleware(GovernanceMiddleware)
 
+# Metrics middleware for HTTP request tracking
+app.add_middleware(MetricsMiddleware)
+
+# Request ID middleware (added last = outermost in ASGI stack)
+app.add_middleware(RequestIDMiddleware)
+
 # Include route modules
 app.include_router(health_router)
+app.include_router(metrics_router)
 app.include_router(companies_router)
 app.include_router(agents_router)
 app.include_router(tasks_router)
@@ -147,3 +161,4 @@ app.include_router(identity_router)
 app.include_router(policies_router)
 app.include_router(secrets_router)
 app.include_router(incidents_router)
+app.include_router(degradation_router)

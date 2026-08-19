@@ -1,536 +1,516 @@
 # Production Readiness Audit
 
-**Project:** NVLabs Nexus - AI Agent Orchestration Platform  
-**Date:** 2025-01-20  
-**Scope:** All modules across Sprints 1-7  
-**Methodology:** Code-level review of each module against reference implementations (NVLabsOrg, PraisonAI, paperclip, munder-difflin, Clawith, AI-company, OpenCompany)
+**Project:** NVLabs Nexus - Autonomous AI Company Operating System  
+**Date:** 2025-07-17  
+**Auditor:** Automated deep code review  
+**Scope:** Complete codebase audit of `src/nexus/` - every subsystem, every module  
+**Method:** Direct code reading, import verification, test execution, dependency analysis
 
 ---
 
 ## Executive Summary
 
-| Rating | Count | Description |
-|--------|-------|-------------|
-| **PRODUCTION** | 58 | Fully implemented, tested, production-grade logic |
-| **PARTIAL** | 17 | Core logic working but missing LLM integration, persistence, or advanced features |
-| **DEMO** | 0 | No pure placeholder modules exist |
+This is a brutally honest assessment. The previous audit (2025-01-20) was overly generous in several areas and outdated by significant development since then. This revision corrects the record.
 
-**Overall Assessment:** The platform is production-ready for its core orchestration, governance, and safety layers. The primary gaps are in higher-level intelligence features that require real LLM backing (planner, critic, reflection, evolution) and vector embedding support for the RAG pipeline.
+| Rating | Count | Meaning |
+|--------|-------|---------|
+| **PRODUCTION** | 14 subsystems | Real logic, tested, handles failures, ready for deployment with noted caveats |
+| **PARTIAL** | 0 subsystems | N/A - all subsystems have real implementations |
+| **DEMO** | 0 subsystems | No stub-only subsystems exist |
 
----
-
-## Rating Criteria
-
-- **PRODUCTION** - Module is fully functional with real logic, comprehensive error handling, tested, and matches or exceeds the reference implementation patterns. Ready for deployment.
-- **PARTIAL** - Module has correct architecture and working core logic, but is missing one or more integration points (LLM calls, external service connections, persistence backends). Usable with known limitations.
-- **DEMO** - Module is a placeholder with no real logic. Not suitable for any use.
+**Bottom line:** The codebase is functionally complete and internally consistent. All 2276 tests pass. All 90 API endpoints are wired. The system starts, serves requests, and governs agent behavior. However, "production-ready" means more than passing tests. This audit identifies the real gaps between "works in dev" and "safe to run with real money and real users."
 
 ---
 
-## Module-by-Module Assessment
+## 1. System-Level Verification
 
-### 1. Adapters (`src/nexus/adapters/`)
+All checks performed against the actual codebase on the `feat/phase4-evolution-intelligence` branch.
 
-| Module | Rating | Reference |
-|--------|--------|-----------|
-| `base.py` | PRODUCTION | NVLabsOrg adapter patterns |
-| `openai_adapter.py` | PRODUCTION | NVLabsOrg adapter patterns |
-| `anthropic_adapter.py` | PRODUCTION | NVLabsOrg adapter patterns |
-| `ollama_adapter.py` | PRODUCTION | NVLabsOrg adapter patterns |
-| `claude_code_adapter.py` | PARTIAL | NVLabsOrg CLI patterns |
-| `cli_adapter.py` | PARTIAL | - |
-| `mcp_adapter.py` | PARTIAL | PraisonAI MCP patterns |
-| `http_adapter.py` | PARTIAL | - |
-| `registry.py` | PRODUCTION | - |
-| `retry.py` | PRODUCTION | - |
-| `provider_presets.py` | PRODUCTION | - |
-| `cli_registry.py` | PRODUCTION | - |
+| Check | Result | Evidence |
+|-------|--------|----------|
+| Clean import | PASS | `python3.12 -c "import sys; sys.path.insert(0,'src'); from nexus.main import app"` succeeds |
+| API routes wired | PASS | 90 endpoints registered, OpenAPI spec generates successfully |
+| Test suite | PASS | 2276 tests pass in 9.52s via `python3.12 -m pytest tests/ -q` |
+| Database schema | PASS | 56 SQLModel tables defined |
+| Route modules | PASS | 22 route modules included in `main.py` |
+| Middleware | PASS | GovernanceMiddleware applied |
+| Startup lifecycle | PASS | Lifespan handler seeds default company, loads governance state from DB |
 
-#### PRODUCTION Details
-
-- **Base Adapter** - Comprehensive abstract base with session tracking, cost accumulation, artifact collection, log buffering, and credential scrubbing. Clean Protocol pattern with well-documented hooks.
-- **OpenAI Adapter** - Full async httpx implementation with exponential backoff on 429s. Includes model pricing table, function calling, streaming support, conversation history management, and cost tracking per session.
-- **Anthropic Adapter** - Full async httpx to Anthropic Messages API. Supports extended thinking, tool use content blocks, and rate limit retry. Correct header format (`x-api-key`, `anthropic-version`) with per-model cost tracking.
-- **Ollama Adapter** - Full async httpx to local Ollama REST API. Includes model availability checks, fallback model selection, GPU memory estimation, and zero-cost tracking for local execution.
-
-#### PARTIAL Details
-
-| Module | What Works | What Is Missing |
-|--------|-----------|-----------------|
-| `claude_code_adapter.py` | Wraps claude CLI subprocess correctly | Streaming output parsing, worktree isolation, `--resume` support |
-| `cli_adapter.py` | Generic subprocess adapter for CLI-based agents | stdin/stdout protocol for interactive CLIs |
-| `mcp_adapter.py` | Wraps MCP client for tool execution via HTTP | SSE transport, stdio transport |
-| `http_adapter.py` | Generic HTTP adapter for remote agent APIs | Webhook callback support, authentication rotation |
+**Verdict:** The system boots cleanly, all routes respond, all tests pass. This is a solid foundation.
 
 ---
 
-### 2. Orchestration (`src/nexus/orchestration/`)
+## 2. Per-Subsystem Module Ratings
 
-| Module | Rating | Reference |
-|--------|--------|-----------|
-| `phase_machine.py` | PRODUCTION | NVLabsOrg/packages/orchestrator/src/phase-machine.ts |
-| `goal_loop.py` | PRODUCTION | PraisonAI goal loop patterns |
-| `smart_retry.py` | PRODUCTION | - |
-| `parallel.py` | PRODUCTION | - |
-| `retry.py` | PRODUCTION | - |
-| `planner.py` | PARTIAL | - |
-| `router.py` | PARTIAL | - |
-| `critic.py` | PARTIAL | - |
+### 2.1 Adapters (`src/nexus/adapters/`) - PRODUCTION
 
-#### PRODUCTION Details
+**What it does:** Provides unified interface for LLM providers and CLI tool execution.
 
-- **Phase Machine** - Exact port of NVLabsOrg phase-machine.ts. Implements CREATE->DESIGN->EXECUTE->COMPLETE cycle with `[PLAN]` detection, PhaseTransitionError, human gate, and feedback loop.
-- **Goal Loop** - Autonomous iteration with independent judge. Includes budget limits, max iterations, parse failure detection, and HeuristicGoalJudge with configurable keywords.
-- **Smart Retry** - Error pattern tracking via Counter with diagnosis protocol (REPORT_BLOCKER, REASSIGN, DECOMPOSE, RETRY). Budget-aware retry with escalation.
-- **Parallel** - Parallel task execution with `asyncio.gather` and configurable concurrency limits.
+| Module | Assessment |
+|--------|-----------|
+| `base.py` | Full abstract base with session tracking, cost accumulation, artifact collection, credential scrubbing. Clean Protocol design. |
+| `openai_adapter.py` | Real async httpx to OpenAI API. Retry on 429, streaming, function calling, per-model cost tracking. |
+| `anthropic_adapter.py` | Real async httpx to Anthropic Messages API. Extended thinking, tool use blocks, correct headers (`x-api-key`, `anthropic-version`). |
+| `ollama_adapter.py` | Real async httpx to local Ollama. Model availability checks, GPU memory estimation, zero-cost for local. |
+| `cli_adapter.py` | **Genuinely impressive.** Real subprocess execution with multi-backend support (claude, codex, aider, etc.), workspace isolation, timeout with SIGTERM then SIGKILL, artifact detection, stdin streaming for interactive sessions, sensitive env var filtering. |
+| `cli_registry.py` | Backend catalog with per-backend command construction. |
+| `provider_presets.py` | Provider configuration catalog. |
+| `mcp_adapter.py` | MCP protocol client implementation. |
 
-#### PARTIAL Details
+**Honest assessment:** This is production-grade. The CLI adapter in particular goes beyond what most platforms implement - it handles real process lifecycle, not just HTTP calls. The LLM adapters use httpx directly (no SDK dependency) which means fewer transitive dependencies but also means the team owns the maintenance burden of API compatibility.
 
-| Module | What Works | What Is Missing |
-|--------|-----------|-----------------|
-| `planner.py` | Task decomposition into subtasks | LLM integration for plan generation (uses heuristics only) |
-| `router.py` | Agent routing based on capabilities | Learned routing from history, cost-weighted selection |
-| `critic.py` | Output quality evaluation | LLM-based evaluation (uses heuristic keyword matching) |
+**Risk:** API schema changes from OpenAI/Anthropic require manual adapter updates since there is no SDK abstraction layer.
 
 ---
 
-### 3. Governance (`src/nexus/governance/`)
+### 2.2 Orchestration (`src/nexus/orchestration/`) - PRODUCTION
 
-| Module | Rating | Reference |
-|--------|--------|-----------|
-| `budget_enforcer.py` | PRODUCTION | paperclip budget_incidents pattern |
-| `circuit_breaker_advanced.py` | PRODUCTION | munder-difflin/src/main/breaker.ts |
-| `kill_switch.py` | PRODUCTION | - |
-| `rate_limiter.py` | PRODUCTION | - |
-| `tenant_guard.py` | PRODUCTION | - |
-| `ssrf_protection.py` | PRODUCTION | - |
-| `decision_queue.py` | PRODUCTION | - |
-| `rollback.py` | PRODUCTION | - |
-| `budget_incident.py` | PRODUCTION | - |
-| `control_registry.py` | PRODUCTION | - |
-| `integration_registry.py` | PRODUCTION | - |
-| `approvals.py` | PARTIAL | - |
-| `secret_backend.py` | PARTIAL | - |
+**What it does:** Plans tasks, routes them to agents, evaluates results, and runs autonomous goal loops.
 
-#### PRODUCTION Details
+| Module | Assessment |
+|--------|-----------|
+| `llm_planner.py` | REAL LLM-backed task decomposition with JSON parsing, DAG validation. Graceful fallback to heuristic `TaskPlanner` on any failure. |
+| `llm_critic.py` | REAL LLM-backed quality evaluation with per-criterion scoring. Caching by `(task_id, result_hash, criterion)`, weighted composite. Graceful fallback to heuristic `CriticEvaluator`. |
+| `goal_loop.py` | Full autonomous iteration with independent judge, safety valves (max iterations, budget cap, parse failure limit). Proper `GoalResult` dataclass. |
+| `phase_machine.py` | Full state machine (CREATE -> DESIGN -> EXECUTE -> COMPLETE -> loop) with per-leader tracking, `[PLAN]` marker detection, explicit approval gate. |
+| `planner.py` | Heuristic fallback that decomposes tasks without LLM. Works, just less intelligent. |
+| `critic.py` | Heuristic fallback with keyword-based quality scoring. |
+| `parallel.py` | Parallel task execution with asyncio. |
+| `router.py` | Agent routing based on capabilities. |
+| `retry.py`, `smart_retry.py` | Error-pattern-aware retry with escalation. |
 
-- **Budget Enforcer** - Multi-metric tracking (cost_cents, tokens, api_calls) with multiple window kinds (monthly, weekly, daily, per_execution, lifetime). Hard-stop auto-pause, incident recording, and cancel-work hooks. Faithful port of paperclip patterns.
-- **Circuit Breaker Advanced** - Direct port from munder-difflin breaker.ts. Six trip conditions: loop detection, error storm, per-agent token cap, floor-wide cost/token caps, velocity spike, and no-progress detection. Four-level escalation (healthy->steering->constrained->stopped) with compaction grace periods and de-escalation logic.
-- **Kill Switch** - Company-wide and per-agent emergency controls with immediate activation/deactivation. Includes basic circuit breaker (threshold + cooldown).
-- **Rate Limiter** - Token bucket (O(1)) plus sliding window counter. Per-agent, per-company, per-resource limiting. Soft limit with queuing, HTTP headers (RFC 6585), burst allowance, configurable refill rates.
-- **Tenant Guard** - Hard tenant isolation with no bypass. UUID validation, query filter injection, resource ownership tracking, cross-tenant data leak detection in responses, and async context propagation via `contextvars`.
-- **SSRF Protection** - IPv4/IPv6 blocked network ranges, IPv4-mapped IPv6 de-mapping, hostname resolution safety check, HTTPS enforcement (HTTP only for localhost).
-- **Decision Queue** - Named queues with priority, source tracking, decide-by dates, snooze, retention policies, and notification tracking.
-- **Rollback Manager** - Operation recording with previous/new state, checkpoint creation and restore, cascading rollback through dependencies. In-memory implementation.
+**Honest assessment:** The previous audit rated `planner.py` and `critic.py` as PARTIAL because they lacked LLM integration. That integration now exists in `llm_planner.py` and `llm_critic.py`. Both have the critical design choice of graceful degradation: if the LLM call fails (timeout, bad JSON, no API key), they fall back to the heuristic versions transparently. This is the right pattern for production.
 
-#### PARTIAL Details
+**LLM fallback reality:** Without API keys, the system still works. Plans are generated by keyword-based heuristics (less intelligent decomposition). Criticism uses simple scoring rules. The system does not crash or refuse to operate - it just produces less sophisticated results.
 
-| Module | What Works | What Is Missing |
-|--------|-----------|-----------------|
-| `approvals.py` | Human approval gate for sensitive operations | Persistent storage, notification delivery integration |
-| `secret_backend.py` | Secret storage abstraction | Real vault integration (in-memory only) |
+**Risk:** `PhaseMachine` and `GoalLoop` state is in-memory. A process restart loses all in-flight orchestration state. There is no replay/recovery for mid-loop failures beyond checkpoint.
 
 ---
 
-### 4. Guardrails (`src/nexus/guardrails/`)
+### 2.3 Governance (`src/nexus/governance/`) - PRODUCTION
 
-| Module | Rating | Reference |
-|--------|--------|-----------|
-| `protocol.py` | PRODUCTION | - |
-| `chain.py` | PRODUCTION | PraisonAI guardrail patterns |
-| `structural.py` | PRODUCTION | - |
-| `policy.py` | PRODUCTION | - |
+**What it does:** The safety layer. Budget enforcement, circuit breaking, kill switches, approvals, RBAC, secrets, rate limiting, SSRF protection.
 
-#### PRODUCTION Details
+| Module | Assessment |
+|--------|-----------|
+| `circuit_breaker_advanced.py` | 7 trip conditions (loop detection, error storm, per-agent token cap, floor-wide cost cap, floor-wide token cap, velocity spike, no-progress). 4-level escalation ladder (healthy -> steering -> constrained -> stopped). Compaction exemption grace periods, de-escalation logic. |
+| `control_registry.py` | Per-agent operator controls (pause, gate_tool, steer, halt, resume). FIFO steer queue, tool decision enforcement, 10KB steer limit. |
+| `ssrf_protection.py` | IP validation against ALL RFC private ranges, IPv4-mapped IPv6 de-mapping, hostname resolution with ALL-addresses check, URL protocol enforcement. |
+| `secret_backend.py` | Fernet encryption with PBKDF2-HMAC key derivation (480k iterations), atomic file persistence, key rotation, fail-closed semantics. |
+| `persistent_kill_switch.py` | DB-backed kill switch that survives restarts. |
+| `persistent_circuit_breaker.py` | DB-backed circuit breaker that survives restarts. |
+| `integration_registry.py` | CRUD for external integrations with secret delegation. |
+| `approvals.py` | Human approval gate for sensitive operations. |
+| `budget_enforcer.py` | Multi-metric tracking with window-based limits. |
+| `rate_limiter.py` | Token bucket + sliding window. Per-agent, per-resource. |
+| `rbac.py` | Role-based access control. |
+| `audit.py` | Audit logging. |
+| `compliance.py` | Compliance rule enforcement. |
 
-- **Protocol** - Runtime-checkable GuardrailProtocol with GuardrailResult carrying violations list. Three validation points: input, output, and tool_call.
-- **Chain** - Sequential guardrail execution chain with short-circuit on first violation or run-all mode.
-- **Structural** - JSON schema validation, max length checks, output format enforcement.
-- **Policy** - Policy-based validation rules with allow/deny lists for tools and actions.
+**Honest assessment:** This is the strongest subsystem in the entire codebase. The circuit breaker alone has more sophistication than most production systems I have reviewed. The SSRF protection correctly handles IPv4-mapped IPv6 (a common bypass vector). The secret backend uses proper key derivation with a high iteration count. The persistent versions of kill switch and circuit breaker solve the restart-loses-state problem that plagues the orchestration layer.
 
----
+**Critical note on ControlRegistry:** The `ControlRegistry` itself is IN-MEMORY. If the process restarts, all active steers, gates, and pauses are lost. The persistent kill switch and circuit breaker are separate modules that survive restarts, but the fine-grained per-agent controls do not. This is a known gap.
 
-### 5. Memory (`src/nexus/memory/`)
-
-| Module | Rating | Reference |
-|--------|--------|-----------|
-| `layered.py` | PRODUCTION | AI-company memory patterns |
-| `store.py` | PRODUCTION | - |
-| `retriever.py` | PRODUCTION | - |
-| `dedup.py` | PRODUCTION | - |
-| `promotion.py` | PRODUCTION | - |
-| `scoping.py` | PRODUCTION | - |
-| `semantic.py` | PARTIAL | - |
-| `extract.py` | PARTIAL | - |
-| `reflector.py` | PARTIAL | - |
-
-#### PRODUCTION Details
-
-- **Layered Memory** - 4-layer system: L0 ephemeral, L1 session ring buffer, L2 agent facts, L3 shared knowledge. Deduplication on insert, access count tracking, promotion from L2 to L3, and context window assembly.
-- **Memory Store** - 3-temperature store (hot/warm/cold) with temperature-based eviction.
-- **Retriever** - BM25 search implementation with tokenization.
-- **Dedup** - Jaccard similarity for fact deduplication.
-
-#### PARTIAL Details
-
-| Module | What Works | What Is Missing |
-|--------|-----------|-----------------|
-| `semantic.py` | Wraps mempalace CLI binary for vector search, graceful degradation when unavailable | Binary is not bundled, requires external install, no fallback embedding |
-| `extract.py` | Fact extraction from text | LLM-based extraction (uses regex/heuristic only) |
-| `reflector.py` | Self-reflection on agent performance | LLM integration for reflective analysis |
+**Risk:** Rate limiter works in-memory for single-process deployment. Production multi-instance deployment requires the Redis rate limiter (`redis_rate_limiter.py`), which requires an external Redis instance.
 
 ---
 
-### 6. Knowledge (`src/nexus/knowledge/`)
+### 2.4 Guardrails (`src/nexus/guardrails/`) - PRODUCTION
 
-| Module | Rating | Reference |
-|--------|--------|-----------|
-| `graph.py` | PRODUCTION | - |
-| `experience.py` | PRODUCTION | - |
-| `rag.py` | PARTIAL | - |
-| `plaza.py` | PARTIAL | - |
+**What it does:** Input/output validation for agent interactions.
 
-#### PRODUCTION Details
+| Module | Assessment |
+|--------|-----------|
+| `protocol.py` | Runtime-checkable Protocol with `validate_input`, `validate_output`, `validate_tool_call`. |
+| `chain.py` | Sequential execution with fail-fast and fail-closed modes. |
+| `structural.py` | JSON schema validation, length checks, format enforcement. |
+| `policy.py` | Policy-based allow/deny rules for tools and actions. |
 
-- **Knowledge Graph** - File-backed knowledge store with BM25 search. Document ingestion, paragraph chunking, CRUD operations. No external dependencies beyond the filesystem.
-- **Experience** - Experience replay buffer for learning.
-
-#### PARTIAL Details
-
-| Module | What Works | What Is Missing |
-|--------|-----------|-----------------|
-| `rag.py` | Chunking (paragraph, section, fixed_size), indexing, BM25 search, reranking, context assembly | Real vector embeddings (uses Jaccard similarity as stub), requires DB session |
-| `plaza.py` | Knowledge sharing hub structure | Real-time collaboration features |
+**Honest assessment:** Clean, minimal, correct. The Protocol-based design means new guardrails can be added without modifying existing code. The chain supports both "stop on first violation" and "collect all violations" modes. This is production-ready as-is.
 
 ---
 
-### 7. Communication (`src/nexus/communication/`)
+### 2.5 Memory (`src/nexus/memory/`) - PRODUCTION
 
-| Module | Rating | Reference |
-|--------|--------|-----------|
-| `hive_protocol.py` | PRODUCTION | munder-difflin hive docs |
-| `hive_manager.py` | PRODUCTION | - |
-| `a2a_router.py` | PRODUCTION | Clawith A2A patterns |
-| `webhook_server.py` | PARTIAL | - |
+**What it does:** Multi-layer memory system for agent context, fact storage, and knowledge retrieval.
 
-#### PRODUCTION Details
+| Module | Assessment |
+|--------|-----------|
+| `layered.py` | Full 4-layer system: L0 ephemeral, L1 ring buffer, L2 per-agent with dedup, L3 shared with promotion. Real Jaccard deduplication, access-count-based auto-promotion, configurable limits. |
+| `llm_extract.py` | LLM-based fact extraction with rate limiting (max calls/minute). 4-category structured extraction, fallback to regex `FactExtractor`, deduplication within extraction. |
+| `reflector.py` | Memory condensation with 3-region structure (pinned/condensed/recent). Verify-dont-trust gate (6 checks: structure, size floor, non-empty condensed, actually smaller, pinned preserved, recent integrity). Heuristic fallback extracts durable facts (decisions, file paths, commits, numbers). |
+| `semantic.py` | `SemanticMemoryManager` with mempalace CLI integration AND full in-process fallback using `LocalEmbeddingProvider` + cosine similarity over JSON store. Both mine and search work without mempalace binary. |
+| `store.py` | Memory storage backend. |
+| `retriever.py` | BM25-based retrieval. |
+| `dedup.py` | Jaccard similarity deduplication. |
+| `scoping.py` | Memory scoping per agent/task. |
+| `promotion.py` | Access-count-based promotion between layers. |
 
-- **Hive Protocol** - FIPA-lite message schema with speech acts. HOP_CAP for livelock prevention. Reply-obligating acts defined. Faithful implementation of munder-difflin patterns.
-- **Hive Manager** - File-based multi-agent coordination. Directory layout: registry.json, board.md, log.jsonl, per-agent directories. Inbox/outbox messaging with audit trail.
-- **A2A Router** - Three modes: notify, consult, delegate. Permission checks, timeout tracking, CycleGuard integration for delegate mode.
+**Honest assessment:** The previous audit rated `semantic.py`, `extract.py`, and `reflector.py` as PARTIAL. This is now incorrect. `semantic.py` has a full in-process fallback with `LocalEmbeddingProvider` and cosine similarity - it does not require the mempalace binary. `llm_extract.py` and `reflector.py` both have working heuristic fallbacks that produce useful results without LLM API keys.
 
-#### PARTIAL Details
+**LLM fallback reality:** Without API keys, fact extraction uses regex patterns to identify decisions, file paths, commits, and numbers. Reflection uses sentence truncation and durable fact extraction instead of LLM-based condensation. Both produce correct (if less nuanced) results.
 
-| Module | What Works | What Is Missing |
-|--------|-----------|-----------------|
-| `webhook_server.py` | Webhook delivery with retry | Persistent queue, dead letter handling |
-
----
-
-### 8. Runtime (`src/nexus/runtime/`)
-
-| Module | Rating | Reference |
-|--------|--------|-----------|
-| `watchdog.py` | PRODUCTION | AI-company watchdog |
-| `heartbeat.py` | PRODUCTION | paperclip heartbeat patterns |
-| `checkpoint.py` | PRODUCTION | Clawith checkpoint patterns |
-| `replay.py` | PRODUCTION | - |
-| `cycle_guard.py` | PRODUCTION | Clawith cycle guard |
-| `lifecycle.py` | PRODUCTION | - |
-| `executor.py` | PRODUCTION | - |
-| `closing_time.py` | PRODUCTION | - |
-| `worktree.py` | PARTIAL | - |
-
-#### PRODUCTION Details
-
-- **Watchdog** - Periodic patrol: stuck agents, orphaned tasks, budget-exceeded, circuit-broken. Background asyncio task with configurable interval.
-- **Heartbeat** - In-memory heartbeat tracking with staleness detection.
-- **Checkpoint** - SQLModel-based checkpoint records with in-memory manager. Save, load, cleanup, staleness detection. Crash recovery via `recover_interrupted()`.
-- **Replay Engine** - Timeline reconstruction for debugging/audit. Event types: created, started, delegated, retried, completed, failed, escalated, checkpoint, cost_incurred.
-- **Cycle Guard** - Delegation loop prevention with edge repetition counting and max ancestor depth.
-- **Lifecycle** - Agent lifecycle state machine.
-- **Executor** - Task execution orchestration.
-- **Closing Time** - Graceful shutdown coordination.
-
-#### PARTIAL Details
-
-| Module | What Works | What Is Missing |
-|--------|-----------|-----------------|
-| `worktree.py` | Git worktree isolation structure | Actual git operations (structure only) |
+**Risk:** `LayeredMemoryStore` is entirely in-memory. A restart wipes all agent memory. There is no built-in persistence for the memory layers themselves (only for extracted facts that make it to the DB via other modules).
 
 ---
 
-### 9. Evolution (`src/nexus/evolution/`)
+### 2.6 Knowledge (`src/nexus/knowledge/`) - PRODUCTION
 
-| Module | Rating | Reference |
-|--------|--------|-----------|
-| `failure_alchemy.py` | PRODUCTION | AI-company failure alchemy |
-| `observer.py` | PRODUCTION | - |
-| `promoter.py` | PRODUCTION | - |
-| `analyzer.py` | PARTIAL | - |
-| `proposer.py` | PARTIAL | - |
-| `evaluator.py` | PARTIAL | - |
-| `sandbox.py` | PARTIAL | - |
-| `agent_evolution.py` | PARTIAL | - |
-| `skill_evolution.py` | PARTIAL | - |
+**What it does:** RAG pipeline, knowledge graph, embeddings, and experience sharing.
 
-#### PRODUCTION Details
+| Module | Assessment |
+|--------|-----------|
+| `embeddings.py` | Protocol + 3 implementations: OpenAI via httpx, `LocalEmbeddingProvider` with hash-based bag-of-words, `FallbackEmbeddingProvider`. Includes `cosine_similarity` utility. |
+| `rag.py` | Full RAG pipeline with 3 chunking strategies (paragraph, section, fixed_size), hybrid search (BM25 + vector), reranking (term overlap + position + freshness), token-budget context assembly, DB persistence via `KnowledgeChunk` model. |
+| `graph.py` | File-backed knowledge store with ingest (file or text), paragraph chunking, BM25 search, atomic writes, CRUD operations, stats. |
+| `experience.py` | Knowledge sharing infrastructure. |
+| `plaza.py` | Knowledge sharing hub. |
 
-- **Failure Alchemy** - Transforms failures into antibodies, vaccines, and catalysts. Rule-based heuristic matching (8 error patterns). Recurring pattern detection for catalyst generation. Adapted from AI-company patterns.
-- **Observer** - Monitors agent execution for learning signals.
-- **Promoter** - Promotes validated changes to production.
+**Honest assessment:** The previous audit rated `rag.py` as PARTIAL saying it used "Jaccard similarity as a stub." This is no longer accurate. The RAG pipeline now uses hybrid search (BM25 + vector) with a real `LocalEmbeddingProvider` for the vector component. The local embeddings use bag-of-words hashing (not transformer-based), so semantic quality is limited, but it IS a working vector search - not a stub.
 
-#### PARTIAL Details
-
-| Module | What Works | What Is Missing |
-|--------|-----------|-----------------|
-| `analyzer.py` | Pattern analysis from observations | Statistical significance testing |
-| `proposer.py` | Generates improvement proposals | LLM-based proposal generation |
-| `evaluator.py` | Evaluates proposed changes | A/B testing framework |
-| `sandbox.py` | Isolated testing environment for proposals | Container isolation (in-memory simulation only) |
-| `agent_evolution.py` | Agent self-improvement structure | LLM-driven evolution strategy |
-| `skill_evolution.py` | Skill improvement over time | Metric-driven optimization |
+**Embedding quality reality:** The `LocalEmbeddingProvider` produces hash-based bag-of-words vectors. This captures lexical overlap but not semantic meaning. "car" and "automobile" would not match. For production-grade semantic search, you would want OpenAI embeddings or a local sentence-transformer model. But the system works today with reduced recall.
 
 ---
 
-### 10. Tools (`src/nexus/tools/`)
+### 2.7 Communication (`src/nexus/communication/`) - PRODUCTION
 
-| Module | Rating | Reference |
-|--------|--------|-----------|
-| `mcp_client.py` | PRODUCTION | PraisonAI MCP patterns |
-| `registry.py` | PRODUCTION | - |
-| `executor.py` | PRODUCTION | - |
-| `policy_engine.py` | PRODUCTION | - |
-| `audit.py` | PRODUCTION | - |
-| `skills_discovery.py` | PRODUCTION | paperclip skills patterns |
-| `skills_catalog.py` | PRODUCTION | - |
-| `tool_catalog.py` | PRODUCTION | - |
+**What it does:** Inter-agent messaging, webhook handling, event distribution.
 
-#### PRODUCTION Details
+| Module | Assessment |
+|--------|-----------|
+| `hive_protocol.py` | FIPA-lite message schema with speech acts (REQUEST, INFORM, PROPOSE, QUERY, AGREE, REFUSE, DONE). Hop cap for livelock prevention, reply obligation tracking. |
+| `hive_manager.py` | File-based coordination with registry.json, board.md, log.jsonl, per-agent inbox/outbox with .done/.sent audit trails, message delivery, blackboard, JSONL event log. |
+| `webhook_server.py` | Constant-time secret comparison, rate limiting (global + per-endpoint), body size cap, JSON schema validation, enumeration attack prevention. |
+| `webhook_queue.py` | File-backed delivery queue with exponential backoff retry, dead letter storage, atomic persistence. |
+| `a2a.py` | Agent-to-agent communication routing. |
+| `channels.py` | Communication channel management. |
+| `event_bus.py` | Event distribution. |
+| `group.py` | Group messaging. |
 
-- **MCP Client** - Full MCP protocol implementation (JSON-RPC 2.0). Connect, list_tools, call_tool, disconnect with error handling and content block parsing.
-- **Skills Discovery** - Filesystem scanning for SKILL.md files. YAML frontmatter parsing, multi-provider (Claude, OpenCode, Codex) support. Scope precedence (project > user > bundled). Faithful port of paperclip patterns.
-- **Tool Registry** - Tool registration and discovery.
-- **Tool Executor** - Tool execution with timeout and error handling.
-- **Policy Engine** - Tool access policy enforcement.
-- **Audit** - Tool usage audit logging.
+**Honest assessment:** The previous audit said `webhook_server.py` was PARTIAL because it lacked "persistent queue and dead letter handling." This has been addressed - `webhook_queue.py` now provides file-backed persistence with dead letter storage. The webhook server itself has production-grade security (constant-time comparison, rate limiting, body size caps).
+
+**Risk:** `HiveManager` uses the filesystem for coordination. This works for single-node deployment but does not scale horizontally without a shared filesystem or replacement with a message broker.
 
 ---
 
-### 11. Workflows (`src/nexus/workflows/`)
+### 2.8 Runtime (`src/nexus/runtime/`) - PRODUCTION
 
-| Module | Rating | Reference |
-|--------|--------|-----------|
-| `pipeline.py` | PRODUCTION | OpenCompany workflow patterns |
-| `company_flow.py` | PRODUCTION | - |
-| `task_flow.py` | PRODUCTION | - |
+**What it does:** Agent lifecycle, health monitoring, checkpointing, graceful shutdown, git worktree isolation.
 
-#### PRODUCTION Details
+| Module | Assessment |
+|--------|-----------|
+| `watchdog.py` | Full patrol system: stuck agents (stale heartbeat), orphaned tasks, budget-exceeded agents, circuit-broken agents ready for half-open. Background asyncio task. |
+| `checkpoint.py` | Durable execution checkpoints with SQLModel table. In-memory `CheckpointManager` for speed with DB backing. Save/load/cleanup/abandon_stale/recover_interrupted. |
+| `worktree.py` | Git worktree management for parallel agent isolation. Create/merge/sync/detect/remove/revert via async subprocess. |
+| `closing_time.py` | Graceful shutdown (STARTED -> PROGRESS -> COMPLETE) with ACK tracking, dead worker exclusion, timeout, steer-based interrupt via ControlRegistry. |
+| `heartbeat.py` | Heartbeat tracking with staleness detection. |
+| `lifecycle.py` | Agent lifecycle state machine. |
+| `executor.py` | Task execution orchestration. |
+| `replay.py` | Timeline reconstruction for audit. |
 
-- **Pipeline** - Multi-stage workflow engine with enforced transitions. Named stages, valid transitions, cases tracking, hook system. StageKind (working/review/done/cancelled) with transition validation.
-- **Company Flow** - Company-level workflow orchestration.
-- **Task Flow** - Task-level workflow management.
+**Honest assessment:** The previous audit rated `worktree.py` as PARTIAL saying it had "structure only." This is incorrect. The module implements real git worktree operations via async subprocess (create, merge, sync, detect, remove, revert). It is a complete implementation.
 
----
-
-### 12. Triggers (`src/nexus/triggers/`)
-
-| Module | Rating | Reference |
-|--------|--------|-----------|
-| `classifier.py` | PRODUCTION | Clawith trigger patterns |
-| `schema_validator.py` | PRODUCTION | - |
-| `types.py` | PRODUCTION | - |
-| `history.py` | PRODUCTION | - |
-| `context_trigger.py` | PARTIAL | - |
-
-#### PRODUCTION Details
-
-- **Classifier** - Inbound message classification (directive vs communication). Regex-based heuristics with imperative verb detection.
-- **Schema Validator** - Trigger payload validation.
-
-#### PARTIAL Details
-
-| Module | What Works | What Is Missing |
-|--------|-----------|-----------------|
-| `context_trigger.py` | Context-aware trigger evaluation | Complex condition expressions |
+**Risk:** The watchdog runs as a background asyncio task in the same process. If the process hangs entirely (not just individual agents), the watchdog hangs too. An external health-check process is needed for true production monitoring.
 
 ---
 
-### 13. Templates (`src/nexus/templates/`)
+### 2.9 Evolution (`src/nexus/evolution/`) - PRODUCTION
 
-| Module | Rating | Reference |
-|--------|--------|-----------|
-| `hire_manifest.py` | PRODUCTION | paperclip/munder-difflin hire patterns |
-| `hire_security.py` | PRODUCTION | - |
-| `hire_registry.py` | PRODUCTION | - |
+**What it does:** Self-improvement through statistical analysis, A/B testing, LLM-driven proposals, and isolated experimentation.
 
-#### PRODUCTION Details
+| Module | Assessment |
+|--------|-----------|
+| `statistical.py` | Pure Python statistics: Welch's t-test with Welch-Satterthwaite df, linear regression trend detection, confidence intervals with Abramowitz-Stegun probit approximation, Cohen's d effect size, regularized incomplete beta function for p-values. NO scipy dependency. |
+| `ab_testing.py` | Full A/B test framework: sample size calculation, comprehensive test execution (p-value, CI, effect size, power estimate, verdict), O'Brien-Fleming alpha spending for early stopping. |
+| `llm_proposer.py` | LLM-driven improvement proposals with structured JSON parsing, validation, heuristic fallback. |
+| `llm_evolution.py` | LLM evolution advisor integrating agent evolution, skill evolution, and hypothesis generation with A/B test framework. |
+| `isolated_sandbox.py` | Resource-limited execution with logical tracking (cost, duration, memory) and limit breach detection. |
+| `agent_evolution.py` | Agent self-improvement pipeline. |
+| `skill_evolution.py` | Skill optimization pipeline. |
+| `proposer.py` | Heuristic proposal generation (fallback). |
+| `evaluator.py` | Change evaluation. |
+| `promoter.py` | Validated change promotion. |
 
-- **Hire Manifest** - Secure manifest parsing with validation. Model ID sanitization (shell metacharacter rejection), flag allowlist (default-deny), provider validation, length caps on all fields.
-- **Hire Security** - Security layer for manifest processing.
-- **Hire Registry** - Manifest storage and retrieval.
+**Honest assessment:** The previous audit rated most of this subsystem as PARTIAL. That was before `statistical.py`, `ab_testing.py`, `llm_proposer.py`, `llm_evolution.py`, and `isolated_sandbox.py` were implemented. The evolution subsystem is now functionally complete with:
+- Real statistical significance testing (no scipy needed)
+- A proper A/B testing framework with early stopping
+- LLM-driven proposal generation with heuristic fallback
+- Isolated execution environments for safe experimentation
 
----
+**LLM fallback reality:** Without API keys, `llm_proposer.py` falls back to heuristic proposal generation based on performance metrics and error patterns. Less creative but still produces actionable improvement suggestions.
 
-## Grouped Assessment
-
-### Ready for Production (58 modules)
-
-These modules require no further work before deployment:
-
-| Subsystem | Modules |
-|-----------|---------|
-| **Governance** | budget_enforcer, circuit_breaker_advanced, kill_switch, rate_limiter, tenant_guard, ssrf_protection, decision_queue, rollback, budget_incident, control_registry, integration_registry |
-| **Adapters** | base, openai_adapter, anthropic_adapter, ollama_adapter, registry, retry, provider_presets, cli_registry |
-| **Orchestration** | phase_machine, goal_loop, smart_retry, parallel, retry |
-| **Guardrails** | protocol, chain, structural, policy |
-| **Memory** | layered, store, retriever, dedup, promotion, scoping |
-| **Knowledge** | graph, experience |
-| **Communication** | hive_protocol, hive_manager, a2a_router |
-| **Runtime** | watchdog, heartbeat, checkpoint, replay, cycle_guard, lifecycle, executor, closing_time |
-| **Evolution** | failure_alchemy, observer, promoter |
-| **Tools** | mcp_client, registry, executor, policy_engine, audit, skills_discovery, skills_catalog, tool_catalog |
-| **Workflows** | pipeline, company_flow, task_flow |
-| **Triggers** | classifier, schema_validator, types, history |
-| **Templates** | hire_manifest, hire_security, hire_registry |
-
-### Needs Integration Work (17 modules)
-
-These modules have correct architecture but need specific integration points completed:
-
-| Priority | Module | Missing Integration | Effort |
-|----------|--------|-------------------|--------|
-| HIGH | `rag.py` | Real vector embeddings (replace Jaccard stub) | 3-5 days |
-| HIGH | `planner.py` | LLM integration for plan generation | 2-3 days |
-| HIGH | `critic.py` | LLM-based evaluation | 2-3 days |
-| MEDIUM | `claude_code_adapter.py` | Streaming output parsing, worktree isolation, --resume | 2-3 days |
-| MEDIUM | `semantic.py` | Bundle mempalace or fallback embedding provider | 2-3 days |
-| MEDIUM | `extract.py` | LLM-based fact extraction | 1-2 days |
-| MEDIUM | `reflector.py` | LLM integration for reflective analysis | 1-2 days |
-| MEDIUM | `mcp_adapter.py` | SSE transport, stdio transport | 2-3 days |
-| MEDIUM | `webhook_server.py` | Persistent queue, dead letter handling | 2-3 days |
-| MEDIUM | `approvals.py` | Persistent storage, notification delivery | 2-3 days |
-| MEDIUM | `secret_backend.py` | Real vault integration (HashiCorp Vault/AWS Secrets Manager) | 2-3 days |
-| LOW | `http_adapter.py` | Webhook callbacks, auth rotation | 1-2 days |
-| LOW | `cli_adapter.py` | stdin/stdout interactive protocol | 1-2 days |
-| LOW | `worktree.py` | Actual git worktree operations | 1-2 days |
-| LOW | `context_trigger.py` | Complex condition expressions | 1-2 days |
-| LOW | `plaza.py` | Real-time collaboration | 3-5 days |
-| LOW | `analyzer.py` | Statistical significance testing | 2-3 days |
-
-### Needs Rewrite (0 modules)
-
-No modules require a full rewrite. All existing implementations follow correct architectural patterns.
+**Risk:** The `isolated_sandbox.py` provides logical resource tracking (tracks cost, duration, memory usage against limits) but does NOT provide actual process isolation (no containers, no cgroups, no namespaces). A misbehaving experiment could affect the host process.
 
 ---
 
-## Prioritized Fix List
+### 2.10 Tools (`src/nexus/tools/`) - PRODUCTION
 
-### Phase 1: Critical Path (Weeks 1-2)
+**What it does:** Tool discovery, registration, execution, MCP protocol support, and skill scanning.
 
-These items block core platform intelligence:
+| Module | Assessment |
+|--------|-----------|
+| `mcp_stdio.py` | Full MCP stdio transport: subprocess lifecycle, JSON-RPC request/response, notification skipping, background stderr reader, graceful disconnect (SIGTERM then SIGKILL), health check. |
+| `tool_catalog.py` | Discoverable catalog with system probing (`shutil.which`), dynamic engine entries from provider presets, install instructions per platform. |
+| `skills_discovery.py` | Local filesystem skill scanner: YAML frontmatter parsing, multi-provider support (Claude, OpenCode, Codex), scope precedence deduplication. |
+| `registry.py` | Tool registration and lookup. |
+| `executor.py` | Tool execution with timeout and error handling. |
+| `mcp_client.py` | MCP protocol client. |
+| `policy_engine.py` | Tool access policy enforcement. |
+| `audit.py` | Tool usage audit logging. |
 
-| # | Task | Module | Effort | Impact |
-|---|------|--------|--------|--------|
-| 1 | Add real vector embeddings to RAG pipeline | `knowledge/rag.py` | 3-5 days | Enables semantic search across all knowledge |
-| 2 | Wire LLM calls into planner | `orchestration/planner.py` | 2-3 days | Enables intelligent task decomposition |
-| 3 | Wire LLM calls into critic | `orchestration/critic.py` | 2-3 days | Enables quality gates on agent output |
-| 4 | Add LLM-based fact extraction | `memory/extract.py` | 1-2 days | Better memory formation from conversations |
-
-**Total Phase 1 effort: 8-13 days**
-
-### Phase 2: Adapter Completeness (Weeks 3-4)
-
-These items expand platform capabilities:
-
-| # | Task | Module | Effort | Impact |
-|---|------|--------|--------|--------|
-| 5 | Complete Claude Code adapter | `adapters/claude_code_adapter.py` | 2-3 days | Full Claude CLI integration |
-| 6 | Add SSE/stdio to MCP adapter | `adapters/mcp_adapter.py` | 2-3 days | Support all MCP transport modes |
-| 7 | Bundle or abstract semantic memory | `memory/semantic.py` | 2-3 days | Remove external binary dependency |
-| 8 | Add vault integration for secrets | `governance/secret_backend.py` | 2-3 days | Production secret management |
-
-**Total Phase 2 effort: 8-12 days**
-
-### Phase 3: Operational Maturity (Weeks 5-6)
-
-These items improve reliability and observability:
-
-| # | Task | Module | Effort | Impact |
-|---|------|--------|--------|--------|
-| 9 | Persistent webhook queue + dead letters | `communication/webhook_server.py` | 2-3 days | Reliable event delivery |
-| 10 | Persistent approval storage + notifications | `governance/approvals.py` | 2-3 days | Human-in-the-loop at scale |
-| 11 | LLM-driven reflection | `memory/reflector.py` | 1-2 days | Agent self-improvement |
-| 12 | Git worktree operations | `runtime/worktree.py` | 1-2 days | Agent code isolation |
-
-**Total Phase 3 effort: 6-10 days**
-
-### Phase 4: Evolution Intelligence (Weeks 7-8)
-
-These items enable autonomous platform improvement:
-
-| # | Task | Module | Effort | Impact |
-|---|------|--------|--------|--------|
-| 13 | Statistical analyzer | `evolution/analyzer.py` | 2-3 days | Data-driven improvement detection |
-| 14 | LLM-based proposal generation | `evolution/proposer.py` | 2-3 days | Intelligent improvement suggestions |
-| 15 | A/B testing in evaluator | `evolution/evaluator.py` | 3-5 days | Validated improvements only |
-| 16 | Container isolation for sandbox | `evolution/sandbox.py` | 3-5 days | Safe experimentation |
-| 17 | LLM-driven agent/skill evolution | `evolution/agent_evolution.py`, `skill_evolution.py` | 3-5 days | Self-optimizing platform |
-
-**Total Phase 4 effort: 13-21 days**
+**Honest assessment:** Production-grade. The MCP stdio transport handles the full subprocess lifecycle correctly (including the SIGTERM-then-SIGKILL pattern for cleanup). The skills discovery scanner supports multiple AI coding tool providers. The policy engine enforces tool access rules before execution.
 
 ---
 
-## Key Findings
+### 2.11 Workflows (`src/nexus/workflows/`) - PRODUCTION
 
-### Strongest Areas
+**What it does:** Multi-stage pipeline engine for business processes.
 
-1. **Governance and Safety** - Every governance module is PRODUCTION quality. Budget enforcement, circuit breaking, tenant isolation, rate limiting, SSRF protection, and kill switches are all fully operational. This is the most critical layer for a multi-tenant AI platform and it is solid.
+| Module | Assessment |
+|--------|-----------|
+| `pipeline.py` | Full pipeline engine: named stages, enforced transitions, case tracking, hook system (on_enter/on_exit), transition validation, history recording. |
+| `company_flow.py` | Company-level workflow orchestration. |
+| `task_flow.py` | Task-level workflow management. |
 
-2. **Communication Layer** - File-based multi-agent coordination (Hive Protocol, A2A Router) is fully working with audit trails and livelock prevention. No external dependencies required.
-
-3. **Runtime Infrastructure** - Watchdog, heartbeat, checkpoint, cycle guard, and replay are all production-grade. The platform can detect stuck agents, recover from crashes, and reconstruct timelines.
-
-### Areas Requiring Attention
-
-1. **LLM-dependent Intelligence** - Modules that need LLM calls (planner, critic, fact extraction, reflection, agent evolution) currently use heuristic fallbacks. They work but produce less intelligent results.
-
-2. **Vector Embeddings** - The RAG pipeline uses Jaccard similarity as a placeholder. Real semantic search requires embedding model integration (OpenAI embeddings, sentence-transformers, or similar).
-
-3. **Evolution Subsystem** - Has the highest density of PARTIAL modules. The feedback loop from observation to validated improvement needs LLM backing and statistical rigor to be production-effective.
-
-### Architecture Quality
-
-- Protocol-based design throughout enables clean substitution
-- BaseAdapter pattern ensures consistent behavior across all providers
-- In-memory implementations can be swapped for persistent backends without API changes
-- Comprehensive test coverage (1,828 tests across 63+ test files)
-- No circular dependencies detected between subsystems
+**Honest assessment:** Clean implementation. Enforced transitions prevent invalid state changes. Hook system allows observation without coupling.
 
 ---
 
-## Deployment Readiness Checklist
+### 2.12 Triggers (`src/nexus/triggers/`) - PRODUCTION
 
-| Requirement | Status | Notes |
-|-------------|--------|-------|
-| Multi-tenant isolation | READY | tenant_guard.py with contextvars propagation |
-| Cost control | READY | budget_enforcer.py with multi-window tracking |
-| Emergency shutdown | READY | kill_switch.py with per-agent and company-wide controls |
-| Rate limiting | READY | Token bucket + sliding window, per-resource |
-| SSRF protection | READY | IPv4/IPv6 blocking, HTTPS enforcement |
-| Circuit breaking | READY | 6 trip conditions, 4 escalation levels |
-| Agent lifecycle | READY | Full state machine with heartbeat |
-| Crash recovery | READY | Checkpoint-based recovery |
-| Audit trail | READY | Replay engine with full event timeline |
-| LLM provider support | READY | OpenAI, Anthropic, Ollama fully working |
-| Semantic search | NOT READY | Needs real vector embeddings |
-| Intelligent planning | DEGRADED | Works with heuristics, needs LLM |
-| Self-improvement | NOT READY | Evolution subsystem needs LLM backing |
+**What it does:** Inbound message classification, event-driven triggering, and scheduling.
+
+| Module | Assessment |
+|--------|-----------|
+| `classifier.py` | Regex-based message classification (directive vs communication) with imperative verb detection. |
+| `context_trigger.py` | Context-aware trigger evaluation. |
+| `history.py` | Trigger execution history. |
+| `schema_validator.py` | Trigger payload validation. |
+| `types.py` | Type definitions. |
+| `scheduler.py` | Scheduled trigger execution. |
+| `webhook.py` | Webhook-based triggers. |
+| `executor.py` | Trigger execution engine. |
+
+**Honest assessment:** Functional and tested. The classifier uses regex heuristics which work for common patterns but will miss nuanced intent. Acceptable for production with the understanding that edge cases may misclassify.
+
+---
+
+### 2.13 Templates (`src/nexus/templates/`) - PRODUCTION
+
+**What it does:** Secure agent hiring with manifest validation.
+
+| Module | Assessment |
+|--------|-----------|
+| `hire_manifest.py` | Secure manifest parsing: model ID sanitization (shell metacharacter rejection), flag allowlist (default-deny), provider validation, length caps. |
+| `hire_security.py` | Security layer for manifest processing. |
+| `hire_registry.py` | Manifest storage and retrieval. |
+
+**Honest assessment:** The security layer is notably thorough - shell metacharacter rejection in model IDs prevents injection attacks through agent configuration. Default-deny flag allowlists prevent configuration abuse.
+
+---
+
+### 2.14 Models Router (`src/nexus/models_router/`) - PRODUCTION
+
+**What it does:** Model selection and cost tracking across providers.
+
+| Module | Assessment |
+|--------|-----------|
+| `pricing.py` | Per-model pricing table (Anthropic, OpenAI, Google) for offline transcript reconciliation. |
+| `provider_registry.py` | Model routing infrastructure. |
+
+**Honest assessment:** Functional. Pricing tables will need periodic updates as providers change rates, but the architecture supports this cleanly.
+
+---
+
+## 3. Real Production Blockers
+
+These are the things that would cause actual incidents if you deployed this system today with real users and real money.
+
+### 3.1 CRITICAL: In-Memory State Loss on Restart
+
+| Component | What is lost | Impact |
+|-----------|-------------|--------|
+| `ControlRegistry` | Active steers, gates, pauses | Agents resume uncontrolled after restart |
+| `PhaseMachine` | Current phase of all active tasks | Tasks restart from scratch or hang |
+| `GoalLoop` | Iteration state, budget consumed | Budget tracking resets, loops restart |
+| `LayeredMemoryStore` | All agent memory (L0-L3) | Agents forget everything on restart |
+
+**Why this matters:** In production, processes restart. Deploys, OOM kills, node failures, and kernel panics all cause restarts. Any state that only lives in memory is state that WILL be lost.
+
+**Mitigation already present:** `persistent_kill_switch.py` and `persistent_circuit_breaker.py` survive restarts via DB. `checkpoint.py` provides crash recovery for task execution. But orchestration state and memory are not covered.
+
+### 3.2 CRITICAL: No Observability Stack
+
+| What is missing | Why it matters |
+|-----------------|---------------|
+| Prometheus/OpenTelemetry metrics | Cannot monitor throughput, latency, error rates, or resource usage |
+| Distributed tracing | Cannot trace a request through the multi-agent pipeline |
+| Structured logging with correlation IDs | Cannot correlate log entries across agents/tasks |
+| Health checks with dependency verification | `/health` returns 200 without checking DB connectivity, LLM reachability, or disk space |
+| Alerting integration | No way to trigger PagerDuty/OpsGenie when things go wrong |
+
+**Why this matters:** You cannot operate what you cannot observe. Without metrics, the first sign of a problem is user complaints. Without tracing, debugging multi-agent interactions requires reading raw logs.
+
+### 3.3 HIGH: CORS Configuration
+
+Current setting: `allow_origins=["*"]`
+
+This allows any website to make authenticated requests to your API. In production with real user sessions, this enables CSRF-style attacks where a malicious page calls your API using the user's cookies/tokens.
+
+### 3.4 HIGH: No Horizontal Scaling Story
+
+The system assumes single-process deployment:
+- In-memory state (ControlRegistry, PhaseMachine, LayeredMemory) is not shared
+- File-based coordination (HiveManager) requires shared filesystem
+- Background tasks (watchdog) would duplicate across instances
+- No leader election for singleton responsibilities
+
+### 3.5 HIGH: Sandbox Isolation is Logical Only
+
+`isolated_sandbox.py` tracks resource usage (cost, duration, memory) against limits but does NOT provide actual process isolation. A misbehaving evolution experiment runs in the same process and can:
+- Consume unlimited actual memory
+- Write to any filesystem path the process can access
+- Make network requests without restriction
+
+### 3.6 MEDIUM: No Rate Limiting at Infrastructure Level
+
+The in-memory rate limiter works for single-process. The Redis rate limiter exists but requires deploying and maintaining Redis. There is no CDN/API gateway-level rate limiting defined.
+
+### 3.7 MEDIUM: datetime.utcnow() Deprecation
+
+Multiple modules use `datetime.utcnow()` which is deprecated in Python 3.12 (produces naive datetimes). Should use `datetime.now(UTC)`. Minor but indicates some code has not been modernized.
+
+---
+
+## 4. What Actually Needs to Happen Before Deployment
+
+### Phase 1: Operational Foundation (must-have before any production traffic)
+
+| Task | Effort | Why |
+|------|--------|-----|
+| Add readiness/liveness probes that check DB, disk, and critical dependencies | 2 days | K8s/ECS needs to know when to route traffic and when to restart |
+| Add OpenTelemetry instrumentation (traces + metrics) | 5 days | Cannot operate blind |
+| Persist ControlRegistry state to DB | 3 days | Agent controls must survive restarts |
+| Persist PhaseMachine state to DB | 2 days | In-flight tasks must survive restarts |
+| Restrict CORS to actual frontend origins | 0.5 days | Security requirement |
+| Add correlation IDs to all log output | 2 days | Debug multi-agent flows |
+| Configure structured JSON logging | 1 day | Log aggregation compatibility |
+
+**Phase 1 total: ~15 days**
+
+### Phase 2: Reliability (must-have before scaling beyond a handful of users)
+
+| Task | Effort | Why |
+|------|--------|-----|
+| Add Redis-backed state for horizontal scaling | 5 days | Cannot scale with in-memory state |
+| Replace file-based HiveManager with message broker (Redis Streams/NATS) | 5 days | File coordination does not scale |
+| Add container isolation to evolution sandbox | 5 days | Untrusted code execution requires real isolation |
+| Persist LayeredMemoryStore (at least L2/L3) to DB | 3 days | Agent memory must survive restarts |
+| Add circuit breaker around all external calls (LLM providers) | 2 days | Prevent cascade failures |
+| Implement graceful degradation dashboard | 3 days | Know which features are operating in fallback mode |
+
+**Phase 2 total: ~23 days**
+
+### Phase 3: Operational Maturity (needed for sustained production operation)
+
+| Task | Effort | Why |
+|------|--------|-----|
+| Add cost alerting and budget dashboards | 3 days | LLM costs can spike unexpectedly |
+| Implement secret rotation automation | 2 days | Manual rotation does not scale |
+| Add API versioning strategy | 3 days | Cannot break clients on deploy |
+| Load testing and capacity planning | 5 days | Know your limits before users find them |
+| Runbook documentation for common incidents | 5 days | On-call engineers need playbooks |
+| Implement audit log export/retention policy | 2 days | Compliance requirement for enterprise |
+| Replace `datetime.utcnow()` with `datetime.now(UTC)` | 1 day | Eliminate deprecation warnings |
+
+**Phase 3 total: ~21 days**
+
+---
+
+## 5. Honest Effort Estimate
+
+### What you have today
+
+- A functionally complete AI orchestration platform
+- 14 subsystems, all with real implementations and test coverage
+- 2276 passing tests covering core logic
+- Every LLM-dependent module has a working heuristic fallback
+- Governance and safety layers are genuinely production-grade
+- The system runs entirely on SQLite + filesystem with zero external dependencies for dev/test
+
+### What stands between you and production
+
+| Phase | Effort | Risk Level if Skipped |
+|-------|--------|-----------------------|
+| Phase 1: Operational Foundation | ~15 days | **System will crash and you won't know why** |
+| Phase 2: Reliability | ~23 days | **System cannot scale or recover gracefully** |
+| Phase 3: Operational Maturity | ~21 days | **Ops burden grows unsustainably** |
+
+**Total estimated effort: 59 engineering days (roughly 12 weeks for a single engineer, or 4 weeks for a team of 3)**
+
+### What you can deploy TODAY with acceptable risk
+
+If you need to ship something now, the system is deployable for:
+- **Internal/demo use** with a small number of agents and no real budget at stake
+- **Single-instance deployment** behind a reverse proxy with CORS restriction
+- **LLM-optional operation** where heuristic fallbacks are acceptable
+
+You would need to:
+1. Restrict CORS origins (30 minutes)
+2. Set up external health monitoring (1 day)
+3. Configure a proper PostgreSQL database instead of SQLite (1 day)
+4. Deploy behind a reverse proxy with rate limiting (1 day)
+5. Set up log aggregation (1 day)
+
+**Minimum viable production deployment: ~5 days assuming infrastructure is available.**
+
+---
+
+## Appendix: LLM Fallback Behavior Summary
+
+Every module that uses LLM calls has been verified to have a working fallback:
+
+| Module | With LLM | Without LLM (fallback) |
+|--------|---------|----------------------|
+| `llm_planner.py` | Intelligent task decomposition with DAG validation | Keyword-based subtask generation via `TaskPlanner` |
+| `llm_critic.py` | Per-criterion quality scoring with weighted composite | Heuristic keyword-based scoring via `CriticEvaluator` |
+| `llm_extract.py` | 4-category structured fact extraction | Regex extraction (decisions, file paths, commits, numbers) |
+| `reflector.py` | LLM condensation with verify-dont-trust gate | Sentence truncation + durable fact extraction |
+| `llm_proposer.py` | Creative improvement proposals from performance data | Metric-threshold-based suggestions |
+| `llm_evolution.py` | Integrated evolution advice with hypothesis generation | Heuristic-based evolution via component modules |
+| `semantic.py` | OpenAI embeddings for semantic search | `LocalEmbeddingProvider` with bag-of-words + cosine similarity |
+
+**None of these fallbacks are stubs.** They all produce actionable results. The quality difference is in nuance and creativity, not in functionality.
+
+---
+
+## Appendix: Persistence Reality Map
+
+| Component | Storage | Survives Restart? |
+|-----------|---------|-------------------|
+| Agents, Tasks, Companies | PostgreSQL/SQLite (56 tables) | Yes |
+| Kill Switch state | DB (persistent_kill_switch) | Yes |
+| Circuit Breaker state | DB (persistent_circuit_breaker) | Yes |
+| Checkpoints | DB (SQLModel table) | Yes |
+| Knowledge Chunks | DB (KnowledgeChunk model) | Yes |
+| Secrets | Encrypted file (Fernet) | Yes |
+| Webhook Queue | File-backed with atomic writes | Yes |
+| HiveManager | File-based (registry.json, inboxes) | Yes |
+| Knowledge Graph | File-backed (index.json + chunks/) | Yes |
+| Semantic Memory embeddings | JSON file store | Yes |
+| ControlRegistry | In-memory | **No** |
+| PhaseMachine | In-memory | **No** |
+| GoalLoop | In-memory | **No** |
+| LayeredMemoryStore | In-memory | **No** |
+| Rate Limiter (default) | In-memory | **No** |
+| CheckpointManager cache | In-memory (DB-backed table exists) | Partial |
 
 ---
 
 ## Conclusion
 
-The NVLabs Nexus platform is production-ready for its core mission of safe, governed multi-agent orchestration. The governance, safety, communication, and runtime layers are all fully operational. The remaining work is concentrated in "intelligence amplification" features that enhance quality of results (LLM-powered planning, criticism, and evolution) rather than platform stability or safety. The platform can be deployed today with the understanding that certain higher-order intelligence features will operate in degraded (heuristic) mode until Phase 1 and Phase 4 work is completed.
+This is not a demo. This is not a prototype. This is a functional AI orchestration platform with real governance, real safety controls, and real fallback behavior. The 2276 passing tests and 90 wired API endpoints are evidence of systematic engineering.
 
-**Estimated total remaining effort: 35-56 engineering days across 4 phases.**
+The gaps are operational, not architectural. The code works. The question is whether it works reliably under production conditions (restarts, scale, failure modes, observability). The answer today is: not yet, but the path is clear and the foundation is solid.
+
+The single most important investment before production is observability. You cannot safely operate a multi-agent AI system that you cannot monitor, trace, and alert on. Everything else (persistence, scaling, isolation) follows from being able to see what is happening.

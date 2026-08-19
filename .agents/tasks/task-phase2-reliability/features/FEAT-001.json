@@ -1,0 +1,31 @@
+{
+  "id": "FEAT-001",
+  "type": "feat",
+  "description": "Redis-backed State Backend for Horizontal Scaling - Create src/nexus/governance/redis_state.py with a RedisStateBackend protocol and implementation. Also create Container Isolation for Evolution Sandbox - add DockerSandbox to isolated_sandbox.py. Also persist L1 ring buffer in LayeredMemoryStore. Also create LLM Circuit Breaker. Also create Degradation Dashboard Endpoint. Also add pluggable backend to HiveManager.",
+  "status": "completed",
+  "steps": [
+    "TASK 1 - Redis State: Create src/nexus/governance/redis_state.py with a StateBackend Protocol defining get/set/delete/list_keys methods (all async). Implement RedisStateBackend using redis.asyncio (following the pattern in redis_rate_limiter.py). Implement FileStateBackend wrapping the existing atomic JSON file pattern. Include a factory function that returns Redis backend if available, file backend otherwise. Add tests in tests/test_redis_state.py mocking redis.",
+    "TASK 2 - HiveManager Pluggable Backend: Add a HiveBackend Protocol to src/nexus/communication/hive_manager.py (or a new file hive_backend.py) with methods: send_message, deliver_to_inbox, get_inbox, mark_processed, get_registry, register_agent, unregister_agent, update_status. Create FileHiveBackend extracting current HiveManager logic. Create RedisHiveBackend using Redis Streams. Modify HiveManager to accept an optional backend parameter (defaults to FileHiveBackend for backward compat). Add tests in tests/test_hive_backend.py.",
+    "TASK 3 - Docker Sandbox: Enhance src/nexus/evolution/isolated_sandbox.py by adding a DockerSandbox class that runs experiments via asyncio.create_subprocess_exec shelling out to 'docker run' with --memory, --cpus, --timeout flags. Detect Docker availability at init (try 'docker info'). Falls back to IsolatedSandbox when Docker is unavailable. Add tests in tests/test_docker_sandbox.py mocking subprocess.",
+    "TASK 4 - L1 Persistence: Modify src/nexus/memory/layered.py - add persistence for L1 ring buffer using the same atomic JSON file pattern already used for L2/L3. Add a separate persist file (or extend the existing one with an 'l1' key). Load L1 on init, save on add_session_summary. Add tests in tests/test_layered_memory_l1.py.",
+    "TASK 5 - LLM Circuit Breaker: Create src/nexus/adapters/llm_circuit_breaker.py that wraps any async LLM callable (Callable[[str], Awaitable[str]]) with circuit breaker protection. Use the existing AdvancedCircuitBreaker from governance as the detection engine (or implement a simpler standalone breaker). When N consecutive failures (timeout, 5xx, rate limit) occur, the breaker opens and returns a configurable fallback response for a cooldown period. Provide a wrap_llm_callable() factory function. Add tests in tests/test_llm_circuit_breaker.py.",
+    "TASK 6 - Degradation Endpoint: Create src/nexus/api/routes/degradation.py with a GET /system/degradation endpoint. Check: Redis connectivity (ping), Docker availability (shutil.which), LLM provider reachability (config check), embedding provider status, mempalace availability. Return structured JSON with per-feature status (full/degraded/unavailable). Register the router in src/nexus/main.py. Add tests in tests/test_degradation_endpoint.py."
+  ],
+  "acceptance_criteria": [
+    "All new modules importable without errors",
+    "RedisStateBackend falls back gracefully when Redis unavailable",
+    "HiveManager backward compatible - works without explicit backend parameter",
+    "DockerSandbox falls back to IsolatedSandbox when Docker unavailable",
+    "L1 persistence loads and saves correctly with atomic writes",
+    "LLM circuit breaker opens after N failures and returns fallback",
+    "Degradation endpoint returns structured JSON with all feature statuses",
+    "All existing 2335 tests still pass",
+    "New tests cover all the new code paths"
+  ],
+  "verification": [
+    "python3.12 -m pytest tests/ -x -q",
+    "python3.12 -m pytest tests/test_redis_state.py tests/test_hive_backend.py tests/test_docker_sandbox.py tests/test_layered_memory_l1.py tests/test_llm_circuit_breaker.py tests/test_degradation_endpoint.py -v"
+  ],
+  "blocked_reason": null,
+  "findings": "All 6 tasks implemented and verified. Updated test_persistence.py test_l1_not_persisted to test_l1_is_persisted since L1 is now persisted (Task 4). Full suite: 2424 tests passing (89 new + existing). The existing test was asserting L1 was ephemeral, which directly contradicts the Task 4 requirement."
+}

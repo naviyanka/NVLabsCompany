@@ -1,16 +1,16 @@
 {
-  "project_type": "Python FastAPI backend for AI agent orchestration platform",
+  "project_type": "Python FastAPI backend - Autonomous AI Company Operating System",
   "language": "Python 3.12+",
-  "build_system": "pyproject.toml with alembic for migrations, Docker for deployment",
-  "test_framework": "pytest with 63+ test files covering all modules",
-  "build_command": "PYTHONPATH=src python3 -m pytest tests/",
-  "test_command": "PYTHONPATH=src python3 -m pytest tests/",
-  "verification_instructions": "Run pytest across tests/ directory, verify all pass",
+  "build_system": "setuptools via pyproject.toml, pip install -e .",
+  "test_framework": "pytest with asyncio_mode=auto, 2276 tests all passing",
+  "build_command": "python3.12 -c \"import sys; sys.path.insert(0,'src'); from nexus.main import app\"",
+  "test_command": "python3.12 -m pytest tests/ -q",
+  "verification_instructions": "Run pytest, check all imports resolve, verify OpenAPI spec generates 90 endpoints",
   "snapshot_or_generated_files": null,
-  "setup_instructions": "pip install -e . or PYTHONPATH=src",
-  "environment_constraints": "No pytest available in sandbox, review is code-analysis based",
-  "contribution_requirements": "Follow existing patterns, all modules have comprehensive tests",
-  "key_patterns": "Protocol-based design, BaseAdapter pattern, in-memory state with optional DB persistence, extensive use of dataclasses/pydantic models",
+  "setup_instructions": "python3.12 required (host has it at /usr/local/bin/python3.12). pip install -e . fails because default python is 3.9, but python3.12 -m pytest works with path manipulation.",
+  "environment_constraints": "Python 3.9 is default but 3.12 is available. No external API keys available for LLM testing. SQLite used for tests.",
+  "contribution_requirements": "N/A - documentation task",
+  "key_patterns": "Protocol-based abstractions, LLM-callable injection with heuristic fallback, SQLModel for persistence, async throughout, atomic file writes",
   "relevant_files": ["docs/PRODUCTION-READINESS-AUDIT.md"],
-  "directory_structure": "src/nexus/{adapters,orchestration,governance,guardrails,memory,knowledge,communication,runtime,evolution,tools,workflows,triggers,templates,models,models_router}/ with tests/ mirror"
+  "directory_structure": "src/nexus/ contains: adapters/, api/, communication/, company/, evolution/, governance/, guardrails/, identity/, knowledge/, memory/, models/, models_router/, orchestration/, runtime/, services/, templates/, tools/, triggers/, workflows/"
 }
