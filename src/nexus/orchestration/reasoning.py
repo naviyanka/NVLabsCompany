@@ -330,9 +330,14 @@ class ToTPlanner:
 
         except Exception:
             # Fall back to linear planning on any failure
-            return self._fallback_planner._default_decomposition(
+            fallback_subtasks = self._fallback_planner._default_decomposition(
                 task_id, description, context
             )
+            # Mark subtasks with fallback flag so callers can detect degraded planning
+            for subtask in fallback_subtasks:
+                subtask.metadata["fallback"] = True
+                subtask.metadata["reason"] = "tree_exploration_failed"
+            return fallback_subtasks
 
     def _path_to_subtasks(
         self,

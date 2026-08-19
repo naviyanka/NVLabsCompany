@@ -28,6 +28,9 @@ MODEL_PRICING: dict[str, tuple[float, float]] = {
 MAX_RETRIES = 5
 BASE_BACKOFF_SECONDS = 1.0
 
+# Maximum number of messages to retain in conversation history per session
+MAX_HISTORY_MESSAGES = 50
+
 
 class BedrockAdapter(BaseAdapter):
     """Agent adapter for AWS Bedrock models.
@@ -125,56 +128,56 @@ class BedrockAdapter(BaseAdapter):
 
         # Retry with exponential backoff on rate limits
         response_data: dict[str, Any] = {}
-        for attempt in range(MAX_RETRIES):
-            # Sign the request with AWS Signature V4
-            headers = self._sign_request(
-                method="POST",
-                host=host,
-                path=path,
-                body=body_bytes,
-                region=region,
-                service="bedrock",
-                access_key=aws_access_key_id,
-                secret_key=aws_secret_access_key,
-            )
-            headers["Content-Type"] = "application/json"
-            headers["Accept"] = "application/json"
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            for attempt in range(MAX_RETRIES):
+                # Sign the request with AWS Signature V4
+                headers = self._sign_request(
+                    method="POST",
+                    host=host,
+                    path=path,
+                    body=body_bytes,
+                    region=region,
+                    service="bedrock",
+                    access_key=aws_access_key_id,
+                    secret_key=aws_secret_access_key,
+                )
+                headers["Content-Type"] = "application/json"
+                headers["Accept"] = "application/json"
 
-            async with httpx.AsyncClient(timeout=120.0) as client:
                 response = await client.post(
                     url,
                     content=body_bytes,
                     headers=headers,
                 )
 
-            if response.status_code == 429:
-                wait_time = BASE_BACKOFF_SECONDS * (2**attempt)
-                self._add_log(
-                    session.session_id,
-                    f"Rate limited (429), retrying in {wait_time}s "
-                    f"(attempt {attempt + 1}/{MAX_RETRIES})",
-                )
-                await asyncio.sleep(wait_time)
-                continue
+                if response.status_code == 429:
+                    wait_time = BASE_BACKOFF_SECONDS * (2**attempt)
+                    self._add_log(
+                        session.session_id,
+                        f"Rate limited (429), retrying in {wait_time}s "
+                        f"(attempt {attempt + 1}/{MAX_RETRIES})",
+                    )
+                    await asyncio.sleep(wait_time)
+                    continue
 
-            if response.status_code != 200:
-                error_text = response.text
+                if response.status_code != 200:
+                    error_text = response.text
+                    return TaskResult(
+                        task_id=task_id,
+                        agent_id=session.agent_id,
+                        success=False,
+                        error=f"Bedrock API error {response.status_code}: {error_text}",
+                    )
+
+                response_data = response.json()
+                break
+            else:
                 return TaskResult(
                     task_id=task_id,
                     agent_id=session.agent_id,
                     success=False,
-                    error=f"Bedrock API error {response.status_code}: {error_text}",
+                    error="Max retries exceeded due to rate limiting",
                 )
-
-            response_data = response.json()
-            break
-        else:
-            return TaskResult(
-                task_id=task_id,
-                agent_id=session.agent_id,
-                success=False,
-                error="Max retries exceeded due to rate limiting",
-            )
 
         # Parse response (Anthropic Claude format)
         content_blocks = response_data.get("content", [])
@@ -189,13 +192,16 @@ class BedrockAdapter(BaseAdapter):
 
         # Calculate cost
         pricing = MODEL_PRICING.get(model, (0.3, 1.5))
-        cost_cents = int(
+        cost_cents = round(
             (input_tokens / 1000 * pricing[0])
             + (output_tokens / 1000 * pricing[1])
         )
 
         # Add assistant response to history
         history.append({"role": "assistant", "content": output_content})
+        # Cap conversation history to prevent unbounded growth
+        if len(history) > MAX_HISTORY_MESSAGES:
+            history = history[-MAX_HISTORY_MESSAGES:]
         self._conversation_history[session.session_id] = history
 
         return TaskResult(

@@ -23,6 +23,9 @@ MODEL_PRICING: dict[str, tuple[float, float]] = {
 MAX_RETRIES = 5
 BASE_BACKOFF_SECONDS = 1.0
 
+# Maximum number of messages to retain in conversation history per session
+MAX_HISTORY_MESSAGES = 50
+
 
 class GoogleGeminiAdapter(BaseAdapter):
     """Agent adapter for Google Gemini generative AI models.
@@ -112,51 +115,49 @@ class GoogleGeminiAdapter(BaseAdapter):
 
         headers = {
             "Content-Type": "application/json",
+            "x-goog-api-key": api_key,
         }
 
-        url = (
-            f"{self._api_base}/models/{model}:generateContent"
-            f"?key={api_key}"
-        )
+        url = f"{self._api_base}/models/{model}:generateContent"
 
         # Retry with exponential backoff on rate limits
         response_data: dict[str, Any] = {}
-        for attempt in range(MAX_RETRIES):
-            async with httpx.AsyncClient(timeout=120.0) as client:
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            for attempt in range(MAX_RETRIES):
                 response = await client.post(
                     url,
                     json=request_body,
                     headers=headers,
                 )
 
-            if response.status_code == 429:
-                wait_time = BASE_BACKOFF_SECONDS * (2**attempt)
-                self._add_log(
-                    session.session_id,
-                    f"Rate limited (429), retrying in {wait_time}s "
-                    f"(attempt {attempt + 1}/{MAX_RETRIES})",
-                )
-                await asyncio.sleep(wait_time)
-                continue
+                if response.status_code == 429:
+                    wait_time = BASE_BACKOFF_SECONDS * (2**attempt)
+                    self._add_log(
+                        session.session_id,
+                        f"Rate limited (429), retrying in {wait_time}s "
+                        f"(attempt {attempt + 1}/{MAX_RETRIES})",
+                    )
+                    await asyncio.sleep(wait_time)
+                    continue
 
-            if response.status_code != 200:
-                error_text = response.text
+                if response.status_code != 200:
+                    error_text = response.text
+                    return TaskResult(
+                        task_id=task_id,
+                        agent_id=session.agent_id,
+                        success=False,
+                        error=f"Google Gemini API error {response.status_code}: {error_text}",
+                    )
+
+                response_data = response.json()
+                break
+            else:
                 return TaskResult(
                     task_id=task_id,
                     agent_id=session.agent_id,
                     success=False,
-                    error=f"Google Gemini API error {response.status_code}: {error_text}",
+                    error="Max retries exceeded due to rate limiting",
                 )
-
-            response_data = response.json()
-            break
-        else:
-            return TaskResult(
-                task_id=task_id,
-                agent_id=session.agent_id,
-                success=False,
-                error="Max retries exceeded due to rate limiting",
-            )
 
         # Parse response
         candidates = response_data.get("candidates", [])
@@ -174,7 +175,7 @@ class GoogleGeminiAdapter(BaseAdapter):
 
         # Calculate cost
         pricing = MODEL_PRICING.get(model, (0.01, 0.04))
-        cost_cents = int(
+        cost_cents = round(
             (input_tokens / 1000 * pricing[0])
             + (output_tokens / 1000 * pricing[1])
         )
@@ -184,6 +185,9 @@ class GoogleGeminiAdapter(BaseAdapter):
             "role": "model",
             "parts": [{"text": output_content}],
         })
+        # Cap conversation history to prevent unbounded growth
+        if len(history) > MAX_HISTORY_MESSAGES:
+            history = history[-MAX_HISTORY_MESSAGES:]
         self._conversation_history[session.session_id] = history
 
         return TaskResult(

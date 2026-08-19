@@ -15,7 +15,11 @@ from nexus.company.okr import OKRManager
 
 router = APIRouter(tags=["okr"])
 
-# In-memory OKR manager instances per company
+# In-memory OKR manager instances per company.
+# NOTE: This is an in-memory store and will not persist across restarts or
+# share state across multiple workers (e.g., uvicorn --workers > 1). This is
+# consistent with other services in this codebase that use in-memory state.
+# A persistent backend (database) should replace this for production use.
 _managers: dict[uuid.UUID, OKRManager] = {}
 
 
