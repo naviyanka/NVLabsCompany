@@ -34,8 +34,11 @@ class AdapterRegistry:
     def _register_defaults(self) -> None:
         """Register all built-in adapter types."""
         from nexus.adapters.anthropic_adapter import AnthropicAdapter
+        from nexus.adapters.azure_adapter import AzureOpenAIAdapter
+        from nexus.adapters.bedrock_adapter import BedrockAdapter
         from nexus.adapters.claude_code_adapter import ClaudeCodeAdapter
         from nexus.adapters.cli_adapter import CLIAdapter
+        from nexus.adapters.google_adapter import GoogleGeminiAdapter
         from nexus.adapters.http_adapter import HTTPAdapter
         from nexus.adapters.mcp_adapter import MCPAgentAdapter
         from nexus.adapters.ollama_adapter import OllamaAdapter
@@ -48,6 +51,9 @@ class AdapterRegistry:
         self.register_adapter("cli", CLIAdapter)
         self.register_adapter("http", HTTPAdapter)
         self.register_adapter("mcp", MCPAgentAdapter)
+        self.register_adapter("azure_openai", AzureOpenAIAdapter)
+        self.register_adapter("bedrock", BedrockAdapter)
+        self.register_adapter("google_gemini", GoogleGeminiAdapter)
 
     def register_adapter(
         self, adapter_type: str, adapter_class: type[BaseAdapter]

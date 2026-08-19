@@ -7,6 +7,9 @@ This module provides adapter implementations for various AI systems:
 - ClaudeCodeAdapter: Claude Code CLI as subprocess
 - HTTPAdapter: Generic HTTP agent endpoints
 - MCPAgentAdapter: MCP server-based execution
+- AzureOpenAIAdapter: Azure-hosted OpenAI models
+- BedrockAdapter: AWS Bedrock models (Claude, Titan)
+- GoogleGeminiAdapter: Google Gemini generative AI models
 
 Additionally provides:
 - BaseAdapter: Abstract base class with common adapter logic
@@ -18,8 +21,11 @@ Additionally provides:
 """
 
 from nexus.adapters.anthropic_adapter import AnthropicAdapter
+from nexus.adapters.azure_adapter import AzureOpenAIAdapter
 from nexus.adapters.base import BaseAdapter
+from nexus.adapters.bedrock_adapter import BedrockAdapter
 from nexus.adapters.claude_code_adapter import ClaudeCodeAdapter
+from nexus.adapters.google_adapter import GoogleGeminiAdapter
 from nexus.adapters.http_adapter import HTTPAdapter
 from nexus.adapters.mcp_adapter import MCPAgentAdapter
 from nexus.adapters.ollama_adapter import OllamaAdapter
@@ -40,6 +46,9 @@ __all__ = [
     "ClaudeCodeAdapter",
     "HTTPAdapter",
     "MCPAgentAdapter",
+    "AzureOpenAIAdapter",
+    "BedrockAdapter",
+    "GoogleGeminiAdapter",
     "AdapterRegistry",
     "AgentProviderID",
     "AgentProviderPreset",
