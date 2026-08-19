@@ -212,9 +212,19 @@ class CostAlertService:
             alerts.append(alert)
             self._fired_alerts.append(alert)
 
-            # Invoke callbacks
+            # Invoke callbacks (exception-isolated so one bad callback
+            # doesn't abort the remaining callbacks or scope checks)
             for callback in self._callbacks:
-                callback(alert)
+                try:
+                    callback(alert)
+                except Exception:
+                    import logging
+                    logging.getLogger(__name__).warning(
+                        "Alert callback failed for %s/%s",
+                        scope_type,
+                        scope_id,
+                        exc_info=True,
+                    )
 
         return alerts
 

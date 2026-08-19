@@ -102,9 +102,11 @@ class VersionedRouter(APIRouter):
         The route will include Sunset and Deprecation headers in responses
         to inform clients of the planned removal date.
 
-        The endpoint can use any standard FastAPI signature (path params,
-        query params, dependency injection). The deprecation headers are
-        added via a middleware-style approach using a response callback.
+        The endpoint MUST accept a single ``Request`` parameter and
+        return either a ``Response`` object or a dict (which will be
+        serialized as JSON). Standard FastAPI dependency injection is NOT
+        supported through this wrapper since it bypasses FastAPI's
+        parameter resolution. Use this for simple legacy endpoints only.
 
         Args:
             path: The route path.

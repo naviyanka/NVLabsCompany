@@ -206,7 +206,7 @@ class AuditExporter:
                 else:
                     remaining_entries.append(entry)
 
-            self._logger._entries = remaining_entries
+            self._logger._entries[:] = remaining_entries
 
             # Also purge ancient entries from the archive
             archive_remaining: list[AuditEntry] = []
