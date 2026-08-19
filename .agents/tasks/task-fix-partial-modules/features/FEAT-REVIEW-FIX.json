@@ -2,7 +2,7 @@
   "id": "FEAT-REVIEW-FIX",
   "type": "fix",
   "description": "Address 6 review issues: wire _stream_output, fix callback routing, bound _recent_changes, isolate subscriber exceptions, document advisory locking, fix ConditionBuilder docstring",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "Issue #1: Wire _stream_output into _do_execute when is_interactive is True as a background task",
     "Issue #2: Remove first-match fallback in _handle_callback_result - require session_id in payload",
@@ -20,5 +20,5 @@
     "python3.12 -m pytest tests/ -x -q"
   ],
   "blocked_reason": null,
-  "findings": null
+  "findings": "All 2276 tests pass (16 new + 2260 existing). Ruff lint clean on all modified files except pre-existing issues in cli_adapter.py (unused AgentStatus import, asyncio.TimeoutError alias). No changes to existing tests were needed."
 }
