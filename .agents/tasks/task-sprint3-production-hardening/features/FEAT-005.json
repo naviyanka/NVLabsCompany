@@ -1,0 +1,31 @@
+{
+  "id": "FEAT-005",
+  "type": "feat",
+  "description": "Replay Engine - reconstruct task execution timelines for debugging and audit, building complete timelines with lifecycle events, delegation chains, cost accumulation, and checkpoints.",
+  "status": "completed",
+  "steps": [
+    "Create src/nexus/runtime/replay.py with the following components:",
+    "TimelineEventType enum: CREATED, STARTED, DELEGATED, RETRIED, COMPLETED, FAILED, ESCALATED, CHECKPOINT, COST_INCURRED",
+    "TimelineEvent dataclass: timestamp datetime, event_type TimelineEventType, description str, agent_id UUID|None, details dict[str, Any] (flexible metadata), cost_cents int default 0",
+    "TaskReplay dataclass: task_id UUID, task_title str, started_at datetime|None, completed_at datetime|None, timeline list[TimelineEvent] (ordered by timestamp), stats ReplayStats",
+    "ReplayStats dataclass: total_duration_seconds float|None, total_cost_cents int, total_retries int, delegation_depth int, event_count int",
+    "ReplayEngine class: __init__(). Internal storage: dict[UUID, list[TimelineEvent]] mapping task_id to events.",
+    "Methods on ReplayEngine: record_event(task_id: UUID, event_type: TimelineEventType, description: str, agent_id: UUID|None = None, details: dict|None = None, cost_cents: int = 0), get_replay(task_id: UUID) -> TaskReplay|None (builds complete timeline sorted by timestamp, computes stats), get_delegation_chain(task_id: UUID) -> list[UUID] (extract unique agent_ids from DELEGATED events in order), get_cost_breakdown(task_id: UUID) -> list[tuple[str, int]] (event description + cost for COST_INCURRED events), list_tasks_with_events() -> list[UUID]",
+    "Create tests/test_replay_engine.py: Test event recording, get_replay timeline ordering, stats computation (duration, cost, retries, delegation_depth), delegation_chain extraction, cost_breakdown, empty task handling, multiple tasks isolation"
+  ],
+  "acceptance_criteria": [
+    "ReplayEngine records events and builds complete TaskReplay with ordered timeline",
+    "ReplayStats correctly computes total_duration, total_cost, total_retries, delegation_depth",
+    "get_delegation_chain returns ordered unique agent IDs from delegation events",
+    "get_cost_breakdown returns accurate cost per event",
+    "Multiple tasks are isolated from each other",
+    "python3.12 -m pytest tests/test_replay_engine.py passes",
+    "python3.12 -m pytest tests/ -x -q passes (no regressions)"
+  ],
+  "verification": [
+    "python3.12 -m pytest tests/test_replay_engine.py -v",
+    "python3.12 -m pytest tests/ -x -q"
+  ],
+  "blocked_reason": null,
+  "findings": "All 32 tests pass. Full suite at 1059 tests with no regressions. Module exported via runtime __init__.py."
+}

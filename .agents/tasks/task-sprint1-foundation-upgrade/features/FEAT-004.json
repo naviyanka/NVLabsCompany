@@ -2,7 +2,7 @@
   "id": "FEAT-004",
   "type": "feat",
   "description": "Persist CircuitBreaker state to the database (the KillSwitch persistence already exists in persistent_kill_switch.py). Create a CircuitBreakerRecord model, a PersistentCircuitBreaker class, and integrate the kill switch DB loading into the app lifespan. Also wire the persistent kill switch load_active() call into the FastAPI lifespan handler so active kill switches are loaded from DB on startup.",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "Create src/nexus/governance/circuit_breaker_model.py with CircuitBreakerRecord(SQLModel, table=True). Fields: id (UUID PK), agent_id (UUID, indexed), consecutive_failures (int), is_open (bool), last_failure_at (datetime | None), opened_at (datetime | None), cooldown_seconds (int, default=300), updated_at (datetime).",
     "Create src/nexus/governance/persistent_circuit_breaker.py with PersistentCircuitBreaker class (mirrors the pattern in persistent_kill_switch.py). Methods: record_failure(agent_id) -> bool (returns True if circuit just opened), record_success(agent_id) -> None, is_open(agent_id) -> bool, reset(agent_id) -> None, load_state() -> dict[UUID, CircuitBreakerState] (load all open circuits from DB). Takes async_sessionmaker in __init__.",
@@ -23,5 +23,5 @@
     "python -m pytest tests/ --tb=short -q"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "All 739 tests pass (726 existing + 13 new). Used datetime.utcnow() to match existing project patterns (kill_switch_model.py, persistent_kill_switch.py). The lifespan block gracefully handles missing DB tables with a try/except."
 }

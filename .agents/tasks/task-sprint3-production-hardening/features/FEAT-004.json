@@ -1,0 +1,31 @@
+{
+  "id": "FEAT-004",
+  "type": "feat",
+  "description": "Decision Queue/Triage System - production-grade queue management with named queues, source tracking, triage support (decide-by dates, snooze, priority routing), retention policies, and notification tracking.",
+  "status": "completed",
+  "steps": [
+    "Create src/nexus/governance/decision_queue.py with the following components:",
+    "DecisionQueueItem dataclass: id UUID, queue_id UUID, decision_id UUID, source_kind str (agent/system/workflow), source_id UUID, priority int (1=highest), status str (pending/decided/snoozed/archived), decide_by datetime|None, snoozed_until datetime|None, needs_notification bool default True, notification_delivered bool default False, created_at datetime, updated_at datetime",
+    "RetentionPolicy dataclass: auto_archive_after_days int (default 30), auto_delete_after_days int|None (default None)",
+    "DecisionQueueManager class: __init__(retention_policy: RetentionPolicy|None = None). Internal state: dict of queue_name -> list[DecisionQueueItem].",
+    "Methods on DecisionQueueManager: create_queue(name: str, company_id: UUID) -> UUID, add_item(queue_name: str, decision_id: UUID, source_kind: str, source_id: UUID, priority: int = 5, decide_by: datetime|None = None) -> DecisionQueueItem, get_pending(queue_name: str, limit: int = 50) -> list sorted by priority then created_at, snooze_item(item_id: UUID, until: datetime), decide_item(item_id: UUID, decision: str), mark_notification_delivered(item_id: UUID), apply_retention() -> int (returns count of archived items), get_overdue(queue_name: str|None = None) -> list[DecisionQueueItem] where decide_by < now and status=pending, list_queues() -> list of queue names",
+    "Create tests/test_decision_queue.py: Test queue creation, item addition with priorities, get_pending sorting, snooze/decide/archive lifecycle, retention policy application, overdue detection, notification tracking"
+  ],
+  "acceptance_criteria": [
+    "DecisionQueueManager creates named queues and adds items",
+    "get_pending returns items sorted by priority (ascending) then created_at",
+    "snooze_item sets snoozed_until and status to 'snoozed'",
+    "decide_item sets status to 'decided'",
+    "apply_retention archives items older than auto_archive_after_days",
+    "get_overdue returns items past their decide_by date",
+    "Notification tracking works (needs_notification, mark_notification_delivered)",
+    "python3.12 -m pytest tests/test_decision_queue.py passes",
+    "python3.12 -m pytest tests/ -x -q passes (no regressions)"
+  ],
+  "verification": [
+    "python3.12 -m pytest tests/test_decision_queue.py -v",
+    "python3.12 -m pytest tests/ -x -q"
+  ],
+  "blocked_reason": null,
+  "findings": "All 39 new tests pass. Full suite at 1027 tests (up from 988). Module exported from governance __init__.py. Follows same dataclass-based in-memory pattern as approvals.py."
+}

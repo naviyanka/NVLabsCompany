@@ -2,7 +2,7 @@
   "id": "FEAT-001",
   "type": "feat",
   "description": "Wire API keys into config and add CLI backend adapter. Three parts: (1) Add openai_api_key and anthropic_api_key to Settings in config.py. (2) Create cli_registry.py that auto-detects installed CLIs. (3) Create cli_adapter.py as a generalized CLI adapter supporting multiple backends. Register the new CLI adapter in the adapter registry.",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "Add 'openai_api_key: str = \"\"' and 'anthropic_api_key: str = \"\"' fields to the Settings class in src/nexus/config.py. These should load from OPENAI_API_KEY and ANTHROPIC_API_KEY env vars (use Field(alias=...) or adjust the env_prefix since the current config uses empty env_prefix).",
     "Create src/nexus/adapters/cli_registry.py with a CLIBackendInfo dataclass (fields: id, name, command, instruction_path, stability, supports_resume, supports_agent_type, supports_stdin) and a CLIRegistry class. The registry should auto-detect installed CLIs via shutil.which() and optionally probe versions via subprocess. Support these backends: claude (command 'claude'), codex (command 'codex'), kiro-cli (command 'kiro'), aider (command 'aider'), opencode (command 'opencode'), agy (command 'agy'). Reference the AIBackend TypeScript interface at /projects/sandbox/NVLabsOrg/packages/orchestrator/src/ai-backend.ts for field definitions.",
@@ -23,5 +23,5 @@
     "python -m pytest tests/ --tb=short -q"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "All 640 tests pass (600 existing + 40 new). The existing test_adapters.py test for default adapter count was updated from 6 to 7 to account for the new 'cli' adapter. Config env_prefix is empty string so OPENAI_API_KEY and ANTHROPIC_API_KEY load directly from environment variables without prefix."
 }
