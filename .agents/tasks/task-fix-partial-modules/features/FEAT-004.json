@@ -2,7 +2,7 @@
   "id": "FEAT-004",
   "type": "feat",
   "description": "Add real-time collaboration features to Knowledge Plaza (subscribe/notify, locking, change feed)",
-  "status": "pending",
+  "status": "in_progress",
   "steps": [
     "In src/nexus/knowledge/plaza.py, add PageChangeEvent dataclass with fields: page_id, company_id, change_type (str: 'created'|'updated'|'deleted'), agent_id, timestamp, metadata dict",
     "Add _subscribers dict[uuid.UUID, list[Callable]] to KnowledgePlaza.__init__ to track per-company subscriber callbacks",
