@@ -2,7 +2,7 @@
   "id": "FEAT-002",
   "type": "feat",
   "description": "ToolInvocation Audit Table and audit query module - comprehensive audit trail for every tool execution with scrubbed argument storage and query/filter capabilities.",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "Create src/nexus/models/tool_invocation.py: ToolInvocation SQLModel table (id UUID PK, company_id FK, agent_id FK to agents, tool_id FK to tools, connection_id UUID nullable, tool_name str, arguments_scrubbed JSON, result_summary str nullable, status [success/error/timeout/denied/rate_limited], duration_ms int, cost_cents int default 0, approval_state [not_required/approved/denied] default not_required, error str nullable, created_at datetime, completed_at datetime nullable)",
     "Update src/nexus/models/__init__.py to import and export ToolInvocation",
@@ -24,5 +24,5 @@
     "python3.12 -m pytest tests/ -x -q"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "Added tool_invocations to EXPECTED_TABLES in test_alembic_migration.py and updated count from 53 to 54. The ToolExecutor now has _scrub_arguments as a module-level function and _record_invocation as a method. Audit store recording is skipped if company_id is None."
 }
