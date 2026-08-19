@@ -1,0 +1,33 @@
+{
+  "id": "FEAT-002",
+  "type": "feat",
+  "description": "Add MCP Stdio Transport: Create src/nexus/tools/mcp_stdio.py implementing an StdioMCPTransport class that spawns MCP servers as subprocesses and communicates via stdin/stdout JSON-RPC",
+  "status": "pending",
+  "steps": [
+    "Create src/nexus/tools/mcp_stdio.py with class StdioMCPTransport that has the same interface as MCPClient (connect, list_tools, call_tool, disconnect) but communicates via subprocess stdio instead of HTTP.",
+    "Implement connect(command: str, args: list[str] | None = None, env: dict[str, str] | None = None) that spawns the MCP server as an asyncio subprocess with stdin=PIPE, stdout=PIPE, stderr=PIPE. Send the JSON-RPC 'initialize' request to stdin (newline-terminated). Read and parse the response from stdout. Store server info.",
+    "Implement _send_request(method: str, params: dict) that writes a JSON-RPC message to the subprocess stdin (newline-terminated), reads the response line from stdout, and parses it. Use a monotonically increasing request ID. Include timeout handling (asyncio.wait_for on the readline).",
+    "Implement list_tools() that sends 'tools/list' JSON-RPC method and returns list[MCPTool] (reuse MCPTool from mcp_client.py).",
+    "Implement call_tool(tool_name: str, arguments: dict) that sends 'tools/call' JSON-RPC method and returns MCPResult (reuse MCPResult from mcp_client.py).",
+    "Implement disconnect() that sends a graceful shutdown signal, waits briefly, then force-kills if needed. Clean up process resources.",
+    "Add _read_stderr_task() as a background coroutine that reads stderr lines and logs them via Python logging for error diagnostics.",
+    "Add is_connected property and health_check() method (sends a ping or checks process.returncode is None).",
+    "Add comprehensive tests in tests/test_mcp_stdio.py covering: (a) connect spawns subprocess and sends initialize, (b) list_tools parses tool response, (c) call_tool sends correct JSON-RPC and parses result, (d) disconnect kills subprocess, (e) timeout handling when server is unresponsive, (f) error handling when subprocess exits unexpectedly."
+  ],
+  "acceptance_criteria": [
+    "StdioMCPTransport class exists at src/nexus/tools/mcp_stdio.py",
+    "It spawns a subprocess and communicates via newline-delimited JSON-RPC on stdin/stdout",
+    "It implements connect(), list_tools(), call_tool(), disconnect(), is_connected, health_check()",
+    "It reuses MCPTool and MCPResult dataclasses from mcp_client.py",
+    "Stderr is captured and logged",
+    "Timeout handling works for unresponsive servers",
+    "All new tests pass via python3.12 -m pytest tests/test_mcp_stdio.py",
+    "All existing tests still pass"
+  ],
+  "verification": [
+    "python3.12 -m pytest tests/test_mcp_stdio.py -v --tb=short",
+    "python3.12 -m pytest tests/ --tb=no -q"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

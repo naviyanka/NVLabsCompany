@@ -1,0 +1,30 @@
+{
+  "id": "FEAT-001",
+  "type": "feat",
+  "description": "Complete Claude Code Adapter: Add streaming JSON output parsing, session resumption support, and --worktree flag handling",
+  "status": "in_progress",
+  "steps": [
+    "In src/nexus/adapters/claude_code_adapter.py, add a _parse_stream_json() method that parses Claude Code's --output-format stream-json mode. The stream is newline-delimited JSON with event types: 'assistant', 'tool_use', 'tool_result', 'system', 'result'. Each line is a JSON object with a 'type' field. Parse them into a list of event dicts and extract final result text from 'result' events.",
+    "Add session_id tracking: After execution, scan the parsed JSON events or stdout for a session_id field (Claude Code returns this in 'system' or 'result' type events). Store it in session.metadata['last_session_id'] so callers can resume later.",
+    "Add resume_session_id parameter to _do_execute(): When payload contains 'resume_session_id', append ['--resume', resume_session_id] to the command args before spawning the subprocess.",
+    "Add --output-format stream-json to the default command args in _do_execute() so we always get structured output (unless overridden via payload['args']).",
+    "Add --worktree flag support: When payload contains 'worktree' (bool True), append '--worktree' to command args for workspace isolation.",
+    "Update _get_capabilities() to include 'stream_json_parsing', 'session_resume', and 'worktree_isolation'.",
+    "Add comprehensive tests in tests/test_claude_code_adapter.py covering: (a) _parse_stream_json with valid multi-event stream, (b) session_id extraction from result events, (c) --resume flag added when resume_session_id present in payload, (d) --output-format stream-json is added by default, (e) --worktree appended when requested, (f) backward compat when no structured output is available (plain text fallback)."
+  ],
+  "acceptance_criteria": [
+    "_parse_stream_json() correctly parses newline-delimited JSON events and returns a list of dicts",
+    "session.metadata['last_session_id'] is populated after execution when a session_id is found in output",
+    "Passing resume_session_id in payload causes --resume <id> to appear in subprocess args",
+    "--output-format stream-json is in default command args",
+    "--worktree is appended only when payload['worktree'] is True",
+    "All new tests pass via python3.12 -m pytest tests/test_claude_code_adapter.py",
+    "All existing tests still pass (1893+)"
+  ],
+  "verification": [
+    "python3.12 -m pytest tests/test_claude_code_adapter.py -v --tb=short",
+    "python3.12 -m pytest tests/ --tb=no -q"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

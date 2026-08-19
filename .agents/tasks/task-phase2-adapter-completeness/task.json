@@ -1,0 +1,7 @@
+{
+  "task_id": "task-phase2-adapter-completeness",
+  "task_description": "Phase 2 of production-readiness audit: Complete 4 MEDIUM-priority adapter/infrastructure modules - Claude Code adapter streaming/resume, MCP stdio transport, semantic memory embedding fallback, and secret backend persistence",
+  "status": "in_progress",
+  "feature_order": ["FEAT-001", "FEAT-002", "FEAT-003", "FEAT-004"],
+  "blocked_reason": null
+}
