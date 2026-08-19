@@ -2,7 +2,7 @@
   "id": "FEAT-003",
   "type": "feat",
   "description": "Add structured JSON logging with correlation IDs (X-Request-ID) and basic in-process metrics/telemetry with a /metrics endpoint in Prometheus text format.",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "Create src/nexus/logging_config.py: (1) Define a JSON formatter class (stdlib logging.Formatter subclass) that outputs each log record as a single JSON line with fields: timestamp, level, logger, message, correlation_id (from contextvars). (2) Define a correlation_id ContextVar[str | None] with default None. (3) Provide a configure_logging(level: str = 'INFO') function that sets up the root logger with the JSON formatter. (4) Provide a get_correlation_id() function.",
     "Create correlation ID middleware: In src/nexus/logging_config.py or as part of the module, create an ASGI middleware class (RequestIDMiddleware) that: reads X-Request-ID from request headers (or generates a uuid4 if missing), sets the correlation_id context var, adds X-Request-ID to response headers. This middleware should be added in main.py.",
@@ -26,5 +26,5 @@
     "python3.12 -m pytest tests/ -q --tb=short"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "All 30 new tests pass. Full suite (2335 tests) passes. JSONFormatter uses record.getMessage() to avoid formatMessage dependency on _style. Histogram uses break-on-first-match for bucket counting (non-cumulative storage, cumulative output in get_buckets and render). MetricsMiddleware uses global counters so metrics persist across requests."
 }
