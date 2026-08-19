@@ -1,21 +1,28 @@
 {
   "id": "FEAT-001",
   "type": "docs",
-  "description": "Create comprehensive production-readiness audit document at docs/PRODUCTION-READINESS-AUDIT.md rating all 40+ features across Sprints 1-7",
-  "status": "completed",
+  "description": "Write a completely fresh PRODUCTION-READINESS-AUDIT.md with honest per-subsystem ratings based on actual code reading",
+  "status": "in_progress",
   "steps": [
-    "Create docs/PRODUCTION-READINESS-AUDIT.md with complete feature-by-feature analysis",
-    "Rate each feature as PRODUCTION, PARTIAL, or DEMO based on code analysis",
-    "Group findings into Ready for production, Needs integration work, Needs rewrite",
-    "Provide prioritized fix list with effort estimates"
+    "Replace docs/PRODUCTION-READINESS-AUDIT.md with a fresh audit document",
+    "Section 1 - System-Level Verification: Document that (a) app imports cleanly, (b) 90 API routes wired in main.py, (c) 2276 tests pass, (d) 56 DB tables defined via SQLModel, (e) OpenAPI spec generates successfully",
+    "Section 2 - Per-Subsystem Module Ratings with evidence from actual code reading. Rate each module PRODUCTION/PARTIAL/DEMO based on the findings below",
+    "Section 3 - Real Production Blockers: No LLM API keys means all LLM-enhanced modules fall back to heuristics (which work but are less intelligent). No external vector DB. In-memory-only for several coordination modules (ControlRegistry, PhaseMachine, GoalLoop, HiveManager uses filesystem). Redis rate limiter requires Redis.",
+    "Section 4 - What actually needs to happen before deployable: focus on ops concerns (observability, health checks beyond /health, configuration management, secrets rotation in production, horizontal scaling)",
+    "Section 5 - Honest effort estimate for remaining work"
   ],
   "acceptance_criteria": [
-    "Document exists at docs/PRODUCTION-READINESS-AUDIT.md",
-    "Every major feature module is rated",
-    "Missing items for PARTIAL/DEMO features are specific and actionable",
-    "Prioritized fix list is present with effort estimates"
+    "docs/PRODUCTION-READINESS-AUDIT.md is rewritten from scratch with current date",
+    "Every subsystem directory is covered with specific module-level ratings",
+    "Ratings are backed by evidence (specific code behavior described)",
+    "LLM fallback behavior is honestly assessed for each module that has it",
+    "Persistence status is accurately documented per module"
   ],
-  "verification": ["File docs/PRODUCTION-READINESS-AUDIT.md exists and is well-structured markdown"],
+  "verification": [
+    "File exists at docs/PRODUCTION-READINESS-AUDIT.md",
+    "File contains sections for all subsystems listed in the briefing",
+    "python3.12 -m pytest tests/ -q still passes (no code changes, only docs)"
+  ],
   "blocked_reason": null,
-  "findings": "Document created successfully at 536 lines covering all 75 modules. No build/test needed for docs-only change."
+  "findings": ""
 }
