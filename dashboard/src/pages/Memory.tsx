@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import { Card } from '@/components/common/Card';
 import {
   Brain,
@@ -216,9 +215,9 @@ function formatCount(value: number): string {
 // ─── Main Component ────────────────────────────────────────────────────────────
 
 export function Memory() {
-  const [activeTab] = useState('Overview');
-  const [activeSubTab] = useState('Recent Memories');
-  const [activeDetailTab] = useState('Details');
+  const activeTab = 'Overview';
+  const activeSubTab = 'Recent Memories';
+  const activeDetailTab = 'Details';
 
   return (
     <div className="space-y-6">
@@ -276,7 +275,12 @@ export function Memory() {
       <div className="flex items-center gap-3">
         <div className="flex-1 flex items-center gap-2 px-3 py-2 bg-dark-surface border border-white/[0.08] rounded-lg">
           <Search size={14} className="text-gray-500" />
-          <span className="text-sm text-gray-500">Search memories...</span>
+          <input
+            type="text"
+            readOnly
+            placeholder="Search memories..."
+            className="flex-1 bg-transparent outline-none text-sm text-gray-500 placeholder-gray-500"
+          />
         </div>
         <select className="px-3 py-2 bg-dark-surface border border-white/[0.08] rounded-lg text-sm text-gray-400 appearance-none pr-8">
           <option>All Agents</option>
@@ -301,9 +305,9 @@ export function Memory() {
       </div>
 
       {/* Main Three-Column Layout */}
-      <div className="flex gap-4">
+      <div className="flex flex-col lg:flex-row gap-4">
         {/* LEFT COLUMN */}
-        <div className="w-[25%] flex-shrink-0 space-y-4">
+        <div className="w-full lg:w-[25%] lg:flex-shrink-0 space-y-4">
           {/* Memory Sources */}
           <Card padding="lg">
             <div className="flex items-center justify-between mb-3">
@@ -476,7 +480,7 @@ export function Memory() {
         </div>
 
         {/* RIGHT COLUMN - Memory Details Sidebar */}
-        <div className="w-[30%] flex-shrink-0">
+        <div className="w-full lg:w-[30%] lg:flex-shrink-0">
           <Card padding="none" className="sticky top-4">
             {/* Panel Header */}
             <div className="p-4 border-b border-white/[0.08]">
