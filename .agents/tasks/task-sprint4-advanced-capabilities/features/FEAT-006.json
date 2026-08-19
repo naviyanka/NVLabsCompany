@@ -2,7 +2,7 @@
   "id": "FEAT-006",
   "type": "feat",
   "description": "Rich Heartbeat Model (PID, Exit Code, Liveness State) and Heartbeat Service: Create HeartbeatRun SQLModel and a service layer for creating/updating/querying heartbeat runs.",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "1. Create src/nexus/models/heartbeat_run.py with HeartbeatRun SQLModel table: id (UUID PK), agent_id (UUID FK to agents.id, indexed), session_id_before (str | None), session_id_after (str | None), process_pid (int | None), exit_code (int | None), signal (str | None), stdout_excerpt (str | None, max 2000 chars), stderr_excerpt (str | None, max 2000 chars), liveness_state (str: healthy/suspected_stale/confirmed_dead), continuation_attempt (int default 0), context_snapshot (dict | None, sa_column JSON), invocation_source (str: on_demand/scheduled/trigger/heartbeat), started_at (datetime), finished_at (datetime | None), last_output_at (datetime | None), created_at (datetime).",
     "2. Create src/nexus/runtime/heartbeat_service.py with HeartbeatService class: __init__(). Methods: create_run(agent_id, process_pid, invocation_source, session_id_before, context_snapshot) -> HeartbeatRun, update_liveness(run_id, liveness_state) -> HeartbeatRun, record_output(run_id, stdout_excerpt, stderr_excerpt) -> HeartbeatRun, finish_run(run_id, exit_code, signal, session_id_after) -> HeartbeatRun, get_active_runs(agent_id) -> list[HeartbeatRun], get_latest_run(agent_id) -> HeartbeatRun | None, increment_continuation(run_id) -> HeartbeatRun, detect_stale(threshold_seconds: int) -> list[HeartbeatRun]. Use in-memory storage for testability (same pattern as other services).",
@@ -23,5 +23,5 @@
     "python3.12 -m pytest tests/test_heartbeat_service.py -x -q"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "All 23 heartbeat service tests pass. All 1230 project tests pass. Added heartbeat_runs to EXPECTED_TABLES and incremented count from 55 to 56. Used datetime.utcnow() for consistency with existing project patterns (budget.py, checkpoint.py) even though deprecation warnings appear."
 }
