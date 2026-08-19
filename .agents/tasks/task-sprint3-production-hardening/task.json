@@ -1,0 +1,14 @@
+{
+  "task_id": "task-sprint3-production-hardening",
+  "task_description": "Sprint 3 - Production Hardening + Advanced Features: Enhanced tool model with connections/catalog/profiles/policies, tool invocation audit, goal-gated loop with judge, decision queue triage system, replay engine, and worktree isolation for parallel agents.",
+  "status": "completed",
+  "feature_order": ["FEAT-001", "FEAT-002", "FEAT-003", "FEAT-004", "FEAT-005", "FEAT-006"],
+  "blocked_reason": null,
+  "verification": {
+    "build": "pass",
+    "tests": "pass",
+    "test_quality": "pass",
+    "docker_build": "skipped",
+    "summary": "1081 tests pass (181 new). All 6 features implemented + review fixes applied. v2 review APPROVED."
+  }
+}

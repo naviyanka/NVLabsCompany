@@ -1,0 +1,33 @@
+{
+  "project_type": "Python FastAPI app - Autonomous AI Company Operating System",
+  "language": "Python 3.12+",
+  "build_system": "setuptools with pyproject.toml, pip install -e '.[dev]'",
+  "test_framework": "pytest with pytest-asyncio (auto mode), classes grouped by behavior, fixtures in tests/conftest.py",
+  "build_command": "python3.12 -m pytest tests/ --co -q (collect-only to validate imports)",
+  "test_command": "python3.12 -m pytest tests/ -x -q",
+  "verification_instructions": "Run python3.12 -m pytest tests/ -x -q and confirm all tests pass (900+ existing + new tests)",
+  "snapshot_or_generated_files": null,
+  "setup_instructions": "python3.12 available at /usr/bin/python3.12. Package installed via python3.12 -m pip install. NEXUS importable via python3.12 -c 'import nexus'",
+  "environment_constraints": "Python 3.12 at /usr/bin/python3.12. Default python3 is 3.9 (DO NOT USE). pip install requires python3.12 -m pip. No Docker daemon available. No database available (tests use mocks/in-memory).",
+  "contribution_requirements": "Type hints required. Docstrings required on all public classes/methods. Ruff formatting (100 char line length). Python 3.12 union syntax (X | Y not Optional[X]). Every module independently testable. New SQLModel tables added to models/__init__.py.",
+  "key_patterns": "Dataclass-based in-memory state for runtime components (registry, executor, phase_machine, watchdog). SQLModel for DB models in src/nexus/models/. Tests use pytest classes with descriptive names, fixtures from conftest.py. Enums for state values. Protocol classes for dependency injection. No external DB in tests - all in-memory.",
+  "relevant_files": [
+    "src/nexus/models/tool.py",
+    "src/nexus/models/__init__.py",
+    "src/nexus/models/governance.py",
+    "src/nexus/tools/registry.py",
+    "src/nexus/tools/executor.py",
+    "src/nexus/tools/__init__.py",
+    "src/nexus/orchestration/phase_machine.py",
+    "src/nexus/orchestration/smart_retry.py",
+    "src/nexus/runtime/watchdog.py",
+    "src/nexus/runtime/lifecycle.py",
+    "src/nexus/governance/approvals.py",
+    "src/nexus/evolution/failure_alchemy.py",
+    "tests/conftest.py",
+    "tests/test_phase_machine.py",
+    "tests/test_smart_retry.py",
+    "tests/test_watchdog.py"
+  ],
+  "directory_structure": "src/nexus/ - main package. models/ - SQLModel DB tables. tools/ - registry, executor, mcp_client. orchestration/ - phase_machine, smart_retry, planner, router. runtime/ - watchdog, heartbeat, lifecycle, executor. governance/ - approvals, budget, circuit breaker, kill switch. evolution/ - failure_alchemy, observer. memory/ - layered memory system. tests/ - flat test files following test_<module>.py convention."
+}

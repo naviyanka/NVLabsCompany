@@ -1,0 +1,31 @@
+{
+  "id": "FEAT-001",
+  "type": "feat",
+  "description": "Enhanced Tool Model - Add ToolConnection, ToolCatalogEntry, ToolProfile, ToolProfileBinding, ToolPolicy SQLModel tables and in-memory policy engine for enterprise-grade tool governance.",
+  "status": "completed",
+  "steps": [
+    "Enhance src/nexus/models/tool.py: Add ToolConnection model (id, company_id, name, transport_type [mcp_remote/rest_api/local_stdio], endpoint_url, auth_kind [none/api_key/oauth/bearer], credential_ref, health_status [healthy/degraded/unhealthy/unknown], last_health_check_at, is_active, created_at, updated_at)",
+    "Add ToolCatalogEntry model to src/nexus/models/tool.py (id, company_id, connection_id FK to tool_connections, tool_name, display_name, description, risk_level [read/write/destructive], input_schema JSON, output_schema JSON, version, is_active, discovered_at, updated_at)",
+    "Add ToolProfile model to src/nexus/models/tool.py (id, company_id, name, description, default_action [allow/deny], is_active, created_at, updated_at)",
+    "Add ToolProfileBinding model to src/nexus/models/tool.py (id, company_id, profile_id FK, target_type [agent/department/company], target_id, priority int, created_at)",
+    "Add ToolPolicy model to src/nexus/models/tool.py (id, company_id, name, description, priority int, effect [allow/deny], conditions JSON [risk_level, tool_name patterns, time_of_day, etc], is_active, created_at, updated_at)",
+    "Update src/nexus/models/__init__.py to import and export all new models (ToolConnection, ToolCatalogEntry, ToolProfile, ToolProfileBinding, ToolPolicy)",
+    "Enhance src/nexus/tools/registry.py: Add catalog_entries dict, method register_catalog_entry(entry), method discover_from_connection(connection_id) that returns catalog entries for a connection, method list_catalog_entries(company_id, risk_level filter, connection_id filter)",
+    "Create src/nexus/tools/policy_engine.py: ToolPolicyEngine class with evaluate(agent_id, tool_name, risk_level, context) -> PolicyDecision. PolicyDecision dataclass with (allowed: bool, matched_policy_id, reason). Engine loads policies sorted by priority, evaluates conditions sequentially, first match wins. Also add ProfileResolver class that resolves the effective profile for an agent by checking agent -> department -> company bindings in priority order.",
+    "Create tests/test_tool_governance.py: Test ToolConnection/ToolCatalogEntry/ToolProfile/ToolProfileBinding/ToolPolicy model instantiation, ToolPolicyEngine evaluation (allow/deny/priority ordering/no-match-defaults), ProfileResolver resolution (agent-level override, department fallback, company default), registry catalog entry methods"
+  ],
+  "acceptance_criteria": [
+    "All 5 new SQLModel tables are importable from nexus.models",
+    "ToolPolicyEngine correctly evaluates allow/deny policies in priority order",
+    "ProfileResolver returns the highest-priority binding profile for a given agent",
+    "Registry supports catalog entry registration and filtered discovery",
+    "python3.12 -m pytest tests/test_tool_governance.py passes",
+    "python3.12 -m pytest tests/ -x -q passes (no regressions)"
+  ],
+  "verification": [
+    "python3.12 -m pytest tests/test_tool_governance.py -v",
+    "python3.12 -m pytest tests/ -x -q"
+  ],
+  "blocked_reason": null,
+  "findings": "Updated test_alembic_migration.py expected table count from 48 to 53 to account for the 5 new tool governance tables. All 936 tests pass. The existing models use datetime.utcnow() which generates DeprecationWarnings but this is consistent with codebase convention."
+}

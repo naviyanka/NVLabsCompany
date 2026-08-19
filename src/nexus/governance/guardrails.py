@@ -1,4 +1,17 @@
-"""Guardrail Chain - validates outputs against structural, content, and policy rules."""
+"""Guardrail Chain - validates outputs against structural, content, and policy rules.
+
+.. deprecated::
+    This module is the legacy synchronous guardrail implementation. For new code,
+    prefer the async guardrail system in ``nexus.guardrails`` which provides:
+    - Protocol-based composition (``GuardrailProtocol``)
+    - Async execution with ``GuardrailChain``
+    - Fail-fast and fail-closed semantics
+    - ``StructuralGuardrail`` and ``PolicyGuardrail`` implementations
+
+    This module (``nexus.governance.guardrails``) is maintained for backward
+    compatibility and will be consolidated into ``nexus.guardrails`` in a future
+    release. Do not add new guardrail logic here.
+"""
 
 import re
 from dataclasses import dataclass, field

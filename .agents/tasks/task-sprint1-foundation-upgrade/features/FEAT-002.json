@@ -1,0 +1,27 @@
+{
+  "id": "FEAT-002",
+  "type": "feat",
+  "description": "Create the composable GuardrailChain system as a proper module under src/nexus/guardrails/. The existing src/nexus/governance/guardrails.py already has a basic implementation - this creates a more robust, modular version with Protocol-based design, async support, fail-closed behavior, and separate concerns (structural, policy, chain). The existing governance/guardrails.py should remain unchanged for backward compatibility.",
+  "status": "completed",
+  "steps": [
+    "Create src/nexus/guardrails/__init__.py that exports GuardrailProtocol, GuardrailChain, GuardrailResult, StructuralGuardrail, PolicyGuardrail.",
+    "Create src/nexus/guardrails/protocol.py with: (a) GuardrailResult dataclass (passed: bool, violations: list[str], guardrail_name: str | None, metadata: dict), (b) GuardrailProtocol (runtime_checkable Protocol) with async methods: validate_input(input: Any, context: dict) -> GuardrailResult, validate_output(output: Any, context: dict) -> GuardrailResult, validate_tool_call(tool_name: str, args: dict, context: dict) -> GuardrailResult. Each method in the Protocol should have a name property.",
+    "Create src/nexus/guardrails/chain.py with GuardrailChain class. Methods: add(guardrail), remove(name), validate_input/validate_output/validate_tool_call that run all guardrails in sequence. Features: short-circuit on first failure (configurable via fail_fast=True), fail-closed (if a guardrail raises an exception, treat as failure), collect all violations when fail_fast=False. Return combined GuardrailResult.",
+    "Create src/nexus/guardrails/structural.py with StructuralGuardrail class implementing GuardrailProtocol. Checks: max_length, min_length, required_fields (for dict outputs), json_schema validation (basic type/required checking without external jsonschema lib), non-empty output validation.",
+    "Create src/nexus/guardrails/policy.py with PolicyGuardrail class implementing GuardrailProtocol. Checks: blocked_patterns (regex list for dangerous content), sensitive_paths (file paths that should not be accessed), dangerous_commands (shell commands that should be blocked), allowed_tools (whitelist of tool names for validate_tool_call).",
+    "Add tests in tests/test_guardrails.py covering: protocol conformance, chain short-circuit behavior, chain fail-closed on exception, structural guardrail validates lengths/fields, policy guardrail blocks patterns/paths/commands, tool call validation with allowed_tools whitelist."
+  ],
+  "acceptance_criteria": [
+    "src/nexus/guardrails/ package exists with __init__.py, protocol.py, chain.py, structural.py, policy.py",
+    "GuardrailProtocol is runtime_checkable and both StructuralGuardrail and PolicyGuardrail satisfy it",
+    "GuardrailChain supports fail_fast and fail_closed modes",
+    "Running 'python -m pytest tests/test_guardrails.py -v' passes all new tests",
+    "Running 'python -m pytest tests/ --tb=short -q' still passes all existing tests"
+  ],
+  "verification": [
+    "python -m pytest tests/test_guardrails.py -v",
+    "python -m pytest tests/ --tb=short -q"
+  ],
+  "blocked_reason": null,
+  "findings": "All 69 new tests pass. Full suite passes with 709 tests (640 existing + 69 new). The new module is independent of the existing governance/guardrails.py which remains unchanged. Used asyncio.run() in tests for async method testing, consistent with the project pattern."
+}

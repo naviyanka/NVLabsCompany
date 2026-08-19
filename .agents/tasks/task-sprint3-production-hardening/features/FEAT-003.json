@@ -1,0 +1,31 @@
+{
+  "id": "FEAT-003",
+  "type": "feat",
+  "description": "Goal-Gated Loop with Independent Judge - autonomous iteration mechanism where agents work toward a goal with a separate judge evaluating completion, safety valves, and budget limits.",
+  "status": "completed",
+  "steps": [
+    "Create src/nexus/orchestration/goal_loop.py with the following components:",
+    "GoalResult dataclass: task_id UUID, success bool, iterations_used int, final_output Any, judge_verdict str, total_cost_cents int, stopped_reason str|None (max_iterations/budget_exceeded/parse_failures/judge_confirmed)",
+    "GoalJudge Protocol with method evaluate(goal: str, current_output: Any, iteration: int) -> JudgeVerdict. JudgeVerdict dataclass: is_complete bool, confidence float (0-1), reasoning str",
+    "HeuristicGoalJudge class implementing GoalJudge: uses keyword matching and output length heuristics to determine completion. Configurable with completion_keywords list and min_output_length.",
+    "GoalLoop class: __init__(judge: GoalJudge, max_iterations: int = 10, max_consecutive_parse_failures: int = 3, budget_limit_cents: int = 5000). Method run(task_id: UUID, goal: str, execute_fn: Callable that returns (output, cost_cents)) -> GoalResult. Loop logic: call execute_fn, pass output to judge, if judge says complete return success, if max_iterations reached return with stopped_reason, if budget exceeded return, if judge raises exception count as parse_failure and auto-stop after consecutive limit.",
+    "Create tests/test_goal_loop.py: Test GoalLoop with mock execute_fn and judge - test success on first iteration, success after N iterations, max_iterations stop, budget exhaustion stop, parse_failure auto-stop, HeuristicGoalJudge keyword detection and min_output_length logic"
+  ],
+  "acceptance_criteria": [
+    "GoalLoop.run() iterates calling execute_fn and evaluating with judge",
+    "Stops correctly on judge confirmation (success=True)",
+    "Stops on max_iterations with stopped_reason='max_iterations'",
+    "Stops on budget_limit_cents exceeded with stopped_reason='budget_exceeded'",
+    "Stops on consecutive parse failures with stopped_reason='parse_failures'",
+    "HeuristicGoalJudge returns is_complete=True when keywords found and min length met",
+    "GoalResult contains accurate iterations_used and total_cost_cents",
+    "python3.12 -m pytest tests/test_goal_loop.py passes",
+    "python3.12 -m pytest tests/ -x -q passes (no regressions)"
+  ],
+  "verification": [
+    "python3.12 -m pytest tests/test_goal_loop.py -v",
+    "python3.12 -m pytest tests/ -x -q"
+  ],
+  "blocked_reason": null,
+  "findings": "All 23 new tests pass. Full suite now at 988 tests (up from 965). Implementation uses Protocol for GoalJudge (runtime_checkable), dataclasses for GoalResult and JudgeVerdict, async run loop matching smart_retry pattern."
+}

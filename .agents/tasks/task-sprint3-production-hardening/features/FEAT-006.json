@@ -1,0 +1,32 @@
+{
+  "id": "FEAT-006",
+  "type": "feat",
+  "description": "Worktree Isolation - git worktree management for parallel agent execution without file conflicts, supporting creation, merging, syncing, change detection, removal, and revert operations.",
+  "status": "completed",
+  "steps": [
+    "Create src/nexus/runtime/worktree.py with the following components:",
+    "MergeResult dataclass: success bool, conflicts list[str] (conflicting file paths), merge_commit str|None (commit hash if successful)",
+    "WorktreeInfo dataclass: worktree_path str, branch str, agent_id UUID, agent_name str, created_at datetime",
+    "WorktreeManager class: __init__(). Manages git worktrees for agent isolation using subprocess calls to git.",
+    "Methods on WorktreeManager: create_worktree(repo_path: str, agent_id: UUID, agent_name: str) -> WorktreeInfo (creates branch named agent/<agent_name>-<short_id>, creates worktree at repo_path/../worktrees/<agent_name>-<short_id>), merge_worktree(repo_path: str, worktree_path: str, branch: str) -> MergeResult (merges worktree branch into current branch of repo_path), sync_worktree_to_main(repo_path: str, worktree_path: str, main_branch: str = 'main') (pulls latest main into the worktree branch via merge), has_pending_changes(repo_path: str, worktree_path: str) -> bool (checks git status for uncommitted or unmerged work), remove_worktree(worktree_path: str, branch: str, repo_path: str) -> bool (removes worktree and deletes branch), revert_worktree_commit(repo_path: str, worktree_path: str) -> bool (reverts last commit in worktree)",
+    "All git operations use asyncio.create_subprocess_exec for non-blocking execution. Include proper error handling for git failures (e.g., worktree already exists, merge conflicts).",
+    "Create tests/test_worktree.py: Test WorktreeManager using a temporary git repo created in a tmp_path fixture. Tests: create_worktree creates branch and directory, merge_worktree with clean merge, merge_worktree with conflicts returns conflict info, has_pending_changes detects uncommitted files, remove_worktree cleans up, revert_worktree_commit undoes last commit, sync_worktree_to_main pulls new commits"
+  ],
+  "acceptance_criteria": [
+    "create_worktree creates a git worktree with proper branch naming",
+    "merge_worktree returns MergeResult with success=True on clean merge",
+    "merge_worktree returns MergeResult with conflicts list on conflict",
+    "has_pending_changes detects uncommitted modifications",
+    "remove_worktree deletes the worktree directory and branch",
+    "revert_worktree_commit undoes the last commit",
+    "sync_worktree_to_main brings main branch changes into worktree",
+    "python3.12 -m pytest tests/test_worktree.py passes",
+    "python3.12 -m pytest tests/ -x -q passes (no regressions)"
+  ],
+  "verification": [
+    "python3.12 -m pytest tests/test_worktree.py -v",
+    "python3.12 -m pytest tests/ -x -q"
+  ],
+  "blocked_reason": null,
+  "findings": "All 11 worktree tests pass. Full suite passes at 1070 tests. Used real git repos via tmp_path fixture for end-to-end verification."
+}

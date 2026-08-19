@@ -5,6 +5,50 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Callable, Awaitable
 
+from nexus.models.tool_invocation import ToolInvocation
+
+
+# Sensitive argument key substrings that trigger scrubbing
+_SENSITIVE_KEYS = ("password", "secret", "token", "key")
+
+
+def _scrub_arguments(arguments: dict[str, Any]) -> dict[str, Any]:
+    """Scrub sensitive fields from tool arguments before audit storage.
+
+    Keys containing 'password', 'secret', 'token', or 'key' (case-insensitive)
+    have their values replaced with '***'. Recursively scrubs nested dicts and
+    lists to ensure deeply nested secrets are also masked.
+
+    Args:
+        arguments: The raw arguments dictionary.
+
+    Returns:
+        A new dictionary with sensitive values masked at all nesting levels.
+    """
+    return _scrub_value(arguments)
+
+
+def _scrub_value(value: Any) -> Any:
+    """Recursively scrub sensitive values from nested structures.
+
+    Args:
+        value: Any value that may contain sensitive data.
+
+    Returns:
+        The scrubbed value with sensitive keys masked at all levels.
+    """
+    if isinstance(value, dict):
+        scrubbed: dict[str, Any] = {}
+        for k, v in value.items():
+            if any(s in k.lower() for s in _SENSITIVE_KEYS):
+                scrubbed[k] = "***"
+            else:
+                scrubbed[k] = _scrub_value(v)
+        return scrubbed
+    elif isinstance(value, list):
+        return [_scrub_value(item) for item in value]
+    return value
+
 
 @dataclass
 class ToolResult:
@@ -56,15 +100,18 @@ class ToolExecutor:
         self,
         timeout_seconds: float = 30.0,
         rate_limit: RateLimitConfig | None = None,
+        audit_store: Any | None = None,
     ) -> None:
         """Initialize the tool executor.
 
         Args:
             timeout_seconds: Maximum time for a single tool execution.
             rate_limit: Rate limiting configuration. Uses defaults if None.
+            audit_store: Optional ToolAuditStore for recording structured invocations.
         """
         self._timeout_seconds = timeout_seconds
         self._rate_limit = rate_limit or RateLimitConfig()
+        self._audit_store = audit_store
         self._call_log: list[tuple[uuid.UUID, uuid.UUID, datetime]] = []
         self._audit_log: list[dict[str, Any]] = []
         # Permission check function can be injected
@@ -90,6 +137,7 @@ class ToolExecutor:
         arguments: dict[str, Any],
         execute_fn: Callable[[dict[str, Any]], Awaitable[Any]],
         company_id: uuid.UUID | None = None,
+        tool_name: str = "",
     ) -> ToolResult:
         """Execute a tool with full permission and safety checks.
 
@@ -102,6 +150,7 @@ class ToolExecutor:
             arguments: Arguments to pass to the tool.
             execute_fn: The actual execution function.
             company_id: Company scope for audit logging.
+            tool_name: Human-readable tool name for audit records.
 
         Returns:
             A ToolResult with the outcome.
@@ -117,6 +166,16 @@ class ToolExecutor:
                 error="Permission denied: agent lacks access to this tool",
             )
             self._log_audit(agent_id, tool_id, "denied", company_id)
+            self._record_invocation(
+                agent_id=agent_id,
+                tool_id=tool_id,
+                company_id=company_id,
+                arguments=arguments,
+                status="denied",
+                duration_ms=0,
+                error="Permission denied: agent lacks access to this tool",
+                tool_name=tool_name,
+            )
             return result
 
         # Rate limit check
@@ -128,6 +187,16 @@ class ToolExecutor:
                 error="Rate limit exceeded",
             )
             self._log_audit(agent_id, tool_id, "rate_limited", company_id)
+            self._record_invocation(
+                agent_id=agent_id,
+                tool_id=tool_id,
+                company_id=company_id,
+                arguments=arguments,
+                status="rate_limited",
+                duration_ms=0,
+                error="Rate limit exceeded",
+                tool_name=tool_name,
+            )
             return result
 
         # Execute with timeout
@@ -149,6 +218,15 @@ class ToolExecutor:
             )
             self._record_call(agent_id, tool_id)
             self._log_audit(agent_id, tool_id, "success", company_id)
+            self._record_invocation(
+                agent_id=agent_id,
+                tool_id=tool_id,
+                company_id=company_id,
+                arguments=arguments,
+                status="success",
+                duration_ms=duration_ms,
+                tool_name=tool_name,
+            )
             return result
 
         except asyncio.TimeoutError:
@@ -162,6 +240,16 @@ class ToolExecutor:
                 duration_ms=duration_ms,
             )
             self._log_audit(agent_id, tool_id, "timeout", company_id)
+            self._record_invocation(
+                agent_id=agent_id,
+                tool_id=tool_id,
+                company_id=company_id,
+                arguments=arguments,
+                status="timeout",
+                duration_ms=duration_ms,
+                error=f"Tool execution timed out after {self._timeout_seconds}s",
+                tool_name=tool_name,
+            )
             return result
 
         except Exception as exc:
@@ -175,7 +263,58 @@ class ToolExecutor:
                 duration_ms=duration_ms,
             )
             self._log_audit(agent_id, tool_id, "error", company_id, error=str(exc))
+            self._record_invocation(
+                agent_id=agent_id,
+                tool_id=tool_id,
+                company_id=company_id,
+                arguments=arguments,
+                status="error",
+                duration_ms=duration_ms,
+                error=str(exc),
+                tool_name=tool_name,
+            )
             return result
+
+    def _record_invocation(
+        self,
+        agent_id: uuid.UUID,
+        tool_id: uuid.UUID,
+        company_id: uuid.UUID | None,
+        arguments: dict[str, Any],
+        status: str,
+        duration_ms: int = 0,
+        error: str | None = None,
+        tool_name: str = "",
+    ) -> None:
+        """Create and record a ToolInvocation in the audit store if configured.
+
+        Args:
+            agent_id: The agent that executed the tool.
+            tool_id: The tool that was executed.
+            company_id: Company scope for the invocation.
+            arguments: Raw arguments (will be scrubbed before storage).
+            status: Execution outcome status.
+            duration_ms: Execution duration in milliseconds.
+            error: Error message, if any.
+            tool_name: Human-readable name of the tool being invoked.
+        """
+        if self._audit_store is None or company_id is None:
+            return
+
+        now = datetime.now(timezone.utc)
+        invocation = ToolInvocation(
+            company_id=company_id,
+            agent_id=agent_id,
+            tool_id=tool_id,
+            tool_name=tool_name,
+            arguments_scrubbed=_scrub_arguments(arguments),
+            status=status,
+            duration_ms=duration_ms,
+            error=error,
+            created_at=now,
+            completed_at=now if status != "timeout" else None,
+        )
+        self._audit_store.record(invocation)
 
     async def _check_permission(
         self, agent_id: uuid.UUID, tool_id: uuid.UUID

@@ -76,6 +76,31 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             import logging
             logging.getLogger(__name__).info("Seeded demo data: %s", counts)
 
+    # Load governance state from DB (kill switches, circuit breakers)
+    import logging
+    _logger = logging.getLogger(__name__)
+    try:
+        from nexus.governance.persistent_kill_switch import PersistentKillSwitch
+        from nexus.governance.persistent_circuit_breaker import PersistentCircuitBreaker
+
+        persistent_ks = PersistentKillSwitch(async_session_factory)
+        loaded_count = await persistent_ks.load_active()
+
+        persistent_cb = PersistentCircuitBreaker(async_session_factory)
+        cb_states = await persistent_cb.load_state()
+
+        _logger.info(
+            "Governance state loaded from DB (%d active kill switches, "
+            "%d open circuit breakers)",
+            loaded_count,
+            len(cb_states),
+        )
+    except Exception as exc:
+        _logger.warning(
+            "Could not load governance state from DB (table may not exist yet): %s",
+            exc,
+        )
+
     yield
     # Shutdown: close connections, flush buffers, etc.
 

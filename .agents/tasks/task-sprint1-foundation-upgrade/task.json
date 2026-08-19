@@ -1,0 +1,14 @@
+{
+  "task_id": "task-sprint1-foundation-upgrade",
+  "task_description": "Sprint 1 foundation upgrade for NEXUS: wire LLM API keys into config, create generalized CLI backend adapter, build composable guardrail system, create agent templates, persist circuit breaker state to database, and wire kill switch DB loading into app startup.",
+  "status": "completed",
+  "feature_order": ["FEAT-001", "FEAT-002", "FEAT-003", "FEAT-004"],
+  "blocked_reason": null,
+  "verification": {
+    "build": "pass",
+    "tests": "pass",
+    "test_quality": "pass",
+    "docker_build": "skipped",
+    "summary": "All 749 tests pass (600 original + 149 new). Semantic review v2 approved. All blocking issues from v1 review resolved. 3 remaining non-blocking notes (CB load_state dead code, static env denylist naming, datetime.utcnow deprecation)."
+  }
+}

@@ -17,6 +17,7 @@ from nexus.governance.incidents import IncidentManager
 from nexus.governance.retention import RetentionManager
 from nexus.governance.health import HealthMonitor
 from nexus.governance.config_governance import ConfigGovernance
+from nexus.governance.decision_queue import DecisionQueueManager, DecisionQueueItem, RetentionPolicy
 
 __all__ = [
     "ApprovalEngine",
@@ -38,4 +39,7 @@ __all__ = [
     "RetentionManager",
     "HealthMonitor",
     "ConfigGovernance",
+    "DecisionQueueManager",
+    "DecisionQueueItem",
+    "RetentionPolicy",
 ]
