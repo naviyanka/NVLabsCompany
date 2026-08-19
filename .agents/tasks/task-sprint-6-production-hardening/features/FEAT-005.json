@@ -2,7 +2,7 @@
   "id": "FEAT-005",
   "type": "feat",
   "description": "Closing Time Protocol (Graceful Shutdown) - Port the ClosingTimeController from munder-difflin/src/main/closingTime.ts. Protocol phases: STARTED -> PROGRESS -> COMPLETE -> teardown (or TIMEOUT/CANCELLED). Manages ACK tracking, premature COMPLETE rejection, dead worker exclusion, and steer-based interrupt.",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "Create src/nexus/runtime/closing_time.py with ClosingTimePhase enum (STARTED, PROGRESS, COMPLETE, TIMEOUT, CANCELLED) and ClosingTimeEvent dataclass (phase, acked: int, total: int). Define ACK_RE and COMPLETE_RE regex patterns (case-insensitive, forgiving of - _ space variants). Constants: TIMEOUT_SECONDS = 360 (6 minutes), TEARDOWN_GRACE_SECONDS = 2.5.",
     "Create ClosingTimeController class. Constructor takes: send_message callable (to send hive messages), get_live_agent_ids callable (returns list of live agent IDs), on_concluded callable (teardown callback), control_registry (optional ControlRegistry reference for steer injection). Internal state: active: bool, god_id: str, workers: set[str], acked: set[str], events: list[ClosingTimeEvent].",
@@ -26,5 +26,5 @@
     "pytest tests/ (full suite to confirm no regressions)"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "Used StrEnum instead of (str, Enum) per ruff UP042 rule. 51 tests pass. Full suite passes with 1640 tests. ControlRegistry.steer() and clear_steers() used for steer-based interrupt."
 }
