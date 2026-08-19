@@ -30,5 +30,5 @@
     "python3.12 -m pytest tests/ -x -q"
   ],
   "blocked_reason": null,
-  "findings": "All 45 new tests pass (34 websocket, 11 SSE). Full suite of 2568 tests pass with no regressions. No new dependencies added. All acceptance criteria met. Post-review fixes applied: (1) event bus __all__ fan-out added, (2) auth added to SSE/WS endpoints, (3) dual registry documented, (4) dead code removed, (5) socket close on disconnect added. All 2599 tests pass after fixes."
+  "findings": "All 45 new tests pass (34 websocket, 11 SSE). Full suite of 2568 tests pass with no regressions. No new dependencies added. All acceptance criteria met. Post-review fixes applied: (1) event bus __all__ fan-out added, (2) auth added to SSE/WS endpoints, (3) dual registry documented, (4) dead code removed, (5) socket close on disconnect added. All 2599 tests pass after fixes. Review v2 fixes: (6) tenant isolation via company_id field on RealtimeEvent + filtering in SSE generator + broadcast_to_company in WS manager, (7) __all__ catch-all fan-out tests added, (8) auth enforcement integration tests added for both SSE and WS endpoints. All 2613 tests pass after v2 fixes."
 }
