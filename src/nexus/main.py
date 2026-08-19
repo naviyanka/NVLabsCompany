@@ -7,6 +7,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from nexus import __version__
+from nexus.config import settings
 from nexus.api.routes.health import router as health_router
 from nexus.api.routes.companies import router as companies_router
 from nexus.api.routes.agents import router as agents_router
@@ -112,10 +113,10 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS middleware for development
+# CORS middleware - restrict to configured origins
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[o.strip() for o in settings.cors_origins.split(",")],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

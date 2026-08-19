@@ -19,6 +19,9 @@ class Settings(BaseSettings):
     # Security
     secret_key: str = "dev-secret-key-change-in-production"
 
+    # CORS
+    cors_origins: str = "http://localhost:3000,http://localhost:5173"
+
     # Server
     debug: bool = False
     log_level: str = "INFO"
