@@ -2,7 +2,7 @@
   "id": "FEAT-003",
   "type": "feat",
   "description": "Approvals DB Persistence - Add file-backed persistence to ApprovalEngine with atomic writes, approval history query, and notification hook for new pending approvals.",
-  "status": "pending",
+  "status": "completed",
   "steps": [
     "In src/nexus/governance/approvals.py, add optional `persist_path: Path | None = None` and `on_approval_needed: Callable[[ApprovalRequest], None] | None = None` parameters to ApprovalEngine.__init__()",
     "Implement _load() method: if persist_path exists and file is present, read JSON and reconstruct _approvals dict (deserialize UUID keys, datetime fields, etc.)",
@@ -26,5 +26,5 @@
     "eval \"$(pyenv init -)\" && cd /projects/sandbox/NVLabsCompany && python -m pytest tests/test_governance.py -x -q"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "All 11 new tests pass. Full suite (2050 tests) passes with no regressions. Existing test_governance.py tests (38) continue to pass unchanged. Used from __future__ import annotations for proper type hint forward references."
 }
