@@ -1,0 +1,28 @@
+{
+  "id": "FEAT-001",
+  "type": "feat",
+  "description": "Memory Reflector LLM Integration - Add llm_callable parameter to MemoryReflector and implement _summarize_evicted() with LLM condensation. Add _extract_durable_facts() for hoisting pinned lines. Include heuristic fallback when LLM is None.",
+  "status": "in_progress",
+  "steps": [
+    "In src/nexus/memory/reflector.py, add an optional `llm_callable: Callable[[str], Awaitable[str]] | None = None` parameter to MemoryReflector.__init__() following the same pattern as LLMFactExtractor in src/nexus/memory/llm_extract.py",
+    "Add a CONDENSE_PROMPT constant string that instructs the LLM to summarize evicted sections while preserving decisions, file paths, commit SHAs, and numeric results",
+    "Implement async method `_summarize_evicted(self, condensed_text: str | None, evicted: list[Section], pinned: str | None) -> tuple[str, list[str]]` that: (a) builds a prompt from CONDENSE_PROMPT + evicted text, (b) calls self._llm_callable, (c) parses the response to extract a summary and hoist lines, (d) returns (new_condensed, hoist_lines)",
+    "Implement heuristic fallback when llm_callable is None: take first 2 sentences of each evicted section body (split on '. '), join them with newlines, prepend existing condensed_text if any. Return empty hoist list.",
+    "Implement `_extract_durable_facts(self, evicted: list[Section]) -> list[str]` that scans evicted section bodies for lines containing decisions (keywords: 'decided', 'decision', 'chose'), file paths (regex for paths like src/..., /.../, *.py etc), commit SHAs (7+ hex chars), and critical numbers (dollar amounts, percentages). Returns those lines as candidates for hoisting.",
+    "Add a convenience method `make_summarizer(self) -> Callable` that returns a synchronous or async-compatible wrapper calling _summarize_evicted, suitable for passing to self.condense() as the summarizer argument",
+    "Add tests in tests/test_memory_reflector.py: (a) test LLM summarizer called with correct prompt structure, (b) test heuristic fallback produces bounded output, (c) test _extract_durable_facts identifies decision lines and file paths, (d) test full condense pipeline with mocked LLM callable, (e) test backward compatibility (no llm_callable still works with external summarizer)"
+  ],
+  "acceptance_criteria": [
+    "MemoryReflector accepts optional llm_callable parameter",
+    "When llm_callable is provided and make_summarizer() is used, condense() calls the LLM with a structured prompt",
+    "When llm_callable is None, heuristic fallback returns first 2 sentences per evicted section",
+    "_extract_durable_facts correctly identifies decision lines, file paths, and commit SHAs",
+    "All existing tests in test_memory_reflector.py still pass unchanged",
+    "New tests cover LLM path, heuristic path, and fact extraction"
+  ],
+  "verification": [
+    "eval \"$(pyenv init -)\" && cd /projects/sandbox/NVLabsCompany && python -m pytest tests/test_memory_reflector.py -x -q"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

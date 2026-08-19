@@ -16,8 +16,10 @@ original file byte-for-byte untouched.
 
 from __future__ import annotations
 
+import asyncio
+import json
 import re
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -41,6 +43,28 @@ CONDENSED_HEADING: str = "## \U0001f5dc Condensed history"
 
 RECENT_HEADING: str = "## Recent"
 """Fixed heading for the recent region divider."""
+
+CONDENSE_PROMPT: str = """\
+You are a memory condensation assistant. Summarize the following evicted \
+memory sections into a concise paragraph. You MUST preserve:
+- Decisions (any line containing 'decided', 'decision', or 'chose')
+- File paths (e.g. src/..., *.py, any slash-separated path)
+- Commit SHAs (7+ hex character strings)
+- Numeric results (dollar amounts with $, percentages with %)
+
+Return ONLY a JSON object with exactly these keys:
+{{
+  "condensed": "<single paragraph summary preserving the above>",
+  "hoist_lines": ["<lines that should be pinned as durable facts>"]
+}}
+
+Current condensed context (if any):
+{condensed_context}
+
+Evicted sections to summarize:
+{evicted_text}
+"""
+"""Prompt template for LLM-based memory condensation."""
 
 
 # ── Verify result type ───────────────────────────────────────────────────────
@@ -306,18 +330,31 @@ class MemoryReflector:
     summarizer is injected as a callable so the LLM call can be stubbed
     in tests.
 
+    Optionally accepts an ``llm_callable`` for built-in LLM-powered
+    summarization (same pattern as LLMFactExtractor). When provided,
+    ``make_summarizer()`` returns a callable that delegates to the LLM;
+    otherwise a heuristic fallback is used.
+
     Attributes:
         settings: The ReflectSettings controlling thresholds and behavior.
     """
 
-    def __init__(self, settings: ReflectSettings | None = None) -> None:
+    def __init__(
+        self,
+        settings: ReflectSettings | None = None,
+        llm_callable: Callable[[str], Awaitable[str]] | None = None,
+    ) -> None:
         """Initialize the MemoryReflector.
 
         Args:
             settings: Configuration for thresholds and behavior.
                 Uses defaults if not specified.
+            llm_callable: Optional async function that takes a prompt string
+                and returns a response string. When provided, enables
+                LLM-powered summarization via make_summarizer().
         """
         self.settings = settings or ReflectSettings()
+        self._llm_callable = llm_callable
 
     def should_condense(self, file_bytes: int, section_count: int) -> bool:
         """Check whether a memory file should be condensed.
@@ -418,3 +455,177 @@ class MemoryReflector:
             new_bytes=new_bytes,
             rebuilt_text=rebuilt,
         )
+
+    async def _summarize_evicted(
+        self,
+        condensed_text: str | None,
+        evicted: list[Section],
+        pinned: str | None,
+    ) -> tuple[str, list[str]]:
+        """Summarize evicted sections using LLM or heuristic fallback.
+
+        When ``self._llm_callable`` is set, builds a structured prompt
+        from CONDENSE_PROMPT, calls the LLM, and parses the JSON response.
+        Otherwise falls back to the heuristic (first 2 sentences per section).
+
+        Args:
+            condensed_text: Existing condensed summary, or None.
+            evicted: List of sections being evicted from recent.
+            pinned: Current pinned text, or None.
+
+        Returns:
+            Tuple of (new_condensed_text, hoist_lines).
+        """
+        if self._llm_callable is None:
+            return self._heuristic_fallback(condensed_text, evicted)
+
+        # Build evicted text block
+        evicted_text = "\n\n".join(
+            f"{s.heading}\n{s.body}" for s in evicted
+        )
+        prompt = CONDENSE_PROMPT.format(
+            condensed_context=condensed_text or "(none)",
+            evicted_text=evicted_text,
+        )
+
+        try:
+            response = await self._llm_callable(prompt)
+            data = json.loads(response)
+            new_condensed = data.get("condensed", "")
+            hoist_lines = data.get("hoist_lines", [])
+            if not isinstance(new_condensed, str):
+                new_condensed = str(new_condensed)
+            if not isinstance(hoist_lines, list):
+                hoist_lines = []
+            hoist_lines = [
+                str(line) for line in hoist_lines if line
+            ]
+            return (new_condensed, hoist_lines)
+        except Exception:
+            return self._heuristic_fallback(condensed_text, evicted)
+
+    def _heuristic_fallback(
+        self,
+        condensed_text: str | None,
+        evicted: list[Section],
+    ) -> tuple[str, list[str]]:
+        """Heuristic summarization fallback when no LLM is available.
+
+        Takes the first 2 sentences of each evicted section body,
+        joins them with newlines, and prepends existing condensed text.
+
+        Args:
+            condensed_text: Existing condensed summary, or None.
+            evicted: List of sections being evicted.
+
+        Returns:
+            Tuple of (new_condensed_text, empty_hoist_list).
+        """
+        parts: list[str] = []
+        if condensed_text:
+            parts.append(condensed_text)
+        for section in evicted:
+            sentences = section.body.split(". ")
+            truncated = ". ".join(sentences[:2])
+            if truncated and not truncated.endswith("."):
+                truncated += "."
+            parts.append(truncated)
+        return ("\n".join(parts), [])
+
+    def _extract_durable_facts(self, evicted: list[Section]) -> list[str]:
+        """Scan evicted sections for lines containing durable facts.
+
+        Identifies lines with:
+        - Decision keywords: 'decided', 'decision', 'chose'
+        - File paths: patterns like ``src/...``, ``/*.``, ``*.py``
+        - Commit SHAs: 7+ consecutive hex characters
+        - Critical numbers: dollar amounts (``$``), percentages (``%``)
+
+        Args:
+            evicted: List of evicted sections to scan.
+
+        Returns:
+            List of matching lines (candidates for hoisting).
+        """
+        decision_re = re.compile(
+            r"\b(decided|decision|chose)\b", re.IGNORECASE
+        )
+        file_path_re = re.compile(
+            r"(src/[\w/.\-]+|/[\w/.\-]+\.\w+|\*\.\w+)"
+        )
+        commit_sha_re = re.compile(r"\b[0-9a-f]{7,40}\b")
+        number_re = re.compile(r"(\$[\d,.]+|\d+%)")
+
+        results: list[str] = []
+        seen: set[str] = set()
+
+        for section in evicted:
+            for line in section.body.split("\n"):
+                stripped = line.strip()
+                if not stripped or stripped in seen:
+                    continue
+                if (
+                    decision_re.search(stripped)
+                    or file_path_re.search(stripped)
+                    or commit_sha_re.search(stripped)
+                    or number_re.search(stripped)
+                ):
+                    seen.add(stripped)
+                    results.append(stripped)
+        return results
+
+    def make_summarizer(
+        self,
+    ) -> Callable[
+        [str | None, list[Section], str | None], tuple[str, list[str]]
+    ]:
+        """Create a summarizer callable for use with condense().
+
+        Returns a synchronous wrapper compatible with the Summarizer
+        protocol. When ``llm_callable`` is available, uses asyncio to
+        call ``_summarize_evicted``. Otherwise calls the heuristic
+        fallback directly.
+
+        Returns:
+            A callable matching the Summarizer protocol signature.
+        """
+        if self._llm_callable is None:
+
+            def _sync_summarizer(
+                condensed_text: str | None,
+                evicted: list[Section],
+                pinned: str | None,
+            ) -> tuple[str, list[str]]:
+                return self._heuristic_fallback(condensed_text, evicted)
+
+            return _sync_summarizer
+
+        def _llm_summarizer(
+            condensed_text: str | None,
+            evicted: list[Section],
+            pinned: str | None,
+        ) -> tuple[str, list[str]]:
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                loop = None
+
+            if loop and loop.is_running():
+                import concurrent.futures
+
+                with concurrent.futures.ThreadPoolExecutor(1) as pool:
+                    future = pool.submit(
+                        asyncio.run,
+                        self._summarize_evicted(
+                            condensed_text, evicted, pinned
+                        ),
+                    )
+                    return future.result()
+            else:
+                return asyncio.run(
+                    self._summarize_evicted(
+                        condensed_text, evicted, pinned
+                    )
+                )
+
+        return _llm_summarizer

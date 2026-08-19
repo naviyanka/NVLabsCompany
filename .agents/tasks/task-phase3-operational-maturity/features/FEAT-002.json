@@ -1,0 +1,33 @@
+{
+  "id": "FEAT-002",
+  "type": "feat",
+  "description": "Webhook Persistent Delivery Queue - Create WebhookDeliveryQueue class with file-backed persistence, retry with exponential backoff, dead letter storage, and atomic file writes. Integrate with existing WebhookServer for outbound event dispatch.",
+  "status": "pending",
+  "steps": [
+    "Create src/nexus/communication/webhook_queue.py with WebhookDeliveryQueue class containing: (a) dataclass WebhookDelivery with fields: id (str/uuid), url (str), payload (dict), headers (dict), created_at (datetime), retry_count (int, default 0), next_retry_at (datetime | None), status ('pending'|'in_flight'|'dead'), last_error (str | None), (b) __init__(self, persist_path: Path, max_retries: int = 5, dead_letter_cap: int = 100)",
+    "Implement file-backed persistence: _load() on init reads JSON file into _pending and _dead_letters lists; _save() writes both lists atomically using tempfile + os.replace",
+    "Implement enqueue(delivery: WebhookDelivery) -> None: appends to _pending, calls _save()",
+    "Implement dequeue() -> WebhookDelivery | None: returns the first pending delivery whose next_retry_at is None or <= now, removes from _pending, calls _save()",
+    "Implement ack(delivery_id: str) -> bool: removes from any in-progress tracking, calls _save(), returns True if found",
+    "Implement nack(delivery_id: str, error: str) -> None: increments retry_count, sets last_error, computes next_retry_at with exponential backoff (1*2^(retry_count-1) seconds, capped at 16s), if retry_count > max_retries moves to _dead_letters (capped at dead_letter_cap, dropping oldest), calls _save()",
+    "Implement get_dead_letters() -> list[WebhookDelivery]: returns the dead letter list",
+    "Implement get_pending_count() -> int and get_dead_letter_count() -> int for observability",
+    "Add tests in tests/test_webhook_queue.py covering: enqueue/dequeue cycle, ack removes delivery, nack increments retry and computes backoff, nack beyond max_retries moves to dead letters, dead letter cap drops oldest, persistence survives simulated restart (write, create new instance, verify state), atomic write (file not corrupted if process dies mid-write), empty file on init creates empty state"
+  ],
+  "acceptance_criteria": [
+    "WebhookDeliveryQueue persists state to JSON file",
+    "enqueue/dequeue/ack/nack lifecycle works correctly",
+    "Exponential backoff: delays are 1s, 2s, 4s, 8s, 16s",
+    "Dead letters: deliveries exceeding max_retries (5) moved to dead_letters",
+    "Dead letter cap (100) enforced, oldest dropped",
+    "Atomic file writes (temp + os.replace) prevent corruption",
+    "State survives restart (new instance from same file)",
+    "All existing tests still pass"
+  ],
+  "verification": [
+    "eval \"$(pyenv init -)\" && cd /projects/sandbox/NVLabsCompany && python -m pytest tests/test_webhook_queue.py -x -q",
+    "eval \"$(pyenv init -)\" && cd /projects/sandbox/NVLabsCompany && python -m pytest tests/test_webhook_server.py -x -q"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}
