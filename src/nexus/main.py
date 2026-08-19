@@ -31,6 +31,11 @@ from nexus.api.routes.policies import router as policies_router
 from nexus.api.routes.secrets import router as secrets_router
 from nexus.api.routes.incidents import router as incidents_router
 from nexus.api.middleware import GovernanceMiddleware
+from nexus.logging_config import RequestIDMiddleware, configure_logging
+from nexus.telemetry import MetricsMiddleware, metrics_router
+
+# Configure structured JSON logging at module level
+configure_logging()
 
 
 @asynccontextmanager
@@ -125,8 +130,15 @@ app.add_middleware(
 # Governance middleware for policy enforcement, audit logging, and rate limiting
 app.add_middleware(GovernanceMiddleware)
 
+# Metrics middleware for HTTP request tracking
+app.add_middleware(MetricsMiddleware)
+
+# Request ID middleware (added last = outermost in ASGI stack)
+app.add_middleware(RequestIDMiddleware)
+
 # Include route modules
 app.include_router(health_router)
+app.include_router(metrics_router)
 app.include_router(companies_router)
 app.include_router(agents_router)
 app.include_router(tasks_router)
