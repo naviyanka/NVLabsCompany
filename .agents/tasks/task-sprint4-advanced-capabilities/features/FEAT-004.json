@@ -2,7 +2,7 @@
   "id": "FEAT-004",
   "type": "feat",
   "description": "LLM Provider Registry (Self-Registering): Create a pluggable provider system with self-registration at import time, capability metadata, and task-based routing.",
-  "status": "pending",
+  "status": "in_progress",
   "steps": [
     "1. Create src/nexus/models_router/provider_registry.py with: LLMProviderSpec dataclass (name: str, models_available: list[str], pricing: dict[str, dict[str, float]], capabilities: dict[str, ModelCapabilities], api_base: str, is_local: bool). ModelCapabilities dataclass (context_window: int, supports_tools: bool, supports_vision: bool, supports_streaming: bool, supports_json_mode: bool).",
     "2. Create ProviderRegistry class (singleton pattern via class-level _instance): register(spec: LLMProviderSpec) class method, get_provider(name: str) -> LLMProviderSpec | None, list_providers() -> list[LLMProviderSpec], unregister(name: str) for testing. Add route_to_provider(task_type: str, requirements: dict) -> LLMProviderSpec | None method that selects best provider based on requirements (e.g., needs_vision=True, min_context_window=128000, prefer_local=True).",
