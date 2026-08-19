@@ -204,17 +204,25 @@ def evaluate_condition(expression: ConditionExpression, context: dict) -> bool:
 class ConditionBuilder:
     """Fluent builder for constructing condition expressions.
 
+    Each method **replaces** the current expression rather than accumulating
+    with prior calls. To compose multiple conditions, pass them as explicit
+    arguments to ``and_()`` or ``or_()``.
+
     Example usage::
 
+        # Build an AND condition from explicit sub-expressions:
         condition = (
             ConditionBuilder()
-            .threshold("cpu_usage", ">", 80.0)
             .and_(
+                ThresholdCondition(metric="cpu_usage", operator=">", value=80.0),
                 ThresholdCondition(metric="memory", operator=">", value=70.0),
                 ThresholdCondition(metric="disk", operator=">", value=90.0),
             )
             .build()
         )
+
+        # A single threshold (no composition needed):
+        single = ConditionBuilder().threshold("cpu_usage", ">", 80.0).build()
     """
 
     def __init__(self) -> None:
@@ -222,10 +230,10 @@ class ConditionBuilder:
         self._expression: ConditionExpression | None = None
 
     def and_(self, *conditions: ConditionExpression) -> ConditionBuilder:
-        """Combine conditions with logical AND.
+        """Create an AND condition, replacing any previously set expression.
 
         Args:
-            *conditions: Two or more condition expressions.
+            *conditions: Two or more condition expressions to combine.
 
         Returns:
             Self for method chaining.
@@ -234,10 +242,10 @@ class ConditionBuilder:
         return self
 
     def or_(self, *conditions: ConditionExpression) -> ConditionBuilder:
-        """Combine conditions with logical OR.
+        """Create an OR condition, replacing any previously set expression.
 
         Args:
-            *conditions: Two or more condition expressions.
+            *conditions: Two or more condition expressions to combine.
 
         Returns:
             Self for method chaining.
@@ -246,7 +254,7 @@ class ConditionBuilder:
         return self
 
     def not_(self, condition: ConditionExpression) -> ConditionBuilder:
-        """Negate a condition.
+        """Create a NOT condition, replacing any previously set expression.
 
         Args:
             condition: The condition to negate.
@@ -258,7 +266,7 @@ class ConditionBuilder:
         return self
 
     def threshold(self, metric: str, operator: str, value: float) -> ConditionBuilder:
-        """Create a threshold comparison condition.
+        """Create a threshold condition, replacing any previously set expression.
 
         Args:
             metric: Context key to compare.
@@ -277,7 +285,7 @@ class ConditionBuilder:
         before: datetime | None = None,
         weekdays: list[int] | None = None,
     ) -> ConditionBuilder:
-        """Create a time-based condition.
+        """Create a time condition, replacing any previously set expression.
 
         Args:
             after: Current time must be after this datetime.

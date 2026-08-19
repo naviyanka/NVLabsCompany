@@ -399,25 +399,19 @@ class HTTPAdapter(BaseAdapter):
         with the task and invokes it. Stores the result in pending_results
         for later retrieval.
 
+        The webhook payload **must** contain a ``session_id`` field to enable
+        deterministic routing. If ``session_id`` is missing, the callback is
+        rejected (returns False).
+
         Args:
             task_id: The task identifier from the webhook payload.
             result_data: The result data from the webhook payload.
+                Must contain 'session_id' for routing.
 
         Returns:
             True if a handler was found and invoked, False otherwise.
         """
-        # Find the callback registration for this task
-        # Task IDs map to session IDs via the pending_results tracking
         session_id = result_data.get("session_id")
-
-        if not session_id:
-            # Try to find by iterating registrations
-            for sid, reg in self._callback_handlers.items():
-                # Check expiry
-                if reg.expiry and datetime.now(UTC) > reg.expiry:
-                    continue
-                session_id = sid
-                break
 
         if not session_id or session_id not in self._callback_handlers:
             return False

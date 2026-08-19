@@ -188,15 +188,52 @@ class CLIAdapter(BaseAdapter):
             )
             self._processes[session.session_id] = process
 
+            # For interactive sessions, spawn _stream_output as a background
+            # task so output is surfaced in real time while the process runs.
+            is_interactive = session.metadata.get("is_interactive", False)
+            stream_task: asyncio.Task | None = None  # type: ignore[type-arg]
+            if is_interactive and process.stdout is not None:
+                stream_task = asyncio.create_task(
+                    self._stream_output(process, session.session_id)
+                )
+                # Mark session as awaiting input once streaming starts
+                session.metadata["awaiting_input"] = True
+
             # Send prompt via stdin if backend supports it
             stdin_data = prompt.encode("utf-8") if backend.supports_stdin else None
 
             try:
-                stdout_bytes, stderr_bytes = await asyncio.wait_for(
-                    process.communicate(input=stdin_data),
-                    timeout=timeout,
-                )
+                if is_interactive:
+                    # In interactive mode, write the initial prompt to stdin
+                    # (if supported) but don't close stdin - keep it open for
+                    # subsequent send_message() calls. Wait for the process to
+                    # exit while _stream_output consumes stdout in the background.
+                    if stdin_data and process.stdin is not None:
+                        process.stdin.write(stdin_data + b"\n")
+                        await process.stdin.drain()
+                    await asyncio.wait_for(process.wait(), timeout=timeout)
+                    # Ensure all buffered output is consumed
+                    if stream_task is not None:
+                        await stream_task
+                    # Read any stderr that was buffered
+                    stderr_bytes = b""
+                    if process.stderr is not None:
+                        stderr_bytes = await process.stderr.read()
+                    # stdout was consumed by _stream_output
+                    stdout_bytes = b""
+                else:
+                    stdout_bytes, stderr_bytes = await asyncio.wait_for(
+                        process.communicate(input=stdin_data),
+                        timeout=timeout,
+                    )
             except asyncio.TimeoutError:
+                # Cancel the stream task if it's running
+                if stream_task is not None:
+                    stream_task.cancel()
+                    try:
+                        await stream_task
+                    except asyncio.CancelledError:
+                        pass
                 # Graceful termination: SIGTERM then SIGKILL
                 self._add_log(
                     session.session_id,

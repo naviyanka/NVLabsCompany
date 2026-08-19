@@ -58,16 +58,20 @@ class KnowledgePlaza:
         db: Async database session for persistence operations.
     """
 
-    def __init__(self, db: AsyncSession) -> None:
+    def __init__(self, db: AsyncSession, *, max_recent_changes: int = 1000) -> None:
         """Initialize KnowledgePlaza with a database session.
 
         Args:
             db: An async SQLAlchemy session for database operations.
+            max_recent_changes: Maximum number of recent change events to retain
+                in memory. Older entries are pruned when this limit is exceeded.
+                Defaults to 1000.
         """
         self.db = db
         self._subscribers: dict[uuid.UUID, list[tuple[str, Callable]]] = {}
         self._recent_changes: list[PageChangeEvent] = []
         self._page_locks: dict[uuid.UUID, tuple[uuid.UUID, datetime]] = {}
+        self._max_recent_changes = max_recent_changes
 
     def subscribe(
         self, company_id: uuid.UUID, callback: Callable
@@ -118,12 +122,20 @@ class KnowledgePlaza:
         Creates a PageChangeEvent and delivers it to all registered callbacks
         for the specified company. Handles both sync and async callbacks.
 
+        Each callback invocation is isolated: if a subscriber raises an
+        exception, the error is logged but delivery continues to remaining
+        subscribers.
+
         Args:
             page_id: UUID of the affected page.
             company_id: UUID of the company scope.
             change_type: Type of change ('created', 'updated', or 'deleted').
             agent_id: UUID of the agent that made the change.
         """
+        import logging
+
+        logger = logging.getLogger(__name__)
+
         event = PageChangeEvent(
             page_id=page_id,
             company_id=company_id,
@@ -133,12 +145,26 @@ class KnowledgePlaza:
         )
         self._recent_changes.append(event)
 
+        # Prune old entries if we exceed the maximum
+        if len(self._recent_changes) > self._max_recent_changes:
+            self._recent_changes = self._recent_changes[
+                -self._max_recent_changes:
+            ]
+
         subscribers = self._subscribers.get(company_id, [])
         for _sid, callback in subscribers:
-            if asyncio.iscoroutinefunction(callback):
-                await callback(event)
-            else:
-                callback(event)
+            try:
+                if asyncio.iscoroutinefunction(callback):
+                    await callback(event)
+                else:
+                    callback(event)
+            except Exception:
+                logger.exception(
+                    "Subscriber callback %s failed for event %s on page %s",
+                    _sid,
+                    change_type,
+                    page_id,
+                )
 
     def get_recent_changes(
         self,
@@ -173,11 +199,18 @@ class KnowledgePlaza:
         agent_id: uuid.UUID,
         duration_seconds: int = 300,
     ) -> bool:
-        """Acquire a page lock with auto-expiry.
+        """Acquire an advisory page lock with auto-expiry.
 
         Attempts to lock a page for exclusive editing by the specified agent.
         If the page is already locked by another agent with a non-expired lock,
         the request is denied. Expired locks are automatically released.
+
+        .. note::
+            Locking is **advisory only**. The ``update_page`` method does not
+            enforce locks; callers should check ``is_page_locked`` before calling
+            ``update_page`` to respect the locking protocol. This design allows
+            flexibility for administrative overrides and avoids deadlocks in
+            automated workflows.
 
         Args:
             page_id: UUID of the page to lock.
@@ -301,6 +334,12 @@ class KnowledgePlaza:
         and records the update timestamp. The editor_agent_id is tracked
         as the author of the new version. Notifies all subscribers of the
         update event.
+
+        .. note::
+            This method does **not** enforce page locks. Locking is advisory:
+            callers should call ``is_page_locked(page_id)`` before updating
+            and respect the result. See ``lock_page`` for details on the
+            advisory locking protocol.
 
         Args:
             page_id: UUID of the page to update.
