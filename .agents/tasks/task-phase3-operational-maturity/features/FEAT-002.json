@@ -1,33 +1,27 @@
 {
   "id": "FEAT-002",
-  "type": "feat",
-  "description": "Webhook Persistent Delivery Queue - Create WebhookDeliveryQueue class with file-backed persistence, retry with exponential backoff, dead letter storage, and atomic file writes. Integrate with existing WebhookServer for outbound event dispatch.",
+  "type": "fix",
+  "description": "Replace all datetime.utcnow() with datetime.now(timezone.utc) across the codebase, add Configuration Validation on Startup, and implement Graceful Shutdown Hooks",
   "status": "completed",
   "steps": [
-    "Create src/nexus/communication/webhook_queue.py with WebhookDeliveryQueue class containing: (a) dataclass WebhookDelivery with fields: id (str/uuid), url (str), payload (dict), headers (dict), created_at (datetime), retry_count (int, default 0), next_retry_at (datetime | None), status ('pending'|'in_flight'|'dead'), last_error (str | None), (b) __init__(self, persist_path: Path, max_retries: int = 5, dead_letter_cap: int = 100)",
-    "Implement file-backed persistence: _load() on init reads JSON file into _pending and _dead_letters lists; _save() writes both lists atomically using tempfile + os.replace",
-    "Implement enqueue(delivery: WebhookDelivery) -> None: appends to _pending, calls _save()",
-    "Implement dequeue() -> WebhookDelivery | None: returns the first pending delivery whose next_retry_at is None or <= now, removes from _pending, calls _save()",
-    "Implement ack(delivery_id: str) -> bool: removes from any in-progress tracking, calls _save(), returns True if found",
-    "Implement nack(delivery_id: str, error: str) -> None: increments retry_count, sets last_error, computes next_retry_at with exponential backoff (1*2^(retry_count-1) seconds, capped at 16s), if retry_count > max_retries moves to _dead_letters (capped at dead_letter_cap, dropping oldest), calls _save()",
-    "Implement get_dead_letters() -> list[WebhookDelivery]: returns the dead letter list",
-    "Implement get_pending_count() -> int and get_dead_letter_count() -> int for observability",
-    "Add tests in tests/test_webhook_queue.py covering: enqueue/dequeue cycle, ack removes delivery, nack increments retry and computes backoff, nack beyond max_retries moves to dead letters, dead letter cap drops oldest, persistence survives simulated restart (write, create new instance, verify state), atomic write (file not corrupted if process dies mid-write), empty file on init creates empty state"
+    "Replace all 72 occurrences of datetime.utcnow() with datetime.now(timezone.utc) across src/nexus/. Files affected: main.py (1), demo/seed.py (4), governance/kill_switch_model.py (1), governance/persistent_kill_switch.py (2), governance/circuit_breaker_model.py (1), governance/persistent_circuit_breaker.py (4), runtime/heartbeat_service.py (3), and all model files in src/nexus/models/ (56 occurrences). Add 'from datetime import timezone' import where needed.",
+    "Create src/nexus/config_validator.py with a validate_config() async function that checks Settings on startup: warns about missing API keys (openai_api_key, anthropic_api_key), validates URLs (database_url format), checks Redis connectivity (non-blocking, just logs warning), checks writable data directories. Does NOT block startup - only logs warnings. Use standard logging module.",
+    "Integrate config_validator.py into the main.py lifespan startup by calling validate_config() early in the lifespan.",
+    "Enhance main.py lifespan shutdown section: flush telemetry metrics (call registry.reset() or equivalent), log Redis connection close attempt, persist ControlRegistry state if persistence is configured, log final status message. Ensure no data loss on SIGTERM.",
+    "Add tests: tests/test_config_validator.py for the config validation (mock settings), tests/test_graceful_shutdown.py for verifying shutdown hooks execute correctly, tests/test_utcnow_removal.py that scans source for any remaining datetime.utcnow() usage."
   ],
   "acceptance_criteria": [
-    "WebhookDeliveryQueue persists state to JSON file",
-    "enqueue/dequeue/ack/nack lifecycle works correctly",
-    "Exponential backoff: delays are 1s, 2s, 4s, 8s, 16s",
-    "Dead letters: deliveries exceeding max_retries (5) moved to dead_letters",
-    "Dead letter cap (100) enforced, oldest dropped",
-    "Atomic file writes (temp + os.replace) prevent corruption",
-    "State survives restart (new instance from same file)",
-    "All existing tests still pass"
+    "Zero occurrences of datetime.utcnow() remain in src/nexus/",
+    "Config validator logs warnings for missing API keys without blocking startup",
+    "Graceful shutdown flushes telemetry and logs final status",
+    "All existing 2433 tests continue to pass (no regressions from datetime change)",
+    "New tests pass"
   ],
   "verification": [
-    "eval \"$(pyenv init -)\" && cd /projects/sandbox/NVLabsCompany && python -m pytest tests/test_webhook_queue.py -x -q",
-    "eval \"$(pyenv init -)\" && cd /projects/sandbox/NVLabsCompany && python -m pytest tests/test_webhook_server.py -x -q"
+    "grep -rn 'datetime.utcnow' src/nexus/ returns no results",
+    "pytest tests/test_config_validator.py tests/test_graceful_shutdown.py tests/test_utcnow_removal.py -v",
+    "pytest (full suite passes)"
   ],
   "blocked_reason": null,
-  "findings": "All 22 new tests pass. Full suite (2039 tests) passes with no regressions. Used dataclass pattern with to_dict/from_dict for serialization. Atomic writes via tempfile + os.replace work correctly."
+  "findings": "All 72 datetime.utcnow() occurrences replaced successfully. Tests that mocked datetime.utcnow in persistent_circuit_breaker and heartbeat_service had to be updated to mock datetime.now instead, and test datetime objects needed timezone.utc tzinfo for arithmetic compatibility. Telemetry registry.reset() in shutdown tests caused ordering issues with telemetry endpoint tests - fixed by re-registering default metrics after reset. Final test count: 2519 passed. New files pass ruff lint cleanly."
 }

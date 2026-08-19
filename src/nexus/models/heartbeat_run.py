@@ -1,7 +1,7 @@
 """Heartbeat run model with rich process and liveness tracking."""
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 
 from sqlalchemy import Column, JSON
@@ -43,7 +43,7 @@ class HeartbeatRun(SQLModel, table=True):
     continuation_attempt: int = Field(default=0)
     context_snapshot: dict | None = Field(default=None, sa_column=Column(JSON))
     invocation_source: str = Field(default="on_demand")
-    started_at: datetime = Field(default_factory=lambda: datetime.utcnow())
+    started_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     finished_at: datetime | None = None
     last_output_at: datetime | None = None
-    created_at: datetime = Field(default_factory=lambda: datetime.utcnow())
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

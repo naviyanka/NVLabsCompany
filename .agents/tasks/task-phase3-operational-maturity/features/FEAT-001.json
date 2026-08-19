@@ -1,28 +1,28 @@
 {
   "id": "FEAT-001",
   "type": "feat",
-  "description": "Memory Reflector LLM Integration - Add llm_callable parameter to MemoryReflector and implement _summarize_evicted() with LLM condensation. Add _extract_durable_facts() for hoisting pinned lines. Include heuristic fallback when LLM is None.",
+  "description": "Cost Alerting Service, Secret Rotation Automation, API Versioning Strategy, and Audit Log Export/Retention - four new modules implementing operational maturity features",
   "status": "completed",
   "steps": [
-    "In src/nexus/memory/reflector.py, add an optional `llm_callable: Callable[[str], Awaitable[str]] | None = None` parameter to MemoryReflector.__init__() following the same pattern as LLMFactExtractor in src/nexus/memory/llm_extract.py",
-    "Add a CONDENSE_PROMPT constant string that instructs the LLM to summarize evicted sections while preserving decisions, file paths, commit SHAs, and numeric results",
-    "Implement async method `_summarize_evicted(self, condensed_text: str | None, evicted: list[Section], pinned: str | None) -> tuple[str, list[str]]` that: (a) builds a prompt from CONDENSE_PROMPT + evicted text, (b) calls self._llm_callable, (c) parses the response to extract a summary and hoist lines, (d) returns (new_condensed, hoist_lines)",
-    "Implement heuristic fallback when llm_callable is None: take first 2 sentences of each evicted section body (split on '. '), join them with newlines, prepend existing condensed_text if any. Return empty hoist list.",
-    "Implement `_extract_durable_facts(self, evicted: list[Section]) -> list[str]` that scans evicted section bodies for lines containing decisions (keywords: 'decided', 'decision', 'chose'), file paths (regex for paths like src/..., /.../, *.py etc), commit SHAs (7+ hex chars), and critical numbers (dollar amounts, percentages). Returns those lines as candidates for hoisting.",
-    "Add a convenience method `make_summarizer(self) -> Callable` that returns a synchronous or async-compatible wrapper calling _summarize_evicted, suitable for passing to self.condense() as the summarizer argument",
-    "Add tests in tests/test_memory_reflector.py: (a) test LLM summarizer called with correct prompt structure, (b) test heuristic fallback produces bounded output, (c) test _extract_durable_facts identifies decision lines and file paths, (d) test full condense pipeline with mocked LLM callable, (e) test backward compatibility (no llm_callable still works with external summarizer)"
+    "Create src/nexus/governance/cost_alerting.py with CostAlertService class that integrates with BudgetEnforcer's cost tracking. Include AlertThreshold (warn_pct, critical_pct), CostAlert dataclass (agent_id, scope, current_spend, limit, severity), and check_budgets() method. Support callback registration for alert delivery.",
+    "Enhance src/nexus/governance/secret_backend.py: add RotationPolicy dataclass (max_age_days, auto_rotate), add check_rotation_needed() method to FernetSecretBackend that identifies secrets past max_age, add rotation_history tracking (when each secret was last rotated).",
+    "Create src/nexus/api/routes/rotation.py with API routes for triggering secret rotation and viewing rotation status. Wire into main.py.",
+    "Create src/nexus/api/versioning.py with VersionedRouter that mounts routes under /api/v1/, adds X-API-Version: 1.0 response header, and supports deprecation mechanism (routes marked deprecated with sunset date in response headers). Wire into main.py.",
+    "Create src/nexus/governance/audit_export.py with AuditExporter class: export_range(start, end, format) supporting JSON and CSV, RetentionPolicy (max_age_days, archive_after_days), apply_retention() that archives old entries and purges ancient ones, atomic export to prevent partial reads.",
+    "Add comprehensive tests for all four modules: tests/test_cost_alerting.py, tests/test_secret_rotation.py, tests/test_api_versioning.py, tests/test_audit_export.py"
   ],
   "acceptance_criteria": [
-    "MemoryReflector accepts optional llm_callable parameter",
-    "When llm_callable is provided and make_summarizer() is used, condense() calls the LLM with a structured prompt",
-    "When llm_callable is None, heuristic fallback returns first 2 sentences per evicted section",
-    "_extract_durable_facts correctly identifies decision lines, file paths, and commit SHAs",
-    "All existing tests in test_memory_reflector.py still pass unchanged",
-    "New tests cover LLM path, heuristic path, and fact extraction"
+    "CostAlertService.check_budgets() correctly identifies over-budget scopes and fires callbacks",
+    "FernetSecretBackend.check_rotation_needed() returns secrets that are past max_age_days",
+    "VersionedRouter routes respond with X-API-Version header and support deprecated route sunset headers",
+    "AuditExporter.export_range() produces valid JSON and CSV output",
+    "AuditExporter.apply_retention() archives and purges entries according to policy",
+    "All new tests pass with pytest"
   ],
   "verification": [
-    "eval \"$(pyenv init -)\" && cd /projects/sandbox/NVLabsCompany && python -m pytest tests/test_memory_reflector.py -x -q"
+    "pytest tests/test_cost_alerting.py tests/test_secret_rotation.py tests/test_api_versioning.py tests/test_audit_export.py -v",
+    "pytest (full suite passes with no regressions)"
   ],
   "blocked_reason": null,
-  "findings": "All 65 tests in test_memory_reflector.py pass (was 44 before, added 21 new tests). Full suite 2017 tests pass. The make_summarizer() with LLM uses a ThreadPoolExecutor workaround to call async from sync context when an event loop is already running (e.g., pytest-asyncio). Tests for async methods use pytest-asyncio auto mode directly."
+  "findings": "All 68 new tests pass. Full suite passes with 2501 tests total (no regressions). Python 3.12 must be used explicitly (python3.12) since default python is 3.9. The APIVersionMiddleware is wired into main.py and adds X-API-Version: 1.0 to all responses. The rotation router is included at /api/v1/rotation prefix."
 }

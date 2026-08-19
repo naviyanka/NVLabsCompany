@@ -1,7 +1,7 @@
 """Circuit Breaker database model for persistent state."""
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from sqlmodel import Field, SQLModel
@@ -24,4 +24,4 @@ class CircuitBreakerRecord(SQLModel, table=True):
     last_failure_at: Optional[datetime] = Field(default=None)
     opened_at: Optional[datetime] = Field(default=None)
     cooldown_seconds: int = Field(default=300)
-    updated_at: datetime = Field(default_factory=lambda: datetime.utcnow())
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

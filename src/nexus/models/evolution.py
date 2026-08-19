@@ -6,7 +6,7 @@ require explicit approval gates - auto-promotion is never allowed.
 """
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 from sqlalchemy import JSON
@@ -40,7 +40,7 @@ class EvolutionProposal(SQLModel, table=True):
     approval_id: Optional[uuid.UUID] = Field(
         default=None, foreign_key="approvals.id"
     )
-    created_at: datetime = Field(default_factory=lambda: datetime.utcnow())
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: Optional[datetime] = Field(default=None)
 
 
@@ -63,7 +63,7 @@ class EvolutionEvaluation(SQLModel, table=True):
     statistical_significance: float
     dimensions: Optional[dict[str, Any]] = Field(default=None, sa_column=Column(JSON))
     passed: bool = Field(default=False)
-    evaluated_at: datetime = Field(default_factory=lambda: datetime.utcnow())
+    evaluated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class SkillVersion(SQLModel, table=True):
@@ -82,7 +82,7 @@ class SkillVersion(SQLModel, table=True):
     prompt_template: str
     performance_score: Optional[float] = Field(default=None)
     is_active: bool = Field(default=False)
-    created_at: datetime = Field(default_factory=lambda: datetime.utcnow())
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class AgentVersion(SQLModel, table=True):
@@ -103,4 +103,4 @@ class AgentVersion(SQLModel, table=True):
     )
     performance_score: Optional[float] = Field(default=None)
     is_active: bool = Field(default=False)
-    created_at: datetime = Field(default_factory=lambda: datetime.utcnow())
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
