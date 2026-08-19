@@ -10,6 +10,8 @@ from nexus.evolution.agent_evolution import AgentEvolution
 from nexus.evolution.analyzer import FailureAnalyzer
 from nexus.evolution.evaluator import ProposalEvaluator
 from nexus.evolution.failure_alchemy import FailureAlchemist
+from nexus.evolution.isolated_sandbox import IsolatedSandbox, ResourceLimitExceeded
+from nexus.evolution.llm_proposer import LLMImprovementProposer
 from nexus.evolution.observer import EvolutionObserver
 from nexus.evolution.promoter import ChangePromoter
 from nexus.evolution.proposer import ImprovementProposer
@@ -23,9 +25,12 @@ __all__ = [
     "FailureAnalyzer",
     "FailureAlchemist",
     "ImprovementProposer",
+    "IsolatedSandbox",
+    "LLMImprovementProposer",
     "EvolutionSandbox",
     "ProposalEvaluator",
     "ChangePromoter",
+    "ResourceLimitExceeded",
     "SkillEvolution",
     "AgentEvolution",
     "StatisticalAnalyzer",

@@ -1,0 +1,260 @@
+"""Isolated Sandbox - resource-limited execution environment for proposals.
+
+Provides a sandbox with logical resource tracking (cost, duration, memory)
+that aborts execution when any limit is breached. This ensures proposals
+cannot consume unbounded resources during evaluation.
+"""
+
+import time
+import uuid
+from datetime import datetime, timezone
+from typing import Any, Callable
+
+
+class ResourceLimitExceeded(Exception):
+    """Raised when a sandbox execution exceeds its resource limits.
+
+    Attributes:
+        resource: The resource type that was exceeded (cost, duration, memory).
+        limit: The configured limit value.
+        actual: The actual value that triggered the breach.
+    """
+
+    def __init__(self, resource: str, limit: float, actual: float) -> None:
+        """Initialize the exception.
+
+        Args:
+            resource: The resource type breached (e.g., 'cost', 'duration', 'memory').
+            limit: The maximum allowed value.
+            actual: The actual value that exceeded the limit.
+        """
+        self.resource = resource
+        self.limit = limit
+        self.actual = actual
+        super().__init__(
+            f"Resource limit exceeded: {resource} "
+            f"(limit={limit}, actual={actual})"
+        )
+
+
+class IsolatedSandbox:
+    """Resource-isolated sandbox for evaluating evolution proposals.
+
+    Tracks cost, duration, and memory as logical accumulators rather than
+    OS-level limits. Raises ResourceLimitExceeded when any limit is breached
+    during execute().
+
+    Attributes:
+        max_cost_cents: Maximum cost allowed in cents.
+        max_duration_seconds: Maximum total duration allowed in seconds.
+        max_memory_mb: Maximum memory usage allowed in megabytes.
+    """
+
+    def __init__(
+        self,
+        max_cost_cents: int = 1000,
+        max_duration_seconds: int = 300,
+        max_memory_mb: int = 512,
+    ) -> None:
+        """Initialize the isolated sandbox with resource limits.
+
+        Args:
+            max_cost_cents: Maximum cost allowed in cents (default 1000).
+            max_duration_seconds: Maximum total duration allowed in seconds (default 300).
+            max_memory_mb: Maximum memory usage allowed in megabytes (default 512).
+        """
+        self.max_cost_cents = max_cost_cents
+        self.max_duration_seconds = max_duration_seconds
+        self.max_memory_mb = max_memory_mb
+        self._sessions: dict[str, dict[str, Any]] = {}
+
+    def create_session(
+        self,
+        proposal_id: uuid.UUID,
+        config: dict[str, Any],
+    ) -> uuid.UUID:
+        """Create a new isolated session for evaluating a proposal.
+
+        Creates a copy-on-write state container with resource tracking
+        initialized to zero.
+
+        Args:
+            proposal_id: The proposal to evaluate.
+            config: Configuration for the session environment.
+
+        Returns:
+            The session_id UUID for referencing this session.
+        """
+        session_id = uuid.uuid4()
+        self._sessions[str(session_id)] = {
+            "session_id": str(session_id),
+            "proposal_id": str(proposal_id),
+            "config": dict(config),
+            "status": "active",
+            "cost_cents": 0,
+            "duration_seconds": 0.0,
+            "memory_mb": 0,
+            "results": [],
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+        return session_id
+
+    def execute(
+        self,
+        session_id: uuid.UUID,
+        callable_fn: Callable[..., Any],
+        *args: Any,
+    ) -> dict[str, Any]:
+        """Execute a callable within the session's resource limits.
+
+        Runs the callable, tracks resource usage (cost, duration, memory),
+        and raises ResourceLimitExceeded if any limit is breached.
+
+        Args:
+            session_id: The session to execute within.
+            callable_fn: The function to execute.
+            *args: Arguments to pass to the callable.
+
+        Returns:
+            Dict with 'result' (the callable's return value) and 'resources'
+            showing the resources consumed by this execution.
+
+        Raises:
+            ResourceLimitExceeded: If any resource limit is breached.
+            ValueError: If the session does not exist or is not active.
+        """
+        session_key = str(session_id)
+        if session_key not in self._sessions:
+            raise ValueError(f"Session {session_id} not found")
+
+        session = self._sessions[session_key]
+        if session["status"] != "active":
+            raise ValueError(
+                f"Session {session_id} is not active (status: {session['status']})"
+            )
+
+        # Track duration
+        start_time = time.monotonic()
+        result = callable_fn(*args)
+        elapsed = time.monotonic() - start_time
+
+        # Update resource accumulators
+        session["duration_seconds"] += elapsed
+
+        # If the callable returns resource metadata, accumulate it
+        cost_incurred = 0
+        memory_used = 0
+        if isinstance(result, dict):
+            cost_incurred = result.get("cost_cents", 0)
+            memory_used = result.get("memory_mb", 0)
+
+        session["cost_cents"] += cost_incurred
+        session["memory_mb"] += memory_used
+
+        # Check cost limit
+        if session["cost_cents"] > self.max_cost_cents:
+            session["status"] = "aborted"
+            raise ResourceLimitExceeded(
+                resource="cost",
+                limit=self.max_cost_cents,
+                actual=session["cost_cents"],
+            )
+
+        # Check duration limit
+        if session["duration_seconds"] > self.max_duration_seconds:
+            session["status"] = "aborted"
+            raise ResourceLimitExceeded(
+                resource="duration",
+                limit=self.max_duration_seconds,
+                actual=session["duration_seconds"],
+            )
+
+        # Check memory limit
+        if session["memory_mb"] > self.max_memory_mb:
+            session["status"] = "aborted"
+            raise ResourceLimitExceeded(
+                resource="memory",
+                limit=self.max_memory_mb,
+                actual=session["memory_mb"],
+            )
+
+        # Store execution result
+        execution_record = {
+            "result": result,
+            "cost_cents": cost_incurred,
+            "duration_seconds": elapsed,
+            "memory_mb": memory_used,
+        }
+        session["results"].append(execution_record)
+
+        return {
+            "result": result,
+            "resources": {
+                "cost_cents": cost_incurred,
+                "duration_seconds": elapsed,
+                "memory_mb": memory_used,
+            },
+        }
+
+    def get_resource_usage(self, session_id: uuid.UUID) -> dict[str, Any]:
+        """Get the current resource usage for a session.
+
+        Args:
+            session_id: The session to query.
+
+        Returns:
+            Dict with current usage and limits for cost, duration, and memory.
+
+        Raises:
+            ValueError: If the session does not exist.
+        """
+        session_key = str(session_id)
+        if session_key not in self._sessions:
+            raise ValueError(f"Session {session_id} not found")
+
+        session = self._sessions[session_key]
+        return {
+            "cost_cents": {
+                "used": session["cost_cents"],
+                "limit": self.max_cost_cents,
+                "remaining": self.max_cost_cents - session["cost_cents"],
+            },
+            "duration_seconds": {
+                "used": session["duration_seconds"],
+                "limit": self.max_duration_seconds,
+                "remaining": self.max_duration_seconds - session["duration_seconds"],
+            },
+            "memory_mb": {
+                "used": session["memory_mb"],
+                "limit": self.max_memory_mb,
+                "remaining": self.max_memory_mb - session["memory_mb"],
+            },
+            "status": session["status"],
+        }
+
+    def abort(self, session_id: uuid.UUID) -> None:
+        """Forcefully terminate a session.
+
+        Marks the session as aborted so no further executions can occur.
+
+        Args:
+            session_id: The session to abort.
+
+        Raises:
+            ValueError: If the session does not exist.
+        """
+        session_key = str(session_id)
+        if session_key not in self._sessions:
+            raise ValueError(f"Session {session_id} not found")
+
+        self._sessions[session_key]["status"] = "aborted"
+
+    def cleanup(self, session_id: uuid.UUID) -> None:
+        """Remove a session and all its state.
+
+        Args:
+            session_id: The session to clean up.
+        """
+        session_key = str(session_id)
+        if session_key in self._sessions:
+            del self._sessions[session_key]
