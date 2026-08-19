@@ -84,6 +84,27 @@ class TestCreateWorktree:
         expected_path = str(tmp_path / "worktrees" / "reviewer-99887766")
         assert info.worktree_path == expected_path
 
+    @pytest.mark.asyncio
+    async def test_branch_cleaned_up_on_worktree_failure(
+        self, tmp_path: Path
+    ) -> None:
+        """Branch is deleted if git worktree add fails after branch creation."""
+        repo = await _init_repo(tmp_path)
+        manager = WorktreeManager()
+        agent_id = uuid.UUID("12345678-1234-1234-1234-123456789abc")
+
+        # Create a file at the worktree path to cause git worktree add to fail
+        worktree_dir = tmp_path / "worktrees" / "blocker-12345678"
+        worktree_dir.mkdir(parents=True)
+        (worktree_dir / "blocker.txt").write_text("occupying path\n")
+
+        with pytest.raises(RuntimeError):
+            await manager.create_worktree(repo, agent_id, "blocker")
+
+        # The orphaned branch should have been cleaned up
+        branches = await _run_git(repo, "branch", "--list")
+        assert "agent/blocker-12345678" not in branches
+
 
 class TestMergeWorktree:
     """Tests for WorktreeManager.merge_worktree."""

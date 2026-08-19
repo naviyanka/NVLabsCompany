@@ -89,8 +89,15 @@ class WorktreeManager:
         # Create branch from current HEAD
         await self._run_git(repo_path, "branch", branch)
 
-        # Create worktree
-        await self._run_git(repo_path, "worktree", "add", worktree_dir, branch)
+        # Create worktree, rolling back the branch if this step fails
+        try:
+            await self._run_git(
+                repo_path, "worktree", "add", worktree_dir, branch
+            )
+        except RuntimeError:
+            # Clean up the orphaned branch before re-raising
+            await self._run_git_raw(repo_path, "branch", "-D", branch)
+            raise
 
         return WorktreeInfo(
             worktree_path=worktree_dir,

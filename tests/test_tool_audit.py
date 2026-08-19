@@ -131,6 +131,57 @@ class TestArgumentScrubbing:
         """Empty arguments dictionary returns empty."""
         assert _scrub_arguments({}) == {}
 
+    def test_scrubs_nested_dict_keys(self) -> None:
+        """Nested dictionaries have their sensitive keys scrubbed."""
+        args = {
+            "config": {"api_key": "sk-live-xxx", "host": "localhost"},
+            "name": "test",
+        }
+        result = _scrub_arguments(args)
+        assert result["config"]["api_key"] == "***"
+        assert result["config"]["host"] == "localhost"
+        assert result["name"] == "test"
+
+    def test_scrubs_deeply_nested_structures(self) -> None:
+        """Deeply nested sensitive keys are scrubbed."""
+        args = {
+            "outer": {
+                "middle": {
+                    "secret_value": "very-secret",
+                    "data": "safe",
+                }
+            }
+        }
+        result = _scrub_arguments(args)
+        assert result["outer"]["middle"]["secret_value"] == "***"
+        assert result["outer"]["middle"]["data"] == "safe"
+
+    def test_scrubs_sensitive_keys_in_lists(self) -> None:
+        """Dicts inside lists have their sensitive keys scrubbed."""
+        args = {
+            "credentials": [
+                {"token": "tok1", "name": "svc1"},
+                {"token": "tok2", "name": "svc2"},
+            ]
+        }
+        result = _scrub_arguments(args)
+        # "credentials" itself is not a sensitive key, so the list is traversed
+        assert result["credentials"][0]["token"] == "***"
+        assert result["credentials"][0]["name"] == "svc1"
+        assert result["credentials"][1]["token"] == "***"
+        assert result["credentials"][1]["name"] == "svc2"
+
+    def test_scrubs_mixed_nested_and_top_level(self) -> None:
+        """Both top-level and nested sensitive keys are scrubbed."""
+        args = {
+            "password": "top-level-pass",
+            "options": {"api_key": "nested-key", "retry": 3},
+        }
+        result = _scrub_arguments(args)
+        assert result["password"] == "***"
+        assert result["options"]["api_key"] == "***"
+        assert result["options"]["retry"] == 3
+
 
 class TestToolAuditStore:
     """Tests for ToolAuditStore record, query, and stats methods."""
@@ -488,3 +539,50 @@ class TestExecutorAuditIntegration:
 
         records = audit_store.query()
         assert len(records) == 0
+
+    def test_tool_name_recorded_in_audit(
+        self, executor: ToolExecutor, audit_store: ToolAuditStore, ids: dict
+    ) -> None:
+        """tool_name parameter is stored in the audit invocation record."""
+
+        async def run():
+            async def fn(args):
+                return "result"
+
+            await executor.execute(
+                agent_id=ids["agent_id"],
+                tool_id=ids["tool_id"],
+                arguments={"x": 1},
+                execute_fn=fn,
+                company_id=ids["company_id"],
+                tool_name="read_file",
+            )
+
+        asyncio.run(run())
+
+        records = audit_store.query()
+        assert len(records) == 1
+        assert records[0].tool_name == "read_file"
+
+    def test_tool_name_defaults_to_empty_string(
+        self, executor: ToolExecutor, audit_store: ToolAuditStore, ids: dict
+    ) -> None:
+        """tool_name defaults to empty string when not provided."""
+
+        async def run():
+            async def fn(args):
+                return "result"
+
+            await executor.execute(
+                agent_id=ids["agent_id"],
+                tool_id=ids["tool_id"],
+                arguments={"x": 1},
+                execute_fn=fn,
+                company_id=ids["company_id"],
+            )
+
+        asyncio.run(run())
+
+        records = audit_store.query()
+        assert len(records) == 1
+        assert records[0].tool_name == ""

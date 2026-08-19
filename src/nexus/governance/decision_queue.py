@@ -21,6 +21,7 @@ class DecisionQueueItem:
         source_id: Identifier of the originating entity.
         priority: Priority level (1=highest, higher numbers = lower priority).
         status: Current status (pending/decided/snoozed/archived).
+        decision_outcome: The actual decision string when decided (e.g., "approved").
         decide_by: Optional deadline for making a decision.
         snoozed_until: When a snoozed item should reappear.
         needs_notification: Whether this item requires notification delivery.
@@ -36,6 +37,7 @@ class DecisionQueueItem:
     source_id: uuid.UUID = field(default_factory=uuid.uuid4)
     priority: int = 5
     status: str = "pending"
+    decision_outcome: str | None = None
     decide_by: datetime | None = None
     snoozed_until: datetime | None = None
     needs_notification: bool = True
@@ -179,17 +181,18 @@ class DecisionQueueManager:
         item.updated_at = datetime.now(timezone.utc)
 
     def decide_item(self, item_id: uuid.UUID, decision: str) -> None:
-        """Mark an item as decided.
+        """Mark an item as decided and store the decision outcome.
 
         Args:
             item_id: The item to mark as decided.
-            decision: The decision string (stored as a status transition marker).
+            decision: The decision outcome string (e.g., "approved", "rejected").
 
         Raises:
             KeyError: If the item is not found.
         """
         item = self._find_item(item_id)
         item.status = "decided"
+        item.decision_outcome = decision
         item.updated_at = datetime.now(timezone.utc)
 
     def mark_notification_delivered(self, item_id: uuid.UUID) -> None:

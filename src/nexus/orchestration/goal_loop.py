@@ -237,7 +237,21 @@ class GoalLoop:
             iterations_used = iteration
 
             # Execute the work function
-            output, cost_cents = await execute_fn()
+            try:
+                output, cost_cents = await execute_fn()
+            except Exception as exc:
+                return GoalResult(
+                    task_id=task_id,
+                    success=False,
+                    iterations_used=iterations_used,
+                    final_output=final_output,
+                    judge_verdict=(
+                        f"execute_fn raised {type(exc).__name__}: {exc}"
+                    ),
+                    total_cost_cents=total_cost,
+                    stopped_reason="execution_error",
+                )
+
             total_cost += cost_cents
             final_output = output
 

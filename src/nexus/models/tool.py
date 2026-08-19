@@ -1,7 +1,7 @@
 """Tool registry and access control models."""
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 from sqlalchemy import JSON
@@ -24,7 +24,9 @@ class Tool(SQLModel, table=True):
     endpoint: Optional[str] = Field(default=None, max_length=2048)
     is_active: bool = Field(default=True)
     risk_level: str = Field(default="low", max_length=50)
-    created_at: datetime = Field(default_factory=lambda: datetime.utcnow())
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc)
+    )
 
 
 class ToolAccess(SQLModel, table=True):
@@ -39,7 +41,9 @@ class ToolAccess(SQLModel, table=True):
     granted_by: Optional[str] = Field(default=None, max_length=255)
     permission_level: str = Field(default="execute", max_length=50)
     expires_at: Optional[datetime] = Field(default=None)
-    created_at: datetime = Field(default_factory=lambda: datetime.utcnow())
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc)
+    )
 
 
 class ToolConnection(SQLModel, table=True):
@@ -59,8 +63,8 @@ class ToolConnection(SQLModel, table=True):
     )  # healthy, degraded, unhealthy, unknown
     last_health_check_at: datetime | None = Field(default=None)
     is_active: bool = Field(default=True)
-    created_at: datetime = Field(default_factory=lambda: datetime.utcnow())
-    updated_at: datetime = Field(default_factory=lambda: datetime.utcnow())
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class ToolCatalogEntry(SQLModel, table=True):
@@ -79,8 +83,8 @@ class ToolCatalogEntry(SQLModel, table=True):
     output_schema: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
     version: str | None = Field(default=None, max_length=100)
     is_active: bool = Field(default=True)
-    discovered_at: datetime = Field(default_factory=lambda: datetime.utcnow())
-    updated_at: datetime = Field(default_factory=lambda: datetime.utcnow())
+    discovered_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class ToolProfile(SQLModel, table=True):
@@ -94,8 +98,8 @@ class ToolProfile(SQLModel, table=True):
     description: str | None = Field(default=None)
     default_action: str = Field(default="allow", max_length=50)  # allow, deny
     is_active: bool = Field(default=True)
-    created_at: datetime = Field(default_factory=lambda: datetime.utcnow())
-    updated_at: datetime = Field(default_factory=lambda: datetime.utcnow())
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class ToolProfileBinding(SQLModel, table=True):
@@ -109,7 +113,7 @@ class ToolProfileBinding(SQLModel, table=True):
     target_type: str = Field(max_length=50)  # agent, department, company
     target_id: uuid.UUID = Field(index=True)
     priority: int = Field(default=0)
-    created_at: datetime = Field(default_factory=lambda: datetime.utcnow())
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class ToolPolicy(SQLModel, table=True):
@@ -125,5 +129,5 @@ class ToolPolicy(SQLModel, table=True):
     effect: str = Field(max_length=50)  # allow, deny
     conditions: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
     is_active: bool = Field(default=True)
-    created_at: datetime = Field(default_factory=lambda: datetime.utcnow())
-    updated_at: datetime = Field(default_factory=lambda: datetime.utcnow())
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

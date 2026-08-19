@@ -294,6 +294,68 @@ class TestGoalLoopParseFailures:
         assert result.iterations_used == 3
         assert result.total_cost_cents == 30
 
+
+class TestGoalLoopExecutionError:
+    """Tests for execute_fn exception handling."""
+
+    @pytest.mark.asyncio
+    async def test_stops_on_execute_fn_exception(self, task_id: uuid.UUID) -> None:
+        """Goal loop returns execution_error when execute_fn raises."""
+
+        class NeverCompleteJudge:
+            async def evaluate(
+                self, goal: str, current_output: object, iteration: int
+            ) -> JudgeVerdict:
+                return JudgeVerdict(
+                    is_complete=False, confidence=0.1, reasoning="Not done"
+                )
+
+        loop = GoalLoop(judge=NeverCompleteJudge(), max_iterations=10)
+
+        async def execute_fn() -> tuple[str, int]:
+            raise RuntimeError("LLM API connection failed")
+
+        result = await loop.run(task_id=task_id, goal="Crash test", execute_fn=execute_fn)
+
+        assert result.success is False
+        assert result.stopped_reason == "execution_error"
+        assert result.iterations_used == 1
+        assert result.total_cost_cents == 0
+        assert "RuntimeError" in result.judge_verdict
+        assert "LLM API connection failed" in result.judge_verdict
+
+    @pytest.mark.asyncio
+    async def test_execution_error_preserves_prior_output(
+        self, task_id: uuid.UUID
+    ) -> None:
+        """If execute_fn fails on iteration 2+, prior output is in final_output."""
+        call_count = 0
+
+        class NeverCompleteJudge:
+            async def evaluate(
+                self, goal: str, current_output: object, iteration: int
+            ) -> JudgeVerdict:
+                return JudgeVerdict(
+                    is_complete=False, confidence=0.2, reasoning="Pending"
+                )
+
+        loop = GoalLoop(judge=NeverCompleteJudge(), max_iterations=10)
+
+        async def execute_fn() -> tuple[str, int]:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 2:
+                raise ConnectionError("Network timeout")
+            return (f"output-{call_count}", 50)
+
+        result = await loop.run(task_id=task_id, goal="Net fail", execute_fn=execute_fn)
+
+        assert result.success is False
+        assert result.stopped_reason == "execution_error"
+        assert result.iterations_used == 2
+        assert result.final_output == "output-1"
+        assert result.total_cost_cents == 50
+
     @pytest.mark.asyncio
     async def test_non_consecutive_failures_do_not_trigger_stop(
         self, task_id: uuid.UUID

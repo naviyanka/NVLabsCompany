@@ -279,6 +279,20 @@ class TestDecideItem:
         with pytest.raises(KeyError, match="not found"):
             mgr.decide_item(uuid.uuid4(), "approved")
 
+    def test_decide_stores_decision_outcome(self) -> None:
+        """decide_item stores the decision string on the item."""
+        mgr = DecisionQueueManager()
+        mgr.create_queue("outcome_q", uuid.uuid4())
+        item = mgr.add_item("outcome_q", uuid.uuid4(), "agent", uuid.uuid4())
+
+        mgr.decide_item(item.id, "rejected - insufficient budget")
+        assert item.decision_outcome == "rejected - insufficient budget"
+
+    def test_decision_outcome_initially_none(self) -> None:
+        """New items have decision_outcome set to None."""
+        item = DecisionQueueItem()
+        assert item.decision_outcome is None
+
 
 class TestRetention:
     """Tests for retention policy application."""

@@ -16,21 +16,38 @@ def _scrub_arguments(arguments: dict[str, Any]) -> dict[str, Any]:
     """Scrub sensitive fields from tool arguments before audit storage.
 
     Keys containing 'password', 'secret', 'token', or 'key' (case-insensitive)
-    have their values replaced with '***'.
+    have their values replaced with '***'. Recursively scrubs nested dicts and
+    lists to ensure deeply nested secrets are also masked.
 
     Args:
         arguments: The raw arguments dictionary.
 
     Returns:
-        A new dictionary with sensitive values masked.
+        A new dictionary with sensitive values masked at all nesting levels.
     """
-    scrubbed: dict[str, Any] = {}
-    for k, v in arguments.items():
-        if any(s in k.lower() for s in _SENSITIVE_KEYS):
-            scrubbed[k] = "***"
-        else:
-            scrubbed[k] = v
-    return scrubbed
+    return _scrub_value(arguments)
+
+
+def _scrub_value(value: Any) -> Any:
+    """Recursively scrub sensitive values from nested structures.
+
+    Args:
+        value: Any value that may contain sensitive data.
+
+    Returns:
+        The scrubbed value with sensitive keys masked at all levels.
+    """
+    if isinstance(value, dict):
+        scrubbed: dict[str, Any] = {}
+        for k, v in value.items():
+            if any(s in k.lower() for s in _SENSITIVE_KEYS):
+                scrubbed[k] = "***"
+            else:
+                scrubbed[k] = _scrub_value(v)
+        return scrubbed
+    elif isinstance(value, list):
+        return [_scrub_value(item) for item in value]
+    return value
 
 
 @dataclass
@@ -120,6 +137,7 @@ class ToolExecutor:
         arguments: dict[str, Any],
         execute_fn: Callable[[dict[str, Any]], Awaitable[Any]],
         company_id: uuid.UUID | None = None,
+        tool_name: str = "",
     ) -> ToolResult:
         """Execute a tool with full permission and safety checks.
 
@@ -132,6 +150,7 @@ class ToolExecutor:
             arguments: Arguments to pass to the tool.
             execute_fn: The actual execution function.
             company_id: Company scope for audit logging.
+            tool_name: Human-readable tool name for audit records.
 
         Returns:
             A ToolResult with the outcome.
@@ -155,6 +174,7 @@ class ToolExecutor:
                 status="denied",
                 duration_ms=0,
                 error="Permission denied: agent lacks access to this tool",
+                tool_name=tool_name,
             )
             return result
 
@@ -175,6 +195,7 @@ class ToolExecutor:
                 status="rate_limited",
                 duration_ms=0,
                 error="Rate limit exceeded",
+                tool_name=tool_name,
             )
             return result
 
@@ -204,6 +225,7 @@ class ToolExecutor:
                 arguments=arguments,
                 status="success",
                 duration_ms=duration_ms,
+                tool_name=tool_name,
             )
             return result
 
@@ -226,6 +248,7 @@ class ToolExecutor:
                 status="timeout",
                 duration_ms=duration_ms,
                 error=f"Tool execution timed out after {self._timeout_seconds}s",
+                tool_name=tool_name,
             )
             return result
 
@@ -248,6 +271,7 @@ class ToolExecutor:
                 status="error",
                 duration_ms=duration_ms,
                 error=str(exc),
+                tool_name=tool_name,
             )
             return result
 
@@ -260,6 +284,7 @@ class ToolExecutor:
         status: str,
         duration_ms: int = 0,
         error: str | None = None,
+        tool_name: str = "",
     ) -> None:
         """Create and record a ToolInvocation in the audit store if configured.
 
@@ -271,6 +296,7 @@ class ToolExecutor:
             status: Execution outcome status.
             duration_ms: Execution duration in milliseconds.
             error: Error message, if any.
+            tool_name: Human-readable name of the tool being invoked.
         """
         if self._audit_store is None or company_id is None:
             return
@@ -280,7 +306,7 @@ class ToolExecutor:
             company_id=company_id,
             agent_id=agent_id,
             tool_id=tool_id,
-            tool_name="",
+            tool_name=tool_name,
             arguments_scrubbed=_scrub_arguments(arguments),
             status=status,
             duration_ms=duration_ms,
