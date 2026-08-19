@@ -1,0 +1,7 @@
+{
+  "task_id": "task-llm-integration-phase1",
+  "task_description": "Wire real LLM integration into 4 critical modules: RAG embeddings, task planner, critic evaluator, and fact extraction. Each module gets a new LLM-enhanced class that falls back gracefully to existing heuristics.",
+  "status": "in_progress",
+  "feature_order": ["FEAT-001", "FEAT-002", "FEAT-003"],
+  "blocked_reason": null
+}

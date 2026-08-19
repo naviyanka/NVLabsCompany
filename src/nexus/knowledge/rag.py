@@ -1,19 +1,25 @@
 """RAG Pipeline - Retrieval-Augmented Generation with chunking and hybrid search.
 
-Provides document chunking, indexing, hybrid search (BM25 + vector similarity stub),
+Provides document chunking, indexing, hybrid search (BM25 + vector similarity),
 result reranking, and context assembly for use in agent prompts.
 """
+
+from __future__ import annotations
 
 import re
 import uuid
 from datetime import datetime, timezone
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 
+from nexus.knowledge.embeddings import cosine_similarity
 from nexus.memory.retriever import search as bm25_search, tokenize
 from nexus.models.knowledge import KnowledgeChunk
+
+if TYPE_CHECKING:
+    from nexus.knowledge.embeddings import EmbeddingProvider
 
 
 class RAGPipeline:
@@ -30,13 +36,16 @@ class RAGPipeline:
         db: Async database session for persistence operations.
     """
 
-    def __init__(self, db: AsyncSession) -> None:
-        """Initialize RAGPipeline with a database session.
+    def __init__(self, db: AsyncSession, embedding_provider: Optional[EmbeddingProvider] = None) -> None:
+        """Initialize RAGPipeline with a database session and optional embedding provider.
 
         Args:
             db: An async SQLAlchemy session for database operations.
+            embedding_provider: Optional embedding provider for computing vector embeddings.
+                If not provided, vector similarity falls back to token overlap.
         """
         self.db = db
+        self.embedding_provider = embedding_provider
 
     def chunk_document(
         self,
@@ -139,6 +148,8 @@ class RAGPipeline:
 
         Creates a KnowledgeChunk for each chunk string, preserving the
         chunk_index for ordering. Metadata includes the chunk length.
+        If an embedding_provider is available, computes and stores
+        embedding vectors for each chunk.
 
         Args:
             company_id: Company scope for the chunks.
@@ -148,14 +159,21 @@ class RAGPipeline:
         Returns:
             List of created KnowledgeChunk instances.
         """
+        # Compute embeddings if provider is available
+        embeddings: Optional[list[list[float]]] = None
+        if self.embedding_provider is not None and chunks:
+            embeddings = await self.embedding_provider.embed_batch(chunks)
+
         records: list[KnowledgeChunk] = []
         for idx, chunk_content in enumerate(chunks):
+            embedding_vector = embeddings[idx] if embeddings is not None else None
             chunk_record = KnowledgeChunk(
                 company_id=company_id,
                 page_id=page_id,
                 content=chunk_content,
                 chunk_index=idx,
                 chunk_metadata={"length": len(chunk_content)},
+                embedding_vector=embedding_vector,
                 created_at=datetime.now(timezone.utc),
             )
             self.db.add(chunk_record)
@@ -174,8 +192,9 @@ class RAGPipeline:
     ) -> list[dict]:
         """Perform hybrid search over knowledge chunks.
 
-        Combines BM25 text search with optional vector similarity (stub).
-        Results are returned with both scores for downstream reranking.
+        Combines BM25 text search with vector similarity when embeddings
+        are available. Falls back to token-overlap heuristic for chunks
+        without stored embeddings.
 
         Args:
             company_id: Company scope for the search.
@@ -199,12 +218,19 @@ class RAGPipeline:
         memories = [c.content for c in chunks]
         bm25_results = bm25_search(query, memories, top_k=top_k)
 
+        # Compute query embedding once if provider is available
+        query_embedding: Optional[list[float]] = None
+        if self.embedding_provider is not None:
+            query_embedding = await self.embedding_provider.embed(query)
+
         # Build results with hybrid scoring
         results: list[dict] = []
         for idx, bm25_score_val in bm25_results:
             chunk = chunks[idx]
-            # Vector similarity stub - placeholder cosine similarity score
-            vector_score = self._compute_vector_similarity_stub(query, chunk.content)
+            # Compute vector similarity
+            vector_score = self._compute_vector_similarity(
+                query, chunk.content, query_embedding, chunk.embedding_vector
+            )
             # Combined score: weighted average (BM25 dominant, vector as supplement)
             combined_score = 0.7 * bm25_score_val + 0.3 * vector_score
 
@@ -219,18 +245,48 @@ class RAGPipeline:
         results.sort(key=lambda x: x["combined_score"], reverse=True)
         return results[:top_k]
 
-    def _compute_vector_similarity_stub(self, query: str, content: str) -> float:
-        """Stub for vector similarity computation.
+    def _compute_vector_similarity(
+        self,
+        query: str,
+        content: str,
+        query_embedding: Optional[list[float]] = None,
+        chunk_embedding: Optional[list[float]] = None,
+    ) -> float:
+        """Compute vector similarity between query and chunk.
 
-        Returns a placeholder cosine similarity score based on token overlap.
-        In production, this would use actual embedding vectors.
+        Uses real cosine similarity when both query and chunk embeddings
+        are available. Falls back to token-overlap heuristic otherwise.
+
+        Args:
+            query: The search query text.
+            content: The chunk content text.
+            query_embedding: Pre-computed query embedding vector, or None.
+            chunk_embedding: Stored chunk embedding vector, or None.
+
+        Returns:
+            Similarity score between 0.0 and 1.0.
+        """
+        # Use real cosine similarity if both embeddings are available
+        if query_embedding is not None and chunk_embedding is not None:
+            score = cosine_similarity(query_embedding, chunk_embedding)
+            # Clamp to [0, 1] range for scoring purposes
+            return max(0.0, score)
+
+        # Fall back to token-overlap heuristic
+        return self._compute_token_overlap(query, content)
+
+    def _compute_token_overlap(self, query: str, content: str) -> float:
+        """Compute token-overlap similarity as a fallback for vector similarity.
+
+        Uses Jaccard-like overlap between query and content tokens as a proxy
+        for semantic similarity when embeddings are not available.
 
         Args:
             query: The search query.
             content: The chunk content.
 
         Returns:
-            A placeholder similarity score between 0.0 and 1.0.
+            A similarity score between 0.0 and 1.0.
         """
         query_tokens = set(tokenize(query))
         content_tokens = set(tokenize(content))
@@ -238,7 +294,6 @@ class RAGPipeline:
         if not query_tokens or not content_tokens:
             return 0.0
 
-        # Jaccard-like overlap as a proxy for cosine similarity
         intersection = query_tokens & content_tokens
         union = query_tokens | content_tokens
         return len(intersection) / len(union) if union else 0.0
