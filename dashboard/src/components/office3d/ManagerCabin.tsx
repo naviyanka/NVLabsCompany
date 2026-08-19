@@ -1,5 +1,6 @@
 import { useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
+import type { ThreeEvent } from '@react-three/fiber';
 import * as THREE from 'three';
 import { managerCabin, managerAgent, status3DColors } from '@/config/office3dLayout';
 import { Desk } from './Desk';
@@ -33,8 +34,8 @@ export function ManagerCabin({ onAgentClick, isSelected = false }: ManagerCabinP
     }
   });
 
-  const handleClick = (e: THREE.Event) => {
-    (e as unknown as { stopPropagation: () => void }).stopPropagation();
+  const handleClick = (e: ThreeEvent<MouseEvent>) => {
+    e.stopPropagation();
     onAgentClick?.(managerAgent);
   };
 

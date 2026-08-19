@@ -1,18 +1,26 @@
-import { X, Cpu, MemoryStick, Zap, ChevronRight } from 'lucide-react';
+import { X, Cpu, MemoryStick, ChevronRight, User, ClipboardList, ScrollText } from 'lucide-react';
 import { status3DColors, statusLabels } from '@/config/office3dLayout';
 import type { MockAgent3D } from '@/config/office3dLayout';
 
 interface AgentDetailSidebarProps {
   agent: MockAgent3D;
   onClose: () => void;
+  onViewProfile?: (agent: MockAgent3D) => void;
 }
 
 /**
  * Right sidebar that shows detailed agent information when an agent is clicked.
+ * Quick action buttons are wired up to navigation callbacks.
  */
-export function AgentDetailSidebar({ agent, onClose }: AgentDetailSidebarProps) {
+export function AgentDetailSidebar({ agent, onClose, onViewProfile }: AgentDetailSidebarProps) {
   const statusColor = status3DColors[agent.status] ?? '#9ca3af';
   const statusLabel = statusLabels[agent.status] ?? 'Unknown';
+
+  const quickActions = [
+    { label: 'View Full Profile', icon: User, action: () => onViewProfile?.(agent) },
+    { label: 'Assign New Task', icon: ClipboardList, action: () => { /* placeholder - task assignment not yet wired */ } },
+    { label: 'View Logs', icon: ScrollText, action: () => { /* placeholder - logs page not yet built */ } },
+  ];
 
   return (
     <div className="absolute top-14 right-0 bottom-0 w-80 z-20 bg-dark-surface/95 backdrop-blur-sm border-l border-white/[0.08] flex flex-col overflow-hidden">
@@ -133,14 +141,15 @@ export function AgentDetailSidebar({ agent, onClose }: AgentDetailSidebarProps) 
       <div className="px-4 py-3 mt-auto">
         <div className="text-[10px] text-gray-500 uppercase tracking-wider mb-2">Quick Actions</div>
         <div className="space-y-1.5">
-          {['View Full Profile', 'Assign New Task', 'View Logs'].map((action) => (
+          {quickActions.map(({ label, icon: Icon, action }) => (
             <button
-              key={action}
+              key={label}
+              onClick={action}
               className="w-full flex items-center justify-between px-3 py-2 text-xs text-gray-300 bg-dark-bg/60 rounded-lg hover:bg-white/5 transition-colors border border-white/[0.05]"
             >
               <span className="flex items-center gap-2">
-                <Zap size={10} className="text-indigo-400" />
-                {action}
+                <Icon size={10} className="text-indigo-400" />
+                {label}
               </span>
               <ChevronRight size={10} className="text-gray-500" />
             </button>

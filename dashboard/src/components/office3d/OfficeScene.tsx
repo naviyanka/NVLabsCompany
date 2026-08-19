@@ -15,19 +15,25 @@ interface OfficeSceneProps {
   selectedAgent: MockAgent3D | null;
   onAgentClick: (agent: MockAgent3D) => void;
   onBackgroundClick: () => void;
+  /** When true, the render loop is paused to save GPU resources (e.g. tab hidden) */
+  paused?: boolean;
 }
 
 /**
  * Main React Three Fiber Canvas with isometric camera view.
  * Composes the entire 3D office scene.
+ *
+ * Uses frameloop="demand" when paused to stop continuous GPU rendering
+ * when the browser tab is not visible.
  */
-export function OfficeScene({ selectedAgent, onAgentClick, onBackgroundClick }: OfficeSceneProps) {
+export function OfficeScene({ selectedAgent, onAgentClick, onBackgroundClick, paused = false }: OfficeSceneProps) {
   return (
     <Canvas
       className="w-full h-full"
       style={{ background: '#0a0b14' }}
       gl={{ antialias: true, alpha: false }}
       onPointerMissed={onBackgroundClick}
+      frameloop={paused ? 'demand' : 'always'}
     >
       {/* Isometric-style orthographic camera */}
       <OrthographicCamera

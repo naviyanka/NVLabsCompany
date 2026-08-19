@@ -1,0 +1,31 @@
+{
+  "id": "FEAT-003",
+  "type": "fix",
+  "description": "Address all 5 review issues: lazy-load Office page for code splitting, add visibility detection to pause GPU rendering, add mobile/small-screen fallback, wire quick action buttons, and fix fragile event type assertions.",
+  "status": "completed",
+  "steps": [
+    "Update App.tsx to lazy-load Office page with React.lazy + Suspense for code splitting",
+    "Create usePageVisibility hook to detect hidden tab state",
+    "Add paused prop to OfficeScene that switches frameloop to 'demand' when tab is hidden",
+    "Create useMediaQuery hook for responsive breakpoint detection",
+    "Create OfficeMobileFallback component with scrollable agent list and bottom-sheet detail view",
+    "Update Office.tsx to use mobile fallback on screens < 768px",
+    "Wire AgentDetailSidebar 'View Full Profile' button to navigate to /agents/:id",
+    "Replace fragile (e as unknown as { stopPropagation }) cast with proper ThreeEvent<MouseEvent> type from @react-three/fiber in AgentCharacter and ManagerCabin"
+  ],
+  "acceptance_criteria": [
+    "Office page is code-split into a separate chunk (not part of main bundle)",
+    "GPU render loop pauses when browser tab is hidden (frameloop='demand')",
+    "Small screens (< 768px) show a mobile-friendly list view instead of 3D canvas",
+    "View Full Profile button navigates to /agents/:id",
+    "No unsafe type casts remain - proper ThreeEvent types used",
+    "TypeScript compilation passes with no errors",
+    "Vite build completes successfully"
+  ],
+  "verification": [
+    "cd /projects/sandbox/NVLabsCompany/dashboard && npx tsc --noEmit",
+    "cd /projects/sandbox/NVLabsCompany/dashboard && npm run build"
+  ],
+  "blocked_reason": null,
+  "findings": "Code-split Office chunk is ~954KB (separate from main 783KB app chunk). Mobile fallback uses a bottom-sheet pattern for agent detail on small screens. The 'Assign New Task' and 'View Logs' buttons are wired as no-ops with comments, since those pages/features do not exist yet."
+}

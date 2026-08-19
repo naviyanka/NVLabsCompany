@@ -1,3 +1,4 @@
+import { lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { Layout } from '@/components/layout/Layout';
 import { Dashboard } from '@/pages/Dashboard';
@@ -16,12 +17,25 @@ import { Workflows } from '@/pages/Workflows';
 import { Meetings } from '@/pages/Meetings';
 import { Activity } from '@/pages/Activity';
 import { Settings } from '@/pages/Settings';
-import { Office } from '@/pages/Office';
 import { HRRoom } from '@/pages/HRRoom';
 import { Pipelines } from '@/pages/Pipelines';
 import { GitRepos } from '@/pages/GitRepos';
 import { KnowledgeBase } from '@/pages/KnowledgeBase';
 import { Notifications } from '@/pages/Notifications';
+
+// Lazy-load Office page to avoid 1.7MB Three.js bundle cost for users who never visit it
+const LazyOffice = lazy(() => import('@/pages/Office').then((m) => ({ default: m.Office })));
+
+function OfficeFallback() {
+  return (
+    <div className="h-[calc(100vh-2rem)] flex items-center justify-center bg-dark-bg -m-6">
+      <div className="flex flex-col items-center gap-3">
+        <div className="w-8 h-8 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+        <span className="text-sm text-gray-400">Loading 3D Office...</span>
+      </div>
+    </div>
+  );
+}
 
 export default function App() {
   return (
@@ -29,7 +43,7 @@ export default function App() {
       <Routes>
         <Route element={<Layout />}>
           <Route path="/" element={<Dashboard />} />
-          <Route path="/office" element={<Office />} />
+          <Route path="/office" element={<Suspense fallback={<OfficeFallback />}><LazyOffice /></Suspense>} />
           <Route path="/hr-room" element={<HRRoom />} />
           <Route path="/agents" element={<Agents />} />
           <Route path="/agents/:id" element={<AgentDetailPage />} />

@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
 import { useFrame } from '@react-three/fiber';
+import type { ThreeEvent } from '@react-three/fiber';
 import * as THREE from 'three';
 import { status3DColors } from '@/config/office3dLayout';
 import type { MockAgent3D } from '@/config/office3dLayout';
@@ -44,8 +45,8 @@ export function AgentCharacter({ agent, position, onClick, isSelected = false }:
     }
   });
 
-  const handleClick = (e: THREE.Event) => {
-    (e as unknown as { stopPropagation: () => void }).stopPropagation();
+  const handleClick = (e: ThreeEvent<MouseEvent>) => {
+    e.stopPropagation();
     onClick?.(agent);
   };
 
