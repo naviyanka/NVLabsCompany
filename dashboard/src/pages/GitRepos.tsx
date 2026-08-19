@@ -152,7 +152,7 @@ const repositories = [
     lastCommitAuthor: 'Shield',
     lastCommitHash: 'x1y2z3a',
     status: 'Behind',
-    statusType: 'behind',
+    statusType: 'behind-critical',
     statusCount: 1,
     updated: '1 day ago',
     starred: false,
@@ -262,6 +262,13 @@ function RepoStatus({ statusType, statusCount }: { statusType: string; statusCou
       return (
         <span className="inline-flex items-center gap-1 text-[10px] text-orange-400">
           <span className="w-1.5 h-1.5 rounded-full bg-orange-400" />
+          Behind &darr;{statusCount}
+        </span>
+      );
+    case 'behind-critical':
+      return (
+        <span className="inline-flex items-center gap-1 text-[10px] text-red-400">
+          <span className="w-1.5 h-1.5 rounded-full bg-red-400" />
           Behind &darr;{statusCount}
         </span>
       );
@@ -384,7 +391,7 @@ export function GitRepos() {
         <div className="flex items-center gap-3">
           <div className="flex-1 flex items-center gap-2 px-3 py-2 bg-dark-surface border border-white/[0.08] rounded-lg">
             <Search size={14} className="text-gray-500" />
-            <span className="text-sm text-gray-500">Search repositories...</span>
+            <input type="text" placeholder="Search repositories..." className="text-sm text-gray-500 bg-transparent outline-none flex-1" />
           </div>
           <select className="px-3 py-2 bg-dark-surface border border-white/[0.08] rounded-lg text-sm text-gray-400 appearance-none pr-8">
             <option>All Status</option>
