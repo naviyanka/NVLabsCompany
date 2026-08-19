@@ -30,6 +30,8 @@ from nexus.governance.breaker_types import (
 )
 from nexus.governance.circuit_breaker_advanced import AdvancedCircuitBreaker
 from nexus.governance.ssrf_protection import SSRFGuard
+from nexus.governance.secret_backend import SecretBackend, FernetSecretBackend
+from nexus.governance.integration_registry import IntegrationRecord, IntegrationRegistry
 
 __all__ = [
     "ApprovalEngine",
@@ -66,4 +68,8 @@ __all__ = [
     "BreakerState",
     "AdvancedCircuitBreaker",
     "SSRFGuard",
+    "SecretBackend",
+    "FernetSecretBackend",
+    "IntegrationRecord",
+    "IntegrationRegistry",
 ]
