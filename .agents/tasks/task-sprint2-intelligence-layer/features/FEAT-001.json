@@ -1,0 +1,26 @@
+{
+  "id": "FEAT-001",
+  "type": "feat",
+  "description": "Phase Machine and Smart Retry with Escalation - Create the team collaboration state machine (CREATE->DESIGN->EXECUTE->COMPLETE) and enhance retry with intelligent escalation (DIAGNOSE->FIX->VERIFY pattern, permanent blocker detection, task decomposition).",
+  "status": "in_progress",
+  "steps": [
+    "Create src/nexus/orchestration/phase_machine.py with: TeamPhase enum (CREATE, DESIGN, EXECUTE, COMPLETE), PhaseTransitionError exception, PhaseMachine class. The machine tracks current phase per leader_id (UUID). Transitions: CREATE->DESIGN on plan detection (check_plan_detected looks for [PLAN] marker in leader output), DESIGN->EXECUTE on explicit approve_plan call (human gate), EXECUTE->COMPLETE on check_final_result, COMPLETE->CREATE on handle_user_feedback (loop). Invalid transitions raise PhaseTransitionError. Include get_phase, get_all_phases, reset methods. Follow the Protocol pattern from company_flow.py for any external dependencies.",
+    "Create src/nexus/orchestration/smart_retry.py with: EscalationAction enum (RETRY, REASSIGN, DECOMPOSE, REPORT_BLOCKER), FailureDiagnosis dataclass (error_pattern: str, is_permanent: bool, suggested_action: EscalationAction, diagnosis_detail: str), SmartRetryResult dataclass (extends RetryResult concept with escalation_action, diagnosis, attempt_history), SmartRetryWithEscalation class. The class wraps the existing RetryWithBudget pattern but adds: (1) error pattern tracking via Counter to detect repeated identical errors, (2) diagnosis protocol that classifies errors as transient/permanent/decomposable, (3) escalation logic: same error 3+ times = REPORT_BLOCKER, different errors each time = REASSIGN to different agent, error mentions 'too large'/'complex'/'timeout' = DECOMPOSE into smaller pieces. Include execute_with_smart_retry method that returns SmartRetryResult.",
+    "Add tests in tests/test_phase_machine.py covering: all valid transitions, invalid transition raises error, plan detection with [PLAN] marker, approve_plan gates DESIGN->EXECUTE, feedback loops back to CREATE, get_phase returns current state, reset clears state.",
+    "Add tests in tests/test_smart_retry.py covering: successful execution (no retry needed), transient failure with successful retry, permanent blocker detection (same error 3 times), reassignment suggestion (different errors), decomposition suggestion (error contains 'too large'), budget exhaustion during smart retry, diagnosis protocol output."
+  ],
+  "acceptance_criteria": [
+    "PhaseMachine correctly enforces CREATE->DESIGN->EXECUTE->COMPLETE->CREATE cycle",
+    "Invalid transitions raise PhaseTransitionError with descriptive message",
+    "SmartRetryWithEscalation detects permanent blockers after 3 identical errors",
+    "SmartRetryWithEscalation suggests REASSIGN for varying errors",
+    "SmartRetryWithEscalation suggests DECOMPOSE for complexity/size errors",
+    "All new tests pass alongside the existing 749 tests"
+  ],
+  "verification": [
+    "/root/.pyenv/versions/3.12.13/bin/python -m pytest tests/test_phase_machine.py tests/test_smart_retry.py -v",
+    "/root/.pyenv/versions/3.12.13/bin/python -m pytest tests/ --tb=short -q"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}
