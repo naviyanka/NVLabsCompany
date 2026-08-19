@@ -98,7 +98,8 @@ class CLIAdapter(BaseAdapter):
         """Initialize CLI session with workspace isolation.
 
         Creates or uses a workspace directory and stores backend metadata
-        in the session for use during execution.
+        in the session for use during execution. Sets the is_interactive
+        and awaiting_input flags based on config.
 
         Args:
             session: The newly created session.
@@ -121,6 +122,10 @@ class CLIAdapter(BaseAdapter):
             "timeout", DEFAULT_TIMEOUT_SECONDS
         )
         session.metadata["backend"] = session.config["backend"]
+        session.metadata["is_interactive"] = session.config.get(
+            "interactive", False
+        )
+        session.metadata["awaiting_input"] = False
 
     async def _do_execute(
         self, session: AgentSession, task_id: uuid.UUID, payload: dict[str, Any]
@@ -286,6 +291,78 @@ class CLIAdapter(BaseAdapter):
         finally:
             self._processes.pop(session.session_id, None)
 
+    async def send_message(self, session_id: str, message: str) -> str:
+        """Send a message to the stdin of a running interactive process.
+
+        Writes the given message (followed by a newline) to the process's
+        stdin pipe. The process must be running and have an open stdin pipe.
+
+        Args:
+            session_id: The session identifier for the running process.
+            message: The text message to send via stdin.
+
+        Returns:
+            Acknowledgment string confirming the message was sent.
+
+        Raises:
+            RuntimeError: If the process has already exited or is not found.
+        """
+        process = self._processes.get(session_id)
+        if process is None:
+            raise RuntimeError(
+                f"No running process for session '{session_id}'. "
+                "Process may have already exited."
+            )
+        if process.returncode is not None:
+            raise RuntimeError(
+                f"Process for session '{session_id}' has already exited "
+                f"with return code {process.returncode}."
+            )
+        if process.stdin is None:
+            raise RuntimeError(
+                f"Process for session '{session_id}' has no stdin pipe."
+            )
+
+        try:
+            encoded = message.encode("utf-8", errors="replace")
+            process.stdin.write(encoded + b"\n")
+            await process.stdin.drain()
+        except BrokenPipeError:
+            raise RuntimeError(
+                f"Broken pipe: process for session '{session_id}' is no "
+                "longer accepting input. The process may have exited."
+            )
+
+        # Update awaiting_input state
+        session = self._sessions.get(session_id)
+        if session:
+            session.metadata["awaiting_input"] = False
+
+        self._add_log(session_id, f"Sent message to stdin ({len(message)} chars)")
+        return f"Message sent ({len(message)} chars)"
+
+    async def _stream_output(
+        self, process: asyncio.subprocess.Process, session_id: str
+    ) -> None:
+        """Read stdout from a process line-by-line and append to session logs.
+
+        Reads incrementally from the process stdout pipe until EOF. Each
+        line is decoded with errors='replace' and added to session logs.
+
+        Args:
+            process: The asyncio subprocess to read from.
+            session_id: The session identifier for log attribution.
+        """
+        if process.stdout is None:
+            return
+
+        while True:
+            line_bytes = await process.stdout.readline()
+            if not line_bytes:
+                break
+            line = line_bytes.decode("utf-8", errors="replace").rstrip("\n")
+            self._add_log(session_id, f"[stdout] {line}")
+
     async def _do_heartbeat(self, session: AgentSession) -> bool:
         """Check if the CLI process is still running.
 
@@ -343,6 +420,7 @@ class CLIAdapter(BaseAdapter):
             "timeout_handling",
             "graceful_termination",
             "multi_backend",
+            "interactive_stdin",
         ]
 
     def _build_args(

@@ -2,7 +2,7 @@
   "id": "FEAT-002",
   "type": "feat",
   "description": "Add stdin interactive protocol to CLI Adapter for ongoing process communication",
-  "status": "pending",
+  "status": "in_progress",
   "steps": [
     "In src/nexus/adapters/cli_adapter.py, add send_message(session_id, message) async method that writes to the running process's stdin pipe and returns acknowledgment",
     "Add is_interactive flag to session metadata (set during _do_create_session based on config)",
