@@ -18,6 +18,7 @@ Directory layout:
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import json
 import time
 from pathlib import Path
@@ -43,7 +44,10 @@ class HiveManager:
     """
 
     def __init__(
-        self, root: Path, backend: HiveBackend | None = None
+        self,
+        root: Path,
+        backend: HiveBackend | None = None,
+        backend_timeout: float = 10.0,
     ) -> None:
         """Initialize with the hive root directory path.
 
@@ -52,9 +56,13 @@ class HiveManager:
             backend: Optional pluggable backend. When None (default), uses
                 the built-in file-based implementation for backward
                 compatibility.
+            backend_timeout: Timeout in seconds for backend operations when
+                bridging async calls from sync contexts. Defaults to 10.0.
         """
         self._root = root
         self._backend = backend
+        self._backend_timeout = backend_timeout
+        self._executor: concurrent.futures.ThreadPoolExecutor | None = None
         if self._backend is None:
             self._ensure_structure()
 
@@ -81,12 +89,14 @@ class HiveManager:
 
         if loop and loop.is_running():
             # We are inside a running event loop (e.g. FastAPI).
-            # Create a task so it executes properly.
-            # For sync callers in async contexts, prefer async_ methods.
-            import concurrent.futures
-
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                return pool.submit(asyncio.run, coro).result(timeout=10)
+            # Use the instance-level thread pool to avoid creating one per call.
+            if self._executor is None:
+                self._executor = concurrent.futures.ThreadPoolExecutor(
+                    max_workers=1
+                )
+            return self._executor.submit(asyncio.run, coro).result(
+                timeout=self._backend_timeout
+            )
         return asyncio.run(coro)
 
     def _ensure_structure(self) -> None:

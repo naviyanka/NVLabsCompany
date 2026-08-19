@@ -288,12 +288,19 @@ class RedisHiveBackend:
     HiveBackend protocol.
     """
 
-    def __init__(self, redis_url: str, key_prefix: str = "nexus:hive") -> None:
+    def __init__(
+        self,
+        redis_url: str,
+        key_prefix: str = "nexus:hive",
+        recovery_cooldown_seconds: float = 30.0,
+    ) -> None:
         """Initialize with a Redis connection URL.
 
         Args:
             redis_url: Redis connection string (redis://host:port/db).
             key_prefix: Prefix for all Redis keys used by this backend.
+            recovery_cooldown_seconds: Seconds to wait before attempting
+                recovery after a failure.
         """
         import redis.asyncio as aioredis
 
@@ -305,6 +312,8 @@ class RedisHiveBackend:
         )
         self._prefix = key_prefix
         self._available = True
+        self._recovery_cooldown = recovery_cooldown_seconds
+        self._last_failure_time: float = 0.0
 
     def _inbox_key(self, agent_id: str) -> str:
         """Build the Redis stream key for an agent's inbox."""
@@ -318,13 +327,46 @@ class RedisHiveBackend:
         """Build the Redis hash key for the agent registry."""
         return f"{self._prefix}:registry"
 
+    async def _check_recovery(self) -> bool:
+        """Check whether enough time has passed to attempt recovery.
+
+        If the backend is unavailable and the cooldown has elapsed, tries
+        a PING to re-enable operations.
+
+        Returns:
+            True if the backend is available (or recovered), False otherwise.
+        """
+        if self._available:
+            return True
+
+        elapsed = time.monotonic() - self._last_failure_time
+        if elapsed < self._recovery_cooldown:
+            return False
+
+        # Attempt recovery via health check
+        try:
+            result = await self._redis.ping()
+            if result:
+                self._available = True
+                logger.info("Redis hive backend recovered after cooldown")
+                return True
+        except Exception:
+            # Reset the failure timer so we wait another cooldown period
+            self._last_failure_time = time.monotonic()
+        return False
+
+    def _mark_unavailable(self) -> None:
+        """Mark the backend as unavailable and record the failure time."""
+        self._available = False
+        self._last_failure_time = time.monotonic()
+
     async def send_message(self, msg: HiveMessage) -> None:
         """Write a message to the sender's outbox stream.
 
         Args:
             msg: The message to send.
         """
-        if not self._available:
+        if not await self._check_recovery():
             return
         try:
             key = self._outbox_key(msg.from_agent)
@@ -332,7 +374,7 @@ class RedisHiveBackend:
             await self._redis.xadd(key, data)
         except Exception as exc:
             logger.warning("Redis hive send failed: %s", exc)
-            self._available = False
+            self._mark_unavailable()
 
     async def deliver_to_inbox(self, agent_id: str, msg: HiveMessage) -> None:
         """Deliver a message to a recipient's inbox stream.
@@ -341,7 +383,7 @@ class RedisHiveBackend:
             agent_id: The target agent ID.
             msg: The message to deliver.
         """
-        if not self._available:
+        if not await self._check_recovery():
             return
         try:
             key = self._inbox_key(agent_id)
@@ -349,7 +391,7 @@ class RedisHiveBackend:
             await self._redis.xadd(key, data)
         except Exception as exc:
             logger.warning("Redis hive deliver failed: %s", exc)
-            self._available = False
+            self._mark_unavailable()
 
     async def get_inbox(self, agent_id: str) -> list[HiveMessage]:
         """Read pending messages from an agent's inbox stream.
@@ -360,7 +402,7 @@ class RedisHiveBackend:
         Returns:
             List of pending HiveMessage objects.
         """
-        if not self._available:
+        if not await self._check_recovery():
             return []
         try:
             key = self._inbox_key(agent_id)
@@ -372,7 +414,7 @@ class RedisHiveBackend:
             return messages
         except Exception as exc:
             logger.warning("Redis hive get_inbox failed: %s", exc)
-            self._available = False
+            self._mark_unavailable()
             return []
 
     async def mark_processed(self, agent_id: str, msg_id: str) -> None:
@@ -382,7 +424,7 @@ class RedisHiveBackend:
             agent_id: The agent that processed the message.
             msg_id: The message ID to mark as done.
         """
-        if not self._available:
+        if not await self._check_recovery():
             return
         try:
             key = self._inbox_key(agent_id)
@@ -394,7 +436,7 @@ class RedisHiveBackend:
                     return
         except Exception as exc:
             logger.warning("Redis hive mark_processed failed: %s", exc)
-            self._available = False
+            self._mark_unavailable()
 
     async def get_registry(self) -> dict[str, HiveAgentMeta]:
         """Return all registered agents from Redis hash.
@@ -402,7 +444,7 @@ class RedisHiveBackend:
         Returns:
             Dictionary mapping agent IDs to their metadata.
         """
-        if not self._available:
+        if not await self._check_recovery():
             return {}
         try:
             key = self._registry_key()
@@ -413,7 +455,7 @@ class RedisHiveBackend:
             return result
         except Exception as exc:
             logger.warning("Redis hive get_registry failed: %s", exc)
-            self._available = False
+            self._mark_unavailable()
             return {}
 
     async def register_agent(self, meta: HiveAgentMeta) -> None:
@@ -422,7 +464,7 @@ class RedisHiveBackend:
         Args:
             meta: The agent metadata to register.
         """
-        if not self._available:
+        if not await self._check_recovery():
             return
         try:
             key = self._registry_key()
@@ -430,7 +472,7 @@ class RedisHiveBackend:
             await self._redis.hset(key, meta.id, data)
         except Exception as exc:
             logger.warning("Redis hive register failed: %s", exc)
-            self._available = False
+            self._mark_unavailable()
 
     async def unregister_agent(self, agent_id: str, archive: bool = True) -> None:
         """Unregister an agent from Redis.
@@ -439,7 +481,7 @@ class RedisHiveBackend:
             agent_id: The agent to unregister.
             archive: If True, mark as archived; if False, remove entirely.
         """
-        if not self._available:
+        if not await self._check_recovery():
             return
         try:
             key = self._registry_key()
@@ -453,7 +495,7 @@ class RedisHiveBackend:
                 await self._redis.hdel(key, agent_id)
         except Exception as exc:
             logger.warning("Redis hive unregister failed: %s", exc)
-            self._available = False
+            self._mark_unavailable()
 
     async def update_status(self, agent_id: str, status: AgentStatus) -> None:
         """Update an agent's status in Redis.
@@ -462,7 +504,7 @@ class RedisHiveBackend:
             agent_id: The agent whose status to update.
             status: The new status value.
         """
-        if not self._available:
+        if not await self._check_recovery():
             return
         try:
             key = self._registry_key()
@@ -474,4 +516,4 @@ class RedisHiveBackend:
                 await self._redis.hset(key, agent_id, json.dumps(data))
         except Exception as exc:
             logger.warning("Redis hive update_status failed: %s", exc)
-            self._available = False
+            self._mark_unavailable()

@@ -34,12 +34,8 @@ TRANSIENT_EXCEPTIONS: tuple[type[BaseException], ...] = (
     asyncio.TimeoutError,
     TimeoutError,
     ConnectionError,
-    ConnectionRefusedError,
-    ConnectionResetError,
-    ConnectionAbortedError,
     OSError,
     IOError,
-    RuntimeError,
 )
 
 
