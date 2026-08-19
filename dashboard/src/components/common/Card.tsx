@@ -15,8 +15,8 @@ const paddingClasses = {
 };
 
 export function Card({ children, className = '', padding = 'md', onClick }: CardProps) {
-  const baseClasses = 'bg-white rounded-xl border border-gray-200 shadow-sm';
-  const interactiveClasses = onClick ? 'cursor-pointer hover:shadow-md transition-shadow' : '';
+  const baseClasses = 'bg-[#1a1b2e] rounded-xl border border-white/[0.08]';
+  const interactiveClasses = onClick ? 'cursor-pointer hover:bg-[#1e2035] transition-colors' : '';
   const padClass = paddingClasses[padding];
 
   return (

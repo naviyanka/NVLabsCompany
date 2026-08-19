@@ -17,6 +17,11 @@ import { Meetings } from '@/pages/Meetings';
 import { Activity } from '@/pages/Activity';
 import { Settings } from '@/pages/Settings';
 import { Office } from '@/pages/Office';
+import { HRRoom } from '@/pages/HRRoom';
+import { Pipelines } from '@/pages/Pipelines';
+import { GitRepos } from '@/pages/GitRepos';
+import { KnowledgeBase } from '@/pages/KnowledgeBase';
+import { Notifications } from '@/pages/Notifications';
 
 export default function App() {
   return (
@@ -25,20 +30,25 @@ export default function App() {
         <Route element={<Layout />}>
           <Route path="/" element={<Dashboard />} />
           <Route path="/office" element={<Office />} />
+          <Route path="/hr-room" element={<HRRoom />} />
           <Route path="/agents" element={<Agents />} />
           <Route path="/agents/:id" element={<AgentDetailPage />} />
           <Route path="/tasks" element={<Tasks />} />
+          <Route path="/pipelines" element={<Pipelines />} />
           <Route path="/organization" element={<Organization />} />
           <Route path="/goals" element={<Goals />} />
           <Route path="/skills" element={<Skills />} />
           <Route path="/tools" element={<Tools />} />
           <Route path="/memory" element={<Memory />} />
+          <Route path="/git-repos" element={<GitRepos />} />
+          <Route path="/knowledge-base" element={<KnowledgeBase />} />
           <Route path="/approvals" element={<Approvals />} />
           <Route path="/budgets" element={<Budgets />} />
           <Route path="/evolution" element={<Evolution />} />
           <Route path="/workflows" element={<Workflows />} />
           <Route path="/meetings" element={<Meetings />} />
           <Route path="/activity" element={<Activity />} />
+          <Route path="/notifications" element={<Notifications />} />
           <Route path="/settings" element={<Settings />} />
         </Route>
       </Routes>

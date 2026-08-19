@@ -4,7 +4,11 @@ export default {
   theme: {
     extend: {
       colors: {
-        sidebar: '#1e1e2e',
+        sidebar: '#12131f',
+        'dark-bg': '#0f1117',
+        'dark-surface': '#1a1b2e',
+        'dark-card': '#1e2035',
+        'dark-sidebar': '#12131f',
         primary: {
           50: '#eef2ff',
           100: '#e0e7ff',
