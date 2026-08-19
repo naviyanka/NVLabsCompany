@@ -9,13 +9,6 @@
     "tests": "pass",
     "test_quality": "pass",
     "docker_build": "skipped",
-    "summary": "All 1998 tests pass (1893 baseline + 105 new). No regressions. All 4 features implemented with comprehensive tests. Code review fixes applied: InvalidToken handling in decrypt, MCP stdio response ID validation with notification skipping, semantic memory docstring and comment clarifications, and secret backend salt comment."
-  },
-  "review_fixes_applied": [
-    "Wrapped decrypt() in FernetSecretBackend with try/except InvalidToken, returns None (fail-closed)",
-    "MCP stdio _send_request() now loops on readline, skipping notifications, and validates response ID matches request ID",
-    "Added docstring to mine_all clarifying _mining flag is single-threaded-only re-entry guard",
-    "Added comments explaining why _compute_embedding private method is used directly (sync API contract)",
-    "Added comment on _SALT explaining shared salt is intentional, deployment isolation comes from secret_key"
-  ]
+    "summary": "All 1998 tests pass (1893 baseline + 105 new). No regressions. All 4 features implemented with comprehensive tests. v1 review issues all addressed. v2 review APPROVED."
+  }
 }

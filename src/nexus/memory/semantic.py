@@ -179,7 +179,7 @@ class SemanticMemoryManager:
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False)
-            os.rename(tmp_path, str(path))
+            os.replace(tmp_path, str(path))
         except Exception:
             # Clean up temp file on failure
             try:
