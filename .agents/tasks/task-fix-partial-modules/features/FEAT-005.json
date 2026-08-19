@@ -2,7 +2,7 @@
   "id": "FEAT-005",
   "type": "feat",
   "description": "Wire Evolution Analyzer to StatisticalAnalyzer for significance testing and trend analysis",
-  "status": "pending",
+  "status": "in_progress",
   "steps": [
     "In src/nexus/evolution/analyzer.py, create StatisticalFailureAnalyzer class that extends FailureAnalyzer",
     "Import StatisticalAnalyzer from nexus.evolution.statistical and instantiate in __init__",

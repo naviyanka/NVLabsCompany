@@ -1,11 +1,14 @@
 """Failure Analyzer - root cause analysis and success factor extraction.
 
 Analyzes failed and successful executions to identify common factors,
-bottlenecks, and cost effectiveness patterns.
+bottlenecks, and cost effectiveness patterns. Also provides statistical
+significance testing via StatisticalFailureAnalyzer.
 """
 
 from collections import Counter
 from typing import Any
+
+from nexus.evolution.statistical import StatisticalAnalyzer
 
 
 class FailureAnalyzer:
@@ -48,12 +51,14 @@ class FailureAnalyzer:
 
             for factor_value, count in counter.most_common():
                 if count >= 2:  # Only report factors that appear more than once
-                    results.append({
-                        "factor_type": factor_type,
-                        "factor_value": factor_value,
-                        "occurrence_count": count,
-                        "percentage": (count / total) * 100,
-                    })
+                    results.append(
+                        {
+                            "factor_type": factor_type,
+                            "factor_value": factor_value,
+                            "occurrence_count": count,
+                            "percentage": (count / total) * 100,
+                        }
+                    )
 
         # Sort by occurrence count descending
         results.sort(key=lambda x: x["occurrence_count"], reverse=True)
@@ -90,10 +95,12 @@ class FailureAnalyzer:
         for factor, count in factor_counts.most_common():
             frequency = count / total
             if frequency >= 0.3:  # Only report factors present in 30%+ of successes
-                results.append({
-                    "factor": factor,
-                    "frequency": frequency,
-                })
+                results.append(
+                    {
+                        "factor": factor,
+                        "frequency": frequency,
+                    }
+                )
 
         return results
 
@@ -167,11 +174,13 @@ class FailureAnalyzer:
         results: list[dict[str, Any]] = []
         for stage, durations in stage_durations.items():
             avg_duration = sum(durations) / len(durations)
-            results.append({
-                "stage": stage,
-                "avg_duration": avg_duration,
-                "count": len(durations),
-            })
+            results.append(
+                {
+                    "stage": stage,
+                    "avg_duration": avg_duration,
+                    "count": len(durations),
+                }
+            )
 
         # Sort by average duration descending (slowest first)
         results.sort(key=lambda x: x["avg_duration"], reverse=True)
@@ -237,3 +246,96 @@ class FailureAnalyzer:
             "best_approach": best_approach,
             "worst_approach": worst_approach,
         }
+
+
+class StatisticalFailureAnalyzer(FailureAnalyzer):
+    """Extended failure analyzer with statistical significance testing.
+
+    Combines FailureAnalyzer's root cause analysis capabilities with
+    StatisticalAnalyzer's significance testing and trend detection to
+    provide evidence-based failure pattern analysis.
+    """
+
+    def __init__(self) -> None:
+        """Initialize with parent FailureAnalyzer and a StatisticalAnalyzer instance."""
+        super().__init__()
+        self._stats = StatisticalAnalyzer()
+
+    def is_significant_pattern(
+        self,
+        pattern_data: list[float],
+        baseline_data: list[float],
+        alpha: float = 0.05,
+    ) -> dict[str, Any]:
+        """Test if a failure pattern is statistically significant vs baseline.
+
+        Uses Welch's t-test to determine whether the observed pattern data
+        differs significantly from the baseline.
+
+        Args:
+            pattern_data: Observed failure metric values for the pattern.
+            baseline_data: Baseline metric values for comparison.
+            alpha: Significance level (default 0.05).
+
+        Returns:
+            Dict with t_statistic, p_value, degrees_of_freedom,
+            is_significant, and alpha.
+        """
+        return self._stats.compute_significance(baseline_data, pattern_data, alpha)
+
+    def trend_analysis(self, metric_values: list[float]) -> dict[str, Any]:
+        """Identify if failure rates are trending up, down, or flat.
+
+        Fits a linear regression to the ordered metric values to detect
+        directional trends over time.
+
+        Args:
+            metric_values: Ordered sequence of failure rate values.
+
+        Returns:
+            Dict with slope, intercept, r_squared, and direction
+            (one of 'upward', 'downward', 'flat').
+        """
+        return self._stats.detect_trend(metric_values)
+
+    def compare_periods(
+        self,
+        period_a: list[float],
+        period_b: list[float],
+        min_effect_size: float = 0.2,
+    ) -> dict[str, Any]:
+        """Compare two time periods to detect significant improvement.
+
+        Combines statistical significance with practical significance
+        (Cohen's d effect size) to determine if period_b is better.
+
+        Args:
+            period_a: Metric values from the first (control) period.
+            period_b: Metric values from the second (treatment) period.
+            min_effect_size: Minimum Cohen's d for practical significance.
+
+        Returns:
+            Dict with is_significant, is_practically_significant,
+            is_improvement, cohens_d, p_value, and effect_interpretation.
+        """
+        return self._stats.is_significant_improvement(period_a, period_b, min_effect_size)
+
+    def confidence_interval_for_rate(
+        self,
+        failure_counts: list[float],
+        confidence: float = 0.95,
+    ) -> dict[str, Any]:
+        """Compute confidence interval for failure rate data.
+
+        Uses normal approximation to estimate the confidence interval
+        around the mean failure count.
+
+        Args:
+            failure_counts: Sample of failure count observations.
+            confidence: Confidence level (default 0.95).
+
+        Returns:
+            Dict with mean, lower, upper, confidence, std_error,
+            and sample_size.
+        """
+        return self._stats.compute_confidence_interval(failure_counts, confidence)
