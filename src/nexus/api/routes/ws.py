@@ -80,7 +80,7 @@ async def websocket_endpoint(
         return
 
     await websocket.accept()
-    await manager.connect(client_id, websocket)
+    await manager.connect(client_id, websocket, validated_company_id)
 
     try:
         while True:

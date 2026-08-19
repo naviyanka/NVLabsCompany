@@ -33,16 +33,22 @@ async def _event_generator(
     request: Request,
     event_types: list[str] | None,
     channel: str | None,
+    company_id: uuid.UUID | None = None,
 ) -> AsyncGenerator[str, None]:
     """Generate SSE events from the event bus with filtering.
 
     Creates a subscriber queue, subscribes to all or specific topics,
     and yields formatted events until the client disconnects.
 
+    Events are filtered by tenant: only events whose company_id is None
+    (global/broadcast events) or matches the authenticated company_id
+    are delivered. This enforces multi-tenant isolation at the stream level.
+
     Args:
         request: The incoming HTTP request (used for disconnect detection).
         event_types: Optional list of event type filters.
         channel: Optional channel filter.
+        company_id: Authenticated tenant UUID for tenant-scoped filtering.
 
     Yields:
         SSE-formatted event strings.
@@ -69,6 +75,11 @@ async def _event_generator(
 
             if event is None:
                 break
+
+            # Apply tenant isolation filter: only deliver events that are
+            # global (company_id is None) or scoped to this tenant
+            if company_id and event.company_id and event.company_id != company_id:
+                continue
 
             # Apply channel filter
             if channel and event.channel != channel:
@@ -113,7 +124,7 @@ async def stream_events(
         types_list = [t.strip() for t in event_types.split(",") if t.strip()]
 
     return StreamingResponse(
-        _event_generator(request, types_list, channel),
+        _event_generator(request, types_list, channel, company_id),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

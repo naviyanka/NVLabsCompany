@@ -2,6 +2,7 @@
 
 Validates EventStream SSE formatting, event type filtering, channel
 filtering, queue bounds enforcement, and graceful close behavior.
+Also tests SSE endpoint auth enforcement and tenant isolation.
 """
 
 import asyncio
@@ -11,6 +12,7 @@ from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from fastapi.testclient import TestClient
 
 from nexus.realtime import (
     AGENT_MESSAGE,
@@ -183,3 +185,110 @@ class TestEventStreamSSE:
         received = queue.get_nowait()
         assert received.event_type == AGENT_STATUS_CHANGED
         assert received.payload == {"status": "idle"}
+
+
+class TestSSEAuthEnforcement:
+    """Tests for SSE endpoint authentication enforcement."""
+
+    def test_sse_endpoint_rejects_missing_company_id_header(self):
+        """GET /events/stream returns 400 without X-Company-Id header."""
+        from nexus.main import app
+
+        client = TestClient(app, raise_server_exceptions=False)
+        response = client.get("/events/stream")
+        assert response.status_code == 400
+        assert "X-Company-Id" in response.json()["detail"]
+
+    def test_sse_endpoint_rejects_invalid_company_id_header(self):
+        """GET /events/stream returns 400 with invalid UUID in X-Company-Id."""
+        from nexus.main import app
+
+        client = TestClient(app, raise_server_exceptions=False)
+        response = client.get(
+            "/events/stream",
+            headers={"X-Company-Id": "not-a-valid-uuid"},
+        )
+        assert response.status_code == 400
+        assert "valid UUID" in response.json()["detail"]
+
+    @pytest.mark.asyncio
+    async def test_sse_endpoint_accepts_valid_company_id_header(self):
+        """GET /events/stream accepts a valid X-Company-Id without raising."""
+        from nexus.api.deps import get_current_company_id
+
+        # Test the dependency directly to confirm it accepts valid UUIDs
+        # (the endpoint integration is confirmed by the 400 rejection tests
+        # proving the dependency is wired in)
+        valid_uuid = str(uuid.uuid4())
+        result = await get_current_company_id(valid_uuid)
+        assert result == uuid.UUID(valid_uuid)
+
+
+class TestSSETenantIsolation:
+    """Tests for SSE tenant-scoped event filtering."""
+
+    @pytest.mark.asyncio
+    async def test_event_generator_filters_other_company_events(self):
+        """_event_generator skips events scoped to a different company."""
+        from nexus.api.routes.events import _event_generator, event_bus
+
+        company_a = uuid.uuid4()
+        company_b = uuid.uuid4()
+
+        # Mock request that disconnects after receiving all events
+        request = AsyncMock()
+        disconnect_after = 3  # Process 3 wait_for cycles then disconnect
+        call_count = 0
+
+        async def is_disconnected():
+            nonlocal call_count
+            call_count += 1
+            return call_count > disconnect_after
+
+        request.is_disconnected = is_disconnected
+
+        # Publish events to the bus in a background task so the generator
+        # can receive them. The generator subscribes to "__all__".
+        event_for_a = RealtimeEvent(
+            event_type=TASK_PROGRESS,
+            payload={"for": "a"},
+            company_id=company_a,
+        )
+        event_for_b = RealtimeEvent(
+            event_type=TASK_PROGRESS,
+            payload={"for": "b"},
+            company_id=company_b,
+        )
+        event_global = RealtimeEvent(
+            event_type=SYSTEM_ALERT,
+            payload={"for": "all"},
+            company_id=None,
+        )
+
+        async def publish_events():
+            """Publish events after a brief delay to let generator subscribe."""
+            await asyncio.sleep(0.01)
+            await event_bus.publish(TASK_PROGRESS, event_for_a)
+            await event_bus.publish(TASK_PROGRESS, event_for_b)
+            await event_bus.publish(SYSTEM_ALERT, event_global)
+
+        # Start publishing in background
+        publish_task = asyncio.create_task(publish_events())
+
+        # Collect results from a generator that filters for company_a
+        results = []
+        async for sse_data in _event_generator(request, None, None, company_a):
+            results.append(sse_data)
+            if len(results) >= 2:
+                break
+
+        await publish_task
+
+        # Should have received event_for_a and event_global, but NOT event_for_b
+        assert len(results) == 2
+        # First result should be the event for company_a
+        parsed_0 = json.loads(results[0][len("data: "):-2])
+        assert parsed_0["payload"]["for"] == "a"
+        # Second result should be the global event
+        parsed_1 = json.loads(results[1][len("data: "):-2])
+        assert parsed_1["payload"]["for"] == "all"

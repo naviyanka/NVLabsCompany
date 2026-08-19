@@ -31,6 +31,9 @@ class RealtimeEvent:
         payload: Arbitrary event data as a dictionary.
         timestamp: UTC datetime when the event was created.
         source_agent_id: Optional UUID of the agent that produced this event.
+        company_id: Optional tenant UUID for multi-tenant event scoping.
+            When set, only clients authenticated for this company receive
+            the event. When None, the event is delivered to all tenants.
     """
 
     event_type: str
@@ -39,6 +42,7 @@ class RealtimeEvent:
     channel: str | None = None
     timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
     source_agent_id: uuid.UUID | None = None
+    company_id: uuid.UUID | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize the event to a JSON-compatible dictionary.
@@ -53,4 +57,5 @@ class RealtimeEvent:
             "payload": self.payload,
             "timestamp": self.timestamp.isoformat(),
             "source_agent_id": str(self.source_agent_id) if self.source_agent_id else None,
+            "company_id": str(self.company_id) if self.company_id else None,
         }

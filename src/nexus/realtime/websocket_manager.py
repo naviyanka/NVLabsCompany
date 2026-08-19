@@ -6,6 +6,7 @@ messaging, broadcasting, and channel-based subscriptions.
 
 import json
 import logging
+import uuid
 from typing import Any
 
 from fastapi import WebSocket
@@ -18,19 +19,22 @@ class WebSocketManager:
 
     Tracks active connections by client_id (UUID string), provides methods
     for sending personal messages, broadcasting to all connections, and
-    channel-based pub/sub for scoped delivery.
+    channel-based pub/sub for scoped delivery. Supports tenant isolation
+    via company_id association per connection.
 
     All methods are async to support non-blocking I/O.
 
     Attributes:
         _connections: Mapping of client_id to active WebSocket connection.
         _channels: Mapping of channel name to set of subscribed client_ids.
+        _company_ids: Mapping of client_id to associated company UUID.
     """
 
     def __init__(self) -> None:
         """Initialize the WebSocket manager with empty connection tracking."""
         self._connections: dict[str, WebSocket] = {}
         self._channels: dict[str, set[str]] = {}
+        self._company_ids: dict[str, uuid.UUID] = {}
 
     @property
     def active_connections(self) -> dict[str, WebSocket]:
@@ -42,7 +46,9 @@ class WebSocketManager:
         """Return the number of active connections."""
         return len(self._connections)
 
-    async def connect(self, client_id: str, websocket: WebSocket) -> None:
+    async def connect(
+        self, client_id: str, websocket: WebSocket, company_id: uuid.UUID | None = None
+    ) -> None:
         """Register a new WebSocket connection for a client.
 
         If the client already has an active connection, it is replaced.
@@ -50,8 +56,11 @@ class WebSocketManager:
         Args:
             client_id: UUID string identifying the client.
             websocket: The FastAPI WebSocket instance.
+            company_id: Optional company UUID for tenant isolation.
         """
         self._connections[client_id] = websocket
+        if company_id is not None:
+            self._company_ids[client_id] = company_id
         logger.info("WebSocket connected: client_id=%s", client_id)
 
     async def disconnect(self, client_id: str) -> None:
@@ -66,6 +75,7 @@ class WebSocketManager:
             client_id: UUID string identifying the client to disconnect.
         """
         websocket = self._connections.pop(client_id, None)
+        self._company_ids.pop(client_id, None)
         if websocket is not None:
             try:
                 await websocket.close()
@@ -181,3 +191,46 @@ class WebSocketManager:
             Set of client_id strings subscribed to the channel.
         """
         return self._channels.get(channel, set()).copy()
+
+    async def broadcast_to_company(
+        self, company_id: uuid.UUID, data: dict[str, Any]
+    ) -> int:
+        """Broadcast a JSON message to all clients belonging to a company.
+
+        Only sends to connections that were registered with the matching
+        company_id, enforcing tenant isolation at the WebSocket layer.
+
+        Args:
+            company_id: Target company UUID for tenant-scoped delivery.
+            data: Dictionary payload to send as JSON.
+
+        Returns:
+            Number of clients the message was successfully sent to.
+        """
+        sent_count = 0
+        disconnected: list[str] = []
+        for client_id, cid in list(self._company_ids.items()):
+            if cid != company_id:
+                continue
+            websocket = self._connections.get(client_id)
+            if websocket is None:
+                continue
+            try:
+                await websocket.send_json(data)
+                sent_count += 1
+            except Exception:
+                disconnected.append(client_id)
+        for client_id in disconnected:
+            await self.disconnect(client_id)
+        return sent_count
+
+    def get_client_company(self, client_id: str) -> uuid.UUID | None:
+        """Get the company UUID associated with a client connection.
+
+        Args:
+            client_id: UUID string of the client.
+
+        Returns:
+            The company UUID if set, None otherwise.
+        """
+        return self._company_ids.get(client_id)

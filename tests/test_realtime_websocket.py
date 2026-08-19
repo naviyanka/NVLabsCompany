@@ -25,6 +25,7 @@ from nexus.realtime import (
     RealtimeEventBus,
     WebSocketManager,
 )
+from nexus.api.routes.ws import _authenticate_websocket
 
 
 @pytest.fixture
@@ -386,3 +387,122 @@ class TestRealtimeEventBus:
         event = RealtimeEvent(event_type=TASK_PROGRESS, payload={})
         delivered = await event_bus.publish(TASK_PROGRESS, event)
         assert delivered == 0
+
+    @pytest.mark.asyncio
+    async def test_all_catch_all_receives_specific_topic_events(self, event_bus):
+        """Subscribing to '__all__' receives events published to specific topics."""
+        all_queue: asyncio.Queue[RealtimeEvent] = asyncio.Queue(maxsize=10)
+        event_bus.subscribe("__all__", all_queue)
+
+        event = RealtimeEvent(event_type=TASK_PROGRESS, payload={"pct": 50})
+        delivered = await event_bus.publish(TASK_PROGRESS, event)
+
+        assert delivered == 1
+        received = all_queue.get_nowait()
+        assert received.event_type == TASK_PROGRESS
+        assert received.payload == {"pct": 50}
+        assert received is event
+
+    @pytest.mark.asyncio
+    async def test_all_catch_all_no_double_delivery(self, event_bus):
+        """Publishing to '__all__' topic does not double-deliver to __all__ subscribers."""
+        all_queue: asyncio.Queue[RealtimeEvent] = asyncio.Queue(maxsize=10)
+        event_bus.subscribe("__all__", all_queue)
+
+        event = RealtimeEvent(event_type=SYSTEM_ALERT, payload={"msg": "test"})
+        delivered = await event_bus.publish("__all__", event)
+
+        assert delivered == 1
+        assert all_queue.qsize() == 1
+
+    @pytest.mark.asyncio
+    async def test_all_catch_all_coexists_with_specific_subscriber(self, event_bus):
+        """Both specific topic and __all__ subscribers receive the event."""
+        specific_queue: asyncio.Queue[RealtimeEvent] = asyncio.Queue(maxsize=10)
+        all_queue: asyncio.Queue[RealtimeEvent] = asyncio.Queue(maxsize=10)
+        event_bus.subscribe(AGENT_MESSAGE, specific_queue)
+        event_bus.subscribe("__all__", all_queue)
+
+        event = RealtimeEvent(event_type=AGENT_MESSAGE, payload={"text": "hi"})
+        delivered = await event_bus.publish(AGENT_MESSAGE, event)
+
+        assert delivered == 2
+        assert not specific_queue.empty()
+        assert not all_queue.empty()
+        assert specific_queue.get_nowait() is event
+        assert all_queue.get_nowait() is event
+
+
+class TestWebSocketAuth:
+    """Tests for WebSocket authentication enforcement."""
+
+    @pytest.mark.asyncio
+    async def test_authenticate_rejects_missing_company_id(self):
+        """_authenticate_websocket closes with 1008 when company_id is None."""
+        ws = AsyncMock()
+        result = await _authenticate_websocket(ws, None)
+        assert result is None
+        ws.close.assert_awaited_once_with(code=1008)
+
+    @pytest.mark.asyncio
+    async def test_authenticate_rejects_empty_company_id(self):
+        """_authenticate_websocket closes with 1008 when company_id is empty string."""
+        ws = AsyncMock()
+        result = await _authenticate_websocket(ws, "")
+        assert result is None
+        ws.close.assert_awaited_once_with(code=1008)
+
+    @pytest.mark.asyncio
+    async def test_authenticate_rejects_invalid_uuid(self):
+        """_authenticate_websocket closes with 1008 when company_id is not a valid UUID."""
+        ws = AsyncMock()
+        result = await _authenticate_websocket(ws, "not-a-uuid")
+        assert result is None
+        ws.close.assert_awaited_once_with(code=1008)
+
+    @pytest.mark.asyncio
+    async def test_authenticate_accepts_valid_uuid(self):
+        """_authenticate_websocket returns UUID when company_id is valid."""
+        ws = AsyncMock()
+        valid_id = str(uuid.uuid4())
+        result = await _authenticate_websocket(ws, valid_id)
+        assert result == uuid.UUID(valid_id)
+        ws.close.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_manager_stores_company_id_on_connect(self):
+        """WebSocketManager stores company_id when provided at connect time."""
+        mgr = WebSocketManager()
+        ws = AsyncMock()
+        company = uuid.uuid4()
+        await mgr.connect("client-1", ws, company)
+        assert mgr.get_client_company("client-1") == company
+
+    @pytest.mark.asyncio
+    async def test_manager_broadcast_to_company(self):
+        """broadcast_to_company sends only to connections with matching company_id."""
+        mgr = WebSocketManager()
+        ws1 = AsyncMock()
+        ws2 = AsyncMock()
+        ws3 = AsyncMock()
+        company_a = uuid.uuid4()
+        company_b = uuid.uuid4()
+        await mgr.connect("client-1", ws1, company_a)
+        await mgr.connect("client-2", ws2, company_b)
+        await mgr.connect("client-3", ws3, company_a)
+
+        count = await mgr.broadcast_to_company(company_a, {"event": "test"})
+        assert count == 2
+        ws1.send_json.assert_awaited_once_with({"event": "test"})
+        ws3.send_json.assert_awaited_once_with({"event": "test"})
+        ws2.send_json.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_manager_disconnect_clears_company_id(self):
+        """Disconnecting a client removes the company_id association."""
+        mgr = WebSocketManager()
+        ws = AsyncMock()
+        company = uuid.uuid4()
+        await mgr.connect("client-1", ws, company)
+        await mgr.disconnect("client-1")
+        assert mgr.get_client_company("client-1") is None
