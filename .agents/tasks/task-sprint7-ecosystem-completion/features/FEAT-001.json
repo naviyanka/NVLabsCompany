@@ -1,0 +1,36 @@
+{
+  "id": "FEAT-001",
+  "type": "feat",
+  "description": "SSRF Protection + Trigger System + Schema Validator (Features 11-12 from the import plan). Implements SSRFGuard for URL/IP safety validation and the full trigger mode/classifier/context/history/schema system.",
+  "status": "completed",
+  "steps": [
+    "Create src/nexus/governance/ssrf_protection.py with SSRFGuard class containing: BLOCKED_NETWORKS list (all RFC-mandated private/reserved ranges for IPv4 + IPv6 using ipaddress.ip_network), is_safe_ip() method (check resolved address against BLOCKED_NETWORKS, handle IPv4-mapped IPv6 de-mapping via ipaddress.ip_address().ipv4_mapped), safe_resolve() async method (DNS resolve hostname via socket.getaddrinfo, check ALL returned addresses), is_safe_url() method (protocol enforcement: https for remote, http only for localhost/127.0.0.1/::1). Reference the TypeScript SSRF_BLOCK ranges in munder-difflin/src/main/hire.ts.",
+    "Create src/nexus/triggers/types.py with: TriggerMode(str, Enum) with values 'strict', 'allow-all', 'communication-only'; InboundKind(str, Enum) with values 'directive', 'communication'; is_auto_allowed(mode, kind) gate function; DEFAULT_TRIGGER_MODE = TriggerMode.strict",
+    "Create src/nexus/triggers/classifier.py with classify_inbound_kind(text) function: questions with no imperative verbs = communication, everything else = directive. Port the regex logic from classifyInboundKind in munder-difflin/src/shared/triggers.ts",
+    "Create src/nexus/triggers/context_trigger.py with: ContextRule dataclass (enabled, every_seconds, min_context_pct, min_context_pct_large_window, message), ContextTriggerConfig dataclass (compact: ContextRule, clear: ContextRule), DEFAULT_CONTEXT_TRIGGER constant matching the TypeScript defaults (everyMs/1000 for seconds)",
+    "Create src/nexus/triggers/history.py with: TriggerHistoryEntry dataclass (id, source, source_id, source_name, direction, peer, title, body, kind, decision, correlation_id, task_id, at), TriggerHistoryLedger class with add() and list() methods capped at 500 entries (TRIGGER_HISTORY_LIMIT)",
+    "Create src/nexus/triggers/schema_validator.py with validate_against_schema(value, schema) function implementing minimal JSON Schema subset: type (string, number, integer, boolean, array, object, null), required, properties, enum. Unknown keywords ignored (degrade to accept). Port the logic from validateAgainstSchema in munder-difflin/src/shared/triggers.ts",
+    "Create tests/test_ssrf_protection.py with tests for: every blocked IPv4 range (0.0.0.0/8, 10.0.0.0/8, 100.64.0.0/10, 127.0.0.0/8, 169.254.0.0/16, 172.16.0.0/12, 192.168.0.0/16, 224.0.0.0/3), IPv6 blocked addresses (::1, ::, fc00::/7, fe80::/10, fec0::/10, ff00::/8), IPv4-mapped IPv6 de-mapping (::ffff:127.0.0.1 and hex form ::ffff:7f00:1), cloud metadata IP (169.254.169.254), DNS resolution mocking (safe_resolve), protocol enforcement (is_safe_url)",
+    "Create tests/test_triggers.py with tests for: TriggerMode values, is_auto_allowed logic (all mode+kind combos), classify_inbound_kind edge cases (questions = communication, imperatives = directive, empty = communication), schema validator tests (valid objects, missing required fields, type mismatches, enum validation, nested properties, unknown keywords accepted), ContextRule and ContextTriggerConfig defaults, TriggerHistoryLedger add/list/cap at 500"
+  ],
+  "acceptance_criteria": [
+    "SSRFGuard.is_safe_ip() correctly blocks all private/reserved ranges and allows public IPs",
+    "IPv4-mapped IPv6 addresses are de-mapped and checked against IPv4 blocklist",
+    "safe_resolve() checks ALL returned addresses and blocks if ANY is private",
+    "is_safe_url() enforces https for non-localhost, allows http for localhost only",
+    "TriggerMode enum has exactly 3 values: strict, allow-all, communication-only",
+    "is_auto_allowed returns correct boolean for all 6 mode+kind combinations",
+    "classify_inbound_kind identifies questions as communication and imperatives as directive",
+    "validate_against_schema validates type, required, properties, enum correctly",
+    "validate_against_schema degrades to accept on unknown keywords",
+    "TriggerHistoryLedger caps at 500 entries dropping oldest",
+    "All new tests pass with python3.12 -m pytest"
+  ],
+  "verification": [
+    "python3.12 -m pytest tests/test_ssrf_protection.py -v",
+    "python3.12 -m pytest tests/test_triggers.py -v",
+    "python3.12 -m pytest tests/ -x -q (full suite still passes)"
+  ],
+  "blocked_reason": null,
+  "findings": "All 72 new tests pass. Full suite runs 1723 tests with no regressions (was 1651). Used pytest-asyncio auto mode for async safe_resolve tests. IPv6 loopback URL uses bracket notation [::1] parsed by urlparse. Frozen dataclasses used for ContextRule/ContextTriggerConfig per project conventions."
+}

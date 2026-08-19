@@ -1,0 +1,28 @@
+{
+  "id": "FEAT-002",
+  "type": "feat",
+  "description": "Wire LLM integration into the task planner and critic modules. Create LLMTaskPlanner (src/nexus/orchestration/llm_planner.py) and LLMCriticEvaluator (src/nexus/orchestration/llm_critic.py) that use configurable LLM callables for intelligent decomposition and evaluation, with graceful fallback to existing heuristics.",
+  "status": "completed",
+  "steps": [
+    "Create src/nexus/orchestration/llm_planner.py with LLMTaskPlanner class: (a) Constructor takes llm_callable (async function: prompt str -> response str), max_subtasks (default 10), and optional prompt_template. (b) decompose_task() method sends task description + context to LLM with a structured prompt asking for JSON output like [{\"description\": ..., \"dependencies\": [indices]}]. (c) Parses LLM JSON response into list[SubTask] objects with proper UUID dependencies. (d) Validates dependency DAG using existing TaskPlanner.validate_dependencies(). (e) Falls back to TaskPlanner._default_decomposition() if LLM call fails, returns unparseable response, or times out. (f) Has configurable decomposition prompt template with {task_description} and {context} placeholders.",
+    "Create src/nexus/orchestration/llm_critic.py with LLMCriticEvaluator class: (a) Constructor takes llm_callable, optional quality_threshold, optional criteria list, and optional prompt_templates dict (keyed by criterion name). (b) evaluate() method iterates criteria, calling _llm_evaluate_criterion() for each. (c) _llm_evaluate_criterion() sends task_description + result + criterion to LLM asking for JSON: {\"score\": 0.0-1.0, \"reasoning\": \"...\"}. (d) Parses JSON response, validates score is float in [0,1]. (e) Falls back to CriticEvaluator._evaluate_criterion() heuristic if LLM fails. (f) Caches evaluations by (task_id, hash(str(result)), criterion_name) to avoid redundant LLM calls. (g) Computes weighted composite score and pass/fail same as base CriticEvaluator.",
+    "Create tests/test_llm_planner.py: (a) Test successful decomposition with mocked LLM returning valid JSON subtasks. (b) Test fallback when LLM returns invalid JSON. (c) Test fallback when LLM callable raises exception. (d) Test max_subtasks limit is respected. (e) Test dependency validation catches cycles in LLM output. (f) Test custom prompt template is used.",
+    "Create tests/test_llm_critic.py: (a) Test successful evaluation with mocked LLM returning valid scores. (b) Test fallback when LLM returns invalid JSON. (c) Test fallback when LLM callable raises exception. (d) Test caching prevents duplicate LLM calls for same task+result. (e) Test quality threshold pass/fail determination. (f) Test custom prompt templates per criterion."
+  ],
+  "acceptance_criteria": [
+    "src/nexus/orchestration/llm_planner.py exists with LLMTaskPlanner class",
+    "src/nexus/orchestration/llm_critic.py exists with LLMCriticEvaluator class",
+    "Both classes accept an async LLM callable as dependency injection",
+    "Both classes fall back gracefully to existing heuristics on LLM failure",
+    "LLMCriticEvaluator caches evaluations to avoid redundant calls",
+    "LLMTaskPlanner validates dependency DAG using existing validate_dependencies()",
+    "Existing tests in tests/ still pass unchanged",
+    "python3.12 -m pytest tests/test_llm_planner.py tests/test_llm_critic.py passes"
+  ],
+  "verification": [
+    "python3.12 -m pytest tests/test_llm_planner.py tests/test_llm_critic.py --tb=short -q",
+    "python3.12 -m pytest tests/ --tb=short -q"
+  ],
+  "blocked_reason": null,
+  "findings": "All 1881 tests pass (1861 existing + 20 new). LLMTaskPlanner validates DAG and falls back to default decomposition on any LLM failure. LLMCriticEvaluator caches by (task_id, result_hash, criterion_name) and falls back to heuristic scoring on LLM failure."
+}

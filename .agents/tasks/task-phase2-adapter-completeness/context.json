@@ -1,0 +1,30 @@
+{
+  "project_type": "Python FastAPI backend for an autonomous AI company OS (NEXUS)",
+  "language": "Python 3.12+",
+  "build_system": "setuptools via pyproject.toml, pip install -e '.[dev]'",
+  "test_framework": "pytest with pytest-asyncio (asyncio_mode=auto), fixtures in tests/conftest.py, unittest.mock for mocking",
+  "build_command": "python3.12 -m pip install -e '.[dev]'",
+  "test_command": "python3.12 -m pytest tests/ --tb=short -q",
+  "verification_instructions": "Run pytest and confirm all tests pass (baseline: 1893 passing). No ruff or mypy failures.",
+  "snapshot_or_generated_files": null,
+  "setup_instructions": "python3.12 -m pip install -e '.[dev]'",
+  "environment_constraints": "Python 3.12 is at /usr/bin/python3.12. The default python3 is 3.9, MUST use python3.12 explicitly. OPEN_INTERNET network mode. Do NOT touch dashboard/ directory.",
+  "contribution_requirements": "All code must have docstrings, type hints, follow ruff (100 char lines, py312 target). Use Python 3.12 features (type unions with |). Every module independently testable. Backward compatibility required.",
+  "key_patterns": "Adapters inherit from BaseAdapter (src/nexus/adapters/base.py) with _do_* hooks. Protocols are @runtime_checkable. Tests use AsyncMock for subprocess, MagicMock for sync. Test files at tests/test_<module>.py. Embedding providers follow EmbeddingProvider protocol. Config via pydantic-settings in src/nexus/config.py.",
+  "relevant_files": [
+    "src/nexus/adapters/claude_code_adapter.py",
+    "src/nexus/adapters/base.py",
+    "src/nexus/tools/mcp_client.py",
+    "src/nexus/memory/semantic.py",
+    "src/nexus/memory/retriever.py",
+    "src/nexus/governance/secret_backend.py",
+    "src/nexus/knowledge/embeddings.py",
+    "src/nexus/config.py",
+    "src/nexus/runtime/adapter.py",
+    "tests/test_cli_adapter.py",
+    "tests/test_memory.py",
+    "tests/test_secrets.py",
+    "tests/conftest.py"
+  ],
+  "directory_structure": "src/nexus/ is the main package. Adapters in src/nexus/adapters/, tools in src/nexus/tools/, memory in src/nexus/memory/, governance in src/nexus/governance/, knowledge in src/nexus/knowledge/. Tests in tests/ at project root."
+}

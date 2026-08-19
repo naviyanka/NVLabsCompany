@@ -21,6 +21,7 @@ from nexus.memory.dedup import (
     find_duplicates,
 )
 from nexus.memory.promotion import PromotionCriteria, PromotionEngine
+from nexus.memory.semantic import EmbeddingModel, SemanticMemoryManager
 
 __all__ = [
     "MemoryStore",
@@ -40,4 +41,6 @@ __all__ = [
     "find_duplicates",
     "PromotionCriteria",
     "PromotionEngine",
+    "EmbeddingModel",
+    "SemanticMemoryManager",
 ]

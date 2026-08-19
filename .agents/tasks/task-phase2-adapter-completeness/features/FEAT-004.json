@@ -1,0 +1,34 @@
+{
+  "id": "FEAT-004",
+  "type": "feat",
+  "description": "Secret Backend with Fernet Persistence: Enhance FernetSecretBackend to persist encrypted secrets to a JSON file on disk with atomic writes, 0o600 permissions, and key rotation support",
+  "status": "completed",
+  "steps": [
+    "In src/nexus/governance/secret_backend.py, add imports for json, os, pathlib.Path, tempfile.",
+    "Modify FernetSecretBackend.__init__() to accept a 'persist_path: str | Path | None = None' parameter. Default to None (in-memory only for backward compatibility). When provided, set self._persist_path = Path(persist_path) and call self._load_from_file() at the end of __init__.",
+    "Add _load_from_file() method that reads the JSON file at self._persist_path (if it exists) and populates self._store with the encrypted bytes (base64-decode the stored values back to bytes).",
+    "Add _save_to_file() method that serializes self._store to JSON (base64-encode the bytes values to strings), writes atomically (tempfile in same directory + os.replace), and sets file permissions to 0o600.",
+    "Modify encrypt() to call self._save_to_file() after storing in self._store (only when persist_path is configured).",
+    "Modify delete() to call self._save_to_file() after removing from self._store (only when persist_path is configured).",
+    "Add rotate_key(new_secret_key: str) method that: (a) decrypts all secrets with current Fernet key, (b) derives new Fernet key from new_secret_key using same PBKDF2 params, (c) re-encrypts all secrets with new key, (d) updates self._fernet to new key, (e) saves to file. Returns number of secrets re-encrypted.",
+    "Ensure backward compatibility: when persist_path is None, behavior is identical to the original in-memory-only implementation.",
+    "Create parent directories for persist_path if they don't exist (Path.mkdir(parents=True, exist_ok=True)).",
+    "Add comprehensive tests in tests/test_secret_backend_persistence.py covering: (a) encrypt + decrypt with persistence (write, re-instantiate, read back), (b) atomic file write (temp + rename pattern), (c) file permissions are 0o600, (d) rotate_key re-encrypts all secrets successfully, (e) backward compat without persist_path (in-memory only), (f) delete persists the removal, (g) missing file on init doesn't crash, (h) parent dirs created automatically."
+  ],
+  "acceptance_criteria": [
+    "FernetSecretBackend with persist_path writes encrypted secrets to JSON file",
+    "Re-instantiating with same secret_key and persist_path can read back previously stored secrets",
+    "File writes are atomic (temp + os.replace)",
+    "File permissions are set to 0o600",
+    "rotate_key() re-encrypts all secrets with new derived key",
+    "Without persist_path, behavior is identical to before (pure in-memory)",
+    "All new tests pass via python3.12 -m pytest tests/test_secret_backend_persistence.py",
+    "All existing tests still pass"
+  ],
+  "verification": [
+    "python3.12 -m pytest tests/test_secret_backend_persistence.py -v --tb=short",
+    "python3.12 -m pytest tests/ --tb=no -q"
+  ],
+  "blocked_reason": null,
+  "findings": "All 20 new tests pass. Full suite now at 1995 tests passing (up from 1975 baseline due to prior features). os.replace mock test required capturing real_replace reference before patching to avoid recursion. Implementation maintains full backward compatibility - existing SecretVault tests unaffected."
+}

@@ -1,0 +1,34 @@
+{
+  "id": "FEAT-003",
+  "type": "feat",
+  "description": "Skills Discovery + Skills Catalog + Semantic Memory (Features 15-16 from the import plan). Implements local skill scanning with frontmatter parsing, remote catalog fetching/caching, and the semantic memory manager wrapping embedding-based retrieval.",
+  "status": "completed",
+  "steps": [
+    "Create src/nexus/tools/skills_discovery.py with: LocalSkill dataclass (id, name, description, provider, scope, path); parse_skill_frontmatter(md) function extracting name+description from YAML frontmatter in SKILL.md (handle block scalar descriptions with | or > indicators); scan_skill_dir(dir, provider, scope) function walking a directory for folders containing SKILL.md; list_local_skills(cwds, bundled_dir) function scanning Claude skills dirs (~/.claude/skills/ + project .claude/skills/), OpenCode plugin dirs (~/.config/opencode/plugin/), Codex plugin dirs (~/.codex/plugins/); deduplicates by provider+name with scope precedence: project > user > bundled. Port logic from munder-difflin/src/main/skills.ts.",
+    "Create src/nexus/tools/skills_catalog.py with: CatalogSkill dataclass (name, description, url, category, owner); parse_catalog_markdown(md) function parsing GitHub README tables into entries (handles ## Category headings, | Name | Description | Link | table rows, extracts GitHub owner from URL); load_catalog(cache_path, force=False) async function fetching from URL with disk cache (24h TTL), stale-on-failure fallback. Port parsing logic from parseCatalogMarkdown in munder-difflin/src/main/skills.ts.",
+    "Create src/nexus/memory/semantic.py with: EmbeddingModel(str, Enum) with values 'minilm', 'embeddinggemma'; SemanticMemoryManager class wrapping embedding-based retrieval backend. Methods: mine_agent(agent_dir, agent_id) indexes an agent's memory into per-agent namespace (subprocess call to mempalace mine), search(query, wing=None, results=5) does meaning-based recall, status() reports availability (checks shutil.which for mempalace binary). Degrades silently to no-op when embedding backend unavailable. Periodic mining with mtime-based skip for unchanged files (lastMined dict tracking mtime). Port from munder-difflin/src/main/memory.ts.",
+    "Create tests/test_skills_discovery.py with tests for: parse_skill_frontmatter with inline and block scalar descriptions, scan_skill_dir with mock directories (tmp_path fixture), list_local_skills deduplication by scope precedence, handling of missing/unreadable directories",
+    "Create tests/test_skills_catalog.py with tests for: parse_catalog_markdown correctly parsing table rows with categories, handling malformed rows, extracting GitHub owner, load_catalog with cache hit (fresh), cache miss (network fetch mock), stale-on-failure fallback",
+    "Create tests/test_semantic_memory.py with tests for: SemanticMemoryManager.status() when mempalace not available (shutil.which returns None), mine_agent with mock subprocess, search with mock subprocess, mtime-based skip logic (unchanged files not re-mined), silent degradation when backend unavailable"
+  ],
+  "acceptance_criteria": [
+    "parse_skill_frontmatter correctly extracts name and description from YAML frontmatter including block scalars",
+    "scan_skill_dir finds folders containing SKILL.md and parses them into LocalSkill entries",
+    "list_local_skills deduplicates with scope precedence (project > user > bundled)",
+    "parse_catalog_markdown parses table rows under category headings into CatalogSkill entries",
+    "load_catalog uses disk cache with 24h TTL and falls back to stale cache on failure",
+    "SemanticMemoryManager degrades to no-op when mempalace CLI not available",
+    "mine_agent uses mtime-based skip for unchanged memory files",
+    "search delegates to subprocess and returns output",
+    "All new tests pass with python3.12 -m pytest",
+    "Full test suite (1651+ tests) still passes"
+  ],
+  "verification": [
+    "python3.12 -m pytest tests/test_skills_discovery.py -v",
+    "python3.12 -m pytest tests/test_skills_catalog.py -v",
+    "python3.12 -m pytest tests/test_semantic_memory.py -v",
+    "python3.12 -m pytest tests/ -x -q (full suite still passes)"
+  ],
+  "blocked_reason": null,
+  "findings": "All 50 new tests pass. Full suite passes (1828 total, up from 1778). Three modules implemented: skills_discovery.py (LocalSkill dataclass, YAML frontmatter parsing with block scalars, filesystem scanning, deduplication with scope precedence), skills_catalog.py (CatalogSkill dataclass, markdown table parsing, async load with httpx and 24h TTL disk cache), semantic.py (EmbeddingModel enum, SemanticMemoryManager with binary detection caching, mtime-based skip logic, subprocess delegation, serialized mining, silent degradation)."
+}

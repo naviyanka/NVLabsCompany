@@ -1,0 +1,29 @@
+{
+  "project_type": "Python FastAPI backend - autonomous AI company operating system",
+  "language": "Python 3.12+",
+  "build_system": "pip with pyproject.toml, setuptools backend",
+  "test_framework": "pytest with pytest-asyncio (asyncio_mode=auto), uses unittest.mock (AsyncMock, MagicMock)",
+  "build_command": "python3.12 -m pip install -e '.[dev]'",
+  "test_command": "python3.12 -m pytest tests/ --tb=short -q",
+  "verification_instructions": "1. Run python3.12 -m pytest tests/ --tb=short -q to confirm all tests pass. 2. Check new test files pass individually.",
+  "snapshot_or_generated_files": null,
+  "setup_instructions": "python3.12 -m pip install -e '.[dev]'",
+  "environment_constraints": "Python 3.12 available at python3.12. Default python3 is 3.9.25 (do NOT use). OPEN_INTERNET network. No actual OpenAI API key available for testing - all tests must mock LLM calls.",
+  "contribution_requirements": "All new files must follow existing patterns: dataclasses/protocols for models, async methods, docstrings on all public methods, type annotations throughout. Tests use mock_db pattern from conftest.py.",
+  "key_patterns": "1. Adapters use httpx for async HTTP. 2. Config via pydantic-settings (nexus.config.settings). 3. Models use SQLModel. 4. Tests mock AsyncSession. 5. BM25 search in nexus.memory.retriever. 6. KnowledgeChunk model has embedding_vector field (list[float] | None in JSON column). 7. Fallback pattern: new LLM class wraps/extends existing heuristic class.",
+  "relevant_files": [
+    "src/nexus/knowledge/rag.py",
+    "src/nexus/orchestration/planner.py",
+    "src/nexus/orchestration/critic.py",
+    "src/nexus/memory/extract.py",
+    "src/nexus/memory/layered.py",
+    "src/nexus/memory/retriever.py",
+    "src/nexus/adapters/openai_adapter.py",
+    "src/nexus/config.py",
+    "src/nexus/models/knowledge.py",
+    "tests/test_knowledge.py",
+    "tests/test_layered_memory.py",
+    "tests/conftest.py"
+  ],
+  "directory_structure": "src/nexus/ - main package with submodules: knowledge/, memory/, orchestration/, adapters/, models/, config.py. tests/ - flat test files (test_*.py). pyproject.toml at root."
+}

@@ -2,9 +2,12 @@
 
 Spawns the Claude Code CLI as an asyncio subprocess, passes tasks as prompts
 with workspace context, captures output, and manages the process lifecycle.
+Supports --output-format stream-json for structured event parsing, session
+resumption via --resume, and workspace isolation via --worktree.
 """
 
 import asyncio
+import json
 import os
 import re
 import signal
@@ -37,8 +40,9 @@ class ClaudeCodeAdapter(BaseAdapter):
 
     Implements the full AgentAdapter Protocol by managing Claude Code
     as an asyncio subprocess. Provides workspace isolation per session,
-    file system monitoring for artifacts, and cost tracking from output
-    parsing.
+    file system monitoring for artifacts, cost tracking from output
+    parsing, stream-json structured output parsing, session resumption,
+    and --worktree isolation.
     """
 
     adapter_type: str = "claude_code"
@@ -88,27 +92,112 @@ class ClaudeCodeAdapter(BaseAdapter):
             "cli_command", "claude"
         )
 
+    def _parse_stream_json(self, output: str) -> list[dict[str, Any]]:
+        """Parse Claude Code's --output-format stream-json output.
+
+        The stream is newline-delimited JSON where each line is a JSON object
+        with a 'type' field. Supported event types include: 'assistant',
+        'tool_use', 'tool_result', 'system', 'result'.
+
+        Blank lines and malformed JSON lines are skipped gracefully.
+
+        Args:
+            output: Raw stdout text from Claude Code with stream-json format.
+
+        Returns:
+            List of parsed event dictionaries.
+        """
+        events: list[dict[str, Any]] = []
+        for line in output.splitlines():
+            stripped = line.strip()
+            if not stripped:
+                continue
+            try:
+                event = json.loads(stripped)
+                if isinstance(event, dict):
+                    events.append(event)
+            except (json.JSONDecodeError, ValueError):
+                # Skip malformed lines gracefully
+                continue
+        return events
+
+    def _extract_session_id(self, events: list[dict[str, Any]]) -> str | None:
+        """Extract session_id from parsed stream-json events.
+
+        Scans 'system' and 'result' type events for a session_id field.
+
+        Args:
+            events: List of parsed event dicts from _parse_stream_json.
+
+        Returns:
+            The session_id string if found, or None.
+        """
+        for event in events:
+            event_type = event.get("type", "")
+            if event_type in ("system", "result"):
+                session_id = event.get("session_id")
+                if session_id:
+                    return session_id
+        return None
+
+    def _extract_result_text(self, events: list[dict[str, Any]]) -> str | None:
+        """Extract final result text from 'result' type events.
+
+        Args:
+            events: List of parsed event dicts from _parse_stream_json.
+
+        Returns:
+            The result text if found, or None.
+        """
+        for event in reversed(events):
+            if event.get("type") == "result":
+                # Try common fields for the result text
+                result = event.get("result") or event.get("text") or event.get("content")
+                if result:
+                    return str(result)
+        return None
+
     async def _do_execute(
         self, session: AgentSession, task_id: uuid.UUID, payload: dict[str, Any]
     ) -> TaskResult:
         """Execute a task by spawning Claude Code CLI as a subprocess.
 
+        Supports structured output via --output-format stream-json, session
+        resumption via --resume, and workspace isolation via --worktree.
+
         Args:
             session: The active agent session.
             task_id: The task identifier.
-            payload: Must contain 'prompt'. Optionally 'timeout', 'args'.
+            payload: Must contain 'prompt'. Optionally 'timeout', 'args',
+                'resume_session_id', 'worktree'.
 
         Returns:
             TaskResult with captured output, artifacts, and parsed costs.
         """
         prompt = payload.get("prompt", "")
-        timeout = payload.get("timeout", session.metadata.get("timeout", DEFAULT_TIMEOUT_SECONDS))
+        timeout = payload.get(
+            "timeout",
+            session.metadata.get("timeout", DEFAULT_TIMEOUT_SECONDS),
+        )
         extra_args = payload.get("args", [])
         workspace = self._workspaces.get(session.session_id, ".")
         cli_command = session.metadata.get("cli_command", "claude")
 
         # Build command
         cmd = [cli_command]
+
+        # Always use stream-json output format for structured parsing
+        cmd.extend(["--output-format", "stream-json"])
+
+        # Add resume support
+        resume_session_id = payload.get("resume_session_id")
+        if resume_session_id:
+            cmd.extend(["--resume", resume_session_id])
+
+        # Add worktree isolation support
+        if payload.get("worktree"):
+            cmd.append("--worktree")
+
         if extra_args:
             cmd.extend(extra_args)
 
@@ -167,12 +256,28 @@ class ClaudeCodeAdapter(BaseAdapter):
             stderr_text = stderr_bytes.decode("utf-8", errors="replace")
             return_code = process.returncode
 
+            # Try to parse stream-json structured output
+            events = self._parse_stream_json(stdout_text)
+            output_text = stdout_text
+
+            if events:
+                # Extract session_id and store in session metadata
+                extracted_session_id = self._extract_session_id(events)
+                if extracted_session_id:
+                    session.metadata["last_session_id"] = extracted_session_id
+
+                # Extract result text from structured events
+                result_text = self._extract_result_text(events)
+                if result_text:
+                    output_text = result_text
+
             # Parse token counts and cost from output
-            input_tokens = self._parse_tokens(stdout_text + stderr_text, TOKEN_PATTERN)
+            combined_text = stdout_text + stderr_text
+            input_tokens = self._parse_tokens(combined_text, TOKEN_PATTERN)
             output_tokens = self._parse_tokens(
-                stdout_text + stderr_text, OUTPUT_TOKEN_PATTERN
+                combined_text, OUTPUT_TOKEN_PATTERN
             )
-            cost_cents = self._parse_cost(stdout_text + stderr_text)
+            cost_cents = self._parse_cost(combined_text)
 
             # Detect new/modified files as artifacts
             post_files = self._snapshot_workspace(workspace)
@@ -196,7 +301,7 @@ class ClaudeCodeAdapter(BaseAdapter):
                 task_id=task_id,
                 agent_id=session.agent_id,
                 success=success,
-                output=stdout_text,
+                output=output_text,
                 error=stderr_text if not success else None,
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
@@ -278,6 +383,9 @@ class ClaudeCodeAdapter(BaseAdapter):
             "cost_parsing",
             "timeout_handling",
             "graceful_termination",
+            "stream_json_parsing",
+            "session_resume",
+            "worktree_isolation",
         ]
 
     def _snapshot_workspace(self, workspace: str) -> dict[str, float]:

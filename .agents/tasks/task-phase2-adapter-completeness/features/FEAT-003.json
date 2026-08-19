@@ -1,0 +1,31 @@
+{
+  "id": "FEAT-003",
+  "type": "feat",
+  "description": "Semantic Memory Embedding Fallback: Enhance SemanticMemoryManager to use LocalEmbeddingProvider as a built-in fallback when mempalace is unavailable, storing embeddings in a JSON file and searching via cosine similarity",
+  "status": "completed",
+  "steps": [
+    "In src/nexus/memory/semantic.py, import LocalEmbeddingProvider and cosine_similarity from src/nexus/knowledge/embeddings.py. Since LocalEmbeddingProvider uses async methods, add an asyncio import.",
+    "Add an __init__ parameter 'embeddings_path: str | None = None' that defaults to None. If provided, it sets the path for the JSON embeddings store file. If None and palace_path is set, default to '<palace_path>/embeddings.json'.",
+    "Add a _load_embeddings() method that reads the JSON embeddings file (if it exists) and returns a dict[str, dict] where keys are content hashes/IDs and values contain {'text': str, 'embedding': list[float], 'agent_id': str, 'timestamp': float}.",
+    "Add a _save_embeddings(data: dict) method that atomically writes the embeddings dict to the JSON file (write to temp file + os.rename).",
+    "Modify mine_agent() to add a fallback path: when mempalace binary is NOT available, read memory.md, split into chunks, compute embeddings via LocalEmbeddingProvider (call async embed with asyncio.run or a helper), and store in the JSON file keyed by agent_id + chunk index.",
+    "Modify search() to add a fallback path: when mempalace binary is NOT available, load embeddings from JSON, compute query embedding, rank by cosine_similarity, return top-N results formatted similarly to mempalace output.",
+    "Add a new public method search_with_embeddings(query: str, wing: str | None = None, results: int = 5) -> dict that ALWAYS uses the in-process embedding provider (regardless of mempalace availability). This gives callers direct access to embedding search.",
+    "Add comprehensive tests in tests/test_semantic_fallback.py covering: (a) mine_agent with mempalace unavailable writes embeddings to JSON, (b) search with mempalace unavailable uses cosine similarity over stored embeddings, (c) search_with_embeddings always uses in-process path, (d) when mempalace IS available, existing behavior unchanged (mock subprocess), (e) atomic write for embeddings file, (f) empty/missing embeddings file handled gracefully."
+  ],
+  "acceptance_criteria": [
+    "When mempalace is unavailable, mine_agent computes embeddings and stores in JSON file",
+    "When mempalace is unavailable, search returns results from the JSON embeddings store via cosine similarity",
+    "search_with_embeddings() always uses in-process LocalEmbeddingProvider",
+    "When mempalace IS available, all existing behavior is unchanged",
+    "Embeddings file is written atomically (temp + rename)",
+    "All new tests pass via python3.12 -m pytest tests/test_semantic_fallback.py",
+    "All existing tests still pass"
+  ],
+  "verification": [
+    "python3.12 -m pytest tests/test_semantic_fallback.py -v --tb=short",
+    "python3.12 -m pytest tests/ --tb=no -q"
+  ],
+  "blocked_reason": null,
+  "findings": "Changed fallback behavior: when no embeddings_path is configured and mempalace is unavailable, returns reason=unavailable for backward compat with existing test_semantic_memory.py. The test_mine_when_unavailable test expects this behavior. Total tests went from 1944 to 1975 (31 new tests added)."
+}

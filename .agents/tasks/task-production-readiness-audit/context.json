@@ -1,0 +1,16 @@
+{
+  "project_type": "Python FastAPI backend for AI agent orchestration platform",
+  "language": "Python 3.12+",
+  "build_system": "pyproject.toml with alembic for migrations, Docker for deployment",
+  "test_framework": "pytest with 63+ test files covering all modules",
+  "build_command": "PYTHONPATH=src python3 -m pytest tests/",
+  "test_command": "PYTHONPATH=src python3 -m pytest tests/",
+  "verification_instructions": "Run pytest across tests/ directory, verify all pass",
+  "snapshot_or_generated_files": null,
+  "setup_instructions": "pip install -e . or PYTHONPATH=src",
+  "environment_constraints": "No pytest available in sandbox, review is code-analysis based",
+  "contribution_requirements": "Follow existing patterns, all modules have comprehensive tests",
+  "key_patterns": "Protocol-based design, BaseAdapter pattern, in-memory state with optional DB persistence, extensive use of dataclasses/pydantic models",
+  "relevant_files": ["docs/PRODUCTION-READINESS-AUDIT.md"],
+  "directory_structure": "src/nexus/{adapters,orchestration,governance,guardrails,memory,knowledge,communication,runtime,evolution,tools,workflows,triggers,templates,models,models_router}/ with tests/ mirror"
+}

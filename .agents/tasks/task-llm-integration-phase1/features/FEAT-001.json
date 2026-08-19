@@ -1,0 +1,25 @@
+{
+  "id": "FEAT-001",
+  "type": "feat",
+  "description": "Add real vector embeddings to the RAG pipeline. Create src/nexus/knowledge/embeddings.py with EmbeddingProvider protocol and implementations (OpenAI, Local, Fallback). Modify rag.py to use embeddings for hybrid search. Add comprehensive tests.",
+  "status": "completed",
+  "steps": [
+    "Create src/nexus/knowledge/embeddings.py with: (a) EmbeddingProvider Protocol with async embed(text) -> list[float] and async embed_batch(texts) -> list[list[float]] methods. (b) OpenAIEmbeddingProvider class using async httpx to call OpenAI text-embedding-3-small endpoint, reads api_key from nexus.config.settings.openai_api_key. (c) LocalEmbeddingProvider using lightweight token-overlap bag-of-words approach producing fixed-dimension vectors. (d) FallbackEmbeddingProvider that wraps LocalEmbeddingProvider as zero-dependency option.",
+    "Modify src/nexus/knowledge/rag.py: (a) Add optional embedding_provider parameter to RAGPipeline.__init__(). (b) In index_chunks(), if embedding_provider is available, compute embeddings for each chunk and store in chunk_record.embedding_vector field (KnowledgeChunk model already has this JSON column). (c) Replace _compute_vector_similarity_stub() with a real _compute_vector_similarity() method that computes cosine similarity between query embedding and stored chunk embedding. (d) In search(), compute query embedding once, then use it for vector scoring on chunks that have embeddings, falling back to token-overlap for chunks without embeddings. Keep BM25 + vector hybrid scoring (0.7 BM25 + 0.3 vector).",
+    "Create tests/test_embeddings.py with tests: (a) Test LocalEmbeddingProvider produces consistent vectors of fixed dimension. (b) Test FallbackEmbeddingProvider works without API key. (c) Test OpenAIEmbeddingProvider with mocked httpx response. (d) Test cosine similarity computation. (e) Test RAGPipeline.index_chunks stores embeddings when provider available. (f) Test RAGPipeline.search uses real vector similarity when embeddings exist. (g) Test fallback to token overlap when no embeddings stored."
+  ],
+  "acceptance_criteria": [
+    "src/nexus/knowledge/embeddings.py exists with EmbeddingProvider protocol and 3 implementations",
+    "RAGPipeline accepts optional embedding_provider and uses it for indexing and search",
+    "Cosine similarity is correctly computed between embedding vectors",
+    "All existing tests in tests/test_knowledge.py still pass (no breaking changes)",
+    "New tests in tests/test_embeddings.py pass with mocked/fallback providers (no API key needed)",
+    "Running python3.12 -m pytest tests/test_embeddings.py tests/test_knowledge.py passes"
+  ],
+  "verification": [
+    "python3.12 -m pytest tests/test_embeddings.py tests/test_knowledge.py --tb=short -q",
+    "python3.12 -m pytest tests/ --tb=short -q"
+  ],
+  "blocked_reason": null,
+  "findings": "All 1861 tests pass including 33 new embedding tests. The RAGPipeline is backward compatible - works with or without embedding_provider parameter. Existing tests in test_knowledge.py pass unchanged."
+}
