@@ -1,0 +1,32 @@
+{
+  "id": "FEAT-001",
+  "type": "feat",
+  "description": "Real-time Cost Tracking (Per-Model Pricing) and Agent Provider Presets - standalone modules with no dependencies on other Sprint 5 features",
+  "status": "completed",
+  "steps": [
+    "Create src/nexus/models_router/pricing.py porting logic from /projects/sandbox/munder-difflin/src/main/pricing.ts. Include: ModelPrice frozen dataclass (input_per_m, output_per_m, cache_read_per_m, cache_write_per_m), price constants for Anthropic (OPUS/SONNET/HAIKU), OpenAI (GPT4O/GPT4O_MINI/O1), and Google Gemini families. Include normalize_model() that strips variant suffixes like [1m], price_for() that resolves model family by keyword matching with Sonnet fallback, TokenSplit dataclass, and estimate_cost_usd() function.",
+    "Update src/nexus/models_router/__init__.py to export the new pricing module classes (ModelPrice, TokenSplit, normalize_model, price_for, estimate_cost_usd).",
+    "Create tests/test_pricing.py with comprehensive tests: all model families resolve correctly, unknown/None falls back to Sonnet/DEFAULT_PRICE, normalize_model strips variant suffixes, estimate_cost_usd computes correct values for known token splits, edge cases (zero tokens, empty string model).",
+    "Create src/nexus/adapters/provider_presets.py porting from /projects/sandbox/munder-difflin/src/shared/agentProvider.ts. Include: AgentProviderID str enum (claude/codex/grok/kimi/antigravity/qwen/opencode/crush/pi/copilot/custom), AgentProviderPreset frozen dataclass with fields (id, label, default_command, auto_mode_flag, supports_model, model_flag, hive_aware, can_receive_inbox, hook_bridge, recommended_orchestrator_model, resume_flag, install_command, docs_url, non_interactive_env dict), PROVIDER_PRESETS dict mapping all 11 providers, get_preset() with fallback to Claude.",
+    "Update src/nexus/adapters/__init__.py to export AgentProviderID, AgentProviderPreset, get_preset, PROVIDER_PRESETS.",
+    "Create tests/test_provider_presets.py with tests: all 11 providers exist in PROVIDER_PRESETS, each preset has required fields (id, label, default_command, auto_mode_flag), get_preset returns correct preset for each ID, get_preset with unknown falls back to Claude, key metadata values verified for claude/codex/antigravity presets."
+  ],
+  "acceptance_criteria": [
+    "python3.12 -m pytest tests/test_pricing.py passes with all tests green",
+    "python3.12 -m pytest tests/test_provider_presets.py passes with all tests green",
+    "ModelPrice dataclass contains input_per_m, output_per_m, cache_read_per_m, cache_write_per_m fields",
+    "Price tables cover Anthropic (Opus/Sonnet/Haiku), OpenAI (GPT-4o/mini/o1), and Google Gemini",
+    "normalize_model strips variant suffixes like [1m]",
+    "price_for resolves model family with keyword matching and Sonnet fallback",
+    "estimate_cost_usd correctly computes cost from TokenSplit",
+    "All 11 provider presets defined with full metadata",
+    "get_preset() lookup works with fallback to Claude for unknown IDs",
+    "All existing 1230 tests still pass"
+  ],
+  "verification": [
+    "python3.12 -m pytest tests/test_pricing.py tests/test_provider_presets.py -v",
+    "python3.12 -m pytest tests/ --tb=short -q"
+  ],
+  "blocked_reason": null,
+  "findings": "All 71 new tests pass. Full suite now at 1301 tests (up from 1230 baseline). No issues encountered. Used unused import field in pricing.py dataclass removed during review. Gemini pricing set to 1.25/5/0.315/0 as reasonable defaults since the TS source didn't include Gemini explicitly."
+}

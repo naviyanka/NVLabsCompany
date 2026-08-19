@@ -19,6 +19,16 @@ from nexus.governance.retention import RetentionManager
 from nexus.governance.health import HealthMonitor
 from nexus.governance.config_governance import ConfigGovernance
 from nexus.governance.decision_queue import DecisionQueueManager, DecisionQueueItem, RetentionPolicy
+from nexus.governance.breaker_types import (
+    AgentUsageSample,
+    BreakerAction,
+    BreakerConfig,
+    BreakerDecision,
+    BreakerInput,
+    BreakerLevel,
+    BreakerState,
+)
+from nexus.governance.circuit_breaker_advanced import AdvancedCircuitBreaker
 
 __all__ = [
     "ApprovalEngine",
@@ -46,4 +56,12 @@ __all__ = [
     "DecisionQueueManager",
     "DecisionQueueItem",
     "RetentionPolicy",
+    "AgentUsageSample",
+    "BreakerAction",
+    "BreakerConfig",
+    "BreakerDecision",
+    "BreakerInput",
+    "BreakerLevel",
+    "BreakerState",
+    "AdvancedCircuitBreaker",
 ]

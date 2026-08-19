@@ -1,0 +1,30 @@
+{
+  "id": "FEAT-002",
+  "type": "feat",
+  "description": "Advanced Circuit Breaker with velocity/loop/cost detection - multi-signal circuit breaker with escalation ladder, ported from /projects/sandbox/munder-difflin/src/main/breaker.ts",
+  "status": "completed",
+  "steps": [
+    "Create src/nexus/governance/breaker_types.py with: BreakerLevel IntEnum (HEALTHY=0, STEERING=1, CONSTRAINED=2, STOPPED=3), BreakerAction str Enum (NONE/STEER/CONSTRAIN/STOP), BreakerState dataclass (agent_id, level, reason, ts), BreakerDecision dataclass (state, action, changed bool), BreakerInput dataclass (agent_id, sample optional AgentUsageSample, progressing bool), AgentUsageSample dataclass (input, output, cache_read, cache_creation, usd, ts), BreakerConfig dataclass (enabled bool default True, hard_stop bool default False, repeated_tool_limit int default 8, error_storm_limit int default 5, token_velocity_per_min int default 60000, cost_cap_usd optional float, cost_cap_tokens optional int, agent_token_caps optional dict[str,int]).",
+    "Create src/nexus/governance/circuit_breaker_advanced.py with AdvancedCircuitBreaker class implementing: __init__(config_getter callable returning BreakerConfig), internal _AgentBreakerState tracking (level, reason, last_sample, repeat_key, repeat_count, error_count, compacting_until, last_distinct_tool_at, no_progress_beats). Methods: tick(inputs list[BreakerInput], now_ms float) -> list[BreakerDecision] - evaluates all agents per beat with escalation ladder (one level up per trip, one level down per healthy beat, ceiling at constrained unless hard_stop); record_tool_use(agent_id, tool_name, tool_input) - tracks tool calls for loop detection using truncated key matching; record_error(agent_id) - tracks consecutive errors; record_compact_start(agent_id) / record_compact_end(agent_id) - exempts velocity trips during compaction with 5min grace + 90s post-compact trailing grace; forget(agent_id) - drops state; level_for(agent_id) -> BreakerLevel. Private _evaluate method implementing 6 trip conditions in order: (1) repeated tool calls >= limit, (2) error storm >= limit, (3) per-agent token cap, (4) floor-wide cost cap (blame top spender), (5) token velocity spike (delta output/delta time > threshold, skipped during compaction), (6) no-progress detection (burning tokens without coordinating, debounced 2 consecutive beats).",
+    "Update src/nexus/governance/__init__.py to export BreakerLevel, BreakerAction, BreakerState, BreakerDecision, BreakerInput, BreakerConfig, AdvancedCircuitBreaker.",
+    "Create tests/test_circuit_breaker_advanced.py with comprehensive tests: (a) repeated tool call loop detection triggers at limit, (b) error storm triggers at limit, (c) per-agent token cap triggers when exceeded, (d) floor-wide cost cap blames top spender only, (e) token velocity spike triggers when output/min exceeds threshold, (f) no-progress detection with 2-beat debounce, (g) escalation ladder goes one level per tick (never jumps), (h) de-escalation goes one level per healthy tick, (i) compaction exemption prevents velocity false positives, (j) forget() removes agent state, (k) disabled breaker reports all healthy, (l) hard_stop=True allows escalation to STOPPED level."
+  ],
+  "acceptance_criteria": [
+    "python3.12 -m pytest tests/test_circuit_breaker_advanced.py passes with all tests green",
+    "Four-level escalation ladder (HEALTHY/STEERING/CONSTRAINED/STOPPED) implemented",
+    "Six distinct trip conditions each testable in isolation",
+    "Escalation is one level per tick, never jumps",
+    "De-escalation is one level per healthy tick",
+    "Compaction exemption window prevents velocity false positives",
+    "No-progress debouncing requires 2 consecutive beats before triggering",
+    "Floor-wide cost cap blames only the top single spender",
+    "forget() drops all state for an agent",
+    "All existing 1230 tests still pass"
+  ],
+  "verification": [
+    "python3.12 -m pytest tests/test_circuit_breaker_advanced.py -v",
+    "python3.12 -m pytest tests/ --tb=short -q"
+  ],
+  "blocked_reason": null,
+  "findings": "All 37 new tests pass. Full suite now at 1338 tests (up from 1301 baseline). Implementation faithfully ports all logic from breaker.ts including the 6 trip conditions, escalation ladder, compaction grace windows, and no-progress debouncing. The _tool_key method uses a recursive truncation approach for string values > 250 chars, matching the TypeScript replacer pattern."
+}
