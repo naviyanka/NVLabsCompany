@@ -1,0 +1,27 @@
+{
+  "id": "FEAT-001",
+  "type": "feat",
+  "description": "Budget Incidents + Auto-Pause: Enhance the existing BudgetEnforcer with incident tracking, auto-pause on hard_stop, cancel-work-for-scope hook, lifetime window type, and multi-metric support.",
+  "status": "in_progress",
+  "steps": [
+    "1. Create src/nexus/governance/budget_incident.py with BudgetIncident dataclass: id, scope_type, scope_id, agent_id, metric (cost_cents/tokens/api_calls), threshold_amount, actual_amount, overage_amount, was_agent_paused, created_at. Also a BudgetIncidentLog class to store/retrieve incidents.",
+    "2. Enhance src/nexus/governance/budget_enforcer.py: Add WindowKind enum (monthly, weekly, daily, per_execution, lifetime). Add multi-metric tracking dict (scope_key -> {cost_cents: int, tokens: int, api_calls: int}). Modify set_budget() to accept metric and window_kind params. Modify check_can_spend() and on_cost_event() to track all three metric types. Add hard_stop behavior: when DENIED and hard_stop_enabled, create a BudgetIncident, auto-pause the agent (via callback/hook), and call cancel_work_for_scope().",
+    "3. Add auto_pause_callback and cancel_work_callback hooks to BudgetEnforcer.__init__(). When hard_stop triggers, invoke auto_pause_callback(agent_id, incident) and cancel_work_callback(scope_type, scope_id).",
+    "4. Add lifetime window support: track cumulative spending across all time (not just monthly) when window_kind is 'lifetime'.",
+    "5. Create tests/test_budget_incidents.py with comprehensive tests: test incident creation on hard_stop, test auto-pause callback invoked, test cancel_work_callback invoked, test multi-metric tracking (cost + tokens + api_calls), test lifetime window type, test incident log retrieval."
+  ],
+  "acceptance_criteria": [
+    "BudgetIncident dataclass exists with all required fields",
+    "BudgetEnforcer supports multi-metric tracking (cost_cents, tokens, api_calls)",
+    "BudgetEnforcer supports lifetime window_kind in addition to existing types",
+    "When hard_stop is triggered, a BudgetIncident is created and auto_pause_callback is invoked",
+    "cancel_work_for_scope hook is called when budget is breached",
+    "All existing budget tests still pass (python3.12 -m pytest tests/test_budget.py -q)",
+    "New tests in tests/test_budget_incidents.py all pass"
+  ],
+  "verification": [
+    "python3.12 -m pytest tests/test_budget.py tests/test_budget_incidents.py -x -q"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}
