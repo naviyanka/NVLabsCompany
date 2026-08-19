@@ -9,7 +9,7 @@ import asyncio
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
@@ -194,8 +194,6 @@ class KnowledgePlaza:
             if expiry > now and holder_id != agent_id:
                 return False
             # Expired or same agent - allow re-lock
-
-        from datetime import timedelta
 
         expiry = now + timedelta(seconds=duration_seconds)
         self._page_locks[page_id] = (agent_id, expiry)

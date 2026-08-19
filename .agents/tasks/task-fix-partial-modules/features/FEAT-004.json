@@ -2,7 +2,7 @@
   "id": "FEAT-004",
   "type": "feat",
   "description": "Add real-time collaboration features to Knowledge Plaza (subscribe/notify, locking, change feed)",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "In src/nexus/knowledge/plaza.py, add PageChangeEvent dataclass with fields: page_id, company_id, change_type (str: 'created'|'updated'|'deleted'), agent_id, timestamp, metadata dict",
     "Add _subscribers dict[uuid.UUID, list[Callable]] to KnowledgePlaza.__init__ to track per-company subscriber callbacks",
@@ -30,5 +30,5 @@
     "pytest tests/test_knowledge.py -v"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "All 29 new tests and 25 existing tests pass. Ruff auto-fix applied UP017 (datetime.UTC alias) and UP045 (X | None syntax) to comply with project lint rules. The timedelta import was moved inside lock_page to a module-level import by ruff. No issues encountered."
 }
