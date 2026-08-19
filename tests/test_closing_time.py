@@ -557,6 +557,77 @@ class TestConstants:
         assert isinstance(COMPLETE_RE, re.Pattern)
 
 
+# ── Test: tick() Timeout Enforcement ─────────────────────────────────────────
+
+
+class TestTick:
+    """Tests for the tick() timeout enforcement method."""
+
+    def test_tick_records_start_time_on_first_call(self):
+        """First tick() call records the start timestamp without emitting timeout."""
+        ctrl, _, _, _ = _make_controller()
+        ctrl.start()
+        initial_events = len(ctrl.events)
+
+        ctrl.tick(1000.0)
+
+        assert ctrl.is_active() is True
+        # No new events beyond what start() already emitted
+        assert len(ctrl.events) == initial_events
+
+    def test_tick_does_not_timeout_before_threshold(self):
+        """tick() does not emit TIMEOUT before TIMEOUT_SECONDS has elapsed."""
+        ctrl, _, _, _ = _make_controller()
+        ctrl.start()
+
+        ctrl.tick(1000.0)
+        ctrl.tick(1000.0 + TIMEOUT_SECONDS - 1)
+
+        assert ctrl.is_active() is True
+        timeout_events = [
+            e for e in ctrl.events if e.phase == ClosingTimePhase.TIMEOUT
+        ]
+        assert len(timeout_events) == 0
+
+    def test_tick_emits_timeout_after_threshold(self):
+        """tick() emits TIMEOUT and deactivates once TIMEOUT_SECONDS elapses."""
+        ctrl, _, concluded, _ = _make_controller()
+        ctrl.start()
+
+        ctrl.tick(1000.0)
+        ctrl.tick(1000.0 + TIMEOUT_SECONDS)
+
+        assert ctrl.is_active() is False
+        timeout_events = [
+            e for e in ctrl.events if e.phase == ClosingTimePhase.TIMEOUT
+        ]
+        assert len(timeout_events) == 1
+
+    def test_tick_noop_when_not_active(self):
+        """tick() is a no-op when the protocol is not active."""
+        ctrl, _, _, _ = _make_controller()
+        # Not started
+        ctrl.tick(1000.0)
+        assert len(ctrl.events) == 0
+
+    def test_tick_noop_after_completion(self):
+        """tick() is a no-op after the protocol has already completed."""
+        ctrl, _, _, _ = _make_controller()
+        ctrl.start()
+        ctrl.tick(1000.0)
+
+        # Complete the protocol normally
+        ctrl.on_routed("worker-1", "CLOSING-TIME-ACK", ["god"])
+        ctrl.on_routed("worker-2", "CLOSING-TIME-ACK", ["god"])
+        ctrl.on_routed("god", "CLOSING-TIME-COMPLETE", ["human"])
+        assert ctrl.is_active() is False
+
+        # tick() after completion should do nothing
+        events_before = len(ctrl.events)
+        ctrl.tick(1000.0 + TIMEOUT_SECONDS + 100)
+        assert len(ctrl.events) == events_before
+
+
 # ── Test: ClosingTimeEvent Dataclass ─────────────────────────────────────────
 
 

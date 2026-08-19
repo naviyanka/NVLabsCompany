@@ -8,8 +8,10 @@ from __future__ import annotations
 
 import json
 import mimetypes
+import os
 import re
 import shutil
+import tempfile
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
@@ -62,13 +64,28 @@ class KnowledgeManager:
             return json.load(f)
 
     def _save_index(self, entries: list[dict]) -> None:
-        """Persist the metadata index to index.json.
+        """Persist the metadata index to index.json atomically.
+
+        Uses write-to-temp + os.replace for crash-safe writes. If the process
+        crashes mid-write, the previous index.json remains intact.
 
         Args:
             entries: List of metadata dicts to write.
         """
-        with open(self._index_path, "w", encoding="utf-8") as f:
-            json.dump(entries, f, indent=2)
+        fd, tmp_path = tempfile.mkstemp(
+            dir=str(self._root_path), suffix=".tmp", prefix=".index_"
+        )
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(entries, f, indent=2)
+            os.replace(tmp_path, str(self._index_path))
+        except BaseException:
+            # Clean up the temp file if os.replace didn't run
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
 
     def _chunk_content(self, content: str, chunk_size: int = 500) -> list[str]:
         """Split content into paragraph-based chunks respecting a size limit.

@@ -36,6 +36,9 @@ class ReflectResult:
         reason: Why (skipped/aborted/done), for logging and UI.
         old_bytes: Original file size in bytes, or None.
         new_bytes: New file size in bytes after condensation, or None.
+        rebuilt_text: The rebuilt memory file text on success, or None.
+            Populated only when condensed=True so the caller can persist
+            the result without re-running the summarizer.
     """
 
     id: str
@@ -43,6 +46,7 @@ class ReflectResult:
     reason: str
     old_bytes: int | None = None
     new_bytes: int | None = None
+    rebuilt_text: str | None = None
 
 
 @dataclass

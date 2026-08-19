@@ -66,11 +66,14 @@ COMPLETE_RE: re.Pattern[str] = re.compile(
 )
 
 # How long to wait before surfacing a timeout. Compaction or a long tool call
-# can hold an ACK for several minutes.
+# can hold an ACK for several minutes. The runtime must call tick(now) periodically
+# for this timeout to be enforced.
 TIMEOUT_SECONDS: float = 360
 
-# Grace period after COMPLETE before tearing down, so final writes land on
-# disk and the floor visibly concludes.
+# Grace period (seconds) after COMPLETE before the runtime should tear down.
+# This is advisory: the integrating runtime is responsible for waiting this
+# duration after on_concluded fires before killing processes, so final disk
+# writes can land. The controller itself does not enforce the delay.
 TEARDOWN_GRACE_SECONDS: float = 2.5
 
 
@@ -113,6 +116,7 @@ class ClosingTimeController:
         self._god_id = god_id
 
         self._active: bool = False
+        self._started_at: float | None = None
         self._workers: set[str] = set()
         self._acked: set[str] = set()
         self._events: list[ClosingTimeEvent] = []
@@ -166,6 +170,7 @@ class ClosingTimeController:
         self._workers = {agent_id for agent_id in live_set if agent_id != self._god_id}
         self._acked = set()
         self._active = True
+        self._started_at = None  # Set by tick() on first call, or by caller
 
         # Send shutdown brief to god.
         worker_names = ", ".join(sorted(self._workers)) or "(none)"
@@ -264,6 +269,30 @@ class ClosingTimeController:
             self._emit_event(ClosingTimePhase.COMPLETE)
             self._active = False
             self._on_concluded()
+
+    def tick(self, now: float) -> None:
+        """Check whether the protocol has exceeded TIMEOUT_SECONDS.
+
+        The runtime event loop should call this method periodically (e.g. every
+        second) with the current monotonic time. On the first call after start(),
+        the timestamp is recorded as the protocol start time. If elapsed time
+        exceeds TIMEOUT_SECONDS, the controller emits a TIMEOUT phase event and
+        deactivates the protocol.
+
+        Args:
+            now: Current monotonic timestamp (e.g. from time.monotonic()).
+        """
+        if not self._active:
+            return
+
+        if self._started_at is None:
+            self._started_at = now
+            return
+
+        elapsed = now - self._started_at
+        if elapsed >= TIMEOUT_SECONDS:
+            self._active = False
+            self._emit_event(ClosingTimePhase.TIMEOUT)
 
     def cancel(self) -> None:
         """Cancel the closing time protocol.

@@ -567,6 +567,34 @@ class TestCondensePipeline:
         assert result.new_bytes is not None
         assert result.new_bytes < result.old_bytes
 
+    def test_successful_condense_returns_rebuilt_text(self):
+        """Full pipeline returns rebuilt_text on success."""
+        reflector = MemoryReflector(ReflectSettings(recent_keep=2))
+        text = _make_large_file(section_count=10)
+        result = reflector.condense("agent-1", text, _dummy_summarizer)
+        assert result.condensed is True
+        assert result.rebuilt_text is not None
+        assert len(result.rebuilt_text) > 0
+        # Rebuilt text should be a valid 3-region file
+        assert PINNED_HEADING in result.rebuilt_text
+        assert CONDENSED_HEADING in result.rebuilt_text
+        assert RECENT_HEADING in result.rebuilt_text
+        # Byte length should match new_bytes
+        assert len(result.rebuilt_text.encode("utf-8")) == result.new_bytes
+
+    def test_nothing_to_evict_has_no_rebuilt_text(self):
+        """Returns rebuilt_text=None when nothing to evict."""
+        reflector = MemoryReflector(ReflectSettings(recent_keep=5))
+        text = _make_3region_file(
+            recent_sections=[
+                ("## Task: one", "Body one."),
+                ("## Task: two", "Body two."),
+            ]
+        )
+        result = reflector.condense("agent-1", text, _dummy_summarizer)
+        assert result.condensed is False
+        assert result.rebuilt_text is None
+
     def test_condense_with_hoist(self):
         """Pipeline correctly hoists new pinned lines from summarizer."""
         reflector = MemoryReflector(ReflectSettings(recent_keep=2))

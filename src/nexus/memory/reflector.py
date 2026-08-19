@@ -416,4 +416,5 @@ class MemoryReflector:
             reason="condensed",
             old_bytes=old_bytes,
             new_bytes=new_bytes,
+            rebuilt_text=rebuilt,
         )

@@ -92,7 +92,7 @@ class WebhookServer:
         """
         next_map: dict[str, WebhookEndpoint] = {}
         for ep in endpoints:
-            if ep.id and ep.secret:
+            if ep.id and ep.secret and ep.enabled:
                 next_map[ep.id] = ep
         self._endpoints = next_map
         # Drop rate-limit state for ids we no longer serve; keep global and unknown
@@ -160,6 +160,9 @@ class WebhookServer:
         validate body size -> parse JSON -> validate schema -> extract inbound ->
         call on_message.
 
+        If endpoint_id is empty or None, it is mapped to LEGACY_ENDPOINT_ID for
+        backwards-compatible bare-POST handling.
+
         Args:
             endpoint_id: The endpoint identifier from the request path.
             headers: Request headers (expects 'x-md-webhook-secret').
@@ -168,6 +171,10 @@ class WebhookServer:
         Returns:
             Dict with 'status_code' and 'body' keys representing the HTTP response.
         """
+        # Map empty/None endpoint_id to the legacy endpoint for bare-POST compat.
+        if not endpoint_id:
+            endpoint_id = LEGACY_ENDPOINT_ID
+
         # Global rate limit first - cheapest rejection
         if not self.allow_request("", RATE_LIMIT):
             return {"status_code": 429, "body": {"ok": False, "error": "rate limited"}}

@@ -527,6 +527,38 @@ class TestNoEnumeration:
         assert server.allow_request(UNKNOWN_BUCKET, PER_ENDPOINT_RATE_LIMIT) is False
 
 
+# ── Test: Legacy Endpoint Routing ────────────────────────────────────────────
+
+
+class TestLegacyEndpointRouting:
+    """Tests for LEGACY_ENDPOINT_ID bare-POST routing."""
+
+    def test_empty_endpoint_id_maps_to_legacy(self):
+        """Empty endpoint_id is mapped to LEGACY_ENDPOINT_ID."""
+        legacy_ep = _make_endpoint(ep_id=LEGACY_ENDPOINT_ID, secret="legacy-secret")
+        server = _make_server(endpoints=[legacy_ep])
+        result = _post(server, endpoint_id="", secret="legacy-secret")
+        assert result["status_code"] == 200
+
+    def test_none_like_endpoint_id_maps_to_legacy(self):
+        """Falsy endpoint_id routes to the legacy endpoint."""
+        legacy_ep = _make_endpoint(ep_id=LEGACY_ENDPOINT_ID, secret="legacy-secret")
+        server = _make_server(endpoints=[legacy_ep])
+        # Passing empty string simulates bare POST /
+        result = server.handle_post(
+            "",
+            {"x-md-webhook-secret": "legacy-secret"},
+            json.dumps({"message": "hello"}).encode(),
+        )
+        assert result["status_code"] == 200
+
+    def test_no_legacy_endpoint_configured_returns_401(self):
+        """If no legacy endpoint is configured, bare POST returns 401."""
+        server = _make_server()  # only has "test-ep"
+        result = _post(server, endpoint_id="", secret="anything")
+        assert result["status_code"] == 401
+
+
 # ── Test: set_endpoints ──────────────────────────────────────────────────────
 
 
@@ -543,6 +575,22 @@ class TestSetEndpoints:
         assert result["status_code"] == 401
         # New endpoint should work
         result = _post(server, endpoint_id="new-ep", secret="new-secret")
+        assert result["status_code"] == 200
+
+    def test_set_endpoints_filters_disabled(self):
+        """set_endpoints should exclude endpoints with enabled=False."""
+        disabled_ep = _make_endpoint(
+            ep_id="disabled-ep", secret="my-secret", enabled=False
+        )
+        enabled_ep = _make_endpoint(
+            ep_id="enabled-ep", secret="my-secret", enabled=True
+        )
+        server = _make_server(endpoints=[disabled_ep, enabled_ep])
+        # Disabled endpoint should not be reachable
+        result = _post(server, endpoint_id="disabled-ep", secret="my-secret")
+        assert result["status_code"] == 401
+        # Enabled endpoint should work
+        result = _post(server, endpoint_id="enabled-ep", secret="my-secret")
         assert result["status_code"] == 200
 
     def test_set_endpoints_clears_old_rate_limits(self):
