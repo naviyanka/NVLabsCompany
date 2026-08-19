@@ -117,6 +117,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             exc,
         )
 
+    # Initialize Plugin SDK (empty registry - plugins are not auto-loaded)
+    from nexus.plugins import PluginRegistry, HookManager
+
+    hook_manager = HookManager()
+    plugin_registry = PluginRegistry(hook_manager=hook_manager)
+    app.state.hook_manager = hook_manager
+    app.state.plugin_registry = plugin_registry
+    _logger.info("Plugin SDK initialized (registry empty, awaiting plugin loads)")
+
     # Run configuration validation (non-blocking, logs warnings only)
     from nexus.config_validator import validate_config
     await validate_config()
