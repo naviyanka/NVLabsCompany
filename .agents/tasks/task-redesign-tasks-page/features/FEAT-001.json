@@ -37,5 +37,5 @@
     "Confirm zero errors in TypeScript compilation and Vite build"
   ],
   "blocked_reason": null,
-  "findings": "Build passes with zero TypeScript errors. The Tasks.tsx file was completely rewritten with static mock data. All old API imports were removed. Used recharts PieChart (donut) and BarChart (horizontal) for charts, lucide-react for all icons, Card component from @/components/common/Card, and dark theme Tailwind tokens throughout."
+  "findings": "Build passes with zero TypeScript errors. The Tasks.tsx file was completely rewritten with static mock data. All old API imports were removed. Used recharts PieChart (donut) and BarChart (horizontal) for charts, lucide-react for all icons, Card component from @/components/common/Card, and dark theme Tailwind tokens throughout. Post-review fixes applied: (1) sidebar metadata status color changed from green to blue to match page convention, (2) leaderboard bar normalization changed from hardcoded 96 (Others aggregate) to Math.max of individual agents (86) for proportional display. (3) TaskList component is dead code (not imported anywhere) but left as-is since it is a separate file and does not cause build issues. Badge component is still used in many other files."
 }
