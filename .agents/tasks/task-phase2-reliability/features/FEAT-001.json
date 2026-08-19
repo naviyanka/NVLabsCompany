@@ -2,7 +2,7 @@
   "id": "FEAT-001",
   "type": "feat",
   "description": "Redis-backed State Backend for Horizontal Scaling - Create src/nexus/governance/redis_state.py with a RedisStateBackend protocol and implementation. Also create Container Isolation for Evolution Sandbox - add DockerSandbox to isolated_sandbox.py. Also persist L1 ring buffer in LayeredMemoryStore. Also create LLM Circuit Breaker. Also create Degradation Dashboard Endpoint. Also add pluggable backend to HiveManager.",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "TASK 1 - Redis State: Create src/nexus/governance/redis_state.py with a StateBackend Protocol defining get/set/delete/list_keys methods (all async). Implement RedisStateBackend using redis.asyncio (following the pattern in redis_rate_limiter.py). Implement FileStateBackend wrapping the existing atomic JSON file pattern. Include a factory function that returns Redis backend if available, file backend otherwise. Add tests in tests/test_redis_state.py mocking redis.",
     "TASK 2 - HiveManager Pluggable Backend: Add a HiveBackend Protocol to src/nexus/communication/hive_manager.py (or a new file hive_backend.py) with methods: send_message, deliver_to_inbox, get_inbox, mark_processed, get_registry, register_agent, unregister_agent, update_status. Create FileHiveBackend extracting current HiveManager logic. Create RedisHiveBackend using Redis Streams. Modify HiveManager to accept an optional backend parameter (defaults to FileHiveBackend for backward compat). Add tests in tests/test_hive_backend.py.",
@@ -27,5 +27,5 @@
     "python3.12 -m pytest tests/test_redis_state.py tests/test_hive_backend.py tests/test_docker_sandbox.py tests/test_layered_memory_l1.py tests/test_llm_circuit_breaker.py tests/test_degradation_endpoint.py -v"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "All 6 tasks implemented and verified. Updated test_persistence.py test_l1_not_persisted to test_l1_is_persisted since L1 is now persisted (Task 4). Full suite: 2424 tests passing (89 new + existing). The existing test was asserting L1 was ephemeral, which directly contradicts the Task 4 requirement."
 }
