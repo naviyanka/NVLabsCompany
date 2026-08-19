@@ -1,0 +1,47 @@
+{
+  "id": "FEAT-002",
+  "type": "feat",
+  "description": "Completely rebuild the Office page with a Three.js-based isometric 3D office floor plan using React Three Fiber. Replace the existing 2D SVG-based OfficeCanvas with a full 3D scene featuring named zones, desks with glowing computer screens, animated AI agent characters, manager task delegation animations, report-sharing animations, click-to-select agent detail panel, stats bar, and agents-at-a-glance section.",
+  "status": "pending",
+  "steps": [
+    "Create new 3D office components directory at dashboard/src/components/office3d/",
+    "Create dashboard/src/components/office3d/OfficeScene.tsx - the main React Three Fiber Canvas component with isometric camera (OrthographicCamera angled at ~35deg/45deg for isometric look), ambient and point lighting for atmospheric dark effect",
+    "Create dashboard/src/components/office3d/ZoneFloor.tsx - renders 9 named zone areas as colored floor planes: Planning Zone, Development Zone, QA & Security Zone, Data Zone, Meeting Area, Automation Zone, Research Zone, Operations Zone, Support Zone. Each zone has a subtle glow border and floating text label using drei Html or Text component",
+    "Create dashboard/src/components/office3d/Desk.tsx - a 3D desk object (box geometry table + thin screen with emissive glow). Each zone has 2-4 desks. Screen shows animated typing effect (flickering emissive material)",
+    "Create dashboard/src/components/office3d/AgentCharacter.tsx - 3D agent avatar (capsule/sphere body with colored skull/robot head glow matching status: green=Working, yellow=Idle, purple=Review, grey=Offline). Includes idle bobbing animation, typing animation when working, and walking animation between zones",
+    "Create dashboard/src/components/office3d/ManagerCabin.tsx - a distinct area (larger desk, glass partition effect) where the manager agent sits. Includes visual delegation animation: envelope/document objects flying from manager to other agents",
+    "Create dashboard/src/components/office3d/ReportAnimation.tsx - animated envelope/document mesh that flies between agents when reports are being shared (uses useFrame for smooth path animation)",
+    "Create dashboard/src/components/office3d/DelegationAnimation.tsx - glowing particle trail from manager to agents representing task assignment",
+    "Create dashboard/src/components/office3d/ZoneLabel.tsx - floating 3D text labels for each zone that face the camera (using drei Billboard or Html)",
+    "Create dashboard/src/components/office3d/Lighting.tsx - atmospheric lighting setup: dark ambient with colored point lights per zone for mood, volumetric-looking spot lights on active zones",
+    "Create dashboard/src/config/office3dLayout.ts - zone positions in 3D space, desk positions, agent spawn positions, zone colors matching reference (teal, green, amber, blue, pink, purple, orange, grey)",
+    "Create dashboard/src/components/office3d/AgentDetailSidebar.tsx - React overlay component (right sidebar) that shows when an agent is clicked: agent name, role, model, current task with progress bar, performance metrics (CPU/MEM sparklines), skills tags, quick actions. Dark themed matching the app (bg-dark-surface, border-white/[0.08])",
+    "Create dashboard/src/components/office3d/StatsBar.tsx - top stats bar overlay showing Total Agents, Active, Idle, Review, Offline counts with colored indicators. Includes view mode selector dropdown and interaction hint text",
+    "Create dashboard/src/components/office3d/AgentsAtGlance.tsx - bottom section overlay showing cards for each agent with: name, role, model, mini CPU/MEM stats, status indicator, sparkline chart using recharts",
+    "Create dashboard/src/components/office3d/CameraControls.tsx - drei OrbitControls configured for isometric pan/zoom with limits, or custom controls that allow drag-to-pan and scroll-to-zoom. Smooth camera transitions when clicking zones/agents",
+    "Rewrite dashboard/src/pages/Office.tsx to compose the new 3D scene: Canvas with OfficeScene, overlay StatsBar at top, AgentDetailSidebar on right (conditionally shown), AgentsAtGlance at bottom, breadcrumb navigation. Use existing useOffice() hook for agent/task data. Map agent statuses to 3D character animations and colors",
+    "Add necessary Three.js-related animation keyframes/utilities to tailwind.config.js if needed for overlay animations",
+    "Ensure all TypeScript types are correct - use proper drei/fiber typing, extend existing office types if needed"
+  ],
+  "acceptance_criteria": [
+    "Office page renders a 3D isometric view with visible floor zones, desks, and agent characters",
+    "9 named zones are visible with labeled areas matching the reference: Planning, Development, QA & Security, Data, Meeting, Automation, Research, Operations, Support",
+    "Agent characters display with color-coded status indicators (green/yellow/purple/grey)",
+    "Clicking an agent shows a detail sidebar with agent info, current task, and performance metrics",
+    "Manager area shows delegation animations (documents/tasks flowing to agents)",
+    "Agents at desks show typing/working animations",
+    "Report sharing animations (envelope flying between agents) are visible",
+    "Stats bar at top shows agent counts by status",
+    "Agents-at-a-glance section at bottom shows summary cards",
+    "Camera supports pan and zoom interactions",
+    "Dark theme is consistent with the rest of the app",
+    "TypeScript compilation passes with no errors",
+    "Vite build completes successfully"
+  ],
+  "verification": [
+    "cd /projects/sandbox/NVLabsCompany/dashboard && npx tsc --noEmit",
+    "cd /projects/sandbox/NVLabsCompany/dashboard && npm run build"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

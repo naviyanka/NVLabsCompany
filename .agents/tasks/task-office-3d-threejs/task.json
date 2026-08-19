@@ -1,0 +1,7 @@
+{
+  "task_id": "task-office-3d-threejs",
+  "task_description": "Rebuild the Office page with a Three.js-based 3D isometric office floor plan featuring named zones, animated AI agent characters, manager task delegation, report sharing animations, click-to-select agent panels, and real-time status indicators - all matching the reference image design.",
+  "status": "in_progress",
+  "feature_order": ["FEAT-001", "FEAT-002"],
+  "blocked_reason": null
+}

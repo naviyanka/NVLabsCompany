@@ -1,0 +1,25 @@
+{
+  "id": "FEAT-001",
+  "type": "chore",
+  "description": "Install Three.js dependencies (@react-three/fiber, @react-three/drei, three, @types/three) and verify existing project builds cleanly before making changes.",
+  "status": "in_progress",
+  "steps": [
+    "Run npm install in /projects/sandbox/NVLabsCompany/dashboard to install existing deps",
+    "Add new dependencies: npm install @react-three/fiber @react-three/drei three",
+    "Add dev dependency: npm install -D @types/three",
+    "Verify TypeScript compilation passes: npx tsc --noEmit",
+    "Verify Vite build passes: npm run build"
+  ],
+  "acceptance_criteria": [
+    "package.json contains @react-three/fiber, @react-three/drei, three in dependencies",
+    "package.json contains @types/three in devDependencies",
+    "TypeScript compilation succeeds with no errors",
+    "Vite build completes successfully"
+  ],
+  "verification": [
+    "cd /projects/sandbox/NVLabsCompany/dashboard && npx tsc --noEmit",
+    "cd /projects/sandbox/NVLabsCompany/dashboard && npm run build"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}
