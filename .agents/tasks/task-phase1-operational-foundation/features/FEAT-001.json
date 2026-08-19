@@ -1,0 +1,28 @@
+{
+  "id": "FEAT-001",
+  "type": "feat",
+  "description": "Add opt-in JSON file persistence to ControlRegistry, PhaseMachine, and LayeredMemoryStore (L2/L3). All three modules use the same atomic write pattern (write to temp file, os.replace to target). Persistence is opt-in via persist_path parameter - when None, behavior is unchanged (backward compatible).",
+  "status": "in_progress",
+  "steps": [
+    "Modify src/nexus/governance/control_registry.py: Add optional persist_path: Path | None parameter to __init__. After every mutation method (pause, pause_auto_delivery, gate_tool, steer, halt, resume, clear_steers), call a _persist() method that serializes self._map to JSON and writes atomically (tempfile in same dir + os.replace). On init, if persist_path exists, load state from it. AgentControl.gated_tools is a set - serialize as sorted list, deserialize back to set.",
+    "Modify src/nexus/orchestration/phase_machine.py: Add optional persist_path: Path | None parameter to __init__. After every mutation (state changes in check_plan_detected, approve_plan, check_final_result, handle_user_feedback, reset), call _persist(). Serialize self._phases as {str(uuid): phase_value}. On init, if persist_path exists, load and reconstruct UUID keys.",
+    "Modify src/nexus/memory/layered.py: Add optional persist_path: Path | None parameter to __init__. Persist only L2 and L3 (L0/L1 remain ephemeral). After mutations in store_fact and promote_to_shared, call _persist(). Serialize Facts as dicts with ISO timestamps and str UUIDs. On init, if persist_path exists, load L2/L3.",
+    "Add tests in tests/test_persistence.py covering: (1) ControlRegistry saves/loads state correctly with persist_path, (2) ControlRegistry without persist_path works as before, (3) PhaseMachine saves/loads state correctly, (4) PhaseMachine without persist_path works as before, (5) LayeredMemoryStore persists L2/L3 but not L1, (6) LayeredMemoryStore without persist_path works as before, (7) Atomic write safety (file not corrupted on error), (8) Missing file on init creates fresh state.",
+    "Verify existing tests still pass: python3.12 -m pytest tests/test_control_registry.py tests/test_phase_machine.py tests/test_layered_memory.py -q"
+  ],
+  "acceptance_criteria": [
+    "ControlRegistry(persist_path=Path('/tmp/test.json')) saves state after each mutation and loads on init",
+    "PhaseMachine(persist_path=Path('/tmp/test.json')) saves state after each mutation and loads on init",
+    "LayeredMemoryStore(persist_path=Path('/tmp/test.json')) persists L2 and L3 only",
+    "All three modules work identically when persist_path=None (backward compatible)",
+    "All existing tests (2276) continue to pass",
+    "New tests in tests/test_persistence.py pass"
+  ],
+  "verification": [
+    "python3.12 -m pytest tests/test_persistence.py -v",
+    "python3.12 -m pytest tests/test_control_registry.py tests/test_phase_machine.py tests/test_layered_memory.py -q",
+    "python3.12 -m pytest tests/ -q --tb=short"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

@@ -1,0 +1,29 @@
+{
+  "project_type": "Python FastAPI backend - Autonomous AI Company Operating System",
+  "language": "Python 3.12+",
+  "build_system": "setuptools via pyproject.toml, pip install -e '.[dev]'",
+  "test_framework": "pytest with pytest-asyncio (asyncio_mode=auto), mock-based DB sessions in conftest.py",
+  "build_command": "pip install -e '.[dev]'",
+  "test_command": "python3.12 -m pytest tests/ -q",
+  "verification_instructions": "Run pytest and confirm all tests pass (currently 2276). No external dependencies required for tests.",
+  "snapshot_or_generated_files": null,
+  "setup_instructions": "pip install -e '.[dev]' from project root",
+  "environment_constraints": "OPEN_INTERNET network mode. No Docker required for tests. Tests use mock DB sessions. SQLite used for local dev.",
+  "contribution_requirements": "Python 3.12, type hints, docstrings, ruff formatting (100 char lines), no new external dependencies for Phase 1 tasks (stdlib only for new modules), persistence is opt-in and backward compatible",
+  "key_patterns": "1) Modules use dataclasses/Pydantic for config. 2) Tests use plain classes (TestXxx) with pytest fixtures. 3) FastAPI routers in src/nexus/api/routes/. 4) Config via pydantic-settings in src/nexus/config.py. 5) Atomic file writes for persistence (temp + os.replace pattern). 6) No external deps for new functionality.",
+  "relevant_files": [
+    "src/nexus/governance/control_registry.py",
+    "src/nexus/orchestration/phase_machine.py",
+    "src/nexus/memory/layered.py",
+    "src/nexus/main.py",
+    "src/nexus/config.py",
+    "src/nexus/api/routes/health.py",
+    "src/nexus/api/middleware.py",
+    "src/nexus/database.py",
+    "tests/test_control_registry.py",
+    "tests/test_phase_machine.py",
+    "tests/test_layered_memory.py",
+    "tests/conftest.py"
+  ],
+  "directory_structure": "src/nexus/ - main package with subsystem dirs (governance/, orchestration/, memory/, api/, etc.). tests/ - flat test files. docs/ - documentation. dashboard/ - frontend (DO NOT TOUCH)."
+}

@@ -1,0 +1,30 @@
+{
+  "id": "FEAT-003",
+  "type": "feat",
+  "description": "Add structured JSON logging with correlation IDs (X-Request-ID) and basic in-process metrics/telemetry with a /metrics endpoint in Prometheus text format.",
+  "status": "pending",
+  "steps": [
+    "Create src/nexus/logging_config.py: (1) Define a JSON formatter class (stdlib logging.Formatter subclass) that outputs each log record as a single JSON line with fields: timestamp, level, logger, message, correlation_id (from contextvars). (2) Define a correlation_id ContextVar[str | None] with default None. (3) Provide a configure_logging(level: str = 'INFO') function that sets up the root logger with the JSON formatter. (4) Provide a get_correlation_id() function.",
+    "Create correlation ID middleware: In src/nexus/logging_config.py or as part of the module, create an ASGI middleware class (RequestIDMiddleware) that: reads X-Request-ID from request headers (or generates a uuid4 if missing), sets the correlation_id context var, adds X-Request-ID to response headers. This middleware should be added in main.py.",
+    "Create src/nexus/telemetry.py: (1) Define Counter and Histogram classes using stdlib only (no prometheus_client dependency). Counter has inc(amount=1) and value property. Histogram has observe(value) and returns count, sum, and bucket counts. (2) Define a metrics registry (dict of name -> metric). (3) Create default metrics: http_requests_total (Counter, labeled by method+path+status), http_request_duration_seconds (Histogram), http_requests_in_flight (up/down counter). (4) Create MetricsMiddleware (ASGI) that increments counters and observes duration for every request. (5) Create a /metrics endpoint (APIRouter) that renders all metrics in Prometheus text exposition format (# HELP, # TYPE, metric_name{labels} value).",
+    "Wire everything in src/nexus/main.py: (1) Import and call configure_logging at module level or in lifespan. (2) Add RequestIDMiddleware. (3) Add MetricsMiddleware. (4) Include the metrics router. Middleware order: RequestID first (outermost), then Metrics, then Governance (existing).",
+    "Add tests in tests/test_logging_telemetry.py: (1) Test JSON formatter produces valid JSON with expected fields. (2) Test correlation_id appears in log output when set. (3) Test RequestIDMiddleware sets context var and response header. (4) Test Counter increments correctly. (5) Test Histogram observe and bucket counting. (6) Test /metrics endpoint returns Prometheus-format text. (7) Test MetricsMiddleware tracks requests.",
+    "Verify: python3.12 -m pytest tests/test_logging_telemetry.py -v && python3.12 -m pytest tests/ -q --tb=short"
+  ],
+  "acceptance_criteria": [
+    "src/nexus/logging_config.py exists with JSON formatter, correlation_id ContextVar, configure_logging(), and RequestIDMiddleware",
+    "src/nexus/telemetry.py exists with Counter, Histogram, MetricsMiddleware, metrics registry, and /metrics router",
+    "X-Request-ID is propagated from request to response (generated if missing)",
+    "correlation_id appears in structured log output",
+    "/metrics returns Prometheus text format with http_requests_total and http_request_duration_seconds",
+    "No new external dependencies used (stdlib only for logging_config.py and telemetry.py)",
+    "All existing tests continue to pass",
+    "New tests pass"
+  ],
+  "verification": [
+    "python3.12 -m pytest tests/test_logging_telemetry.py -v",
+    "python3.12 -m pytest tests/ -q --tb=short"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

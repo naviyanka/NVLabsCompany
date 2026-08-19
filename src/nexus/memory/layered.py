@@ -11,9 +11,13 @@ MemoryStore. Layers represent different scopes of knowledge:
 
 from __future__ import annotations
 
+import json
+import os
+import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
+from pathlib import Path
 from uuid import UUID
 
 
@@ -99,17 +103,27 @@ class LayeredMemoryStore:
     This system augments (not replaces) the existing 3-temperature MemoryStore.
     """
 
-    def __init__(self, config: LayeredMemoryConfig | None = None) -> None:
+    def __init__(
+        self,
+        config: LayeredMemoryConfig | None = None,
+        persist_path: Path | None = None,
+    ) -> None:
         """Initialize the layered memory store.
 
         Args:
             config: Configuration for layer sizes and thresholds.
                 Uses defaults if not specified.
+            persist_path: Optional path to a JSON file for persisting L2/L3.
+                When provided, L2 and L3 state is saved after mutations and
+                loaded on init if the file exists. L0 and L1 remain ephemeral.
+                When None, no persistence occurs.
         """
         self._config = config or LayeredMemoryConfig()
+        self._persist_path = persist_path
         self._l1: list[L1Summary] = []
         self._l2: dict[UUID, list[Fact]] = {}
         self._l3: list[Fact] = []
+        self._load()
 
     @property
     def config(self) -> LayeredMemoryConfig:
@@ -130,6 +144,62 @@ class LayeredMemoryStore:
     def l3_shared(self) -> list[Fact]:
         """Return the current L3 shared knowledge (read-only view)."""
         return list(self._l3)
+
+    # ── Persistence ──────────────────────────────────────────────────────────
+
+    def _serialize_fact(self, fact: Fact) -> dict:
+        """Serialize a Fact to a JSON-compatible dict."""
+        return {
+            "content": fact.content,
+            "source_agent_id": str(fact.source_agent_id) if fact.source_agent_id else None,
+            "created_at": fact.created_at.isoformat(),
+            "access_count": fact.access_count,
+            "metadata": fact.metadata,
+        }
+
+    def _deserialize_fact(self, data: dict) -> Fact:
+        """Deserialize a dict back to a Fact instance."""
+        return Fact(
+            content=data["content"],
+            source_agent_id=UUID(data["source_agent_id"]) if data["source_agent_id"] else None,
+            created_at=datetime.fromisoformat(data["created_at"]),
+            access_count=data["access_count"],
+            metadata=data.get("metadata"),
+        )
+
+    def _persist(self) -> None:
+        """Atomically write L2 and L3 state to the persist file."""
+        if self._persist_path is None:
+            return
+        data = {
+            "l2": {
+                str(agent_id): [self._serialize_fact(f) for f in facts]
+                for agent_id, facts in self._l2.items()
+            },
+            "l3": [self._serialize_fact(f) for f in self._l3],
+        }
+        self._persist_path.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(dir=self._persist_path.parent, suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w") as f:
+                json.dump(data, f)
+            os.replace(tmp, self._persist_path)
+        except BaseException:
+            if os.path.exists(tmp):
+                os.unlink(tmp)
+            raise
+
+    def _load(self) -> None:
+        """Load L2 and L3 state from the persist file if it exists."""
+        if self._persist_path is None or not self._persist_path.exists():
+            return
+        with open(self._persist_path) as f:
+            data = json.load(f)
+        for agent_id_str, facts_data in data.get("l2", {}).items():
+            self._l2[UUID(agent_id_str)] = [
+                self._deserialize_fact(fd) for fd in facts_data
+            ]
+        self._l3 = [self._deserialize_fact(fd) for fd in data.get("l3", [])]
 
     def add_session_summary(self, task_id: UUID, summary: str) -> None:
         """Add a session summary to the L1 ring buffer.
@@ -193,6 +263,7 @@ class LayeredMemoryStore:
             metadata=metadata,
         )
         existing.append(fact)
+        self._persist()
         return True
 
     def get_agent_facts(self, agent_id: UUID, limit: int = 10) -> list[Fact]:
@@ -258,6 +329,7 @@ class LayeredMemoryStore:
                     metadata=fact.metadata,
                 )
                 self._l3.append(shared_fact)
+                self._persist()
                 return True
         return False
 
