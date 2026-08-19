@@ -2,7 +2,7 @@
   "id": "FEAT-001",
   "type": "feat",
   "description": "Tree-of-Thought Reasoning Engine and OKR Management System. Creates src/nexus/orchestration/reasoning.py with ThoughtNode, ThoughtTree, and ToTPlanner classes for tree-based reasoning. Also creates src/nexus/company/okr.py with Objective, KeyResult, and OKRManager classes, plus src/nexus/api/routes/okr.py REST API. Both modules have comprehensive tests.",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "Create src/nexus/orchestration/reasoning.py with: (1) ThoughtNode dataclass (id, content, parent_id, children list, score float, depth int, metadata dict), (2) ThoughtTree class (root ThoughtNode, expand method that uses LLM callable to generate child thoughts, evaluate method that scores nodes using LLM callable, select_best_path method that returns the highest-scoring path from root to leaf, prune method to remove low-scoring branches), (3) ToTPlanner class that decomposes tasks using tree exploration with configurable branching_factor (default 3), max_depth (default 3), beam_width (default 2). Uses LLM callable (Callable[[str], Awaitable[str]]) for expansion and evaluation. Falls back to linear planning (using existing TaskPlanner) if tree exploration fails. Follow the pattern in src/nexus/orchestration/llm_planner.py.",
     "Create src/nexus/company/okr.py with: (1) Objective dataclass (id UUID, title str, description str, owner_agent_id UUID, time_frame str, status str, key_results list, created_at datetime), (2) KeyResult dataclass (id UUID, objective_id UUID, title str, target_value float, current_value float, unit str, status str, updated_at datetime), (3) OKRManager class with methods: create_objective, add_key_result, update_progress, get_company_okrs, compute_objective_progress (weighted average of key results), detect_at_risk_objectives (key results below 30% progress past 70% of time_frame).",
@@ -31,5 +31,5 @@
     "Verify main.py includes the okr_router import and registration"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "All files pass AST validation. 18 test methods in test_reasoning.py and 22 test methods in test_okr.py. OKR router wired into main.py. Company __init__.py exports updated."
 }
