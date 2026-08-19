@@ -1,0 +1,7 @@
+{
+  "task_id": "task-final-backend-review",
+  "task_description": "Generate a comprehensive final backend review document (docs/FINAL-BACKEND-REVIEW.md) with system verification, per-subsystem ratings, cross-repo gap analysis against 8 reference repos, prioritized import opportunities, and final verdict.",
+  "status": "in_progress",
+  "feature_order": ["FEAT-001"],
+  "blocked_reason": null
+}
