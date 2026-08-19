@@ -2,7 +2,7 @@
   "id": "FEAT-001",
   "type": "feat",
   "description": "RAG Pipeline Enhancement - Create pluggable rankers, multiple retriever strategies, and document parsers for the knowledge subsystem. Add BM25Ranker, CrossEncoderRanker protocol at src/nexus/knowledge/rankers.py. Add DenseRetriever, SparseRetriever, HybridRetriever protocol at src/nexus/knowledge/retrievers.py. Add TextParser, MarkdownParser, CodeParser at src/nexus/knowledge/parsers.py. Enhance existing rag.py to integrate these components.",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "Create src/nexus/knowledge/rankers.py with: (1) Ranker Protocol defining rank(query, results) -> list interface, (2) BM25Ranker class implementing the protocol using token-overlap scoring from nexus.memory.retriever.tokenize and bm25_score, (3) CrossEncoderRanker class implementing the protocol with a configurable scoring function (default: combined BM25 + token overlap as cross-encoder proxy since no new deps allowed), (4) RerankerPipeline class that chains multiple rankers sequentially",
     "Create src/nexus/knowledge/retrievers.py with: (1) Retriever Protocol defining retrieve(query, top_k) -> list interface, (2) DenseRetriever class using embedding provider from embeddings.py for vector similarity search, (3) SparseRetriever class using BM25 from nexus.memory.retriever, (4) HybridRetriever class combining dense + sparse with configurable alpha weight, (5) RetrieverFactory function to create retrievers by name",
@@ -30,5 +30,5 @@
     "Run: python3 -c \"import ast; [ast.parse(open(f'src/nexus/knowledge/{f}').read()) for f in ['rankers.py','retrievers.py','parsers.py','rag.py','__init__.py']]\" to verify all knowledge module files parse cleanly"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "All 6 files pass AST validation. Backward compatibility maintained: RAGPipeline(db) still works without new params. New optional params (ranker, retriever, parser) and from_config class method added. Test file has 60+ test methods covering all classes."
 }
