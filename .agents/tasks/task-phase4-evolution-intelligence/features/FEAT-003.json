@@ -2,7 +2,7 @@
   "id": "FEAT-003",
   "type": "feat",
   "description": "Create LLMImprovementProposer (src/nexus/evolution/llm_proposer.py) and IsolatedSandbox (src/nexus/evolution/isolated_sandbox.py) - LLM-based proposal generation with heuristic fallback, and resource-isolated sandbox.",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "Create src/nexus/evolution/llm_proposer.py with class LLMImprovementProposer(llm_callable: Callable[[str], Awaitable[str]], fallback_proposer: ImprovementProposer | None = None) containing: generate_proposal(company_id: UUID, context: dict) -> dict that sends structured prompt to LLM and parses JSON response into proposal with implementation_steps field. On any LLM failure (exception, invalid JSON, missing fields), falls back to fallback_proposer.propose_skill_improvement or returns a heuristic proposal. Follow the exact same pattern as LLMTaskPlanner in src/nexus/orchestration/llm_planner.py.",
     "Create src/nexus/evolution/isolated_sandbox.py with class IsolatedSandbox containing: __init__(max_cost_cents: int = 1000, max_duration_seconds: int = 300, max_memory_mb: int = 512); create_session(proposal_id: UUID, config: dict) -> UUID that creates a copy-on-write state container; execute(session_id: UUID, callable_fn: Callable, *args) -> dict that runs callable within resource tracking (cost, duration, memory accumulation) and aborts with ResourceLimitExceeded if any limit breached; get_resource_usage(session_id: UUID) -> dict showing current usage vs limits; abort(session_id: UUID) -> None to forcefully terminate a session; cleanup(session_id: UUID) -> None to remove session state. Also define ResourceLimitExceeded(Exception) in the same file.",
@@ -23,5 +23,5 @@
     "export PATH=/opt/toolchains/.pyenv/shims:$PATH && cd /projects/sandbox/NVLabsCompany && python3.12 -m pytest tests/test_llm_proposer.py tests/test_isolated_sandbox.py tests/test_evolution.py --tb=short -q"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "All 2118 tests pass (19 new + 2099 existing). LLMImprovementProposer follows same pattern as LLMTaskPlanner. IsolatedSandbox uses logical accumulators for resource tracking. ResourceLimitExceeded exported from nexus.evolution package."
 }
