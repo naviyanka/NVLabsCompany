@@ -1,0 +1,40 @@
+{
+  "id": "FEAT-001",
+  "type": "feat",
+  "description": "Implement the full Notifications page replacing the existing placeholder in src/pages/Notifications.tsx. The page has a main content area (header, category tabs, filter bar, notification list table with pagination) and a right sidebar (notification summary donut chart, priority breakdown, recent unread, notification preferences, quiet hours).",
+  "status": "in_progress",
+  "steps": [
+    "Replace the entire contents of /projects/sandbox/NVLabsCompany/dashboard/src/pages/Notifications.tsx with the full implementation",
+    "Define static mock data arrays at the top of the file for: notification rows (12 items with all fields), summary donut chart data (5 segments), priority breakdown data (3 items), recent unread items (4 items)",
+    "Import required icons from lucide-react: Bell, Search, Filter, ChevronDown, ChevronLeft, ChevronRight, MoreHorizontal, AlertTriangle, ArrowDown, Bot, GitBranch, AlertCircle, Brain, FileText, AtSign, UserPlus, Shield, Rocket, Server, Database, Settings",
+    "Import PieChart, Pie, Cell, Tooltip, ResponsiveContainer from recharts",
+    "Import Card from @/components/common/Card",
+    "Implement page header with Bell icon + 'Notifications' title, subtitle text, 'Mark all as read' outlined button, and red 'Notification Settings' button",
+    "Implement category tabs as pill/badge buttons: All (12, blue bg active), Unread (8), Mentions (2), Alerts (3), System (5)",
+    "Implement filter bar with search input, three dropdowns (All Types, All Modules, All Priorities), and Filters button",
+    "Implement notifications table with columns NOTIFICATION and TIME, containing 12 rows each with: colored avatar circle with icon, bold title, description text, module badge (colored), priority indicator dot with label, time ago text, and more-options button",
+    "Implement pagination bar: 'Showing 1 to 12 of 148 notifications', page buttons (< 1 2 3 ... 13 >), '10 / page' dropdown",
+    "Implement right sidebar Notification Summary card with donut chart (center text '148 Total'), legend showing 5 categories with counts and percentages",
+    "Implement Priority Breakdown card with three rows: High (red, 23, 16%), Medium (orange, 56, 38%), Low (green, 69, 46%)",
+    "Implement Recent Unread card with 4 items showing colored dots and timestamps, plus 'View all unread (8)' link",
+    "Implement Notification Preferences card with 4 settings rows (Email: Enabled green, Push: Enabled green, Slack: Disabled red, Manage Preferences link)",
+    "Implement Quiet Hours card showing '10:00 PM - 7:00 AM (Daily)' with edit link and description text",
+    "Use the same layout pattern as Activity.tsx: outer div with flex gap-4, flex-1 min-w-0 space-y-6 for main content, w-80 flex-shrink-0 space-y-4 for sidebar",
+    "Use dark theme color tokens: dark-bg, dark-surface, dark-card, white/[0.08] borders, text-white for primary text, text-gray-400 for secondary, text-gray-500 for metadata"
+  ],
+  "acceptance_criteria": [
+    "Running `npm run build` in dashboard/ completes with zero TypeScript errors",
+    "The Notifications.tsx file exports a Notifications component (named export)",
+    "All 12 notification rows from the spec are present with correct titles, descriptions, modules, priorities, and times",
+    "The donut chart uses recharts PieChart/Pie/Cell components with correct data",
+    "The page layout uses flex gap-4 with main content and w-80 sidebar",
+    "All text uses appropriate dark theme colors (white, gray-400, gray-500)",
+    "Module badges have distinct colors per module type",
+    "Priority indicators use colored dots (green for success/low, orange for medium, red for high)"
+  ],
+  "verification": [
+    "cd /projects/sandbox/NVLabsCompany/dashboard && npm run build"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}
