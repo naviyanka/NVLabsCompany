@@ -1,10 +1,8 @@
-import { useState } from 'react';
 import { Card } from '@/components/common/Card';
 import {
   Settings as SettingsIcon,
   User,
   Shield,
-  ShieldCheck,
   Key,
   Puzzle,
   Users,
@@ -19,12 +17,17 @@ import {
   Wrench,
   ExternalLink,
   Eye,
-  EyeOff,
-  Smartphone,
-  Laptop,
-  Monitor,
+  Copy,
+  Plus,
+  Search,
+  ChevronDown,
+  MoreVertical,
+  AlertTriangle,
+  XCircle,
   CheckCircle2,
-  ChevronRight,
+  Code2,
+  Star,
+  BarChart3,
 } from 'lucide-react';
 
 // ─── Static Mock Data ──────────────────────────────────────────────────────────
@@ -32,8 +35,8 @@ import {
 const navItems = [
   { label: 'General', icon: Cog, active: false },
   { label: 'Profile', icon: User, active: false },
-  { label: 'Security', icon: Shield, active: true },
-  { label: 'API Keys', icon: Key, active: false },
+  { label: 'Security', icon: Shield, active: false },
+  { label: 'API Keys', icon: Key, active: true },
   { label: 'Integrations', icon: Puzzle, active: false },
   { label: 'Teams & Users', icon: Users, active: false },
   { label: 'Roles & Permissions', icon: UserCog, active: false },
@@ -54,86 +57,137 @@ const footerLinks = [
   { label: 'Terms of Service' },
 ];
 
-const activeSessions = [
+const statCards = [
   {
-    device: 'Windows \u2022 Chrome',
-    label: 'This device',
-    icon: Monitor,
-    location: 'Kolkata, India',
-    ip: '117.230.45.12',
-    lastActive: 'Just now',
-    status: 'Active',
-    current: true,
+    label: 'Total Keys',
+    value: '6',
+    subtitle: 'Across all environments',
+    icon: Key,
+    color: 'primary',
   },
   {
-    device: 'Android \u2022 Chrome',
-    label: 'OnePlus 11',
-    icon: Smartphone,
-    location: 'Delhi, India',
-    ip: '103.2.145.67',
-    lastActive: 'May 16, 2024, 10:12 AM',
-    status: 'Active',
-    current: false,
+    label: 'Active Keys',
+    value: '4',
+    subtitle: 'Currently active',
+    icon: CheckCircle2,
+    color: 'green',
   },
   {
-    device: 'macOS \u2022 Safari',
-    label: 'MacBook Pro',
-    icon: Laptop,
-    location: 'Bangalore, India',
-    ip: '2405:201:2500:1234::1',
-    lastActive: 'May 15, 2024, 07:45 PM',
-    status: 'Active',
-    current: false,
+    label: 'Expired Keys',
+    value: '1',
+    subtitle: 'No longer valid',
+    icon: AlertTriangle,
+    color: 'warning',
+  },
+  {
+    label: 'Revoked Keys',
+    value: '1',
+    subtitle: 'Manually revoked',
+    icon: XCircle,
+    color: 'danger',
   },
 ];
 
-const securityChecklist = [
-  'Password is strong',
-  'Two-factor authentication is enabled',
-  'Recovery email is verified',
-  'No suspicious activity detected',
+const apiKeys = [
+  {
+    name: 'Production Server Key',
+    description: 'Used by production services',
+    badge: { text: 'Production', color: 'green' },
+    key: 'nv_\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022',
+    environment: { text: 'Production', color: 'green' },
+    status: 'Active',
+    lastUsed: 'May 16, 2024, 10:25 AM',
+    dimmed: false,
+  },
+  {
+    name: 'Agent Service Key',
+    description: 'For AI agent communication',
+    badge: { text: 'Backend', color: 'blue' },
+    key: 'nv_\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022',
+    environment: { text: 'Staging', color: 'orange' },
+    status: 'Active',
+    lastUsed: 'May 16, 2024, 09:12 AM',
+    dimmed: false,
+  },
+  {
+    name: 'Data Ingestion Key',
+    description: 'For pipeline data ingestion',
+    badge: { text: 'Backend', color: 'blue' },
+    key: 'nv_\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022',
+    environment: { text: 'Staging', color: 'orange' },
+    status: 'Active',
+    lastUsed: 'May 15, 2024, 11:47 PM',
+    dimmed: false,
+  },
+  {
+    name: 'Dev Environment Key',
+    description: 'Development environment access',
+    badge: { text: 'Development', color: 'purple' },
+    key: 'nv_\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022',
+    environment: { text: 'Development', color: 'purple' },
+    status: 'Active',
+    lastUsed: 'May 15, 2024, 04:32 PM',
+    dimmed: false,
+  },
+  {
+    name: 'Old Analytics Key',
+    description: 'Deprecated analytics integration',
+    badge: { text: 'Analytics', color: 'gray' },
+    key: 'nv_\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022',
+    environment: { text: 'Production', color: 'green' },
+    status: 'Expired',
+    lastUsed: 'Apr 20, 2024, 02:15 PM',
+    dimmed: true,
+  },
+  {
+    name: 'Revoked Test Key',
+    description: 'Compromised key (revoked)',
+    badge: { text: 'Test', color: 'gray' },
+    key: 'nv_\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022',
+    environment: { text: 'Test', color: 'gray' },
+    status: 'Revoked',
+    lastUsed: 'Mar 12, 2024, 05:40 PM',
+    dimmed: true,
+  },
 ];
 
-const recentSecurityActivity = [
-  {
-    color: 'bg-green-400',
-    title: 'Successful login',
-    subtitle: 'Windows \u2022 Kolkata, India',
-    time: 'Just now',
-  },
-  {
-    color: 'bg-orange-400',
-    title: 'Password changed',
-    subtitle: 'Kolkata, India',
-    time: 'May 12, 10:30 AM',
-  },
-  {
-    color: 'bg-blue-400',
-    title: '2FA enabled',
-    subtitle: 'Kolkata, India',
-    time: 'May 10, 09:15 PM',
-  },
-  {
-    color: 'bg-purple-400',
-    title: 'Recovery email updated',
-    subtitle: 'Kolkata, India',
-    time: 'May 05, 04:22 PM',
-  },
-  {
-    color: 'bg-orange-400',
-    title: 'New device login',
-    subtitle: 'Android \u2022 Delhi, India',
-    time: 'May 02, 11:08 AM',
-  },
-];
+// ─── Helpers ───────────────────────────────────────────────────────────────────
+
+function getBadgeClasses(color: string) {
+  switch (color) {
+    case 'green':
+      return 'bg-green-500/20 text-green-400';
+    case 'blue':
+      return 'bg-blue-500/20 text-blue-400';
+    case 'orange':
+      return 'bg-orange-500/20 text-orange-400';
+    case 'purple':
+      return 'bg-purple-500/20 text-purple-400';
+    case 'gray':
+      return 'bg-gray-500/20 text-gray-400';
+    default:
+      return 'bg-gray-500/20 text-gray-400';
+  }
+}
+
+function getStatIconClasses(color: string) {
+  switch (color) {
+    case 'primary':
+      return 'bg-primary-500/10 text-primary-400';
+    case 'green':
+      return 'bg-green-500/10 text-green-400';
+    case 'warning':
+      return 'bg-warning-500/10 text-warning-500';
+    case 'danger':
+      return 'bg-danger-500/10 text-danger-500';
+    default:
+      return 'bg-primary-500/10 text-primary-400';
+  }
+}
 
 // ─── Main Component ────────────────────────────────────────────────────────────
 
 export function Settings() {
-  const [showCurrentPassword, setShowCurrentPassword] = useState(false);
-  const [showNewPassword, setShowNewPassword] = useState(false);
-  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
-
   return (
     <div className="space-y-6">
       {/* Page Header */}
@@ -177,235 +231,181 @@ export function Settings() {
 
         {/* Center Content */}
         <div className="flex-1 min-w-0 space-y-6">
-          {/* Section 1: Password */}
-          <Card padding="lg">
-            <div className="mb-5">
-              <h2 className="text-lg font-semibold text-white">Password</h2>
+          {/* Section Header */}
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-lg font-semibold text-white">API Keys</h2>
               <p className="text-sm text-gray-400 mt-0.5">
-                Ensure your password is strong and unique.
+                Manage API keys to securely access NVLABS Mission Control APIs.
               </p>
             </div>
+            <button className="flex items-center gap-2 px-4 py-2 bg-green-500/20 text-green-400 text-sm font-medium rounded-lg hover:bg-green-500/30 transition-colors">
+              <Plus size={16} />
+              Generate New Key
+            </button>
+          </div>
 
-            <div className="space-y-4">
-              {/* Current Password */}
-              <div className="flex items-center gap-4">
-                <div className="flex-1">
-                  <label className="block text-sm text-gray-400 mb-1.5">Current Password</label>
-                  <div className="relative">
-                    <input
-                      type={showCurrentPassword ? 'text' : 'password'}
-                      defaultValue="securepassword123"
-                      className="w-full bg-dark-bg border border-white/[0.08] rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-primary-500 pr-10"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowCurrentPassword(!showCurrentPassword)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white transition-colors"
-                    >
-                      {showCurrentPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-                    </button>
+          {/* Stat Cards Row */}
+          <div className="grid grid-cols-4 gap-4">
+            {statCards.map((stat) => {
+              const StatIcon = stat.icon;
+              return (
+                <Card key={stat.label} padding="md">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs text-gray-400 font-medium">{stat.label}</span>
+                    <div className={`p-1.5 rounded-lg ${getStatIconClasses(stat.color)}`}>
+                      <StatIcon size={14} />
+                    </div>
                   </div>
-                </div>
-                <div className="pt-6">
-                  <span className="text-xs text-gray-400 whitespace-nowrap">Last changed: May 12, 2024</span>
-                </div>
-              </div>
+                  <p className="text-2xl font-bold text-white">{stat.value}</p>
+                  <p className="text-xs text-gray-400 mt-0.5">{stat.subtitle}</p>
+                </Card>
+              );
+            })}
+          </div>
 
-              {/* New Password */}
-              <div className="flex items-center gap-4">
-                <div className="flex-1">
-                  <label className="block text-sm text-gray-400 mb-1.5">New Password</label>
-                  <div className="relative">
-                    <input
-                      type={showNewPassword ? 'text' : 'password'}
-                      defaultValue="newstrongpassword"
-                      className="w-full bg-dark-bg border border-white/[0.08] rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-primary-500 pr-10"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowNewPassword(!showNewPassword)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white transition-colors"
-                    >
-                      {showNewPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-                    </button>
-                  </div>
-                </div>
-                <div className="pt-6 flex items-center gap-2">
-                  <div className="flex gap-1">
-                    <div className="w-6 h-1.5 rounded-full bg-green-400" />
-                    <div className="w-6 h-1.5 rounded-full bg-green-400" />
-                    <div className="w-6 h-1.5 rounded-full bg-green-400" />
-                    <div className="w-6 h-1.5 rounded-full bg-green-400" />
-                  </div>
-                  <span className="text-xs text-green-400 font-medium">Strong</span>
-                </div>
-              </div>
-
-              {/* Confirm New Password */}
-              <div>
-                <label className="block text-sm text-gray-400 mb-1.5">Confirm New Password</label>
-                <div className="relative">
-                  <input
-                    type={showConfirmPassword ? 'text' : 'password'}
-                    defaultValue="newstrongpassword"
-                    className="w-full bg-dark-bg border border-white/[0.08] rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-primary-500 pr-10"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white transition-colors"
-                  >
-                    {showConfirmPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-                  </button>
-                </div>
-              </div>
+          {/* Search/Filter Bar */}
+          <div className="flex items-center gap-3">
+            <div className="relative flex-1">
+              <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+              <input
+                type="text"
+                placeholder="Search API keys by name or description..."
+                className="w-full bg-dark-bg border border-white/[0.08] rounded-lg pl-9 pr-3 py-2 text-white text-sm placeholder-gray-500 focus:outline-none focus:border-primary-500"
+              />
             </div>
+            <button className="flex items-center gap-2 px-3 py-2 bg-dark-bg border border-white/[0.08] rounded-lg text-sm text-gray-300 hover:bg-white/[0.04] transition-colors">
+              All Status
+              <ChevronDown size={14} className="text-gray-400" />
+            </button>
+            <button className="flex items-center gap-2 px-3 py-2 bg-dark-bg border border-white/[0.08] rounded-lg text-sm text-gray-300 hover:bg-white/[0.04] transition-colors">
+              All Environments
+              <ChevronDown size={14} className="text-gray-400" />
+            </button>
+          </div>
 
-            <div className="mt-6">
-              <button className="px-4 py-2 bg-teal-500/20 text-teal-400 text-sm font-medium rounded-lg hover:bg-teal-500/30 transition-colors">
-                Update Password
-              </button>
-            </div>
-          </Card>
-
-          {/* Section 2: Two-Factor Authentication */}
-          <Card padding="lg">
-            <div className="mb-5">
-              <h2 className="text-lg font-semibold text-white">Two-Factor Authentication (2FA)</h2>
-              <p className="text-sm text-gray-400 mt-0.5">
-                Add an extra layer of security to your account.
-              </p>
-            </div>
-
-            {/* Status Row */}
-            <div className="flex items-center gap-3 mb-6 p-3 rounded-lg bg-dark-bg border border-white/[0.08]">
-              <span className="text-sm text-gray-400">Status</span>
-              <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-green-500/20 text-green-400">
-                Enabled
-              </span>
-              <span className="text-sm text-gray-400 flex-1">
-                Your account is protected with two-factor authentication.
-              </span>
-              <button className="px-3 py-1.5 border border-white/[0.08] text-sm text-gray-300 rounded-lg hover:bg-white/[0.04] transition-colors">
-                Manage 2FA
-              </button>
-            </div>
-
-            {/* Methods */}
-            <div className="space-y-3">
-              <div className="flex items-center gap-3 p-3 rounded-lg bg-dark-bg border border-white/[0.08]">
-                <div className="p-2 rounded-lg bg-primary-500/10">
-                  <ShieldCheck size={16} className="text-primary-400" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-white">Authenticator App</p>
-                  <p className="text-xs text-gray-400 mt-0.5">Using Google Authenticator</p>
-                </div>
-                <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-green-500/20 text-green-400">
-                  Primary
-                </span>
-                <button className="px-3 py-1.5 border border-white/[0.08] text-sm text-gray-300 rounded-lg hover:bg-white/[0.04] transition-colors">
-                  Change Method
-                </button>
-              </div>
-
-              <div className="flex items-center gap-3 p-3 rounded-lg bg-dark-bg border border-white/[0.08]">
-                <div className="p-2 rounded-lg bg-primary-500/10">
-                  <Key size={16} className="text-primary-400" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-white">Backup Codes</p>
-                  <p className="text-xs text-gray-400 mt-0.5">
-                    Use these codes to access your account if you lose your device.
-                  </p>
-                </div>
-                <button className="px-3 py-1.5 border border-white/[0.08] text-sm text-gray-300 rounded-lg hover:bg-white/[0.04] transition-colors">
-                  View Backup Codes
-                </button>
-              </div>
-            </div>
-          </Card>
-
-          {/* Section 3: Active Sessions */}
-          <Card padding="lg">
-            <div className="mb-5">
-              <h2 className="text-lg font-semibold text-white">Active Sessions</h2>
-              <p className="text-sm text-gray-400 mt-0.5">
-                Manage your active sessions across devices.
-              </p>
-            </div>
-
-            {/* Sessions Table */}
+          {/* API Keys Table */}
+          <Card padding="none">
             <div className="overflow-x-auto">
               <table className="w-full">
                 <thead>
                   <tr className="border-b border-white/[0.08]">
-                    <th className="text-left text-xs font-medium text-gray-400 uppercase tracking-wider pb-3">
-                      Device
+                    <th className="text-left text-xs font-medium text-gray-400 uppercase tracking-wider px-4 py-3">
+                      Name &amp; Description
                     </th>
-                    <th className="text-left text-xs font-medium text-gray-400 uppercase tracking-wider pb-3">
-                      Location / IP
+                    <th className="text-left text-xs font-medium text-gray-400 uppercase tracking-wider px-4 py-3">
+                      Key
                     </th>
-                    <th className="text-left text-xs font-medium text-gray-400 uppercase tracking-wider pb-3">
-                      Last Active
+                    <th className="text-left text-xs font-medium text-gray-400 uppercase tracking-wider px-4 py-3">
+                      Environment
                     </th>
-                    <th className="text-left text-xs font-medium text-gray-400 uppercase tracking-wider pb-3">
+                    <th className="text-left text-xs font-medium text-gray-400 uppercase tracking-wider px-4 py-3">
                       Status
                     </th>
-                    <th className="text-left text-xs font-medium text-gray-400 uppercase tracking-wider pb-3">
-                      Action
+                    <th className="text-left text-xs font-medium text-gray-400 uppercase tracking-wider px-4 py-3">
+                      Last Used
+                    </th>
+                    <th className="text-left text-xs font-medium text-gray-400 uppercase tracking-wider px-4 py-3">
+                      Actions
                     </th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white/[0.04]">
-                  {activeSessions.map((session, idx) => {
-                    const DeviceIcon = session.icon;
-                    return (
-                      <tr key={idx}>
-                        <td className="py-3">
-                          <div className="flex items-center gap-2">
-                            <DeviceIcon size={14} className="text-gray-400" />
-                            <div>
-                              <p className="text-sm text-white">{session.device}</p>
-                              <p className="text-xs text-gray-400">{session.label}</p>
-                            </div>
+                  {apiKeys.map((apiKey, idx) => (
+                    <tr key={idx} className={apiKey.dimmed ? 'opacity-60' : ''}>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-3">
+                          <div className="p-1.5 rounded-lg bg-primary-500/10">
+                            <Code2 size={14} className="text-primary-400" />
                           </div>
-                        </td>
-                        <td className="py-3">
-                          <p className="text-sm text-white">{session.location}</p>
-                          <p className="text-xs text-gray-400">{session.ip}</p>
-                        </td>
-                        <td className="py-3">
-                          <span className="text-sm text-gray-300">{session.lastActive}</span>
-                        </td>
-                        <td className="py-3">
-                          <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-green-500/20 text-green-400">
-                            {session.status}
-                          </span>
-                        </td>
-                        <td className="py-3">
-                          {session.current ? (
-                            <span className="text-sm text-gray-500">&mdash;</span>
-                          ) : (
-                            <button className="px-3 py-1 text-xs font-medium text-red-400 bg-red-500/10 rounded-lg hover:bg-red-500/20 transition-colors">
-                              Revoke
-                            </button>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <p className="text-sm font-medium text-white">{apiKey.name}</p>
+                              <span className={`px-2 py-0.5 text-xs font-medium rounded-full ${getBadgeClasses(apiKey.badge.color)}`}>
+                                {apiKey.badge.text}
+                              </span>
+                            </div>
+                            <p className="text-xs text-gray-400 mt-0.5">{apiKey.description}</p>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-2">
+                          <code className="text-xs text-gray-300 font-mono">{apiKey.key}</code>
+                          <button className="text-gray-400 hover:text-white transition-colors">
+                            <Eye size={14} />
+                          </button>
+                          <button className="text-gray-400 hover:text-white transition-colors">
+                            <Copy size={14} />
+                          </button>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className={`px-2 py-0.5 text-xs font-medium rounded-full ${getBadgeClasses(apiKey.environment.color)}`}>
+                          {apiKey.environment.text}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className={`flex items-center gap-1.5 text-xs font-medium ${
+                          apiKey.status === 'Active' ? 'text-green-400' : 'text-red-400'
+                        }`}>
+                          <span className={`w-1.5 h-1.5 rounded-full ${
+                            apiKey.status === 'Active' ? 'bg-green-400' : 'bg-red-400'
+                          }`} />
+                          {apiKey.status}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className="text-xs text-gray-300">{apiKey.lastUsed}</span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <button className="text-gray-400 hover:text-white transition-colors">
+                          <MoreVertical size={16} />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
             </div>
+          </Card>
 
-            <div className="mt-4">
-              <a
-                href="#"
-                className="text-sm text-teal-400 hover:text-teal-300 transition-colors"
-              >
-                View All Sessions
-              </a>
+          {/* API Key Best Practices */}
+          <Card padding="lg">
+            <div className="flex items-start gap-3">
+              <div className="p-2 rounded-lg bg-warning-500/10">
+                <Star size={16} className="text-warning-500" />
+              </div>
+              <div>
+                <h3 className="text-sm font-semibold text-white mb-2">API Key Best Practices</h3>
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 size={14} className="text-green-400 flex-shrink-0" />
+                    <span className="text-xs text-gray-300">
+                      Store API keys securely and never share them publicly.
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 size={14} className="text-green-400 flex-shrink-0" />
+                    <span className="text-xs text-gray-300">
+                      Use environment-specific keys with minimal required permissions.
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 size={14} className="text-green-400 flex-shrink-0" />
+                    <span className="text-xs text-gray-300">
+                      Rotate keys regularly and revoke unused keys.
+                    </span>
+                  </div>
+                </div>
+                <a
+                  href="#"
+                  className="inline-flex items-center gap-1 mt-3 text-xs text-primary-400 hover:text-primary-300 transition-colors"
+                >
+                  Learn more in our documentation
+                  <ExternalLink size={12} />
+                </a>
+              </div>
             </div>
           </Card>
 
@@ -433,91 +433,114 @@ export function Settings() {
 
         {/* Right Sidebar */}
         <div className="w-[25%] flex-shrink-0 space-y-6">
-          {/* Security Overview */}
+          {/* About API Keys */}
           <Card padding="lg">
-            <div className="flex flex-col items-center text-center mb-4">
-              <div className="p-3 rounded-full bg-green-500/10 mb-3">
-                <ShieldCheck size={32} className="text-green-400" />
-              </div>
-              <p className="text-sm font-semibold text-green-400">Your account is secure</p>
-              <p className="text-xs text-gray-400 mt-1">Last security check: Just now</p>
-            </div>
-            <div className="space-y-2.5">
-              {securityChecklist.map((item) => (
-                <div key={item} className="flex items-center gap-2">
-                  <CheckCircle2 size={14} className="text-green-400 flex-shrink-0" />
-                  <span className="text-xs text-gray-300">{item}</span>
+            <h3 className="text-sm font-semibold text-white mb-2">About API Keys</h3>
+            <p className="text-xs text-gray-400 mb-4">
+              API keys allow external applications and services to authenticate with the NVLABS Mission Control API.
+            </p>
+            <div className="space-y-3">
+              <div className="flex items-start gap-2.5">
+                <div className="p-1.5 rounded-lg bg-primary-500/10">
+                  <Shield size={14} className="text-primary-400" />
                 </div>
-              ))}
+                <div>
+                  <p className="text-xs font-medium text-white">Secure Access</p>
+                  <p className="text-xs text-gray-400 mt-0.5">All keys are encrypted and securely stored.</p>
+                </div>
+              </div>
+              <div className="flex items-start gap-2.5">
+                <div className="p-1.5 rounded-lg bg-primary-500/10">
+                  <SettingsIcon size={14} className="text-primary-400" />
+                </div>
+                <div>
+                  <p className="text-xs font-medium text-white">Fine-grained Control</p>
+                  <p className="text-xs text-gray-400 mt-0.5">Manage access with environment-specific keys.</p>
+                </div>
+              </div>
+              <div className="flex items-start gap-2.5">
+                <div className="p-1.5 rounded-lg bg-primary-500/10">
+                  <BarChart3 size={14} className="text-primary-400" />
+                </div>
+                <div>
+                  <p className="text-xs font-medium text-white">Usage Tracking</p>
+                  <p className="text-xs text-gray-400 mt-0.5">Monitor when and how your keys are used.</p>
+                </div>
+              </div>
             </div>
           </Card>
 
-          {/* Account Recovery */}
+          {/* Key Permissions */}
           <Card padding="lg">
-            <h3 className="text-sm font-semibold text-white mb-1">Account Recovery</h3>
+            <h3 className="text-sm font-semibold text-white mb-2">Key Permissions</h3>
             <p className="text-xs text-gray-400 mb-4">
-              Manage your recovery email and phone number.
+              All API keys inherit the permissions of the user who created them.
             </p>
-            <div className="space-y-3">
+            <button className="w-full flex items-center justify-center gap-2 px-3 py-2 border border-white/[0.08] text-sm text-gray-300 rounded-lg hover:bg-white/[0.04] transition-colors">
+              Manage Roles &amp; Permissions
+              <ExternalLink size={14} />
+            </button>
+          </Card>
+
+          {/* Need Help? */}
+          <Card padding="lg">
+            <h3 className="text-sm font-semibold text-white mb-3">Need Help?</h3>
+            <div className="space-y-2.5">
+              <a
+                href="#"
+                className="flex items-center justify-between text-xs text-gray-300 hover:text-white transition-colors"
+              >
+                <span>View API Documentation</span>
+                <ExternalLink size={12} className="text-gray-400" />
+              </a>
+              <a
+                href="#"
+                className="flex items-center justify-between text-xs text-gray-300 hover:text-white transition-colors"
+              >
+                <span>Postman Collection</span>
+                <ExternalLink size={12} className="text-gray-400" />
+              </a>
+              <a
+                href="#"
+                className="flex items-center justify-between text-xs text-gray-300 hover:text-white transition-colors"
+              >
+                <span>Developer Support</span>
+                <ExternalLink size={12} className="text-gray-400" />
+              </a>
+              <a
+                href="#"
+                className="flex items-center justify-between text-xs text-gray-300 hover:text-white transition-colors"
+              >
+                <span>API Status</span>
+                <span className="text-xs text-green-400">All Systems Operational</span>
+              </a>
+            </div>
+          </Card>
+
+          {/* Rate Limits */}
+          <Card padding="lg">
+            <h3 className="text-sm font-semibold text-white mb-3">Rate Limits</h3>
+            <div className="space-y-2.5">
               <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-xs text-gray-400">Recovery Email</p>
-                  <p className="text-xs text-white mt-0.5">navi.yanka@nvlabs.dev</p>
-                </div>
-                <span className="flex items-center gap-1 text-xs text-green-400 font-medium">
-                  Verified <CheckCircle2 size={12} />
-                </span>
+                <span className="text-xs text-gray-400">Standard Requests</span>
+                <span className="text-xs font-medium text-white">1,000 / min</span>
               </div>
               <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-xs text-gray-400">Recovery Phone</p>
-                  <p className="text-xs text-white mt-0.5">+91 98765 43210</p>
-                </div>
-                <span className="flex items-center gap-1 text-xs text-green-400 font-medium">
-                  Verified <CheckCircle2 size={12} />
-                </span>
+                <span className="text-xs text-gray-400">Bulk Requests</span>
+                <span className="text-xs font-medium text-white">500 / min</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-gray-400">Webhooks</span>
+                <span className="text-xs font-medium text-white">100 / min</span>
               </div>
             </div>
             <a
               href="#"
-              className="mt-4 inline-flex items-center gap-1 text-xs text-teal-400 hover:text-teal-300 transition-colors"
+              className="inline-flex items-center gap-1 mt-3 text-xs text-primary-400 hover:text-primary-300 transition-colors"
             >
-              Manage Recovery Options
-              <ChevronRight size={12} />
+              View all rate limits
+              <ExternalLink size={12} />
             </a>
-          </Card>
-
-          {/* Recent Security Activity */}
-          <Card padding="lg">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-sm font-semibold text-white">Recent Security Activity</h3>
-              <a
-                href="#"
-                className="text-xs text-primary-400 hover:text-primary-300 transition-colors"
-              >
-                View All
-              </a>
-            </div>
-            <div className="space-y-3">
-              {recentSecurityActivity.map((activity, idx) => (
-                <a
-                  key={idx}
-                  href="#"
-                  className="flex items-center gap-3 group"
-                >
-                  <div className={`w-2 h-2 rounded-full ${activity.color} flex-shrink-0`} />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-xs font-medium text-white">{activity.title}</p>
-                    <p className="text-xs text-gray-400 mt-0.5">{activity.subtitle}</p>
-                    <p className="text-xs text-gray-500 mt-0.5">{activity.time}</p>
-                  </div>
-                  <ChevronRight
-                    size={14}
-                    className="text-gray-500 group-hover:text-gray-300 transition-colors flex-shrink-0"
-                  />
-                </a>
-              ))}
-            </div>
           </Card>
         </div>
       </div>
