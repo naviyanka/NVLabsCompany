@@ -11,6 +11,10 @@ This module provides adapter implementations for various AI systems:
 Additionally provides:
 - BaseAdapter: Abstract base class with common adapter logic
 - AdapterRegistry: Factory pattern for creating and managing adapters
+- AgentProviderID: Enum of supported agent CLI providers
+- AgentProviderPreset: Frozen dataclass describing provider spawn metadata
+- PROVIDER_PRESETS: Complete mapping of all provider presets
+- get_preset: Lookup function with Claude fallback
 """
 
 from nexus.adapters.anthropic_adapter import AnthropicAdapter
@@ -20,6 +24,12 @@ from nexus.adapters.http_adapter import HTTPAdapter
 from nexus.adapters.mcp_adapter import MCPAgentAdapter
 from nexus.adapters.ollama_adapter import OllamaAdapter
 from nexus.adapters.openai_adapter import OpenAIAdapter
+from nexus.adapters.provider_presets import (
+    AgentProviderID,
+    AgentProviderPreset,
+    PROVIDER_PRESETS,
+    get_preset,
+)
 from nexus.adapters.registry import AdapterRegistry
 
 __all__ = [
@@ -31,4 +41,8 @@ __all__ = [
     "HTTPAdapter",
     "MCPAgentAdapter",
     "AdapterRegistry",
+    "AgentProviderID",
+    "AgentProviderPreset",
+    "PROVIDER_PRESETS",
+    "get_preset",
 ]
