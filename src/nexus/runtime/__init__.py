@@ -5,6 +5,7 @@ from nexus.runtime.lifecycle import AgentLifecycleManager
 from nexus.runtime.executor import TaskExecutor
 from nexus.runtime.cycle_guard import CycleGuard, CycleGuardError
 from nexus.runtime.heartbeat import HeartbeatMonitor
+from nexus.runtime.watchdog import Watchdog, WatchdogConfig
 
 __all__ = [
     "AgentAdapter",
@@ -15,4 +16,6 @@ __all__ = [
     "CycleGuard",
     "CycleGuardError",
     "HeartbeatMonitor",
+    "Watchdog",
+    "WatchdogConfig",
 ]

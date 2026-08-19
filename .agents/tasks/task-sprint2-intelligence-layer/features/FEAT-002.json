@@ -1,0 +1,26 @@
+{
+  "id": "FEAT-002",
+  "type": "feat",
+  "description": "Failure Alchemy and Watchdog Auto-Recovery - Create the failure learning system that transforms failed tasks into Antibody/Vaccine/Catalyst artifacts, and the watchdog that performs periodic patrol to recover stuck/orphaned/budget-exceeded/circuit-broken agents.",
+  "status": "in_progress",
+  "steps": [
+    "Create src/nexus/evolution/failure_alchemy.py with: ArtifactType enum (ANTIBODY, VACCINE, CATALYST), Antibody dataclass (rule: str, source_error: str, created_at: datetime, severity: str), Vaccine dataclass (scenario: str, expected: str, actual: str, root_cause: str, created_at: datetime), Catalyst dataclass (proposal: str, target_system: str, priority: str, created_at: datetime), FailureLearning dataclass (antibody: Antibody, vaccine: Vaccine, catalyst: Catalyst | None, task_id: UUID, agent_id: UUID, created_at: datetime). FailureAlchemist class with: analyze_failure(task_id, agent_id, error: str, context: dict) -> FailureLearning. The alchemist uses rule-based heuristics (not LLM): extracts antibody from error patterns (e.g., 'Never run X without checking Y'), creates vaccine test cases from the failure context, generates catalyst proposals for recurring patterns. Include get_antibodies, get_vaccines, get_catalysts methods for retrieval. Store artifacts in-memory list. Include an EventBusProtocol-style emit_learning_event method for audit trail.",
+    "Create src/nexus/runtime/watchdog.py with: RecoveryAction enum (RESET_IDLE, REASSIGN, MARK_FAILED, PAUSE, HALF_OPEN_TEST), WatchdogConfig dataclass (patrol_interval_seconds: int = 30, stuck_threshold_seconds: int = 300, orphan_check: bool = True, budget_check: bool = True, circuit_check: bool = True), PatrolReport dataclass (timestamp: datetime, actions_taken: list[dict], agents_checked: int, issues_found: int). Watchdog class that accepts: HeartbeatMonitor, optional config. Methods: patrol() -> PatrolReport that checks: (1) stuck agents via heartbeat (executing > threshold -> reset to idle), (2) orphaned tasks (agent in terminated/error state with assigned tasks -> mark tasks failed), (3) budget-exceeded agents (spent > budget -> pause), (4) circuit-broken agents (check cooldown elapsed -> attempt half-open test). Each check returns actions taken. Include start_background_patrol() that creates an asyncio.Task running patrol periodically, and stop() to cancel it. Use AgentInfo protocol/dataclass for agent state input rather than direct DB access.",
+    "Add tests in tests/test_failure_alchemy.py covering: analyze_failure produces valid antibody, vaccine, and catalyst; different error types produce different antibodies; catalyst is None for non-systemic errors; get_antibodies/get_vaccines/get_catalysts retrieval; multiple failures accumulate artifacts.",
+    "Add tests in tests/test_watchdog.py covering: patrol detects stuck agents, patrol detects orphaned tasks, patrol pauses budget-exceeded agents, patrol checks circuit-broken agents, patrol returns accurate report, start/stop background patrol lifecycle."
+  ],
+  "acceptance_criteria": [
+    "FailureAlchemist.analyze_failure produces structured Antibody + Vaccine + optional Catalyst",
+    "Different error patterns produce contextually appropriate antibody rules",
+    "Watchdog.patrol detects and acts on stuck, orphaned, budget-exceeded, and circuit-broken agents",
+    "PatrolReport accurately summarizes all actions taken",
+    "Background patrol can be started and stopped cleanly",
+    "All new tests pass alongside the existing 749 tests"
+  ],
+  "verification": [
+    "/root/.pyenv/versions/3.12.13/bin/python -m pytest tests/test_failure_alchemy.py tests/test_watchdog.py -v",
+    "/root/.pyenv/versions/3.12.13/bin/python -m pytest tests/ --tb=short -q"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}
