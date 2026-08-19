@@ -2,7 +2,7 @@
   "id": "FEAT-001",
   "type": "feat",
   "description": "Complete Claude Code Adapter: Add streaming JSON output parsing, session resumption support, and --worktree flag handling",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "In src/nexus/adapters/claude_code_adapter.py, add a _parse_stream_json() method that parses Claude Code's --output-format stream-json mode. The stream is newline-delimited JSON with event types: 'assistant', 'tool_use', 'tool_result', 'system', 'result'. Each line is a JSON object with a 'type' field. Parse them into a list of event dicts and extract final result text from 'result' events.",
     "Add session_id tracking: After execution, scan the parsed JSON events or stdout for a session_id field (Claude Code returns this in 'system' or 'result' type events). Store it in session.metadata['last_session_id'] so callers can resume later.",
@@ -26,5 +26,5 @@
     "python3.12 -m pytest tests/ --tb=no -q"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "All 27 new tests pass. Full suite: 1920 tests passing (baseline was 1893, +27 new). No regressions. The adapter now always uses --output-format stream-json by default and gracefully falls back when output is plain text."
 }
