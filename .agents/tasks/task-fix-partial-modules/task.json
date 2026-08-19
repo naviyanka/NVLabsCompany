@@ -1,0 +1,7 @@
+{
+  "task_id": "task-fix-partial-modules",
+  "task_description": "Fix the final 5 LOW-priority PARTIAL modules to bring the platform to 100% PRODUCTION rating. Includes HTTP adapter webhook callbacks, CLI adapter interactive stdin, context trigger complex conditions, Knowledge Plaza real-time collaboration, and Evolution Analyzer statistical wiring.",
+  "status": "in_progress",
+  "feature_order": ["FEAT-001", "FEAT-002", "FEAT-003", "FEAT-004", "FEAT-005"],
+  "blocked_reason": null
+}

@@ -1,0 +1,31 @@
+{
+  "project_type": "Python FastAPI backend - NEXUS AI Company Operating System",
+  "language": "Python 3.12+",
+  "build_system": "setuptools with pyproject.toml, pip install -e '.[dev]'",
+  "test_framework": "pytest with pytest-asyncio, asyncio_mode=auto, tests in tests/ directory",
+  "build_command": "pip install -e '.[dev]'",
+  "test_command": "pytest tests/ -x -q",
+  "verification_instructions": "Run pytest to verify all existing and new tests pass",
+  "snapshot_or_generated_files": null,
+  "setup_instructions": "pip install -e '.[dev]'",
+  "environment_constraints": "OPEN_INTERNET network mode. Do NOT modify dashboard/frontend. Python 3.12+ required.",
+  "contribution_requirements": "All code needs docstrings, type hints, ruff compliant, 100 char line limit, backward compatible",
+  "key_patterns": "Tests use pytest fixtures, AsyncMock for DB sessions, _run() helper for sync test wrappers. Adapters extend BaseAdapter with _do_execute/_do_create_session/_do_heartbeat/_do_terminate hooks. Tests in tests/test_*.py files. Dataclasses used for config/models.",
+  "relevant_files": [
+    "src/nexus/adapters/http_adapter.py",
+    "src/nexus/adapters/cli_adapter.py",
+    "src/nexus/adapters/base.py",
+    "src/nexus/triggers/context_trigger.py",
+    "src/nexus/knowledge/plaza.py",
+    "src/nexus/evolution/analyzer.py",
+    "src/nexus/evolution/statistical.py",
+    "src/nexus/runtime/adapter.py",
+    "tests/test_adapters.py",
+    "tests/test_cli_adapter.py",
+    "tests/test_triggers.py",
+    "tests/test_knowledge.py",
+    "tests/test_evolution.py",
+    "tests/test_statistical.py"
+  ],
+  "directory_structure": "src/nexus/ - main package with adapters/, triggers/, knowledge/, evolution/ subpackages. tests/ - flat test files. dashboard/ - frontend (DO NOT TOUCH)."
+}

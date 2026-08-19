@@ -1,0 +1,28 @@
+{
+  "id": "FEAT-002",
+  "type": "feat",
+  "description": "Add stdin interactive protocol to CLI Adapter for ongoing process communication",
+  "status": "pending",
+  "steps": [
+    "In src/nexus/adapters/cli_adapter.py, add send_message(session_id, message) async method that writes to the running process's stdin pipe and returns acknowledgment",
+    "Add is_interactive flag to session metadata (set during _do_create_session based on config)",
+    "Add awaiting_input state tracking in session metadata that tracks whether the process is waiting for stdin input",
+    "Add _stream_output(process, session_id) async helper that reads stdout line-by-line incrementally and appends to session logs",
+    "Handle edge cases: process already exited (raise RuntimeError), stdin pipe broken (BrokenPipeError handling), encoding issues (use errors='replace')",
+    "Create tests/test_cli_adapter_interactive.py with tests using mock subprocess covering: send_message to running process, send_message to exited process, is_interactive flag, awaiting_input state, _stream_output line reading, broken pipe handling"
+  ],
+  "acceptance_criteria": [
+    "pytest tests/test_cli_adapter_interactive.py passes all new tests",
+    "send_message() writes to stdin of running process and handles errors gracefully",
+    "is_interactive and awaiting_input state properly tracked",
+    "_stream_output() reads lines incrementally",
+    "Existing CLIAdapter behavior (non-interactive execute) unchanged",
+    "All existing tests still pass"
+  ],
+  "verification": [
+    "pytest tests/test_cli_adapter_interactive.py -v",
+    "pytest tests/test_cli_adapter.py -v"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

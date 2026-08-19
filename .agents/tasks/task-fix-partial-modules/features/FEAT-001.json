@@ -1,0 +1,27 @@
+{
+  "id": "FEAT-001",
+  "type": "feat",
+  "description": "Enhance HTTP Adapter with robust polling and webhook callback support",
+  "status": "in_progress",
+  "steps": [
+    "In src/nexus/adapters/http_adapter.py, enhance _poll_for_result() to accept configurable poll_interval, max_polls, timeout parameters with proper error handling (distinct timeout vs connection errors, exponential backoff option)",
+    "Add register_callback_handler(callback_url, session, handler_fn) method that stores callback handlers keyed by session/task and provides a way for the adapter to receive async webhook results instead of polling",
+    "Add CallbackRegistration dataclass to hold callback_url, handler function reference, registered_at timestamp, and expiry",
+    "Add _handle_callback_result(task_id, result_data) method that resolves pending async tasks via stored callbacks",
+    "Update _get_capabilities() to include 'webhook_callback'",
+    "Create tests/test_http_adapter_webhook.py with tests covering: successful poll flow (202 -> poll -> completed), poll timeout, poll with connection errors, callback registration, callback handler invocation, and configurable poll parameters"
+  ],
+  "acceptance_criteria": [
+    "pytest tests/test_http_adapter_webhook.py passes all new tests",
+    "_poll_for_result() supports configurable poll_interval, max_polls, timeout parameters",
+    "register_callback_handler() method exists and stores callback configuration",
+    "Existing HTTPAdapter behavior (synchronous 200 responses) is unchanged",
+    "All existing tests still pass"
+  ],
+  "verification": [
+    "pytest tests/test_http_adapter_webhook.py -v",
+    "pytest tests/test_adapters.py -v"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

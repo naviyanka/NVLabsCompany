@@ -1,0 +1,33 @@
+{
+  "id": "FEAT-005",
+  "type": "feat",
+  "description": "Wire Evolution Analyzer to StatisticalAnalyzer for significance testing and trend analysis",
+  "status": "pending",
+  "steps": [
+    "In src/nexus/evolution/analyzer.py, create StatisticalFailureAnalyzer class that extends FailureAnalyzer",
+    "Import StatisticalAnalyzer from nexus.evolution.statistical and instantiate in __init__",
+    "Add is_significant_pattern(pattern_data: list[float], baseline_data: list[float], alpha: float = 0.05) -> dict method that uses StatisticalAnalyzer.compute_significance to test if a failure pattern is statistically significant vs baseline",
+    "Add trend_analysis(metric_values: list[float]) -> dict method that uses StatisticalAnalyzer.detect_trend to identify if failure rates are trending up/down/flat",
+    "Add compare_periods(period_a: list[float], period_b: list[float]) -> dict method that uses StatisticalAnalyzer.is_significant_improvement to compare two time periods",
+    "Add confidence_interval_for_rate(failure_counts: list[float], confidence: float = 0.95) -> dict method that uses StatisticalAnalyzer.compute_confidence_interval",
+    "Ensure all parent FailureAnalyzer methods (root_cause_analysis, extract_success_factors, etc.) still work via inheritance",
+    "Create tests/test_statistical_failure_analyzer.py with tests covering: is_significant_pattern with significant vs non-significant data, trend_analysis detecting upward/downward/flat, compare_periods detecting improvement, confidence_interval_for_rate, inherited methods still functional"
+  ],
+  "acceptance_criteria": [
+    "pytest tests/test_statistical_failure_analyzer.py passes all new tests",
+    "StatisticalFailureAnalyzer extends FailureAnalyzer (isinstance check passes)",
+    "is_significant_pattern() correctly delegates to StatisticalAnalyzer.compute_significance",
+    "trend_analysis() correctly delegates to StatisticalAnalyzer.detect_trend",
+    "compare_periods() correctly delegates to StatisticalAnalyzer.is_significant_improvement",
+    "confidence_interval_for_rate() correctly delegates to StatisticalAnalyzer.compute_confidence_interval",
+    "All existing FailureAnalyzer tests still pass",
+    "All existing tests still pass"
+  ],
+  "verification": [
+    "pytest tests/test_statistical_failure_analyzer.py -v",
+    "pytest tests/test_evolution.py -v",
+    "pytest tests/test_statistical.py -v"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

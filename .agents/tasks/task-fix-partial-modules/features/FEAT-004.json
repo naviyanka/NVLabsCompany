@@ -1,0 +1,34 @@
+{
+  "id": "FEAT-004",
+  "type": "feat",
+  "description": "Add real-time collaboration features to Knowledge Plaza (subscribe/notify, locking, change feed)",
+  "status": "pending",
+  "steps": [
+    "In src/nexus/knowledge/plaza.py, add PageChangeEvent dataclass with fields: page_id, company_id, change_type (str: 'created'|'updated'|'deleted'), agent_id, timestamp, metadata dict",
+    "Add _subscribers dict[uuid.UUID, list[Callable]] to KnowledgePlaza.__init__ to track per-company subscriber callbacks",
+    "Add subscribe(company_id, callback) method that registers a callback for page change events in a company, returns a subscription_id",
+    "Add unsubscribe(subscription_id) method",
+    "Add notify_subscribers(page_id, company_id, change_type, agent_id) async method that calls all registered callbacks for the company with a PageChangeEvent",
+    "Add get_recent_changes(company_id, since_timestamp, limit=50) async method that returns recent PageChangeEvents (stored in an internal deque/list)",
+    "Add lock_page(page_id, agent_id, duration_seconds=300) method that acquires a page lock with auto-expiry timestamp",
+    "Add unlock_page(page_id, agent_id) method that releases lock only if held by the same agent",
+    "Add is_page_locked(page_id) method that checks lock status respecting expiry",
+    "Wire notify_subscribers into publish_page and update_page methods",
+    "Create tests/test_knowledge_plaza_collab.py with tests covering: subscribe/notify flow, multiple subscribers, unsubscribe, get_recent_changes with timestamp filtering, lock_page/unlock_page, lock expiry, lock by wrong agent rejected, PageChangeEvent fields"
+  ],
+  "acceptance_criteria": [
+    "pytest tests/test_knowledge_plaza_collab.py passes all new tests",
+    "subscribe()/unsubscribe() correctly manage callbacks",
+    "notify_subscribers() delivers PageChangeEvent to all registered callbacks",
+    "get_recent_changes() returns events since given timestamp with limit",
+    "lock_page()/unlock_page() implement mutex with auto-expiry",
+    "Existing KnowledgePlaza methods (publish_page, update_page, search_pages) still work unchanged",
+    "All existing tests still pass"
+  ],
+  "verification": [
+    "pytest tests/test_knowledge_plaza_collab.py -v",
+    "pytest tests/test_knowledge.py -v"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}
