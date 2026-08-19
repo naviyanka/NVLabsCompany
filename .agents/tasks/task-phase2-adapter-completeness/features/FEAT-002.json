@@ -2,7 +2,7 @@
   "id": "FEAT-002",
   "type": "feat",
   "description": "Add MCP Stdio Transport: Create src/nexus/tools/mcp_stdio.py implementing an StdioMCPTransport class that spawns MCP servers as subprocesses and communicates via stdin/stdout JSON-RPC",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "Create src/nexus/tools/mcp_stdio.py with class StdioMCPTransport that has the same interface as MCPClient (connect, list_tools, call_tool, disconnect) but communicates via subprocess stdio instead of HTTP.",
     "Implement connect(command: str, args: list[str] | None = None, env: dict[str, str] | None = None) that spawns the MCP server as an asyncio subprocess with stdin=PIPE, stdout=PIPE, stderr=PIPE. Send the JSON-RPC 'initialize' request to stdin (newline-terminated). Read and parse the response from stdout. Store server info.",
@@ -29,5 +29,5 @@
     "python3.12 -m pytest tests/ --tb=no -q"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "Implementation complete with 24 tests passing. Full test suite: 1944 tests pass. Used asyncio.create_subprocess_exec mock pattern with side_effect lists for stdout responses. Note: process.wait mock needs side_effect list for disconnect force-kill scenario (first raises TimeoutError, second returns 0)."
 }
