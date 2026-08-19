@@ -4,7 +4,6 @@ import { Badge } from '@/components/common/Badge';
 import { EmptyState } from '@/components/common/EmptyState';
 import { Spinner } from '@/components/common/Spinner';
 import { Brain, Search } from 'lucide-react';
-import { useApi } from '@/hooks/useApi';
 import { agentsApi } from '@/api/agents';
 import type { MemoryEntry } from '@/types/agent';
 import type { MemoryScope } from '@/types/common';

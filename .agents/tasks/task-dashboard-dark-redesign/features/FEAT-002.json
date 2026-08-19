@@ -1,0 +1,32 @@
+{
+  "id": "FEAT-002",
+  "type": "feat",
+  "description": "Complete dark theme redesign of the dashboard - convert from light gray/white theme to dark navy mission-control theme. This includes: new Tailwind color palette, dark layout shell (Layout, Sidebar, Header), updated common Card component, updated index.css with dark base styles, and the fully redesigned Dashboard (Overview) page with all sections described in the screenshot.",
+  "status": "completed",
+  "steps": [
+    "Step 1 - Update tailwind.config.js: Add dark color palette (dark-bg: #0f1117, dark-surface: #1a1b2e, dark-card: #1e2035, dark-sidebar: #12131f, dark-border: rgba(255,255,255,0.08)), keep existing animation keyframes, update sidebar color to #12131f",
+    "Step 2 - Update index.html: Change body class from bg-gray-50 to bg-[#0f1117] for dark background",
+    "Step 3 - Update src/index.css: Rewrite CSS variables for dark theme (--sidebar-bg: #12131f, --sidebar-text: #e2e8f0, etc.), update .sidebar-link classes for dark theme with active blue/indigo gradient highlight, add scrollbar styling for dark theme",
+    "Step 4 - Update src/components/common/Card.tsx: Change base classes from bg-white/border-gray-200 to bg-[#1a1b2e]/border-white/[0.08] for dark cards, update hover state",
+    "Step 5 - Rewrite src/components/layout/Layout.tsx: Change min-h-screen background to bg-[#0f1117], keep sidebar + main structure with dark colors",
+    "Step 6 - Rewrite src/components/layout/Sidebar.tsx: Complete redesign with dark navy sidebar (#12131f). Include: NVLABS logo with rocket icon and 'Mission Control' subtitle, nav items (Overview, Office, HR Room with 'New' badge, Agents with chevron, Tasks with chevron, Pipelines with chevron, Memory, Git Repos, Knowledge Base, Activity, Notifications with red '12' badge, Settings), SYSTEM STATUS section showing Gateway/WebSocket/Database/Memory Store/Vector DB all with green 'Online'/'Connected'/'Healthy' status dots, User profile at bottom with avatar showing 'Navi Yanka' and 'Administrator' subtitle",
+    "Step 7 - Rewrite src/components/layout/Header.tsx: Dark header bar with search input (placeholder 'Search agents, tasks, pipelines...' with Ctrl+K hint), Dashboard/Office toggle buttons (Office highlighted in teal), user info on right showing 'Navi Yanka' / 'Operator' with avatar circle",
+    "Step 8 - Rewrite src/pages/Dashboard.tsx: Complete redesign as the Overview/Mission Control page. Remove all existing API-dependent logic and use static mock data. Include these sections in order: (A) Page title with sparkle icon 'NVLabs Mission Control' and subtitle 'Monitor. Orchestrate. Scale.' (B) 5 stat cards row: Active Agents 24/32 +12%, Active Tasks 18/50 +8%, Pipelines 7/15 +5%, Token Usage 1.24M -3%, Est. Spend $42.68 +7% - each with colored icon background (purple, blue, green, orange, pink) (C) Three-column section: Agent Network (pixel-art office visualization with colored zones: Planning, DevOps, Development, Meeting, Analysis, Support, HQ Terminal - with robot avatar dots and legend), Pipeline Execution (4 pipelines with progress bars: Bug Bounty Recon 85% amber, Code Review Automation 62% green, Threat Intel Collector 45% teal, Content Generation Flow 30% purple), Live Activity feed (5 timestamped entries) (D) Quick Actions row: 5 colored buttons (Add Agent green, Create Task blue, New Pipeline orange, Open HR Room red/pink, View Office purple) (E) Bottom two-column: Recent Tasks (4 task items with agent, progress bar, percentage, time) and Top Agents (4 agent cards with avatar, name, percentage, backend model, progress bar) (F) Token & Cost Overview chart using recharts: dual-axis area chart with Tokens (blue area, left Y-axis 0-200K) and Cost USD (orange line, right Y-axis 0-$80), X-axis 00:00 to 24:00, summary stats below (G) Command bar at bottom: 'Ask NVLabs anything...' input with Ctrl K shortcut and teal send button",
+    "Step 9 - Update src/App.tsx routes if needed: Ensure the Overview route (/) still points to the Dashboard component. Add routes for new sidebar items that don't yet have pages (HR Room -> placeholder, Pipelines -> placeholder, Git Repos -> placeholder, Knowledge Base -> placeholder, Notifications -> placeholder) so navigation works without errors",
+    "Step 10 - Verify build: Run npm run build to confirm all TypeScript compiles correctly with the strict tsconfig settings"
+  ],
+  "acceptance_criteria": [
+    "npm run build succeeds with no TypeScript errors",
+    "tailwind.config.js contains the new dark color palette",
+    "Sidebar renders with NVLABS branding, all navigation items, system status section, and user profile",
+    "Header renders with dark background, search bar, Dashboard/Office toggle, user info",
+    "Dashboard page renders all sections: title, 5 stat cards, agent network visualization, pipeline execution list, live activity feed, quick actions, recent tasks, top agents, token/cost chart, command bar",
+    "All components use dark theme colors (dark backgrounds, white/gray text, subtle borders)",
+    "Card component uses dark styling"
+  ],
+  "verification": [
+    "Run: cd /projects/sandbox/NVLabsCompany/dashboard && npm run build"
+  ],
+  "blocked_reason": null,
+  "findings": "Build passes cleanly with zero TypeScript errors. Had to remove unused AreaChart import (using ComposedChart instead). All strict mode constraints satisfied including noUncheckedIndexedAccess, noUnusedLocals, noUnusedParameters. The chunk size warning from Vite is informational only (588KB JS bundle) and not a build error."
+}

@@ -29,12 +29,7 @@ function computeDelegations(tasks: Task[], agents: Agent[]): DelegationArrow[] {
       // Find parent task to get the delegating agent
       const parentTask = tasks.find((t) => t.id === task.parent_task_id);
       if (parentTask?.assigned_agent_id && agentMap.has(parentTask.assigned_agent_id)) {
-        const status =
-          task.status === 'in_progress'
-            ? 'active'
-            : task.status === 'completed'
-              ? 'completed'
-              : 'active';
+        const status: DelegationArrow['status'] = 'active';
 
         delegations.push({
           id: `del-${task.id}`,
