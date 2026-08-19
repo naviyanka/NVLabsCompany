@@ -1,0 +1,27 @@
+{
+  "id": "FEAT-004",
+  "type": "feat",
+  "description": "LLM Provider Registry (Self-Registering): Create a pluggable provider system with self-registration at import time, capability metadata, and task-based routing.",
+  "status": "completed",
+  "steps": [
+    "1. Create src/nexus/models_router/provider_registry.py with: LLMProviderSpec dataclass (name: str, models_available: list[str], pricing: dict[str, dict[str, float]], capabilities: dict[str, ModelCapabilities], api_base: str, is_local: bool). ModelCapabilities dataclass (context_window: int, supports_tools: bool, supports_vision: bool, supports_streaming: bool, supports_json_mode: bool).",
+    "2. Create ProviderRegistry class (singleton pattern via class-level _instance): register(spec: LLMProviderSpec) class method, get_provider(name: str) -> LLMProviderSpec | None, list_providers() -> list[LLMProviderSpec], unregister(name: str) for testing. Add route_to_provider(task_type: str, requirements: dict) -> LLMProviderSpec | None method that selects best provider based on requirements (e.g., needs_vision=True, min_context_window=128000, prefer_local=True).",
+    "3. Create built-in specs in the same file as module-level registrations: OPENAI_SPEC (gpt-4o, gpt-4o-mini, gpt-4-turbo; api_base='https://api.openai.com/v1'), ANTHROPIC_SPEC (claude-sonnet-4-20250514, claude-3-5-haiku; api_base='https://api.anthropic.com'), OLLAMA_SPEC (llama3, mistral, codellama; api_base='http://localhost:11434', is_local=True), DEEPSEEK_SPEC (deepseek-chat, deepseek-coder; api_base='https://api.deepseek.com'), MISTRAL_SPEC (mistral-large, mistral-medium; api_base='https://api.mistral.ai'), GOOGLE_SPEC (gemini-1.5-pro, gemini-1.5-flash, gemini-2.0-flash; api_base='https://generativelanguage.googleapis.com').",
+    "4. Self-registration pattern: At the bottom of provider_registry.py, register all built-in specs so they are available as soon as the module is imported.",
+    "5. Update src/nexus/models_router/__init__.py to export ProviderRegistry, LLMProviderSpec, ModelCapabilities.",
+    "6. Create tests/test_provider_registry.py with tests: registry singleton, register/unregister providers, list_providers returns all built-ins, get_provider by name, route_to_provider selects provider with vision support, route_to_provider selects local provider, route_to_provider selects by context window, model capabilities metadata correct for built-in specs."
+  ],
+  "acceptance_criteria": [
+    "LLMProviderSpec dataclass has name, models_available, pricing, capabilities, api_base fields",
+    "ModelCapabilities has context_window, supports_tools, supports_vision, supports_streaming",
+    "ProviderRegistry is singleton with register/get_provider/list_providers/route_to_provider",
+    "Built-in specs for OpenAI, Anthropic, Ollama, DeepSeek, Mistral, Google are auto-registered at import",
+    "route_to_provider correctly selects based on task requirements",
+    "All tests in tests/test_provider_registry.py pass"
+  ],
+  "verification": [
+    "python3.12 -m pytest tests/test_provider_registry.py -x -q"
+  ],
+  "blocked_reason": null,
+  "findings": "All 21 provider registry tests pass. Full suite passes at 1187 tests. Singleton pattern uses class-level _instance with reset() classmethod. Built-in providers self-register at module level at the bottom of provider_registry.py."
+}

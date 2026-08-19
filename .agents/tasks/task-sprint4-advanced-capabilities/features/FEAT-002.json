@@ -1,0 +1,27 @@
+{
+  "id": "FEAT-002",
+  "type": "feat",
+  "description": "A2A Protocol enhancement: Add structured communication modes (notify/consult/delegate), A2AMessage dataclass, A2ARouter with permission checks and CycleGuard integration, and response tracking with timeout for consult mode.",
+  "status": "completed",
+  "steps": [
+    "1. Create src/nexus/communication/a2a_router.py (new file, separate from existing a2a.py to avoid breaking changes): Define CommunicationMode enum (notify, consult, delegate). Define A2AMessage dataclass with: id, sender (UUID), recipient (UUID), mode (CommunicationMode), payload (dict), correlation_id (str), timeout_seconds (float|None), created_at, response (optional dict), response_received_at (optional datetime).",
+    "2. Create A2ARouter class in the same file: __init__(cycle_guard: CycleGuard | None = None, permissions: dict | None = None). Methods: send(message: A2AMessage) -> A2AMessage, check_permission(sender, recipient) -> bool, register_permission(sender, recipient, allowed_modes: list[CommunicationMode]). For 'delegate' mode, integrate with CycleGuard.check_delegation() to prevent infinite delegation loops.",
+    "3. Implement response tracking for consult mode: A2ARouter.respond(correlation_id, response_payload) to resolve a pending consult. A2ARouter.get_pending_consults(agent_id) to list unresolved consults. Track timeout expiration: A2ARouter.check_timeouts() marks expired consults as timed_out.",
+    "4. Update src/nexus/communication/__init__.py to export A2ARouter, A2AMessage, CommunicationMode.",
+    "5. Create tests/test_a2a_router.py with tests: notify mode fire-and-forget, consult mode with response tracking, consult mode timeout, delegate mode with CycleGuard integration (verify CycleGuardError raised on loops), permission checks (allowed/denied), multiple messages with correlation tracking."
+  ],
+  "acceptance_criteria": [
+    "A2AMessage dataclass exists with sender, recipient, mode, payload, correlation_id, timeout fields",
+    "CommunicationMode enum has notify, consult, delegate values",
+    "A2ARouter routes messages with permission checks",
+    "Delegate mode integrates with CycleGuard and raises CycleGuardError on loops",
+    "Consult mode tracks responses and handles timeouts",
+    "Existing communication tests still pass (python3.12 -m pytest tests/test_communication.py -q)",
+    "New tests in tests/test_a2a_router.py all pass"
+  ],
+  "verification": [
+    "python3.12 -m pytest tests/test_communication.py tests/test_a2a_router.py -x -q"
+  ],
+  "blocked_reason": null,
+  "findings": "All 1154 tests pass (39 new in test_a2a_router.py, 38 existing in test_communication.py). The A2ARouter uses open-by-default permissions (allows all when no permissions registered). CycleGuard integration tracks execution_chain internally. Existing a2a.py was not modified."
+}

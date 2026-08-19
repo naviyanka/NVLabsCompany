@@ -1,0 +1,29 @@
+{
+  "id": "FEAT-003",
+  "type": "feat",
+  "description": "Durable Execution Checkpoints: Create a checkpointing system for crash recovery of long-running tasks, including SQLModel table, CheckpointManager class, state serialization, and startup recovery routine.",
+  "status": "completed",
+  "steps": [
+    "1. Create src/nexus/runtime/checkpoint.py with: ExecutionCheckpoint SQLModel table (id UUID PK, task_id UUID indexed, step_index int, state_json dict/JSON, status str [active/completed/abandoned], created_at datetime, updated_at datetime). Add CheckpointStatus enum: active, completed, abandoned.",
+    "2. Create CheckpointManager class in the same file: __init__(max_checkpoint_age_hours: int = 24). Methods: save_checkpoint(task_id, step_index, state: dict) -> ExecutionCheckpoint, load_latest(task_id) -> ExecutionCheckpoint | None, cleanup(task_id) to mark old checkpoints as completed, abandon_stale() to mark checkpoints older than max_checkpoint_age_hours as abandoned, list_active() -> list[ExecutionCheckpoint], resume_from_checkpoint(task_id) -> dict | None (deserializes state_json from latest active checkpoint).",
+    "3. State serialization: state_json should hold agent_context (dict), completed_steps (list[int]), intermediate_results (list[dict]), metadata (dict). Provide a helper function build_checkpoint_state(agent_context, completed_steps, intermediate_results, metadata) -> dict.",
+    "4. Startup recovery routine: CheckpointManager.recover_interrupted() -> list[tuple[UUID, dict]] that finds all active checkpoints and returns (task_id, state) pairs for the runtime to resume.",
+    "5. Add ExecutionCheckpoint to src/nexus/models/__init__.py: import from nexus.runtime.checkpoint and add to __all__.",
+    "6. Update src/nexus/runtime/__init__.py to export CheckpointManager and ExecutionCheckpoint.",
+    "7. Create tests/test_checkpoint.py with tests: save and load checkpoint, load_latest returns most recent, cleanup marks as completed, abandon_stale marks old checkpoints, recover_interrupted finds active checkpoints, build_checkpoint_state helper, resume_from_checkpoint returns deserialized state."
+  ],
+  "acceptance_criteria": [
+    "ExecutionCheckpoint SQLModel table has all required fields (task_id, step_index, state_json, status, created_at)",
+    "CheckpointManager can save, load, cleanup, and abandon checkpoints",
+    "Startup recovery routine finds interrupted tasks",
+    "State serialization handles agent_context, completed_steps, intermediate_results",
+    "Configurable max checkpoint age for abandonment",
+    "ExecutionCheckpoint is registered in src/nexus/models/__init__.py",
+    "All tests in tests/test_checkpoint.py pass"
+  ],
+  "verification": [
+    "python3.12 -m pytest tests/test_checkpoint.py -x -q"
+  ],
+  "blocked_reason": null,
+  "findings": "Added execution_checkpoints table to EXPECTED_TABLES in test_alembic_migration.py and updated count from 54 to 55. All 1166 tests pass."
+}

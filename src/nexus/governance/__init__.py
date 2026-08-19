@@ -1,7 +1,8 @@
 """Governance layer - approvals, budget enforcement, guardrails, RBAC, audit, and kill switch."""
 
 from nexus.governance.approvals import ApprovalEngine
-from nexus.governance.budget_enforcer import BudgetEnforcer, BudgetDecision
+from nexus.governance.budget_enforcer import BudgetEnforcer, BudgetDecision, WindowKind
+from nexus.governance.budget_incident import BudgetIncident, BudgetIncidentLog
 from nexus.governance.guardrails import GuardrailChain
 from nexus.governance.rbac import RBACManager
 from nexus.governance.audit import AuditLogger
@@ -23,6 +24,9 @@ __all__ = [
     "ApprovalEngine",
     "BudgetEnforcer",
     "BudgetDecision",
+    "BudgetIncident",
+    "BudgetIncidentLog",
+    "WindowKind",
     "GuardrailChain",
     "RBACManager",
     "AuditLogger",

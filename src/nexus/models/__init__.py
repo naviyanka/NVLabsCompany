@@ -35,6 +35,8 @@ from nexus.models.tool_invocation import ToolInvocation
 from nexus.models.trigger import Trigger, TriggerExecution
 from nexus.governance.kill_switch_model import KillSwitchRecord
 from nexus.governance.circuit_breaker_model import CircuitBreakerRecord
+from nexus.models.heartbeat_run import HeartbeatRun
+from nexus.runtime.checkpoint import ExecutionCheckpoint
 
 __all__ = [
     # Company / Organization
@@ -108,4 +110,7 @@ __all__ = [
     # Governance persistence
     "KillSwitchRecord",
     "CircuitBreakerRecord",
+    # Runtime persistence
+    "ExecutionCheckpoint",
+    "HeartbeatRun",
 ]
