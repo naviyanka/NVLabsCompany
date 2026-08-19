@@ -2,7 +2,7 @@
   "id": "FEAT-004",
   "type": "feat",
   "description": "Webhook Inbound Server - Port the WebhookServer from munder-difflin/src/main/webhook.ts. Production-grade inbound HTTP for external integrations with per-endpoint secrets (constant-time comparison), JSON schema validation, fixed-window rate limiting, capability tokens, body size cap.",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "Create src/nexus/communication/webhook_types.py with Pydantic models: WebhookEndpoint (id: str, name: str, secret: str, schema: str default '{}', enabled: bool default True), WebhookInbound (message: str, title: str|None, kind: str|None, from_: str|None using Field(alias='from')), WebhookDispatch (token: str, task_id: str|None, pending: bool), WebhookTaskStatus (status: str, title: str, result: str|None).",
     "Create src/nexus/communication/webhook_server.py with WebhookServer class. Constructor takes endpoints list, on_message callback, lookup_status callback. Constants: MAX_BODY_BYTES = 1MB, RATE_LIMIT = 120/min global, PER_ENDPOINT_RATE_LIMIT = 60/min, RATE_WINDOW_MS = 60_000, LEGACY_ENDPOINT_ID = 'legacy'. Internal state: endpoints dict, decoy_secret (random 32 bytes hex), rate windows dict. Methods: set_endpoints(list) to swap endpoint config, verify_secret(provided, endpoint) using hmac.compare_digest with constant-time comparison (compare against decoy for unknown endpoints), allow_request(bucket, limit) fixed-window rate limiter, handle_post(endpoint_id, headers, body_bytes) that enforces rate limit -> verifies secret -> validates body size -> parses JSON -> validates against endpoint schema -> extracts WebhookInbound fields -> calls on_message, handle_get(endpoint_id, token) that calls lookup_status. Return proper HTTP-style responses as dicts with status codes.",
@@ -23,5 +23,5 @@
     "pytest tests/ (full suite to confirm no regressions)"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "jsonschema library added as a dependency (pyproject.toml). Installed for pyenv Python 3.12.13. All 54 webhook tests pass plus full suite of 1589 tests passes with no regressions. Ruff linting and formatting verified clean."
 }
