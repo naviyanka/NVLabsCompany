@@ -1,0 +1,29 @@
+{
+  "project_type": "Python FastAPI app - NEXUS Autonomous AI Company Operating System",
+  "language": "Python 3.12+",
+  "build_system": "setuptools with pyproject.toml, pip install -e '.[dev]'",
+  "test_framework": "pytest with pytest-asyncio, asyncio_mode=auto, all tests in tests/ directory",
+  "build_command": "export PATH=/opt/toolchains/.pyenv/shims:$PATH && cd /projects/sandbox/NVLabsCompany && pip install -e '.[dev]' 2>/dev/null",
+  "test_command": "export PATH=/opt/toolchains/.pyenv/shims:$PATH && cd /projects/sandbox/NVLabsCompany && python3.12 -m pytest tests/ --tb=short -q",
+  "verification_instructions": "Run pytest on all tests in tests/ directory. All tests must pass including new ones.",
+  "snapshot_or_generated_files": null,
+  "setup_instructions": "export PATH=/opt/toolchains/.pyenv/shims:$PATH && cd /projects/sandbox/NVLabsCompany && pip install -e '.[dev]'",
+  "environment_constraints": "Python 3.12 via pyenv at /opt/toolchains/.pyenv/shims/python3.12. No numpy/scipy allowed - stdlib only (math, statistics) for statistical operations.",
+  "contribution_requirements": "No breaking changes to existing modules. New modules follow existing patterns: class-based, docstrings on all classes and public methods, type hints throughout. LLM modules accept Callable[[str], Awaitable[str]] and fall back to heuristics on failure.",
+  "key_patterns": "LLM integration pattern: accept llm_callable: Callable[[str], Awaitable[str]] in constructor, use AsyncMock in tests, fall back to heuristic method on any failure. Governance: all promotions require approval_id (ValueError if None). Tests: class-based TestXxx groupings, fixtures for UUIDs, pytest.mark.asyncio for async tests.",
+  "relevant_files": [
+    "src/nexus/evolution/__init__.py",
+    "src/nexus/evolution/analyzer.py",
+    "src/nexus/evolution/proposer.py",
+    "src/nexus/evolution/evaluator.py",
+    "src/nexus/evolution/sandbox.py",
+    "src/nexus/evolution/agent_evolution.py",
+    "src/nexus/evolution/skill_evolution.py",
+    "src/nexus/orchestration/llm_planner.py",
+    "src/nexus/orchestration/llm_critic.py",
+    "src/nexus/memory/llm_extract.py",
+    "tests/test_evolution.py",
+    "tests/test_llm_planner.py"
+  ],
+  "directory_structure": "src/nexus/evolution/ - Evolution Engine module with analyzer, proposer, evaluator, sandbox, agent_evolution, skill_evolution, failure_alchemy, observer, promoter. tests/ - flat test directory with test_evolution.py covering all evolution classes."
+}

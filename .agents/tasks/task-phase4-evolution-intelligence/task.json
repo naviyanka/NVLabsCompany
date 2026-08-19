@@ -1,0 +1,7 @@
+{
+  "task_id": "task-phase4-evolution-intelligence",
+  "task_description": "Phase 4: Evolution Intelligence - Add statistical rigor and LLM integration to the Evolution subsystem. Create StatisticalAnalyzer, ABTestFramework, LLMImprovementProposer, IsolatedSandbox, and LLMEvolutionAdvisor modules with comprehensive tests.",
+  "status": "in_progress",
+  "feature_order": ["FEAT-001", "FEAT-002", "FEAT-003", "FEAT-004"],
+  "blocked_reason": null
+}
