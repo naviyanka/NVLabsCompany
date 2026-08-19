@@ -8,6 +8,10 @@ This module provides the full communication infrastructure for the NEXUS platfor
 - GroupManager: Group conversations, broadcasts, and handoffs
 - ChannelRouter: External channel integration (Slack, Discord, Webhooks)
 - EventBus: Pub/sub event system with async/sync handler support
+- HiveMessage: FIPA-lite message for file-based multi-agent coordination
+- HiveManager: File-based agent workspace management
+- HiveRouter: Message routing from outbox to inbox directories
+- HiveTask: Kanban-style task ledger for agent coordination
 """
 
 from nexus.communication.a2a import A2AProtocol
@@ -15,6 +19,18 @@ from nexus.communication.a2a_router import A2AMessage, A2ARouter, CommunicationM
 from nexus.communication.channels import ChannelRouter
 from nexus.communication.event_bus import EventBus
 from nexus.communication.group import GroupManager
+from nexus.communication.hive_manager import HiveManager
+from nexus.communication.hive_protocol import (
+    HOP_CAP,
+    REPLY_OBLIGATING_ACTS,
+    AgentStatus,
+    HiveAgentMeta,
+    HiveMessage,
+    MessageAct,
+    requires_reply_for_act,
+)
+from nexus.communication.hive_router import HiveRouter
+from nexus.communication.hive_task import HiveTask, TaskStatus
 
 __all__ = [
     "A2AProtocol",
@@ -24,4 +40,15 @@ __all__ = [
     "GroupManager",
     "ChannelRouter",
     "EventBus",
+    "HiveMessage",
+    "MessageAct",
+    "HiveAgentMeta",
+    "AgentStatus",
+    "HiveManager",
+    "HiveRouter",
+    "HiveTask",
+    "TaskStatus",
+    "HOP_CAP",
+    "REPLY_OBLIGATING_ACTS",
+    "requires_reply_for_act",
 ]
