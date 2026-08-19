@@ -1,0 +1,37 @@
+{
+  "id": "FEAT-001",
+  "type": "feat",
+  "description": "Implement the complete Pipelines page replacing the existing placeholder at src/pages/Pipelines.tsx. The page includes: page header with action buttons, 6 stat cards with sparklines, Pipeline Studio section with SVG flow visualization (~65% width), right sidebar with tabs (Details/Executions/Settings), and a bottom 4-column section with Pipeline Templates list, Execution Trends line chart, Top Pipeline Runs leaderboard, and Resource Usage donut chart.",
+  "status": "completed",
+  "steps": [
+    "Replace src/pages/Pipelines.tsx entirely with a new implementation following the patterns in Dashboard.tsx and Tasks.tsx",
+    "Define all static mock data at the top of the file (pipeline nodes, stat values, execution history, templates, chart data, etc.) - use deterministic values matching the design spec exactly",
+    "Implement the page header with GitBranch icon, title 'Pipelines', subtitle, and three buttons (Templates, Import Pipeline, + New Pipeline)",
+    "Implement 6 stat cards in a grid row: Total Pipelines (15), Running (7), Completed 24h (23), Success Rate (89.6%), Avg. Duration (14m 32s), Total Executions (412) - each with sparkline (using recharts Area), icon with colored background, and change indicators",
+    "Implement Pipeline Studio section (~65% width) with: header showing 'Pipeline Studio' with green dot 'Live Execution', sub-header 'Bug Bounty Recon Pipeline' with Running badge, info line with started date and trigger agent, control bar with Play/Pause/Stop/Expand/Grid buttons and 'View Logs' button",
+    "Implement SVG-based pipeline flow visualization showing 7 nodes (TRIGGER, 4 AGENT TASKs, PARALLEL GROUP, AGGREGATE) connected by lines/arrows in a horizontal flow with a branch. Each node shows type label, name, agent/details, status icon, and timing. Include zoom controls (+/-/fit) and a legend bar at bottom",
+    "Implement right sidebar (~35% width) with tabs (Details active, Executions, Settings). Details tab shows: pipeline name with Running badge, ID pipe_7f2a9b4d with copy icon, description text, metadata section (Created by, Created date, Last Executed, Pipeline Status), and Recent Executions list with 5 entries showing date/time, status badge, and duration",
+    "Implement bottom 4-column section: Column 1 - Pipeline Templates list (4 items with category badges + task counts + 'Browse All Templates' link), Column 2 - Execution Trends line chart (recharts LineChart, 7 days, Success green line + Failed red line), Column 3 - Top Pipeline Runs 24h leaderboard (5 items with run counts), Column 4 - Resource Usage 24h donut chart (recharts PieChart, center text '1.24M Total Tokens', 4 segments with legend, Total Cost $42.68)",
+    "Use lucide-react for all icons (GitBranch, Play, Pause, Square, Maximize2, Grid, Copy, Clock, Activity, CheckCircle2, Clipboard, Zap, etc.)",
+    "Use the Card component from @/components/common/Card with appropriate padding props",
+    "Use Tailwind dark theme tokens (dark-bg, dark-surface, dark-card) and text colors (white for primary, gray-400 for secondary)",
+    "Ensure zero TypeScript compilation errors - all types must be correct"
+  ],
+  "acceptance_criteria": [
+    "npm run build passes with zero TypeScript errors",
+    "The page exports a named function 'Pipelines'",
+    "All 6 stat cards render with correct values and sparklines",
+    "SVG pipeline flow visualization renders 7 nodes with connecting lines",
+    "Right sidebar has 3 tabs with Details tab content visible",
+    "Bottom section has 4 columns: templates list, line chart, leaderboard, donut chart",
+    "All data is static/hardcoded (no API calls, no Math.random)",
+    "Uses Card component from @/components/common/Card",
+    "Uses recharts for LineChart and PieChart",
+    "Uses lucide-react for all icons"
+  ],
+  "verification": [
+    "Run: cd /projects/sandbox/NVLabsCompany/dashboard && npm run build"
+  ],
+  "blocked_reason": null,
+  "findings": "Build passes cleanly with zero TypeScript errors. Removed unused 'Activity' import and 'pipelineNodes' variable that were initially included for reference but not directly used in the SVG (SVG nodes are hardcoded inline for precise positioning). All acceptance criteria met: 6 stat cards with sparklines, SVG pipeline flow with 7 nodes, right sidebar with tabs, bottom 4-column section with templates/charts/leaderboard/donut."
+}
