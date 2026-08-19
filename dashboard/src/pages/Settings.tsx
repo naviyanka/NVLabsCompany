@@ -16,11 +16,15 @@ import {
   Palette,
   Wrench,
   ExternalLink,
-  Diamond,
-  Download,
-  Trash2,
   ChevronRight,
-  Check,
+  ChevronDown,
+  Search,
+  RotateCcw,
+  Pencil,
+  CheckCircle,
+  Target,
+  RefreshCw,
+  BookOpen,
 } from 'lucide-react';
 
 // ─── Static Mock Data ──────────────────────────────────────────────────────────
@@ -33,8 +37,8 @@ const navItems = [
   { label: 'Integrations', icon: Puzzle, active: false },
   { label: 'Teams & Users', icon: Users, active: false },
   { label: 'Roles & Permissions', icon: UserCog, active: false },
-  { label: 'Billing & Subscription', icon: CreditCard, active: true },
-  { label: 'System Configuration', icon: SettingsIcon, active: false },
+  { label: 'Billing & Subscription', icon: CreditCard, active: false },
+  { label: 'System Configuration', icon: SettingsIcon, active: true },
   { label: 'Notifications', icon: Bell, active: false },
   { label: 'Data & Storage', icon: Database, active: false },
   { label: 'Backup & Restore', icon: ArchiveRestore, active: false },
@@ -50,36 +54,110 @@ const footerLinks = [
   { label: 'Terms of Service' },
 ];
 
-const planFeatures = [
-  'Unlimited agents & tasks',
-  'Advanced AI models',
-  'Private pipelines',
-  'SLA & priority support',
-  'Advanced security & SSO',
-  'Custom integrations',
+const tabs = [
+  { label: 'General Settings', active: true },
+  { label: 'Security & Access', active: false },
+  { label: 'Performance', active: false },
+  { label: 'Maintenance', active: false },
+  { label: 'Integrations', active: false },
+  { label: 'Advanced', active: false },
 ];
 
-const usageLimits = [
-  { label: 'Agents', used: '124', total: 'Unlimited', percentage: 100 },
-  { label: 'Tasks', used: '12,548', total: 'Unlimited', percentage: 100 },
-  { label: 'Pipelines', used: '85', total: 'Unlimited', percentage: 100 },
-  { label: 'Storage', used: '1.2 TB', total: '5 TB', percentage: 24 },
-  { label: 'API Calls', used: '2.4M', total: '10M', percentage: 24 },
-];
-
-const invoices = [
-  { id: 'INV-2024-0489', date: 'May 1, 2024', amount: '$499.00', status: 'Paid' },
-  { id: 'INV-2024-0410', date: 'Apr 1, 2024', amount: '$499.00', status: 'Paid' },
-  { id: 'INV-2024-0331', date: 'Mar 1, 2024', amount: '$499.00', status: 'Paid' },
-  { id: 'INV-2024-0229', date: 'Feb 1, 2024', amount: '$499.00', status: 'Paid' },
-  { id: 'INV-2024-0129', date: 'Jan 1, 2024', amount: '$499.00', status: 'Paid' },
+const healthItems = [
+  { label: 'System Services', status: 'Healthy' },
+  { label: 'Security Configuration', status: 'Healthy' },
+  { label: 'Database Connections', status: 'Healthy' },
+  { label: 'Storage Systems', status: 'Healthy' },
+  { label: 'Backup Configuration', status: 'Healthy' },
 ];
 
 const helpLinks = [
-  { title: 'Billing & Subscription FAQ' },
-  { title: 'Contact Support' },
-  { title: 'Request a Call' },
+  { title: 'System Configuration Guide', description: 'Learn how to configure the platform.' },
+  { title: 'Best Practices', description: 'Follow recommended configuration best practices.' },
+  { title: 'Admin Support', description: 'Get help from our support team.' },
+  { title: 'Community Forum', description: 'Join discussions with other admins.' },
 ];
+
+// ─── Toggle Switch Component ───────────────────────────────────────────────────
+
+function ToggleSwitch({ enabled }: { enabled: boolean }) {
+  return (
+    <div
+      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+        enabled ? 'bg-primary-500' : 'bg-gray-600'
+      }`}
+    >
+      <span
+        className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+          enabled ? 'translate-x-6' : 'translate-x-1'
+        }`}
+      />
+    </div>
+  );
+}
+
+// ─── Config Item Component ─────────────────────────────────────────────────────
+
+function ConfigItem({
+  title,
+  description,
+  children,
+}: {
+  title: string;
+  description: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="flex items-center justify-between py-4 border-b border-white/[0.08] last:border-b-0">
+      <div className="flex-1 min-w-0 pr-4">
+        <p className="text-sm font-medium text-white">{title}</p>
+        <p className="text-xs text-gray-400 mt-0.5">{description}</p>
+      </div>
+      <div className="flex-shrink-0">{children}</div>
+    </div>
+  );
+}
+
+// ─── Input Components ──────────────────────────────────────────────────────────
+
+function TextInput({ value, icon }: { value: string; icon?: React.ReactNode }) {
+  return (
+    <div className="relative flex items-center">
+      <input
+        type="text"
+        readOnly
+        value={value}
+        className="w-64 px-3 py-2 text-sm text-gray-300 bg-white/[0.04] border border-white/[0.08] rounded-lg pr-9"
+      />
+      {icon && (
+        <span className="absolute right-3 text-gray-400">{icon}</span>
+      )}
+    </div>
+  );
+}
+
+function SelectInput({ value }: { value: string }) {
+  return (
+    <div className="relative flex items-center">
+      <select
+        className="w-64 px-3 py-2 text-sm text-gray-300 bg-white/[0.04] border border-white/[0.08] rounded-lg appearance-none pr-9"
+        defaultValue={value}
+      >
+        <option>{value}</option>
+      </select>
+      <ChevronDown size={14} className="absolute right-3 text-gray-400 pointer-events-none" />
+    </div>
+  );
+}
+
+function ChevronInput({ value }: { value: string }) {
+  return (
+    <div className="flex items-center gap-2 w-64 px-3 py-2 text-sm text-gray-300 bg-white/[0.04] border border-white/[0.08] rounded-lg cursor-pointer">
+      <span className="flex-1 truncate">{value}</span>
+      <ChevronRight size={14} className="text-gray-400 flex-shrink-0" />
+    </div>
+  );
+}
 
 // ─── Main Component ────────────────────────────────────────────────────────────
 
@@ -129,160 +207,153 @@ export function Settings() {
         <div className="flex-1 min-w-0 space-y-6">
           {/* Section Header */}
           <div>
-            <h2 className="text-lg font-semibold text-white">Billing &amp; Subscription</h2>
+            <h2 className="text-lg font-semibold text-white">System Configuration</h2>
             <p className="text-sm text-gray-400 mt-0.5">
-              Manage your subscription, payment methods, and billing history.
+              Configure global system settings and platform behavior.
             </p>
           </div>
 
-          {/* Current Plan Card */}
-          <Card padding="lg">
-            <div className="grid grid-cols-3 gap-6">
-              {/* Left: Plan Info */}
-              <div className="space-y-3">
-                <p className="text-xs font-medium text-gray-400 uppercase tracking-wider">Current Plan</p>
-                <div className="flex items-center gap-2">
-                  <Diamond size={18} className="text-red-400" />
-                  <span className="text-lg font-bold text-white">Enterprise</span>
-                </div>
-                <div>
-                  <span className="text-2xl font-bold text-white">$499</span>
-                  <span className="text-sm text-gray-400"> / month</span>
-                </div>
-                <p className="text-xs text-gray-400">Billed monthly</p>
-                <span className="inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-full bg-green-500/20 text-green-400">
-                  Active
-                </span>
-              </div>
-
-              {/* Center: Plan Features */}
-              <div className="space-y-3">
-                <p className="text-xs font-medium text-gray-400">Everything in Professional, plus:</p>
-                <div className="space-y-2">
-                  {planFeatures.map((feature) => (
-                    <div key={feature} className="flex items-center gap-2">
-                      <Check size={14} className="text-green-400 flex-shrink-0" />
-                      <span className="text-sm text-gray-300">{feature}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Right: Billing Details */}
-              <div className="space-y-3">
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs text-gray-400">Next billing date:</span>
-                    <span className="text-xs text-gray-300">June 1, 2024</span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs text-gray-400">Billing cycle:</span>
-                    <span className="text-xs text-gray-300">Monthly</span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs text-gray-400">Seats:</span>
-                    <span className="text-xs text-gray-300">24 / 50</span>
-                  </div>
-                </div>
-                <button className="w-full mt-3 px-4 py-2 border border-white/[0.12] rounded-lg text-sm text-gray-300 hover:bg-white/[0.04] transition-colors">
-                  Manage Plan
-                </button>
-              </div>
-            </div>
-          </Card>
-
-          {/* Usage & Plan Limits */}
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="text-sm font-semibold text-white">Usage &amp; Plan Limits</h3>
-              <a href="#" className="text-xs text-primary-400 hover:text-primary-300 transition-colors">
-                View all limits
-              </a>
-            </div>
-            <div className="grid grid-cols-5 gap-3">
-              {usageLimits.map((item) => (
-                <Card key={item.label} padding="sm">
-                  <div className="space-y-2">
-                    <p className="text-xs text-gray-400">{item.label}</p>
-                    <p className="text-sm font-semibold text-white">
-                      {item.used} / {item.total}
-                    </p>
-                    <div className="w-full h-1.5 bg-dark-bg rounded-full overflow-hidden">
-                      <div
-                        className="h-full bg-primary-500 rounded-full"
-                        style={{ width: `${item.percentage}%` }}
-                      />
-                    </div>
-                  </div>
-                </Card>
-              ))}
-            </div>
+          {/* Tab Navigation */}
+          <div className="flex items-center gap-1 border-b border-white/[0.08]">
+            {tabs.map((tab) => (
+              <button
+                key={tab.label}
+                className={`px-4 py-2.5 text-sm font-medium transition-colors border-b-2 ${
+                  tab.active
+                    ? 'border-primary-500 text-primary-400'
+                    : 'border-transparent text-gray-400 hover:text-white'
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
           </div>
 
-          {/* Payment Method */}
-          <div className="space-y-4">
-            <div>
-              <h3 className="text-sm font-semibold text-white">Payment Method</h3>
-              <p className="text-xs text-gray-400 mt-0.5">Manage your saved payment methods.</p>
+          {/* Search/Actions Bar */}
+          <div className="flex items-center gap-3">
+            <div className="relative flex-1">
+              <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+              <input
+                type="text"
+                placeholder="Search configuration..."
+                className="w-full pl-9 pr-4 py-2 text-sm text-gray-300 bg-white/[0.04] border border-white/[0.08] rounded-lg placeholder-gray-500"
+                readOnly
+              />
             </div>
-            <Card padding="md">
-              <div className="flex items-center gap-4">
-                {/* VISA text logo */}
-                <div className="w-12 h-8 bg-white rounded flex items-center justify-center">
-                  <span className="text-[10px] font-bold text-blue-900 italic tracking-tight">VISA</span>
-                </div>
-                <div className="flex-1">
-                  <p className="text-sm text-white font-medium">
-                    Visa &bull;&bull;&bull;&bull; &bull;&bull;&bull;&bull; &bull;&bull;&bull;&bull; 4242
-                  </p>
-                </div>
-                <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-green-500/20 text-green-400">
-                  Default
-                </span>
-                <span className="text-xs text-gray-400">Expires 08/27</span>
-                <button className="px-3 py-1.5 text-xs text-gray-300 border border-white/[0.12] rounded-lg hover:bg-white/[0.04] transition-colors">
-                  Edit
-                </button>
-                <button className="text-gray-400 hover:text-red-400 transition-colors">
-                  <Trash2 size={16} />
-                </button>
-              </div>
-            </Card>
-            <button className="w-full px-4 py-2 border border-white/[0.12] border-dashed rounded-lg text-sm text-gray-400 hover:text-white hover:border-white/[0.2] transition-colors">
-              + Add Payment Method
+            <button className="flex items-center gap-2 px-4 py-2 text-sm text-gray-300 border border-white/[0.12] rounded-lg hover:bg-white/[0.04] transition-colors">
+              <RotateCcw size={14} />
+              Reset to Defaults
+            </button>
+            <button className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-green-600 hover:bg-green-700 rounded-lg transition-colors">
+              Save Changes
             </button>
           </div>
 
-          {/* Billing Information */}
-          <div className="space-y-4">
-            <div>
-              <h3 className="text-sm font-semibold text-white">Billing Information</h3>
-              <p className="text-xs text-gray-400 mt-0.5">Update your billing details and download invoices.</p>
+          {/* Section 1: Platform Settings */}
+          <Card padding="lg">
+            <h3 className="text-sm font-semibold text-white mb-1">Platform Settings</h3>
+            <div className="divide-y divide-white/[0.08]">
+              <ConfigItem
+                title="System Name"
+                description="Name of your NVLABS Mission Control instance."
+              >
+                <TextInput value="NVLABS Mission Control" icon={<Pencil size={14} />} />
+              </ConfigItem>
+              <ConfigItem
+                title="Default Time Zone"
+                description="Set the default time zone for the entire platform."
+              >
+                <SelectInput value="(UTC +05:30) Asia/Kolkata" />
+              </ConfigItem>
+              <ConfigItem
+                title="Date & Time Format"
+                description="Choose the default format for date and time."
+              >
+                <SelectInput value="May 19, 2024 02:45 PM (UTC+05:30)" />
+              </ConfigItem>
+              <ConfigItem
+                title="Language"
+                description="Set the default language for the platform."
+              >
+                <SelectInput value="English (US)" />
+              </ConfigItem>
             </div>
-            <Card padding="md">
-              <div className="grid grid-cols-3 gap-6">
-                <div className="space-y-2">
-                  <p className="text-xs text-gray-400">Billing Email</p>
-                  <p className="text-sm text-white">billing@nvlabs.dev</p>
-                  <a href="#" className="text-xs text-teal-400 hover:text-teal-300 transition-colors">Edit</a>
-                </div>
-                <div className="space-y-2">
-                  <p className="text-xs text-gray-400">Billing Address</p>
-                  <p className="text-sm text-white leading-relaxed">
-                    NVLABS Technologies Pvt. Ltd.<br />
-                    Gurgaon, Haryana 122001<br />
-                    India
-                  </p>
-                  <a href="#" className="text-xs text-teal-400 hover:text-teal-300 transition-colors">Edit</a>
-                </div>
-                <div className="space-y-2">
-                  <p className="text-xs text-gray-400">Tax ID / GSTIN</p>
-                  <p className="text-sm text-white">06AAGCN1234H1Z5</p>
-                  <a href="#" className="text-xs text-teal-400 hover:text-teal-300 transition-colors">Edit</a>
-                </div>
-              </div>
-            </Card>
-          </div>
+          </Card>
+
+          {/* Section 2: Session & Access */}
+          <Card padding="lg">
+            <h3 className="text-sm font-semibold text-white mb-1">Session &amp; Access</h3>
+            <div className="divide-y divide-white/[0.08]">
+              <ConfigItem
+                title="Session Timeout"
+                description="Automatically log out inactive users after."
+              >
+                <SelectInput value="30 minutes" />
+              </ConfigItem>
+              <ConfigItem
+                title="Require Multi-Factor Authentication (MFA)"
+                description="Require MFA for all users to access the platform."
+              >
+                <ToggleSwitch enabled={true} />
+              </ConfigItem>
+              <ConfigItem
+                title="Allowed IP Ranges"
+                description="Restrict access to the platform by IP range."
+              >
+                <ChevronInput value="192.168.0.0/16, 10.0.0.0/8" />
+              </ConfigItem>
+            </div>
+          </Card>
+
+          {/* Section 3: Data & Operations */}
+          <Card padding="lg">
+            <h3 className="text-sm font-semibold text-white mb-1">Data &amp; Operations</h3>
+            <div className="divide-y divide-white/[0.08]">
+              <ConfigItem
+                title="Default Data Retention"
+                description="Automatically delete data older than the selected period."
+              >
+                <SelectInput value="90 days" />
+              </ConfigItem>
+              <ConfigItem
+                title="Enable Data Anonymization"
+                description="Anonymize sensitive data in logs and analytics."
+              >
+                <ToggleSwitch enabled={true} />
+              </ConfigItem>
+              <ConfigItem
+                title="Audit Log Retention"
+                description="Retain audit logs for the selected period."
+              >
+                <SelectInput value="1 year" />
+              </ConfigItem>
+            </div>
+          </Card>
+
+          {/* Section 4: System Behavior */}
+          <Card padding="lg">
+            <h3 className="text-sm font-semibold text-white mb-1">System Behavior</h3>
+            <div className="divide-y divide-white/[0.08]">
+              <ConfigItem
+                title="Maintenance Mode"
+                description="Put the platform in maintenance mode."
+              >
+                <ToggleSwitch enabled={false} />
+              </ConfigItem>
+              <ConfigItem
+                title="Allow User Self-Registration"
+                description="Allow new users to register without admin invite."
+              >
+                <ToggleSwitch enabled={false} />
+              </ConfigItem>
+              <ConfigItem
+                title="Default Landing Page"
+                description="Select the default page after user login."
+              >
+                <SelectInput value="Dashboard" />
+              </ConfigItem>
+            </div>
+          </Card>
 
           {/* Footer */}
           <div className="border-t border-white/[0.08] pt-6 pb-4">
@@ -308,98 +379,89 @@ export function Settings() {
 
         {/* Right Sidebar */}
         <div className="w-[25%] flex-shrink-0 space-y-6">
-          {/* Invoices */}
+          {/* About System Configuration */}
           <Card padding="lg">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-sm font-semibold text-white">Invoices</h3>
-              <a href="#" className="text-xs text-primary-400 hover:text-primary-300 transition-colors">
-                View all invoices
-              </a>
+            <h3 className="text-sm font-semibold text-white mb-2">About System Configuration</h3>
+            <p className="text-xs text-gray-400 mb-4">
+              Configure global settings that control how NVLABS Mission Control operates. Changes may affect all users and system behavior.
+            </p>
+            <div className="space-y-4">
+              <div className="flex items-start gap-3">
+                <div className="p-1.5 rounded-md bg-purple-500/10">
+                  <Target size={14} className="text-purple-400" />
+                </div>
+                <div>
+                  <p className="text-xs font-medium text-white">Global Impact</p>
+                  <p className="text-xs text-gray-400 mt-0.5">
+                    These settings apply across the entire platform and all environments.
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-start gap-3">
+                <div className="p-1.5 rounded-md bg-blue-500/10">
+                  <RefreshCw size={14} className="text-blue-400" />
+                </div>
+                <div>
+                  <p className="text-xs font-medium text-white">Change Control</p>
+                  <p className="text-xs text-gray-400 mt-0.5">
+                    Some settings may require admin approval and system restart.
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-start gap-3">
+                <div className="p-1.5 rounded-md bg-green-500/10">
+                  <BookOpen size={14} className="text-green-400" />
+                </div>
+                <div>
+                  <p className="text-xs font-medium text-white">Best Practices</p>
+                  <p className="text-xs text-gray-400 mt-0.5">
+                    Review best practices before making critical changes.
+                  </p>
+                </div>
+              </div>
             </div>
-            <div className="space-y-3">
-              {invoices.map((invoice) => (
-                <div key={invoice.id} className="flex items-center gap-2 text-xs">
-                  <div className="flex-1 min-w-0">
-                    <p className="text-gray-300 font-medium truncate">{invoice.id}</p>
-                    <p className="text-gray-500">{invoice.date}</p>
+          </Card>
+
+          {/* Configuration Health */}
+          <Card padding="lg">
+            <div className="flex items-center gap-2 mb-1">
+              <CheckCircle size={16} className="text-green-400" />
+              <h3 className="text-sm font-semibold text-white">All Systems Operational</h3>
+            </div>
+            <p className="text-xs text-gray-400 mb-4">Last checked: May 19, 2024 02:45 PM</p>
+            <div className="space-y-0">
+              {healthItems.map((item) => (
+                <div
+                  key={item.label}
+                  className="flex items-center justify-between py-2.5 border-b border-white/[0.08] last:border-b-0"
+                >
+                  <span className="text-xs text-gray-300">{item.label}</span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-medium text-green-400">{item.status}</span>
+                    <ChevronRight size={12} className="text-gray-400" />
                   </div>
-                  <span className="text-gray-300">{invoice.amount}</span>
-                  <span className="px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-green-500/20 text-green-400">
-                    {invoice.status}
-                  </span>
-                  <button className="text-gray-400 hover:text-white transition-colors">
-                    <Download size={12} />
-                  </button>
                 </div>
               ))}
-            </div>
-          </Card>
-
-          {/* Payment Method (Sidebar) */}
-          <Card padding="lg">
-            <h3 className="text-sm font-semibold text-white mb-2">Payment Method</h3>
-            <p className="text-xs text-gray-400 mb-3">Default payment method for recurring billing.</p>
-            <div className="flex items-center gap-3 mb-2">
-              <div className="w-10 h-6 bg-white rounded flex items-center justify-center">
-                <span className="text-[8px] font-bold text-blue-900 italic tracking-tight">VISA</span>
-              </div>
-              <div className="flex-1">
-                <p className="text-xs text-white font-medium">
-                  Visa &bull;&bull;&bull;&bull; &bull;&bull;&bull;&bull; &bull;&bull;&bull;&bull; 4242
-                </p>
-              </div>
-              <span className="px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-green-500/20 text-green-400">
-                Default
-              </span>
-            </div>
-            <p className="text-xs text-gray-400 mb-3">Expires 08/27</p>
-            <a href="#" className="flex items-center gap-1 text-xs text-primary-400 hover:text-primary-300 transition-colors">
-              Update Payment Method
-              <ChevronRight size={12} />
-            </a>
-          </Card>
-
-          {/* Usage This Month */}
-          <Card padding="lg">
-            <h3 className="text-sm font-semibold text-white mb-2">Usage This Month</h3>
-            <p className="text-xs text-gray-400 mb-4">Your usage will reset on June 1, 2024.</p>
-            <div className="space-y-4">
-              <div className="space-y-1.5">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs text-gray-400">Compute Minutes</span>
-                  <span className="text-xs text-gray-300">1,245 / 5,000 min</span>
-                </div>
-                <div className="w-full h-1.5 bg-dark-bg rounded-full overflow-hidden">
-                  <div className="h-full bg-primary-500 rounded-full" style={{ width: '25%' }} />
-                </div>
-              </div>
-              <div className="space-y-1.5">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs text-gray-400">AI Tokens</span>
-                  <span className="text-xs text-gray-300">24.6M / 100M tokens</span>
-                </div>
-                <div className="w-full h-1.5 bg-dark-bg rounded-full overflow-hidden">
-                  <div className="h-full bg-primary-500 rounded-full" style={{ width: '24.6%' }} />
-                </div>
-              </div>
             </div>
           </Card>
 
           {/* Need Help? */}
           <Card padding="lg">
             <h3 className="text-sm font-semibold text-white mb-2">Need Help?</h3>
-            <p className="text-xs text-gray-400 mb-3">Our support team is here to help you.</p>
             <div className="space-y-3">
               {helpLinks.map((link) => (
                 <a
                   key={link.title}
                   href="#"
-                  className="flex items-center gap-2 group"
+                  className="flex items-start gap-2 group"
                 >
-                  <ExternalLink size={12} className="text-gray-400 flex-shrink-0" />
-                  <span className="text-xs font-medium text-gray-300 group-hover:text-white transition-colors">
-                    {link.title}
-                  </span>
+                  <ExternalLink size={12} className="text-gray-400 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-xs font-medium text-gray-300 group-hover:text-white transition-colors">
+                      {link.title}
+                    </p>
+                    <p className="text-xs text-gray-500 mt-0.5">{link.description}</p>
+                  </div>
                 </a>
               ))}
             </div>
