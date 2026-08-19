@@ -115,8 +115,9 @@ class LayeredMemoryStore:
                 Uses defaults if not specified.
             persist_path: Optional path to a JSON file for persisting L2/L3.
                 When provided, L2 and L3 state is saved after mutations and
-                loaded on init if the file exists. L0 and L1 remain ephemeral.
-                When None, no persistence occurs.
+                loaded on init if the file exists. L1 is persisted to a
+                separate file (<persist_path_stem>_l1.json) in the same
+                directory. When None, no persistence occurs.
         """
         self._config = config or LayeredMemoryConfig()
         self._persist_path = persist_path
@@ -146,6 +147,59 @@ class LayeredMemoryStore:
         return list(self._l3)
 
     # ── Persistence ──────────────────────────────────────────────────────────
+
+    @property
+    def _l1_persist_path(self) -> Path | None:
+        """Return the path for L1 persistence file, derived from persist_path."""
+        if self._persist_path is None:
+            return None
+        return self._persist_path.parent / f"{self._persist_path.stem}_l1.json"
+
+    def _serialize_l1_summary(self, summary: L1Summary) -> dict:
+        """Serialize an L1Summary to a JSON-compatible dict."""
+        return {
+            "summary": summary.summary,
+            "task_id": str(summary.task_id),
+            "created_at": summary.created_at.isoformat(),
+        }
+
+    def _deserialize_l1_summary(self, data: dict) -> L1Summary:
+        """Deserialize a dict back to an L1Summary instance."""
+        return L1Summary(
+            summary=data["summary"],
+            task_id=UUID(data["task_id"]),
+            created_at=datetime.fromisoformat(data["created_at"]),
+        )
+
+    def _persist_l1(self) -> None:
+        """Atomically write L1 ring buffer state to the persist file."""
+        l1_path = self._l1_persist_path
+        if l1_path is None:
+            return
+        data = {
+            "l1": [self._serialize_l1_summary(s) for s in self._l1],
+        }
+        l1_path.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(dir=l1_path.parent, suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w") as f:
+                json.dump(data, f)
+            os.replace(tmp, l1_path)
+        except BaseException:
+            if os.path.exists(tmp):
+                os.unlink(tmp)
+            raise
+
+    def _load_l1(self) -> None:
+        """Load L1 ring buffer state from the persist file if it exists."""
+        l1_path = self._l1_persist_path
+        if l1_path is None or not l1_path.exists():
+            return
+        with open(l1_path) as f:
+            data = json.load(f)
+        self._l1 = [
+            self._deserialize_l1_summary(s) for s in data.get("l1", [])
+        ]
 
     def _serialize_fact(self, fact: Fact) -> dict:
         """Serialize a Fact to a JSON-compatible dict."""
@@ -192,6 +246,7 @@ class LayeredMemoryStore:
     def _load(self) -> None:
         """Load L2 and L3 state from the persist file if it exists."""
         if self._persist_path is None or not self._persist_path.exists():
+            self._load_l1()
             return
         with open(self._persist_path) as f:
             data = json.load(f)
@@ -200,12 +255,14 @@ class LayeredMemoryStore:
                 self._deserialize_fact(fd) for fd in facts_data
             ]
         self._l3 = [self._deserialize_fact(fd) for fd in data.get("l3", [])]
+        self._load_l1()
 
     def add_session_summary(self, task_id: UUID, summary: str) -> None:
         """Add a session summary to the L1 ring buffer.
 
         If the ring buffer is full (at l1_ring_size capacity), the oldest
-        summary is evicted before the new one is added.
+        summary is evicted before the new one is added. Persists L1 state
+        after each addition.
 
         Args:
             task_id: UUID of the task this summary is associated with.
@@ -219,6 +276,7 @@ class LayeredMemoryStore:
         if len(self._l1) >= self._config.l1_ring_size:
             self._l1.pop(0)  # Evict oldest
         self._l1.append(entry)
+        self._persist_l1()
 
     def store_fact(
         self,

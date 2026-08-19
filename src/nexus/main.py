@@ -30,6 +30,7 @@ from nexus.api.routes.identity import router as identity_router
 from nexus.api.routes.policies import router as policies_router
 from nexus.api.routes.secrets import router as secrets_router
 from nexus.api.routes.incidents import router as incidents_router
+from nexus.api.routes.degradation import router as degradation_router
 from nexus.api.middleware import GovernanceMiddleware
 from nexus.logging_config import RequestIDMiddleware, configure_logging
 from nexus.telemetry import MetricsMiddleware, metrics_router
@@ -160,3 +161,4 @@ app.include_router(identity_router)
 app.include_router(policies_router)
 app.include_router(secrets_router)
 app.include_router(incidents_router)
+app.include_router(degradation_router)

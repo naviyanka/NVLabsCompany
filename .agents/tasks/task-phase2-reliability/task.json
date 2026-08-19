@@ -1,0 +1,7 @@
+{
+  "task_id": "task-phase2-reliability",
+  "task_description": "Phase 2 Reliability - Redis state backend, pluggable HiveManager, Docker sandbox, L1 persistence, LLM circuit breaker, degradation endpoint",
+  "status": "in_progress",
+  "feature_order": ["FEAT-001"],
+  "blocked_reason": null
+}

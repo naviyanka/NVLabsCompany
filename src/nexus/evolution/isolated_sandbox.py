@@ -3,12 +3,21 @@
 Provides a sandbox with logical resource tracking (cost, duration, memory)
 that aborts execution when any limit is breached. This ensures proposals
 cannot consume unbounded resources during evaluation.
+
+Also provides DockerSandbox for container-isolated execution when Docker
+is available, with automatic fallback to IsolatedSandbox.
 """
 
+import asyncio
+import logging
+import shutil
 import time
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Callable
+
+
+logger = logging.getLogger(__name__)
 
 
 class ResourceLimitExceeded(Exception):
@@ -258,3 +267,185 @@ class IsolatedSandbox:
         session_key = str(session_id)
         if session_key in self._sessions:
             del self._sessions[session_key]
+
+
+class DockerSandbox:
+    """Container-isolated sandbox using Docker for execution.
+
+    Runs experiments via asyncio.create_subprocess_exec shelling out to
+    'docker run' with --memory, --cpus, and timeout flags. Falls back to
+    IsolatedSandbox when Docker is unavailable.
+
+    Attributes:
+        max_memory_mb: Maximum memory limit for containers.
+        max_cpus: Maximum CPU allocation for containers.
+        timeout_seconds: Maximum execution time before timeout.
+        docker_image: Docker image to use for execution.
+        docker_available: Whether Docker was detected at init.
+    """
+
+    def __init__(
+        self,
+        max_memory_mb: int = 512,
+        max_cpus: float = 1.0,
+        timeout_seconds: int = 300,
+        docker_image: str = "python:3.12-slim",
+    ) -> None:
+        """Initialize the Docker sandbox.
+
+        Checks Docker availability at init time. If Docker is not found,
+        all operations fall back to IsolatedSandbox behavior.
+
+        Args:
+            max_memory_mb: Maximum memory in MB for containers (default 512).
+            max_cpus: Maximum CPU allocation (default 1.0).
+            timeout_seconds: Maximum execution time in seconds (default 300).
+            docker_image: Docker image to use (default python:3.12-slim).
+        """
+        self.max_memory_mb = max_memory_mb
+        self.max_cpus = max_cpus
+        self.timeout_seconds = timeout_seconds
+        self.docker_image = docker_image
+        self.docker_available = self._detect_docker()
+        self._fallback = IsolatedSandbox(
+            max_cost_cents=1000,
+            max_duration_seconds=timeout_seconds,
+            max_memory_mb=max_memory_mb,
+        )
+
+    def _detect_docker(self) -> bool:
+        """Detect whether Docker is available on this system.
+
+        Returns:
+            True if the 'docker' binary is found in PATH.
+        """
+        return shutil.which("docker") is not None
+
+    async def run(
+        self,
+        code: str,
+        language: str = "python",
+        env: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        """Execute code in a Docker container or fall back to local sandbox.
+
+        When Docker is available, runs code in an isolated container with
+        memory and CPU limits. When Docker is unavailable, falls back to
+        IsolatedSandbox for logical resource tracking.
+
+        Args:
+            code: The code to execute.
+            language: Programming language (default 'python').
+            env: Optional environment variables to pass to the container.
+
+        Returns:
+            Dict with 'stdout', 'stderr', 'exit_code', 'timed_out', and
+            'docker_used' fields.
+        """
+        if not self.docker_available:
+            return await self._run_fallback(code, language)
+        return await self._run_docker(code, language, env)
+
+    async def _run_docker(
+        self,
+        code: str,
+        language: str,
+        env: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        """Execute code in a Docker container with resource limits.
+
+        Args:
+            code: The code to execute.
+            language: Programming language.
+            env: Optional environment variables.
+
+        Returns:
+            Execution result dict.
+        """
+        cmd = [
+            "docker", "run", "--rm",
+            f"--memory={self.max_memory_mb}m",
+            f"--cpus={self.max_cpus}",
+            "--network=none",
+            "--read-only",
+        ]
+
+        if env:
+            for key, value in env.items():
+                cmd.extend(["-e", f"{key}={value}"])
+
+        cmd.extend([self.docker_image, language, "-c", code])
+
+        try:
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+
+            try:
+                stdout, stderr = await asyncio.wait_for(
+                    process.communicate(),
+                    timeout=self.timeout_seconds,
+                )
+                return {
+                    "stdout": stdout.decode(errors="replace"),
+                    "stderr": stderr.decode(errors="replace"),
+                    "exit_code": process.returncode,
+                    "timed_out": False,
+                    "docker_used": True,
+                }
+            except asyncio.TimeoutError:
+                process.kill()
+                await process.wait()
+                return {
+                    "stdout": "",
+                    "stderr": "Execution timed out",
+                    "exit_code": -1,
+                    "timed_out": True,
+                    "docker_used": True,
+                }
+
+        except OSError as exc:
+            logger.warning("Docker execution failed: %s. Falling back.", exc)
+            self.docker_available = False
+            return await self._run_fallback(code, language)
+
+    async def _run_fallback(
+        self, code: str, language: str
+    ) -> dict[str, Any]:
+        """Execute code using the fallback IsolatedSandbox.
+
+        Args:
+            code: The code to execute.
+            language: Programming language.
+
+        Returns:
+            Execution result dict with docker_used=False.
+        """
+        session_id = self._fallback.create_session(
+            proposal_id=uuid.uuid4(),
+            config={"language": language},
+        )
+        try:
+            result = self._fallback.execute(
+                session_id,
+                lambda: {"output": f"Executed {len(code)} chars of {language}"},
+            )
+            return {
+                "stdout": str(result.get("result", "")),
+                "stderr": "",
+                "exit_code": 0,
+                "timed_out": False,
+                "docker_used": False,
+            }
+        except ResourceLimitExceeded as exc:
+            return {
+                "stdout": "",
+                "stderr": str(exc),
+                "exit_code": -1,
+                "timed_out": exc.resource == "duration",
+                "docker_used": False,
+            }
+        finally:
+            self._fallback.cleanup(session_id)

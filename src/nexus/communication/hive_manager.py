@@ -15,21 +15,42 @@ Directory layout:
       cursor.json          # Agent state cursor
 """
 
+from __future__ import annotations
+
 import json
 import time
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from nexus.communication.hive_protocol import AgentStatus, HiveAgentMeta, HiveMessage
 
+if TYPE_CHECKING:
+    from nexus.communication.hive_backend import HiveBackend
+
 
 class HiveManager:
-    """File-based multi-agent coordination layer."""
+    """File-based multi-agent coordination layer.
 
-    def __init__(self, root: Path) -> None:
-        """Initialize with the hive root directory path."""
+    Supports pluggable backends via the optional `backend` parameter.
+    When no backend is provided, uses the built-in file-based logic
+    (fully backward compatible with existing behavior).
+    """
+
+    def __init__(
+        self, root: Path, backend: HiveBackend | None = None
+    ) -> None:
+        """Initialize with the hive root directory path.
+
+        Args:
+            root: Path to the hive directory structure.
+            backend: Optional pluggable backend. When None (default), uses
+                the built-in file-based implementation for backward
+                compatibility.
+        """
         self._root = root
-        self._ensure_structure()
+        self._backend = backend
+        if self._backend is None:
+            self._ensure_structure()
 
     @property
     def root(self) -> Path:
@@ -65,6 +86,9 @@ class HiveManager:
 
     def register_agent(self, meta: HiveAgentMeta) -> None:
         """Register an agent and create its workspace directories."""
+        if self._backend is not None:
+            self._backend.register_agent(meta)
+            return
         # Update registry.json
         registry = self._read_registry()
         registry["agents"][meta.id] = meta.model_dump(mode="json")
@@ -91,6 +115,9 @@ class HiveManager:
 
     def unregister_agent(self, agent_id: str, archive: bool = True) -> None:
         """Unregister (archive) an agent. Does not delete files."""
+        if self._backend is not None:
+            self._backend.unregister_agent(agent_id, archive)
+            return
         registry = self._read_registry()
         if agent_id in registry["agents"]:
             if archive:
@@ -101,6 +128,8 @@ class HiveManager:
 
     def get_registry(self) -> dict[str, HiveAgentMeta]:
         """Return all registered agents."""
+        if self._backend is not None:
+            return self._backend.get_registry()
         registry = self._read_registry()
         result: dict[str, HiveAgentMeta] = {}
         for agent_id, data in registry["agents"].items():
@@ -117,6 +146,9 @@ class HiveManager:
 
     def update_status(self, agent_id: str, status: AgentStatus) -> None:
         """Update an agent's status in the registry."""
+        if self._backend is not None:
+            self._backend.update_status(agent_id, status)
+            return
         registry = self._read_registry()
         if agent_id in registry["agents"]:
             registry["agents"][agent_id]["status"] = status.value
@@ -125,6 +157,9 @@ class HiveManager:
 
     def send_message(self, msg: HiveMessage) -> None:
         """Write a message to the sender's outbox directory."""
+        if self._backend is not None:
+            self._backend.send_message(msg)
+            return
         agent_dir = self._root / "agents" / msg.from_agent
         outbox = agent_dir / "outbox"
         outbox.mkdir(parents=True, exist_ok=True)
@@ -136,6 +171,9 @@ class HiveManager:
 
     def deliver_to_inbox(self, agent_id: str, msg: HiveMessage) -> None:
         """Write a message to a recipient's inbox directory."""
+        if self._backend is not None:
+            self._backend.deliver_to_inbox(agent_id, msg)
+            return
         agent_dir = self._root / "agents" / agent_id
         inbox = agent_dir / "inbox"
         inbox.mkdir(parents=True, exist_ok=True)
@@ -147,6 +185,8 @@ class HiveManager:
 
     def get_inbox(self, agent_id: str) -> list[HiveMessage]:
         """Read all pending messages from an agent's inbox."""
+        if self._backend is not None:
+            return self._backend.get_inbox(agent_id)
         inbox = self._root / "agents" / agent_id / "inbox"
         if not inbox.exists():
             return []
@@ -159,6 +199,9 @@ class HiveManager:
 
     def mark_processed(self, agent_id: str, msg_id: str) -> None:
         """Move a message from inbox/ to inbox/.done/."""
+        if self._backend is not None:
+            self._backend.mark_processed(agent_id, msg_id)
+            return
         inbox = self._root / "agents" / agent_id / "inbox"
         done_dir = inbox / ".done"
         done_dir.mkdir(exist_ok=True)

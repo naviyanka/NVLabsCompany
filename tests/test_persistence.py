@@ -237,8 +237,8 @@ class TestLayeredMemoryPersistence:
         assert len(shared) == 1
         assert shared[0].content == "Python uses GIL for thread safety"
 
-    def test_l1_not_persisted(self, tmp_path: Path) -> None:
-        """L1 session summaries are NOT persisted (ephemeral)."""
+    def test_l1_is_persisted(self, tmp_path: Path) -> None:
+        """L1 session summaries are persisted to a separate file."""
         fp = tmp_path / "memory.json"
         task_id = uuid.uuid4()
         agent = uuid.uuid4()
@@ -247,9 +247,10 @@ class TestLayeredMemoryPersistence:
         store.add_session_summary(task_id, "Session summary text")
         store.store_fact(agent, "A fact to trigger persistence")
 
-        # Load in a new instance - L1 should be empty
+        # Load in a new instance - L1 should be restored
         store2 = LayeredMemoryStore(persist_path=fp)
-        assert store2.l1_summaries == []
+        assert len(store2.l1_summaries) == 1
+        assert store2.l1_summaries[0].summary == "Session summary text"
 
     def test_no_persist_path_works_as_before(self) -> None:
         """LayeredMemoryStore without persist_path works identically."""
