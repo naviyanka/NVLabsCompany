@@ -2,7 +2,7 @@
   "id": "FEAT-002",
   "type": "feat",
   "description": "Add stdin interactive protocol to CLI Adapter for ongoing process communication",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "In src/nexus/adapters/cli_adapter.py, add send_message(session_id, message) async method that writes to the running process's stdin pipe and returns acknowledgment",
     "Add is_interactive flag to session metadata (set during _do_create_session based on config)",
@@ -24,5 +24,5 @@
     "pytest tests/test_cli_adapter.py -v"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "Python 3.12 required (system default is 3.9.25, use python3.12 -m pytest). All 19 new interactive tests pass. All 48 existing CLI adapter tests pass. Full suite of 2179 tests passes. Pre-existing ruff warnings in cli_adapter.py (unused AgentStatus import, asyncio.TimeoutError aliased errors) were not touched."
 }
