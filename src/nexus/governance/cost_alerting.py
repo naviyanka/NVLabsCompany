@@ -110,6 +110,9 @@ class CostAlertService:
         self._thresholds: dict[tuple[str, uuid.UUID], AlertThreshold] = {}
         self._callbacks: list[AlertCallback] = []
         self._fired_alerts: list[CostAlert] = []
+        self._last_severity: dict[
+            tuple[str, uuid.UUID], AlertSeverity | None
+        ] = {}
 
     def set_threshold(
         self,
@@ -141,7 +144,10 @@ class CostAlertService:
 
         Iterates over all configured thresholds, compares current spending
         against the budget limit, and fires alerts for any that have crossed
-        warning or critical thresholds.
+        warning or critical thresholds. Alerts are deduplicated: a scope
+        that remains at the same or lower severity will not re-fire until
+        it drops below the warning threshold and crosses again, or
+        escalates to a higher severity.
 
         Returns:
             List of CostAlert objects generated during this check.
@@ -166,8 +172,23 @@ class CostAlertService:
             elif spent_pct >= threshold.warn_pct:
                 severity = AlertSeverity.WARNING
 
+            # If below all thresholds, reset last severity so future
+            # crossings will fire again.
             if severity is None:
+                self._last_severity[key] = None
                 continue
+
+            # Deduplicate: suppress re-fire at the same or lower severity
+            last = self._last_severity.get(key)
+            if last is not None:
+                # Only fire if escalating (WARNING -> CRITICAL)
+                if severity == AlertSeverity.WARNING:
+                    continue
+                if severity == AlertSeverity.CRITICAL and last == AlertSeverity.CRITICAL:
+                    continue
+
+            # Record that we fired at this severity
+            self._last_severity[key] = severity
 
             # Resolve agent_id if mapped
             agent_id_uuid = self._enforcer._scope_agent.get(key)

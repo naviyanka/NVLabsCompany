@@ -102,6 +102,10 @@ class VersionedRouter(APIRouter):
         The route will include Sunset and Deprecation headers in responses
         to inform clients of the planned removal date.
 
+        The endpoint can use any standard FastAPI signature (path params,
+        query params, dependency injection). The deprecation headers are
+        added via a middleware-style approach using a response callback.
+
         Args:
             path: The route path.
             endpoint: The route handler function.
@@ -112,6 +116,9 @@ class VersionedRouter(APIRouter):
         full_path = path
         self._deprecated_routes[full_path] = sunset_date
 
+        # Store sunset info for the after_response callback
+        _sunset_iso = sunset_date.isoformat()
+
         # Wrap the endpoint to add deprecation headers
         original_endpoint = endpoint
 
@@ -119,13 +126,13 @@ class VersionedRouter(APIRouter):
             """Wrapper that adds deprecation headers to the response."""
             result = await original_endpoint(request)
             if isinstance(result, Response):
-                result.headers["Sunset"] = sunset_date.isoformat()
+                result.headers["Sunset"] = _sunset_iso
                 result.headers["Deprecation"] = "true"
                 return result
             # For non-Response returns, create a JSON response
             from fastapi.responses import JSONResponse
             response = JSONResponse(content=result)
-            response.headers["Sunset"] = sunset_date.isoformat()
+            response.headers["Sunset"] = _sunset_iso
             response.headers["Deprecation"] = "true"
             return response
 

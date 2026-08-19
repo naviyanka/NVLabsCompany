@@ -342,6 +342,17 @@ class FernetSecretBackend:
         """
         self._rotation_policies[ref] = policy
 
+    def get_rotation_policy(self, ref: str) -> RotationPolicy | None:
+        """Get the rotation policy for a specific secret reference.
+
+        Args:
+            ref: The secret reference key.
+
+        Returns:
+            The rotation policy if configured, None otherwise.
+        """
+        return self._rotation_policies.get(ref)
+
     def check_rotation_needed(self, ref: str) -> bool:
         """Check whether a secret needs rotation based on its policy.
 

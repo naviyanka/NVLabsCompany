@@ -273,3 +273,99 @@ class TestCostAlertService:
         alerts = service.check_budgets()
         assert len(alerts) == 1
         assert alerts[0].agent_id == str(agent_id)
+
+    def test_deduplication_suppresses_same_severity(
+        self, enforcer: BudgetEnforcer, service: CostAlertService
+    ) -> None:
+        """Test that repeated checks at same severity do not re-fire."""
+        scope_id = uuid.uuid4()
+        enforcer.set_budget("agent", scope_id, 10000)
+        enforcer.on_cost_event("agent", scope_id, 8500)  # 85% - warning
+
+        service.set_threshold(
+            "agent", scope_id, AlertThreshold(warn_pct=80.0, critical_pct=95.0)
+        )
+
+        # First check fires
+        alerts = service.check_budgets()
+        assert len(alerts) == 1
+        assert alerts[0].severity == AlertSeverity.WARNING
+
+        # Second check at same spend level does NOT re-fire
+        alerts = service.check_budgets()
+        assert len(alerts) == 0
+
+    def test_deduplication_allows_escalation(
+        self, enforcer: BudgetEnforcer, service: CostAlertService
+    ) -> None:
+        """Test that escalation from WARNING to CRITICAL fires a new alert."""
+        scope_id = uuid.uuid4()
+        enforcer.set_budget("agent", scope_id, 10000)
+        enforcer.on_cost_event("agent", scope_id, 8500)  # 85% - warning
+
+        service.set_threshold(
+            "agent", scope_id, AlertThreshold(warn_pct=80.0, critical_pct=95.0)
+        )
+
+        # First check fires WARNING
+        alerts = service.check_budgets()
+        assert len(alerts) == 1
+        assert alerts[0].severity == AlertSeverity.WARNING
+
+        # Spend increases past critical
+        enforcer.on_cost_event("agent", scope_id, 1200)  # now 9700 = 97%
+
+        # Second check fires CRITICAL (escalation)
+        alerts = service.check_budgets()
+        assert len(alerts) == 1
+        assert alerts[0].severity == AlertSeverity.CRITICAL
+
+    def test_deduplication_resets_when_below_threshold(
+        self, enforcer: BudgetEnforcer, service: CostAlertService
+    ) -> None:
+        """Test that severity resets when spending drops below threshold."""
+        scope_id = uuid.uuid4()
+        enforcer.set_budget("agent", scope_id, 10000)
+        enforcer.on_cost_event("agent", scope_id, 8500)  # 85% - warning
+
+        service.set_threshold(
+            "agent", scope_id, AlertThreshold(warn_pct=80.0, critical_pct=95.0)
+        )
+
+        # First check fires
+        alerts = service.check_budgets()
+        assert len(alerts) == 1
+
+        # Budget increases (e.g., new allocation), spending now below threshold
+        enforcer.set_budget("agent", scope_id, 20000)  # 8500/20000 = 42.5%
+
+        # Check with spending below threshold - resets state
+        alerts = service.check_budgets()
+        assert len(alerts) == 0
+
+        # Budget goes back to original, re-fires
+        enforcer.set_budget("agent", scope_id, 10000)  # 8500/10000 = 85%
+        alerts = service.check_budgets()
+        assert len(alerts) == 1
+        assert alerts[0].severity == AlertSeverity.WARNING
+
+    def test_deduplication_critical_does_not_refire(
+        self, enforcer: BudgetEnforcer, service: CostAlertService
+    ) -> None:
+        """Test that CRITICAL does not re-fire on repeated checks."""
+        scope_id = uuid.uuid4()
+        enforcer.set_budget("agent", scope_id, 10000)
+        enforcer.on_cost_event("agent", scope_id, 9600)  # 96% - critical
+
+        service.set_threshold(
+            "agent", scope_id, AlertThreshold(warn_pct=80.0, critical_pct=95.0)
+        )
+
+        # First check fires CRITICAL
+        alerts = service.check_budgets()
+        assert len(alerts) == 1
+        assert alerts[0].severity == AlertSeverity.CRITICAL
+
+        # Second check does NOT re-fire
+        alerts = service.check_budgets()
+        assert len(alerts) == 0

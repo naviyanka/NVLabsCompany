@@ -6,7 +6,7 @@ from the FernetSecretBackend.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, status
@@ -137,7 +137,7 @@ async def get_rotation_status(ref: str) -> RotationStatusResponse:
 
     needs_rotation = backend.check_rotation_needed(ref)
     last_rotated_dt = backend.rotation_history.get(ref)
-    policy = backend._rotation_policies.get(ref)
+    policy = backend.get_rotation_policy(ref)
 
     return RotationStatusResponse(
         ref=ref,
@@ -162,6 +162,11 @@ async def trigger_rotation(
 
     Stores the new value and records the rotation timestamp.
 
+    WARNING: This endpoint accepts a plaintext secret in the request body.
+    It MUST only be exposed over TLS and should be gated behind
+    authentication when served beyond localhost. Rotation is a
+    privileged operation.
+
     Args:
         body: The rotation trigger request with new value.
 
@@ -178,7 +183,7 @@ async def trigger_rotation(
 
     # Perform rotation: store new value and record timestamp
     success = backend.encrypt(body.ref, body.new_value)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     if success:
         backend.rotation_history[body.ref] = now
