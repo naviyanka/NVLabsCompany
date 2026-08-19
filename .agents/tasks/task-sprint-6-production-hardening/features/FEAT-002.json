@@ -2,7 +2,7 @@
   "id": "FEAT-002",
   "type": "feat",
   "description": "Memory Reflector (Auto-Condense) - Port the MemoryReflector from munder-difflin/src/main/reflect.ts. Provides auto-condensation of oversized memory files with a 3-region structure (pinned, condensed, recent), verify-dont-trust gate, and atomic swap.",
-  "status": "pending",
+  "status": "in_progress",
   "steps": [
     "Create src/nexus/memory/reflector_types.py with dataclasses/Pydantic models: ReflectSettings (enabled: bool, interval_seconds: int default 300, byte_trigger_pct: int default 80, section_trigger: int default 20, recent_keep: int default 5, min_bytes: int default 4096), ReflectResult (id: str, condensed: bool, reason: str, old_bytes: int|None, new_bytes: int|None), Section (heading: str, body: str), ParsedMemory (header: str, pinned: str|None, condensed: str|None, recent: list[Section]).",
     "Create src/nexus/memory/reflector.py with pure helper functions: parse_memory(text) -> ParsedMemory that splits into header, pinned (## pinned heading), condensed (## condensed heading), and recent sections. count_sections(text) -> int counting ## headings. pinned_lines(pinned: str|None) -> list[str] non-empty trimmed lines. merge_pinned(old_lines, hoist) -> list[str] appending new lines not already present. rebuild(header, pinned_lines, condensed, keep_sections) -> str reassembling the canonical 3-region file. verify(rebuilt, new_bytes, old_bytes, old_pinned_lines, merged_pinned, condensed, keep) -> VerifyResult checking: structure has all 3 regions, new_bytes < old_bytes * 0.95, new_bytes > 200, condensed non-empty, pinned lines preserved, recent sections byte-for-byte preserved.",
