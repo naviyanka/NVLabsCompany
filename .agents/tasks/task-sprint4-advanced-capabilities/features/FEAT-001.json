@@ -2,7 +2,7 @@
   "id": "FEAT-001",
   "type": "feat",
   "description": "Budget Incidents + Auto-Pause: Enhance the existing BudgetEnforcer with incident tracking, auto-pause on hard_stop, cancel-work-for-scope hook, lifetime window type, and multi-metric support.",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "1. Create src/nexus/governance/budget_incident.py with BudgetIncident dataclass: id, scope_type, scope_id, agent_id, metric (cost_cents/tokens/api_calls), threshold_amount, actual_amount, overage_amount, was_agent_paused, created_at. Also a BudgetIncidentLog class to store/retrieve incidents.",
     "2. Enhance src/nexus/governance/budget_enforcer.py: Add WindowKind enum (monthly, weekly, daily, per_execution, lifetime). Add multi-metric tracking dict (scope_key -> {cost_cents: int, tokens: int, api_calls: int}). Modify set_budget() to accept metric and window_kind params. Modify check_can_spend() and on_cost_event() to track all three metric types. Add hard_stop behavior: when DENIED and hard_stop_enabled, create a BudgetIncident, auto-pause the agent (via callback/hook), and call cancel_work_for_scope().",
@@ -23,5 +23,5 @@
     "python3.12 -m pytest tests/test_budget.py tests/test_budget_incidents.py -x -q"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "All 1115 tests pass (52 in budget-related files). Existing test_budget.py tests remain fully backward-compatible. New BudgetEnforcer accepts optional params without breaking old callers. The governance __init__.py was updated to export WindowKind, BudgetIncident, and BudgetIncidentLog."
 }
