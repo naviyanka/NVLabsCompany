@@ -30,5 +30,5 @@
     "python3.12 -m pytest tests/ -x -q"
   ],
   "blocked_reason": null,
-  "findings": "All 45 new tests pass (34 websocket, 11 SSE). Full suite of 2568 tests pass with no regressions. No new dependencies added. All acceptance criteria met."
+  "findings": "All 45 new tests pass (34 websocket, 11 SSE). Full suite of 2568 tests pass with no regressions. No new dependencies added. All acceptance criteria met. Post-review fixes applied: (1) event bus __all__ fan-out added, (2) auth added to SSE/WS endpoints, (3) dual registry documented, (4) dead code removed, (5) socket close on disconnect added. All 2599 tests pass after fixes."
 }
