@@ -368,6 +368,7 @@ class DockerSandbox:
             f"--cpus={self.max_cpus}",
             "--network=none",
             "--read-only",
+            "--tmpfs", "/tmp",
         ]
 
         if env:
@@ -416,12 +417,16 @@ class DockerSandbox:
     ) -> dict[str, Any]:
         """Execute code using the fallback IsolatedSandbox.
 
+        Note: When Docker is unavailable, code is NOT actually executed.
+        The result is a synthetic fallback indicating Docker was not
+        available for real execution.
+
         Args:
             code: The code to execute.
             language: Programming language.
 
         Returns:
-            Execution result dict with docker_used=False.
+            Execution result dict with docker_used=False and is_fallback=True.
         """
         session_id = self._fallback.create_session(
             proposal_id=uuid.uuid4(),
@@ -430,7 +435,12 @@ class DockerSandbox:
         try:
             result = self._fallback.execute(
                 session_id,
-                lambda: {"output": f"Executed {len(code)} chars of {language}"},
+                lambda: {
+                    "output": (
+                        f"[FALLBACK] Docker unavailable. Code not executed. "
+                        f"({len(code)} chars of {language})"
+                    ),
+                },
             )
             return {
                 "stdout": str(result.get("result", "")),
@@ -438,6 +448,7 @@ class DockerSandbox:
                 "exit_code": 0,
                 "timed_out": False,
                 "docker_used": False,
+                "is_fallback": True,
             }
         except ResourceLimitExceeded as exc:
             return {
@@ -446,6 +457,7 @@ class DockerSandbox:
                 "exit_code": -1,
                 "timed_out": exc.resource == "duration",
                 "docker_used": False,
+                "is_fallback": True,
             }
         finally:
             self._fallback.cleanup(session_id)

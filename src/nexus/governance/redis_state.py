@@ -76,15 +76,26 @@ class RedisStateBackend:
 
     Uses redis.asyncio with JSON serialization for values. Falls back
     gracefully when Redis becomes unavailable after initialization.
+    After a failure, the backend will attempt to reconnect after a
+    configurable cooldown period rather than staying permanently disabled.
     """
 
-    def __init__(self, redis_url: str, key_prefix: str = "nexus:state") -> None:
+    def __init__(
+        self,
+        redis_url: str,
+        key_prefix: str = "nexus:state",
+        recovery_cooldown_seconds: float = 30.0,
+    ) -> None:
         """Initialize with a Redis connection URL.
 
         Args:
             redis_url: Redis connection string (redis://host:port/db).
             key_prefix: Prefix for all keys in this backend.
+            recovery_cooldown_seconds: Seconds to wait before retrying
+                after a failure. Default is 30 seconds.
         """
+        import time as _time
+
         import redis.asyncio as aioredis
 
         self._redis = aioredis.from_url(
@@ -95,10 +106,49 @@ class RedisStateBackend:
         )
         self._prefix = key_prefix
         self._available = True
+        self._recovery_cooldown = recovery_cooldown_seconds
+        self._last_failure_time: float = 0.0
 
     def _full_key(self, key: str) -> str:
         """Build the full Redis key with prefix."""
         return f"{self._prefix}:{key}"
+
+    async def _check_recovery(self) -> bool:
+        """Check whether enough time has passed to attempt recovery.
+
+        If the backend is unavailable and the cooldown has elapsed, tries
+        a PING to re-enable operations.
+
+        Returns:
+            True if the backend is available (or recovered), False otherwise.
+        """
+        import time as _time
+
+        if self._available:
+            return True
+
+        elapsed = _time.monotonic() - self._last_failure_time
+        if elapsed < self._recovery_cooldown:
+            return False
+
+        # Attempt recovery via health check
+        try:
+            result = await self._redis.ping()
+            if result:
+                self._available = True
+                logger.info("Redis state backend recovered after cooldown")
+                return True
+        except Exception:
+            # Reset the failure timer so we wait another cooldown period
+            self._last_failure_time = _time.monotonic()
+        return False
+
+    def _mark_unavailable(self) -> None:
+        """Mark the backend as unavailable and record the failure time."""
+        import time as _time
+
+        self._available = False
+        self._last_failure_time = _time.monotonic()
 
     async def get(self, key: str) -> Any | None:
         """Retrieve a value by key from Redis.
@@ -109,7 +159,7 @@ class RedisStateBackend:
         Returns:
             The deserialized value, or None if missing or Redis unavailable.
         """
-        if not self._available:
+        if not await self._check_recovery():
             return None
         try:
             raw = await self._redis.get(self._full_key(key))
@@ -118,7 +168,7 @@ class RedisStateBackend:
             return json.loads(raw)
         except Exception as exc:
             logger.warning("Redis state get failed: %s", exc)
-            self._available = False
+            self._mark_unavailable()
             return None
 
     async def set(self, key: str, value: Any, ttl: int | None = None) -> None:
@@ -129,7 +179,7 @@ class RedisStateBackend:
             value: The value to store (must be JSON-serializable).
             ttl: Optional time-to-live in seconds.
         """
-        if not self._available:
+        if not await self._check_recovery():
             return
         try:
             full_key = self._full_key(key)
@@ -140,7 +190,7 @@ class RedisStateBackend:
                 await self._redis.set(full_key, serialized)
         except Exception as exc:
             logger.warning("Redis state set failed: %s", exc)
-            self._available = False
+            self._mark_unavailable()
 
     async def delete(self, key: str) -> bool:
         """Delete a key from Redis.
@@ -151,14 +201,14 @@ class RedisStateBackend:
         Returns:
             True if the key was deleted, False otherwise.
         """
-        if not self._available:
+        if not await self._check_recovery():
             return False
         try:
             result = await self._redis.delete(self._full_key(key))
             return result > 0
         except Exception as exc:
             logger.warning("Redis state delete failed: %s", exc)
-            self._available = False
+            self._mark_unavailable()
             return False
 
     async def list_keys(self, pattern: str = "*") -> list[str]:
@@ -170,7 +220,7 @@ class RedisStateBackend:
         Returns:
             List of matching keys (without the prefix).
         """
-        if not self._available:
+        if not await self._check_recovery():
             return []
         try:
             full_pattern = self._full_key(pattern)
@@ -182,7 +232,7 @@ class RedisStateBackend:
             return keys
         except Exception as exc:
             logger.warning("Redis state list_keys failed: %s", exc)
-            self._available = False
+            self._mark_unavailable()
             return []
 
     async def health_check(self) -> bool:
@@ -196,7 +246,7 @@ class RedisStateBackend:
             self._available = True
             return bool(result)
         except Exception:
-            self._available = False
+            self._mark_unavailable()
             return False
 
 
@@ -206,6 +256,9 @@ class FileStateBackend:
     Stores each key as a separate JSON file in a directory. Uses the
     tempfile + os.replace pattern for atomic writes. TTL is not enforced
     (all entries persist indefinitely).
+
+    Keys are encoded using percent-encoding (bijective) to avoid
+    collisions between keys containing special characters.
     """
 
     def __init__(self, directory: Path) -> None:
@@ -217,9 +270,28 @@ class FileStateBackend:
         self._dir = directory
         self._dir.mkdir(parents=True, exist_ok=True)
 
+    @staticmethod
+    def _encode_key(key: str) -> str:
+        """Encode a key for safe filesystem use via percent-encoding.
+
+        This is bijective: every unique key maps to a unique filename.
+        Characters that are not alphanumeric, hyphens, or dots are
+        percent-encoded.
+        """
+        from urllib.parse import quote
+
+        return quote(key, safe=".-")
+
+    @staticmethod
+    def _decode_key(encoded: str) -> str:
+        """Decode a percent-encoded filename back to the original key."""
+        from urllib.parse import unquote
+
+        return unquote(encoded)
+
     def _key_path(self, key: str) -> Path:
         """Convert a key to a filesystem path (safe for filenames)."""
-        safe_key = key.replace("/", "__").replace(":", "_")
+        safe_key = self._encode_key(key)
         return self._dir / f"{safe_key}.json"
 
     async def get(self, key: str) -> Any | None:
@@ -288,8 +360,8 @@ class FileStateBackend:
 
         keys: list[str] = []
         for path in self._dir.glob("*.json"):
-            # Reconstruct key from filename
-            key_name = path.stem.replace("__", "/").replace("_", ":")
+            # Reconstruct key from filename using percent-decoding
+            key_name = self._decode_key(path.stem)
             if fnmatch.fnmatch(key_name, pattern):
                 keys.append(key_name)
         return keys

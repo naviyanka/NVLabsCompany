@@ -29,7 +29,7 @@ class TestLLMCircuitBreakerBasic:
 
     async def test_opens_after_threshold_failures(self) -> None:
         """Test that circuit opens after N consecutive failures."""
-        mock_llm = AsyncMock(side_effect=RuntimeError("API error"))
+        mock_llm = AsyncMock(side_effect=ConnectionError("API error"))
         breaker = wrap_llm_callable(mock_llm, failure_threshold=3)
 
         # Three failures should open the circuit
@@ -41,7 +41,7 @@ class TestLLMCircuitBreakerBasic:
 
     async def test_returns_fallback_when_open(self) -> None:
         """Test that fallback is returned when circuit is open."""
-        mock_llm = AsyncMock(side_effect=RuntimeError("API error"))
+        mock_llm = AsyncMock(side_effect=ConnectionError("API error"))
         fallback = "System is busy"
         breaker = wrap_llm_callable(
             mock_llm, failure_threshold=2, fallback_response=fallback
@@ -66,7 +66,7 @@ class TestLLMCircuitBreakerBasic:
             nonlocal call_count
             call_count += 1
             if call_count <= 2:
-                raise RuntimeError("fail")
+                raise ConnectionError("fail")
             return "success"
 
         breaker = wrap_llm_callable(flaky_llm, failure_threshold=3)
@@ -122,7 +122,7 @@ class TestLLMCircuitBreakerHalfOpen:
 
     async def test_transitions_to_half_open_after_cooldown(self) -> None:
         """Test that circuit transitions to half-open after cooldown."""
-        mock_llm = AsyncMock(side_effect=RuntimeError("fail"))
+        mock_llm = AsyncMock(side_effect=ConnectionError("fail"))
         breaker = wrap_llm_callable(
             mock_llm, failure_threshold=2, cooldown_seconds=0.01
         )
@@ -145,7 +145,7 @@ class TestLLMCircuitBreakerHalfOpen:
 
     async def test_half_open_failure_reopens(self) -> None:
         """Test that failure in half-open state re-opens the circuit."""
-        mock_llm = AsyncMock(side_effect=RuntimeError("fail"))
+        mock_llm = AsyncMock(side_effect=ConnectionError("fail"))
         breaker = wrap_llm_callable(
             mock_llm, failure_threshold=2, cooldown_seconds=0.01
         )
@@ -168,7 +168,7 @@ class TestLLMCircuitBreakerReset:
 
     async def test_manual_reset(self) -> None:
         """Test that manual reset returns to closed state."""
-        mock_llm = AsyncMock(side_effect=RuntimeError("fail"))
+        mock_llm = AsyncMock(side_effect=ConnectionError("fail"))
         breaker = wrap_llm_callable(mock_llm, failure_threshold=2)
 
         await breaker("p1")
@@ -217,3 +217,60 @@ class TestWrapLLMCallable:
         # Should be callable with same signature
         result = await breaker("my prompt")
         assert result == "response"
+
+
+class TestLLMCircuitBreakerNonTransient:
+    """Tests for non-transient exception handling."""
+
+    async def test_type_error_propagates(self) -> None:
+        """Test that TypeError is re-raised without tripping the breaker."""
+        mock_llm = AsyncMock(side_effect=TypeError("bad argument"))
+        breaker = wrap_llm_callable(mock_llm, failure_threshold=2)
+
+        with pytest.raises(TypeError, match="bad argument"):
+            await breaker("prompt")
+
+        # Should not have tripped the breaker
+        assert breaker.state == CircuitState.CLOSED
+        assert breaker.consecutive_failures == 0
+
+    async def test_attribute_error_propagates(self) -> None:
+        """Test that AttributeError is re-raised without tripping the breaker."""
+        mock_llm = AsyncMock(side_effect=AttributeError("no such attr"))
+        breaker = wrap_llm_callable(mock_llm, failure_threshold=2)
+
+        with pytest.raises(AttributeError, match="no such attr"):
+            await breaker("prompt")
+
+        assert breaker.state == CircuitState.CLOSED
+        assert breaker.consecutive_failures == 0
+
+    async def test_value_error_propagates(self) -> None:
+        """Test that ValueError is re-raised without tripping the breaker."""
+        mock_llm = AsyncMock(side_effect=ValueError("invalid"))
+        breaker = wrap_llm_callable(mock_llm, failure_threshold=2)
+
+        with pytest.raises(ValueError, match="invalid"):
+            await breaker("prompt")
+
+        assert breaker.state == CircuitState.CLOSED
+        assert breaker.consecutive_failures == 0
+
+    async def test_connection_error_trips_breaker(self) -> None:
+        """Test that ConnectionError counts as transient and trips breaker."""
+        mock_llm = AsyncMock(side_effect=ConnectionError("refused"))
+        breaker = wrap_llm_callable(mock_llm, failure_threshold=2)
+
+        await breaker("prompt")
+        assert breaker.consecutive_failures == 1
+
+        await breaker("prompt")
+        assert breaker.state == CircuitState.OPEN
+
+    async def test_os_error_trips_breaker(self) -> None:
+        """Test that OSError counts as transient and trips breaker."""
+        mock_llm = AsyncMock(side_effect=OSError("network unreachable"))
+        breaker = wrap_llm_callable(mock_llm, failure_threshold=2)
+
+        await breaker("prompt")
+        assert breaker.consecutive_failures == 1

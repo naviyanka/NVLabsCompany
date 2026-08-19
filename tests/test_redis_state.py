@@ -166,13 +166,21 @@ class TestRedisStateBackend:
             assert backend._available is False
 
     async def test_unavailable_state_skips_operations(self) -> None:
-        """Test that operations are skipped when backend is unavailable."""
+        """Test that operations are skipped when backend is unavailable within cooldown."""
         with patch("redis.asyncio.from_url") as mock_from_url:
             mock_redis = AsyncMock()
+            # Recovery ping will fail, keeping backend unavailable
+            mock_redis.ping = AsyncMock(side_effect=ConnectionError("down"))
             mock_from_url.return_value = mock_redis
 
-            backend = RedisStateBackend("redis://localhost:6379/0")
+            backend = RedisStateBackend(
+                "redis://localhost:6379/0",
+                recovery_cooldown_seconds=0.0,  # Zero cooldown triggers recovery
+            )
             backend._available = False
+            # Set failure time to now so cooldown has elapsed
+            import time
+            backend._last_failure_time = time.monotonic()
 
             assert await backend.get("key") is None
             await backend.set("key", "value")
@@ -201,6 +209,49 @@ class TestRedisStateBackend:
             backend = RedisStateBackend("redis://localhost:6379/0")
             result = await backend.health_check()
             assert result is False
+            assert backend._available is False
+
+    async def test_recovery_after_cooldown(self) -> None:
+        """Test that backend recovers after cooldown period."""
+        with patch("redis.asyncio.from_url") as mock_from_url:
+            mock_redis = AsyncMock()
+            mock_redis.ping = AsyncMock(return_value=True)
+            mock_redis.get = AsyncMock(return_value='{"data": "hello"}')
+            mock_from_url.return_value = mock_redis
+
+            backend = RedisStateBackend(
+                "redis://localhost:6379/0",
+                recovery_cooldown_seconds=0.0,
+            )
+            # Simulate a failure
+            backend._available = False
+            import time
+            backend._last_failure_time = time.monotonic() - 1.0
+
+            # After cooldown elapsed, should recover
+            result = await backend.get("key")
+            assert result == {"data": "hello"}
+            assert backend._available is True
+
+    async def test_no_recovery_within_cooldown(self) -> None:
+        """Test that backend does not attempt recovery within cooldown."""
+        with patch("redis.asyncio.from_url") as mock_from_url:
+            mock_redis = AsyncMock()
+            mock_redis.ping = AsyncMock(return_value=True)
+            mock_from_url.return_value = mock_redis
+
+            backend = RedisStateBackend(
+                "redis://localhost:6379/0",
+                recovery_cooldown_seconds=9999.0,
+            )
+            # Simulate a recent failure
+            backend._available = False
+            import time
+            backend._last_failure_time = time.monotonic()
+
+            # Should not recover - cooldown not elapsed
+            result = await backend.get("key")
+            assert result is None
             assert backend._available is False
 
     async def test_conforms_to_protocol(self) -> None:

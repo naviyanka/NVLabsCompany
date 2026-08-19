@@ -13,6 +13,17 @@ from nexus.api.routes.degradation import (
     _check_redis,
     router,
 )
+import nexus.api.routes.degradation as degradation_module
+
+
+@pytest.fixture(autouse=True)
+def reset_redis_singleton():
+    """Reset the module-level Redis client singleton between tests."""
+    degradation_module._redis_client = None
+    degradation_module._redis_client_initialized = False
+    yield
+    degradation_module._redis_client = None
+    degradation_module._redis_client_initialized = False
 
 
 class TestCheckRedis:
@@ -23,7 +34,6 @@ class TestCheckRedis:
         with patch("redis.asyncio.from_url") as mock_from_url:
             mock_redis = AsyncMock()
             mock_redis.ping = AsyncMock(return_value=True)
-            mock_redis.aclose = AsyncMock()
             mock_from_url.return_value = mock_redis
 
             result = await _check_redis()
@@ -35,7 +45,6 @@ class TestCheckRedis:
         with patch("redis.asyncio.from_url") as mock_from_url:
             mock_redis = AsyncMock()
             mock_redis.ping = AsyncMock(side_effect=ConnectionError("refused"))
-            mock_redis.aclose = AsyncMock()
             mock_from_url.return_value = mock_redis
 
             result = await _check_redis()
@@ -171,7 +180,6 @@ class TestDegradationEndpoint:
         ):
             mock_redis = AsyncMock()
             mock_redis.ping = AsyncMock(return_value=True)
-            mock_redis.aclose = AsyncMock()
             mock_from_url.return_value = mock_redis
             mock_settings.redis_url = "redis://localhost:6379/0"
             mock_settings.openai_api_key = "sk-test"
@@ -211,7 +219,6 @@ class TestDegradationEndpoint:
             mock_redis.ping = AsyncMock(
                 side_effect=ConnectionError("refused")
             )
-            mock_redis.aclose = AsyncMock()
             mock_from_url.return_value = mock_redis
             mock_settings.redis_url = "redis://localhost:6379/0"
             mock_settings.openai_api_key = ""
@@ -244,7 +251,6 @@ class TestDegradationEndpoint:
         ):
             mock_redis = AsyncMock()
             mock_redis.ping = AsyncMock(return_value=True)
-            mock_redis.aclose = AsyncMock()
             mock_from_url.return_value = mock_redis
             mock_settings.redis_url = "redis://localhost:6379/0"
             mock_settings.openai_api_key = "sk-test"

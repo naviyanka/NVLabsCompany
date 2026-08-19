@@ -22,41 +22,41 @@ from nexus.communication.hive_protocol import (
 class TestFileHiveBackend:
     """Tests for the file-based hive backend."""
 
-    def test_register_and_get_registry(self, tmp_path: Path) -> None:
+    async def test_register_and_get_registry(self, tmp_path: Path) -> None:
         """Test agent registration and registry retrieval."""
         backend = FileHiveBackend(tmp_path / "hive")
         meta = HiveAgentMeta(id="agent-1", name="Test Agent", role="worker")
-        backend.register_agent(meta)
+        await backend.register_agent(meta)
 
-        registry = backend.get_registry()
+        registry = await backend.get_registry()
         assert "agent-1" in registry
         assert registry["agent-1"].name == "Test Agent"
 
-    def test_unregister_agent_archive(self, tmp_path: Path) -> None:
+    async def test_unregister_agent_archive(self, tmp_path: Path) -> None:
         """Test archiving an agent on unregister."""
         backend = FileHiveBackend(tmp_path / "hive")
         meta = HiveAgentMeta(id="agent-1", name="Test Agent")
-        backend.register_agent(meta)
-        backend.unregister_agent("agent-1", archive=True)
+        await backend.register_agent(meta)
+        await backend.unregister_agent("agent-1", archive=True)
 
-        registry = backend.get_registry()
+        registry = await backend.get_registry()
         assert registry["agent-1"].archived is True
 
-    def test_unregister_agent_delete(self, tmp_path: Path) -> None:
+    async def test_unregister_agent_delete(self, tmp_path: Path) -> None:
         """Test removing an agent entirely on unregister."""
         backend = FileHiveBackend(tmp_path / "hive")
         meta = HiveAgentMeta(id="agent-1", name="Test Agent")
-        backend.register_agent(meta)
-        backend.unregister_agent("agent-1", archive=False)
+        await backend.register_agent(meta)
+        await backend.unregister_agent("agent-1", archive=False)
 
-        registry = backend.get_registry()
+        registry = await backend.get_registry()
         assert "agent-1" not in registry
 
-    def test_send_and_get_inbox(self, tmp_path: Path) -> None:
+    async def test_send_and_get_inbox(self, tmp_path: Path) -> None:
         """Test sending a message and retrieving it from inbox."""
         backend = FileHiveBackend(tmp_path / "hive")
         meta = HiveAgentMeta(id="agent-1", name="Agent 1")
-        backend.register_agent(meta)
+        await backend.register_agent(meta)
 
         msg = HiveMessage(
             conversation="conv-1",
@@ -66,18 +66,18 @@ class TestFileHiveBackend:
             subject="Hello",
             body="Test message",
         )
-        backend.deliver_to_inbox("agent-1", msg)
+        await backend.deliver_to_inbox("agent-1", msg)
 
-        inbox = backend.get_inbox("agent-1")
+        inbox = await backend.get_inbox("agent-1")
         assert len(inbox) == 1
         assert inbox[0].subject == "Hello"
         assert inbox[0].body == "Test message"
 
-    def test_mark_processed(self, tmp_path: Path) -> None:
+    async def test_mark_processed(self, tmp_path: Path) -> None:
         """Test marking a message as processed moves it to .done."""
         backend = FileHiveBackend(tmp_path / "hive")
         meta = HiveAgentMeta(id="agent-1", name="Agent 1")
-        backend.register_agent(meta)
+        await backend.register_agent(meta)
 
         msg = HiveMessage(
             conversation="conv-1",
@@ -87,27 +87,27 @@ class TestFileHiveBackend:
             subject="Hello",
             body="Body",
         )
-        backend.deliver_to_inbox("agent-1", msg)
-        backend.mark_processed("agent-1", msg.id)
+        await backend.deliver_to_inbox("agent-1", msg)
+        await backend.mark_processed("agent-1", msg.id)
 
-        inbox = backend.get_inbox("agent-1")
+        inbox = await backend.get_inbox("agent-1")
         assert len(inbox) == 0
 
-    def test_update_status(self, tmp_path: Path) -> None:
+    async def test_update_status(self, tmp_path: Path) -> None:
         """Test updating an agent's status."""
         backend = FileHiveBackend(tmp_path / "hive")
         meta = HiveAgentMeta(id="agent-1", name="Agent 1")
-        backend.register_agent(meta)
-        backend.update_status("agent-1", AgentStatus.WORKING)
+        await backend.register_agent(meta)
+        await backend.update_status("agent-1", AgentStatus.WORKING)
 
-        registry = backend.get_registry()
+        registry = await backend.get_registry()
         assert registry["agent-1"].status == AgentStatus.WORKING
 
-    def test_send_message_creates_outbox_file(self, tmp_path: Path) -> None:
+    async def test_send_message_creates_outbox_file(self, tmp_path: Path) -> None:
         """Test that send_message creates a file in the outbox."""
         backend = FileHiveBackend(tmp_path / "hive")
         meta = HiveAgentMeta(id="agent-1", name="Agent 1")
-        backend.register_agent(meta)
+        await backend.register_agent(meta)
 
         msg = HiveMessage(
             conversation="conv-1",
@@ -117,21 +117,21 @@ class TestFileHiveBackend:
             subject="Do something",
             body="Please do it",
         )
-        backend.send_message(msg)
+        await backend.send_message(msg)
 
         outbox = tmp_path / "hive" / "agents" / "agent-1" / "outbox"
         files = list(outbox.glob("*.json"))
         assert len(files) == 1
 
-    def test_conforms_to_protocol(self, tmp_path: Path) -> None:
+    async def test_conforms_to_protocol(self, tmp_path: Path) -> None:
         """Test that FileHiveBackend conforms to HiveBackend protocol."""
         backend = FileHiveBackend(tmp_path / "hive")
         assert isinstance(backend, HiveBackend)
 
-    def test_get_inbox_empty(self, tmp_path: Path) -> None:
+    async def test_get_inbox_empty(self, tmp_path: Path) -> None:
         """Test that empty inbox returns empty list."""
         backend = FileHiveBackend(tmp_path / "hive")
-        inbox = backend.get_inbox("nonexistent")
+        inbox = await backend.get_inbox("nonexistent")
         assert inbox == []
 
 
@@ -248,7 +248,7 @@ class TestRedisHiveBackend:
             backend = RedisHiveBackend("redis://localhost:6379/0")
             assert isinstance(backend, HiveBackend)
 
-    def test_unavailable_send_message_no_error(self) -> None:
+    async def test_unavailable_send_message_no_error(self) -> None:
         """Test that send_message does not raise when backend is unavailable."""
         with patch("redis.asyncio.from_url"):
             backend = RedisHiveBackend("redis://localhost:6379/0")
@@ -263,22 +263,67 @@ class TestRedisHiveBackend:
                 body="Body",
             )
             # Should not raise
-            backend.send_message(msg)
+            await backend.send_message(msg)
 
-    def test_unavailable_get_inbox_returns_empty(self) -> None:
+    async def test_unavailable_get_inbox_returns_empty(self) -> None:
         """Test that get_inbox returns empty list when unavailable."""
         with patch("redis.asyncio.from_url"):
             backend = RedisHiveBackend("redis://localhost:6379/0")
             backend._available = False
 
-            result = backend.get_inbox("agent-1")
+            result = await backend.get_inbox("agent-1")
             assert result == []
 
-    def test_unavailable_get_registry_returns_empty(self) -> None:
+    async def test_unavailable_get_registry_returns_empty(self) -> None:
         """Test that get_registry returns empty dict when unavailable."""
         with patch("redis.asyncio.from_url"):
             backend = RedisHiveBackend("redis://localhost:6379/0")
             backend._available = False
 
-            result = backend.get_registry()
+            result = await backend.get_registry()
             assert result == {}
+
+    async def test_send_message_calls_redis(self) -> None:
+        """Test that send_message properly calls Redis xadd."""
+        with patch("redis.asyncio.from_url") as mock_from_url:
+            mock_redis = AsyncMock()
+            mock_redis.xadd = AsyncMock()
+            mock_from_url.return_value = mock_redis
+
+            backend = RedisHiveBackend("redis://localhost:6379/0")
+            msg = HiveMessage(
+                conversation="conv-1",
+                from_agent="agent-1",
+                to_agent="agent-2",
+                act=MessageAct.INFORM,
+                subject="Hi",
+                body="Body",
+            )
+            await backend.send_message(msg)
+            mock_redis.xadd.assert_called_once()
+
+    async def test_get_inbox_returns_messages(self) -> None:
+        """Test that get_inbox properly reads from Redis streams."""
+        with patch("redis.asyncio.from_url") as mock_from_url:
+            mock_redis = AsyncMock()
+            msg = HiveMessage(
+                conversation="conv-1",
+                from_agent="agent-1",
+                to_agent="agent-2",
+                act=MessageAct.INFORM,
+                subject="Hi",
+                body="Body",
+            )
+            import json
+
+            mock_redis.xrange = AsyncMock(
+                return_value=[
+                    ("1-0", {"payload": json.dumps(msg.model_dump(mode="json"))})
+                ]
+            )
+            mock_from_url.return_value = mock_redis
+
+            backend = RedisHiveBackend("redis://localhost:6379/0")
+            result = await backend.get_inbox("agent-2")
+            assert len(result) == 1
+            assert result[0].subject == "Hi"

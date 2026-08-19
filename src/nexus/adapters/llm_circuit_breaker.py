@@ -5,6 +5,10 @@ opens and returns a configurable fallback response for a cooldown period.
 After the cooldown, the breaker enters half-open state and allows one
 probe call through.
 
+Only transient failures (timeouts, connection errors, HTTP 5xx) trip the
+breaker. Programming errors (TypeError, AttributeError, ValueError, etc.)
+are propagated immediately without counting toward the threshold.
+
 Usage:
     from nexus.adapters.llm_circuit_breaker import wrap_llm_callable
 
@@ -22,6 +26,21 @@ from dataclasses import dataclass, field
 from enum import Enum
 
 logger = logging.getLogger(__name__)
+
+# Exception types considered transient (infrastructure failures).
+# These trip the circuit breaker. All other exceptions are considered
+# permanent (programming errors) and are re-raised immediately.
+TRANSIENT_EXCEPTIONS: tuple[type[BaseException], ...] = (
+    asyncio.TimeoutError,
+    TimeoutError,
+    ConnectionError,
+    ConnectionRefusedError,
+    ConnectionResetError,
+    ConnectionAbortedError,
+    OSError,
+    IOError,
+    RuntimeError,
+)
 
 
 class CircuitState(Enum):
@@ -51,6 +70,22 @@ class LLMCircuitBreakerConfig:
     success_threshold: int = 1
 
 
+def _is_transient(exc: BaseException) -> bool:
+    """Determine if an exception is transient (infrastructure failure).
+
+    Transient exceptions trip the circuit breaker. Non-transient exceptions
+    (programming errors like TypeError, AttributeError) are propagated
+    immediately.
+
+    Args:
+        exc: The exception to classify.
+
+    Returns:
+        True if the exception is considered transient.
+    """
+    return isinstance(exc, TRANSIENT_EXCEPTIONS)
+
+
 class LLMCircuitBreaker:
     """Circuit breaker that wraps an async LLM callable.
 
@@ -58,6 +93,10 @@ class LLMCircuitBreaker:
     threshold. In the open state, calls return the fallback response
     immediately without invoking the LLM. After a cooldown period, the
     breaker enters half-open state and allows probe calls through.
+
+    Only transient failures (timeout, connection error, OSError) count
+    toward the threshold. Programming errors (TypeError, AttributeError,
+    ValueError) are re-raised without tripping the breaker.
     """
 
     def __init__(
@@ -96,6 +135,12 @@ class LLMCircuitBreaker:
 
         Returns:
             The LLM response, or the fallback if the circuit is open.
+
+        Raises:
+            TypeError: If the wrapped callable raises TypeError (not transient).
+            AttributeError: If the wrapped callable raises AttributeError.
+            ValueError: If the wrapped callable raises ValueError.
+            Any non-transient exception is re-raised without tripping the breaker.
         """
         # Check if we should transition from OPEN to HALF_OPEN
         if self._state == CircuitState.OPEN:
@@ -120,9 +165,16 @@ class LLMCircuitBreaker:
             self._on_failure()
             return self._config.fallback_response
         except Exception as exc:
-            logger.warning("LLM call failed: %s", exc)
-            self._on_failure()
-            return self._config.fallback_response
+            if _is_transient(exc):
+                logger.warning("LLM call failed (transient): %s", exc)
+                self._on_failure()
+                return self._config.fallback_response
+            # Non-transient (programming error) - propagate immediately
+            logger.error(
+                "LLM call failed (non-transient, not tripping breaker): %s",
+                exc,
+            )
+            raise
 
     def _on_success(self) -> None:
         """Handle a successful LLM call."""

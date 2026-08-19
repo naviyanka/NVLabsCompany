@@ -50,15 +50,18 @@ class TestDockerSandboxFallback:
             assert result["docker_used"] is False
             assert result["exit_code"] == 0
             assert result["timed_out"] is False
+            assert result["is_fallback"] is True
 
     async def test_fallback_returns_stdout(self) -> None:
-        """Test that fallback returns some stdout content."""
+        """Test that fallback returns a clear fallback indicator."""
         with patch("shutil.which", return_value=None):
             sandbox = DockerSandbox()
             result = await sandbox.run("x = 1 + 1", language="python")
 
             assert result["docker_used"] is False
             assert "stdout" in result
+            assert result["is_fallback"] is True
+            assert "[FALLBACK]" in result["stdout"]
 
 
 class TestDockerSandboxExecution:
@@ -192,3 +195,7 @@ class TestDockerSandboxExecution:
                 assert "--cpus=0.5" in call_args
                 assert "--network=none" in call_args
                 assert "--read-only" in call_args
+                assert "--tmpfs" in call_args
+                # Verify /tmp is the tmpfs target
+                tmpfs_idx = list(call_args).index("--tmpfs")
+                assert call_args[tmpfs_idx + 1] == "/tmp"

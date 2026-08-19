@@ -14,29 +14,57 @@ from nexus.config import settings
 
 router = APIRouter(tags=["system"])
 
+# Module-level Redis client singleton to avoid connection churn.
+# Lazily initialized on first use.
+_redis_client = None
+_redis_client_initialized = False
 
-async def _check_redis() -> dict[str, str]:
-    """Check Redis connectivity by attempting a PING.
+
+async def _get_redis_client():
+    """Get or create a module-scoped Redis client singleton.
 
     Returns:
-        Dict with 'status' (full/unavailable) and 'detail'.
+        The shared Redis async client, or None if initialization fails.
     """
+    global _redis_client, _redis_client_initialized
+
+    if _redis_client_initialized:
+        return _redis_client
+
     try:
         import redis.asyncio as aioredis
 
-        client = aioredis.from_url(
+        _redis_client = aioredis.from_url(
             settings.redis_url,
             decode_responses=True,
             socket_connect_timeout=2.0,
             socket_timeout=2.0,
         )
-        try:
-            result = await client.ping()
-            if result:
-                return {"status": "full", "detail": "Redis responding to PING"}
-            return {"status": "unavailable", "detail": "Redis PING returned False"}
-        finally:
-            await client.aclose()
+        _redis_client_initialized = True
+        return _redis_client
+    except Exception:
+        _redis_client_initialized = True
+        _redis_client = None
+        return None
+
+
+async def _check_redis() -> dict[str, str]:
+    """Check Redis connectivity by attempting a PING.
+
+    Reuses a module-scoped Redis client to avoid creating a new
+    connection pool on every request.
+
+    Returns:
+        Dict with 'status' (full/unavailable) and 'detail'.
+    """
+    try:
+        client = await _get_redis_client()
+        if client is None:
+            return {"status": "unavailable", "detail": "Redis client not configured"}
+        result = await client.ping()
+        if result:
+            return {"status": "full", "detail": "Redis responding to PING"}
+        return {"status": "unavailable", "detail": "Redis PING returned False"}
     except Exception as exc:
         return {"status": "unavailable", "detail": f"Redis unreachable: {exc}"}
 
@@ -130,8 +158,11 @@ async def degradation_status() -> JSONResponse:
         overall = "full"
     elif any(s == "unavailable" for s in statuses):
         overall = "degraded"
-    else:
+    elif any(s == "degraded" for s in statuses):
+        # All components are either full or degraded (none unavailable)
         overall = "degraded"
+    else:
+        overall = "full"
 
     return JSONResponse(
         status_code=200,

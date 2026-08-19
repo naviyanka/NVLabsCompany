@@ -20,9 +20,13 @@ logger = logging.getLogger(__name__)
 
 @runtime_checkable
 class HiveBackend(Protocol):
-    """Protocol defining the pluggable hive backend interface."""
+    """Protocol defining the pluggable hive backend interface.
 
-    def send_message(self, msg: HiveMessage) -> None:
+    All methods are async to support both file-based and Redis-based
+    implementations transparently without sync/async impedance mismatch.
+    """
+
+    async def send_message(self, msg: HiveMessage) -> None:
         """Write a message to the sender's outbox.
 
         Args:
@@ -30,7 +34,7 @@ class HiveBackend(Protocol):
         """
         ...
 
-    def deliver_to_inbox(self, agent_id: str, msg: HiveMessage) -> None:
+    async def deliver_to_inbox(self, agent_id: str, msg: HiveMessage) -> None:
         """Deliver a message to a recipient's inbox.
 
         Args:
@@ -39,7 +43,7 @@ class HiveBackend(Protocol):
         """
         ...
 
-    def get_inbox(self, agent_id: str) -> list[HiveMessage]:
+    async def get_inbox(self, agent_id: str) -> list[HiveMessage]:
         """Read all pending messages for an agent.
 
         Args:
@@ -50,7 +54,7 @@ class HiveBackend(Protocol):
         """
         ...
 
-    def mark_processed(self, agent_id: str, msg_id: str) -> None:
+    async def mark_processed(self, agent_id: str, msg_id: str) -> None:
         """Mark a message as processed.
 
         Args:
@@ -59,7 +63,7 @@ class HiveBackend(Protocol):
         """
         ...
 
-    def get_registry(self) -> dict[str, HiveAgentMeta]:
+    async def get_registry(self) -> dict[str, HiveAgentMeta]:
         """Return all registered agents.
 
         Returns:
@@ -67,7 +71,7 @@ class HiveBackend(Protocol):
         """
         ...
 
-    def register_agent(self, meta: HiveAgentMeta) -> None:
+    async def register_agent(self, meta: HiveAgentMeta) -> None:
         """Register an agent in the backend.
 
         Args:
@@ -75,7 +79,7 @@ class HiveBackend(Protocol):
         """
         ...
 
-    def unregister_agent(self, agent_id: str, archive: bool = True) -> None:
+    async def unregister_agent(self, agent_id: str, archive: bool = True) -> None:
         """Unregister (or archive) an agent.
 
         Args:
@@ -84,7 +88,7 @@ class HiveBackend(Protocol):
         """
         ...
 
-    def update_status(self, agent_id: str, status: AgentStatus) -> None:
+    async def update_status(self, agent_id: str, status: AgentStatus) -> None:
         """Update an agent's status.
 
         Args:
@@ -139,7 +143,7 @@ class FileHiveBackend:
         reg_path = self._root / "registry.json"
         reg_path.write_text(json.dumps(data, indent=2))
 
-    def send_message(self, msg: HiveMessage) -> None:
+    async def send_message(self, msg: HiveMessage) -> None:
         """Write a message to the sender's outbox directory.
 
         Args:
@@ -154,7 +158,7 @@ class FileHiveBackend:
         filepath = outbox / filename
         filepath.write_text(json.dumps(msg.model_dump(mode="json"), indent=2))
 
-    def deliver_to_inbox(self, agent_id: str, msg: HiveMessage) -> None:
+    async def deliver_to_inbox(self, agent_id: str, msg: HiveMessage) -> None:
         """Write a message to a recipient's inbox directory.
 
         Args:
@@ -170,7 +174,7 @@ class FileHiveBackend:
         filepath = inbox / filename
         filepath.write_text(json.dumps(msg.model_dump(mode="json"), indent=2))
 
-    def get_inbox(self, agent_id: str) -> list[HiveMessage]:
+    async def get_inbox(self, agent_id: str) -> list[HiveMessage]:
         """Read all pending messages from an agent's inbox.
 
         Args:
@@ -189,7 +193,7 @@ class FileHiveBackend:
             messages.append(HiveMessage(**data))
         return messages
 
-    def mark_processed(self, agent_id: str, msg_id: str) -> None:
+    async def mark_processed(self, agent_id: str, msg_id: str) -> None:
         """Move a message from inbox/ to inbox/.done/.
 
         Args:
@@ -206,7 +210,7 @@ class FileHiveBackend:
                 filepath.rename(dest)
                 return
 
-    def get_registry(self) -> dict[str, HiveAgentMeta]:
+    async def get_registry(self) -> dict[str, HiveAgentMeta]:
         """Return all registered agents.
 
         Returns:
@@ -218,7 +222,7 @@ class FileHiveBackend:
             result[agent_id] = HiveAgentMeta(**data)
         return result
 
-    def register_agent(self, meta: HiveAgentMeta) -> None:
+    async def register_agent(self, meta: HiveAgentMeta) -> None:
         """Register an agent and create its workspace directories.
 
         Args:
@@ -247,7 +251,7 @@ class FileHiveBackend:
         if not cursor_path.exists():
             cursor_path.write_text(json.dumps({"last_processed": 0}, indent=2))
 
-    def unregister_agent(self, agent_id: str, archive: bool = True) -> None:
+    async def unregister_agent(self, agent_id: str, archive: bool = True) -> None:
         """Unregister (archive) an agent. Does not delete files.
 
         Args:
@@ -262,7 +266,7 @@ class FileHiveBackend:
                 del registry["agents"][agent_id]
             self._write_registry(registry)
 
-    def update_status(self, agent_id: str, status: AgentStatus) -> None:
+    async def update_status(self, agent_id: str, status: AgentStatus) -> None:
         """Update an agent's status in the registry.
 
         Args:
@@ -280,7 +284,8 @@ class RedisHiveBackend:
     """Redis Streams-based hive backend for distributed messaging.
 
     Uses Redis Streams for message delivery and Redis hashes for the
-    agent registry. Falls back gracefully when Redis is unavailable.
+    agent registry. All methods are natively async, matching the
+    HiveBackend protocol.
     """
 
     def __init__(self, redis_url: str, key_prefix: str = "nexus:hive") -> None:
@@ -313,29 +318,12 @@ class RedisHiveBackend:
         """Build the Redis hash key for the agent registry."""
         return f"{self._prefix}:registry"
 
-    def send_message(self, msg: HiveMessage) -> None:
-        """Write a message to the sender's outbox stream (sync wrapper).
-
-        Note: This is a synchronous interface wrapping async Redis ops.
-        For production use, prefer async methods via the HiveManager.
+    async def send_message(self, msg: HiveMessage) -> None:
+        """Write a message to the sender's outbox stream.
 
         Args:
             msg: The message to send.
         """
-        import asyncio
-
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                # Cannot await in sync context with running loop
-                asyncio.ensure_future(self._async_send_message(msg))
-            else:
-                loop.run_until_complete(self._async_send_message(msg))
-        except RuntimeError:
-            asyncio.run(self._async_send_message(msg))
-
-    async def _async_send_message(self, msg: HiveMessage) -> None:
-        """Async implementation for sending a message to outbox stream."""
         if not self._available:
             return
         try:
@@ -346,26 +334,13 @@ class RedisHiveBackend:
             logger.warning("Redis hive send failed: %s", exc)
             self._available = False
 
-    def deliver_to_inbox(self, agent_id: str, msg: HiveMessage) -> None:
-        """Deliver a message to a recipient's inbox stream (sync wrapper).
+    async def deliver_to_inbox(self, agent_id: str, msg: HiveMessage) -> None:
+        """Deliver a message to a recipient's inbox stream.
 
         Args:
             agent_id: The target agent ID.
             msg: The message to deliver.
         """
-        import asyncio
-
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                asyncio.ensure_future(self._async_deliver(agent_id, msg))
-            else:
-                loop.run_until_complete(self._async_deliver(agent_id, msg))
-        except RuntimeError:
-            asyncio.run(self._async_deliver(agent_id, msg))
-
-    async def _async_deliver(self, agent_id: str, msg: HiveMessage) -> None:
-        """Async implementation for delivering a message to inbox stream."""
         if not self._available:
             return
         try:
@@ -376,8 +351,8 @@ class RedisHiveBackend:
             logger.warning("Redis hive deliver failed: %s", exc)
             self._available = False
 
-    def get_inbox(self, agent_id: str) -> list[HiveMessage]:
-        """Read pending messages from an agent's inbox stream (sync wrapper).
+    async def get_inbox(self, agent_id: str) -> list[HiveMessage]:
+        """Read pending messages from an agent's inbox stream.
 
         Args:
             agent_id: The agent whose inbox to read.
@@ -385,19 +360,6 @@ class RedisHiveBackend:
         Returns:
             List of pending HiveMessage objects.
         """
-        import asyncio
-
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                # Return empty in sync context with running loop
-                return []
-            return loop.run_until_complete(self._async_get_inbox(agent_id))
-        except RuntimeError:
-            return asyncio.run(self._async_get_inbox(agent_id))
-
-    async def _async_get_inbox(self, agent_id: str) -> list[HiveMessage]:
-        """Async implementation for reading inbox messages."""
         if not self._available:
             return []
         try:
@@ -413,30 +375,13 @@ class RedisHiveBackend:
             self._available = False
             return []
 
-    def mark_processed(self, agent_id: str, msg_id: str) -> None:
+    async def mark_processed(self, agent_id: str, msg_id: str) -> None:
         """Mark a message as processed by deleting it from the stream.
 
         Args:
             agent_id: The agent that processed the message.
             msg_id: The message ID to mark as done.
         """
-        import asyncio
-
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                asyncio.ensure_future(
-                    self._async_mark_processed(agent_id, msg_id)
-                )
-            else:
-                loop.run_until_complete(
-                    self._async_mark_processed(agent_id, msg_id)
-                )
-        except RuntimeError:
-            asyncio.run(self._async_mark_processed(agent_id, msg_id))
-
-    async def _async_mark_processed(self, agent_id: str, msg_id: str) -> None:
-        """Async implementation for marking a message as processed."""
         if not self._available:
             return
         try:
@@ -451,24 +396,12 @@ class RedisHiveBackend:
             logger.warning("Redis hive mark_processed failed: %s", exc)
             self._available = False
 
-    def get_registry(self) -> dict[str, HiveAgentMeta]:
-        """Return all registered agents from Redis hash (sync wrapper).
+    async def get_registry(self) -> dict[str, HiveAgentMeta]:
+        """Return all registered agents from Redis hash.
 
         Returns:
             Dictionary mapping agent IDs to their metadata.
         """
-        import asyncio
-
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                return {}
-            return loop.run_until_complete(self._async_get_registry())
-        except RuntimeError:
-            return asyncio.run(self._async_get_registry())
-
-    async def _async_get_registry(self) -> dict[str, HiveAgentMeta]:
-        """Async implementation for reading the registry."""
         if not self._available:
             return {}
         try:
@@ -483,25 +416,12 @@ class RedisHiveBackend:
             self._available = False
             return {}
 
-    def register_agent(self, meta: HiveAgentMeta) -> None:
-        """Register an agent in Redis (sync wrapper).
+    async def register_agent(self, meta: HiveAgentMeta) -> None:
+        """Register an agent in Redis.
 
         Args:
             meta: The agent metadata to register.
         """
-        import asyncio
-
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                asyncio.ensure_future(self._async_register(meta))
-            else:
-                loop.run_until_complete(self._async_register(meta))
-        except RuntimeError:
-            asyncio.run(self._async_register(meta))
-
-    async def _async_register(self, meta: HiveAgentMeta) -> None:
-        """Async implementation for registering an agent."""
         if not self._available:
             return
         try:
@@ -512,30 +432,13 @@ class RedisHiveBackend:
             logger.warning("Redis hive register failed: %s", exc)
             self._available = False
 
-    def unregister_agent(self, agent_id: str, archive: bool = True) -> None:
-        """Unregister an agent from Redis (sync wrapper).
+    async def unregister_agent(self, agent_id: str, archive: bool = True) -> None:
+        """Unregister an agent from Redis.
 
         Args:
             agent_id: The agent to unregister.
             archive: If True, mark as archived; if False, remove entirely.
         """
-        import asyncio
-
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                asyncio.ensure_future(
-                    self._async_unregister(agent_id, archive)
-                )
-            else:
-                loop.run_until_complete(
-                    self._async_unregister(agent_id, archive)
-                )
-        except RuntimeError:
-            asyncio.run(self._async_unregister(agent_id, archive))
-
-    async def _async_unregister(self, agent_id: str, archive: bool) -> None:
-        """Async implementation for unregistering an agent."""
         if not self._available:
             return
         try:
@@ -552,32 +455,13 @@ class RedisHiveBackend:
             logger.warning("Redis hive unregister failed: %s", exc)
             self._available = False
 
-    def update_status(self, agent_id: str, status: AgentStatus) -> None:
-        """Update an agent's status in Redis (sync wrapper).
+    async def update_status(self, agent_id: str, status: AgentStatus) -> None:
+        """Update an agent's status in Redis.
 
         Args:
             agent_id: The agent whose status to update.
             status: The new status value.
         """
-        import asyncio
-
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                asyncio.ensure_future(
-                    self._async_update_status(agent_id, status)
-                )
-            else:
-                loop.run_until_complete(
-                    self._async_update_status(agent_id, status)
-                )
-        except RuntimeError:
-            asyncio.run(self._async_update_status(agent_id, status))
-
-    async def _async_update_status(
-        self, agent_id: str, status: AgentStatus
-    ) -> None:
-        """Async implementation for updating agent status."""
         if not self._available:
             return
         try:
