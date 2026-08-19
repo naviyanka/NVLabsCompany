@@ -1,0 +1,26 @@
+{
+  "id": "FEAT-002",
+  "type": "feat",
+  "description": "Session Context Compaction - Create src/nexus/memory/compaction.py with SessionCompactor class supporting three strategies (truncate, summarize, sliding_window) and src/nexus/memory/token_counter.py with simple token estimation. Update memory __init__.py to export new classes.",
+  "status": "pending",
+  "steps": [
+    "Create src/nexus/memory/token_counter.py with class TokenCounter: provides estimate_tokens(text: str) -> int method using a simple heuristic (split on whitespace and punctuation, roughly 1 token per 4 characters or word-based estimation). Also provide fits_in_context(text: str, max_tokens: int) -> bool and truncate_to_tokens(text: str, max_tokens: int) -> str methods.",
+    "Create src/nexus/memory/compaction.py with: enum CompactionStrategy (TRUNCATE, SUMMARIZE, SLIDING_WINDOW). dataclass CompactionConfig (strategy, max_tokens, window_size, overlap_tokens, summary_ratio). class SessionCompactor with methods: compact(messages: list[dict], config: CompactionConfig) -> list[dict] dispatching to strategy, _truncate(messages, max_tokens) -> list[dict] keeping newest messages that fit, _summarize(messages, max_tokens) -> list[dict] creating a summary placeholder of older messages and keeping recent ones within budget, _sliding_window(messages, window_size, overlap_tokens) -> list[dict] keeping the last window_size messages plus overlap context from earlier messages. Include get_token_count(messages) -> int utility.",
+    "Update src/nexus/memory/__init__.py to import and export SessionCompactor, CompactionStrategy, CompactionConfig, TokenCounter in __all__.",
+    "Create tests/test_session_compaction.py with comprehensive tests: test TokenCounter estimation, test truncate_to_tokens, test fits_in_context, test CompactionStrategy enum, test SessionCompactor truncate strategy (keeps newest messages), test summarize strategy (produces summary + recent), test sliding_window strategy (correct window + overlap), test edge cases (empty messages, single message, messages fitting within budget without compaction). At least 15 test functions."
+  ],
+  "acceptance_criteria": [
+    "python3.12 -c 'from nexus.memory.compaction import SessionCompactor, CompactionStrategy, CompactionConfig' succeeds",
+    "python3.12 -c 'from nexus.memory.token_counter import TokenCounter' succeeds",
+    "python3.12 -c 'from nexus.memory import SessionCompactor, CompactionStrategy, CompactionConfig, TokenCounter' succeeds",
+    "python3.12 -m pytest tests/test_session_compaction.py -x -q passes all tests",
+    "Existing memory tests still pass: python3.12 -m pytest tests/test_memory.py tests/test_layered_memory.py -x -q",
+    "No new dependencies added to pyproject.toml"
+  ],
+  "verification": [
+    "python3.12 -m pytest tests/test_session_compaction.py -v",
+    "python3.12 -m pytest tests/ -x -q"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

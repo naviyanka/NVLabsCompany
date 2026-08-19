@@ -1,0 +1,31 @@
+{
+  "project_type": "Python FastAPI async backend - Autonomous AI Company Operating System",
+  "language": "Python 3.12+",
+  "build_system": "setuptools via pyproject.toml, pip install -e '.[dev]'",
+  "test_framework": "pytest with pytest-asyncio (asyncio_mode=auto), tests in tests/ directory, unittest.mock (AsyncMock/MagicMock), class-based test organization",
+  "build_command": "python3.12 -m pip install -e '.[dev]'",
+  "test_command": "python3.12 -m pytest tests/ -x -q",
+  "verification_instructions": "1. Run python3.12 -m pytest tests/ -x -q to ensure all tests pass. 2. Import check: python3.12 -c 'from nexus.realtime import WebSocketManager, EventStream, RealtimeEventBus; from nexus.memory.compaction import SessionCompactor; from nexus.memory.token_counter import TokenCounter'",
+  "snapshot_or_generated_files": null,
+  "setup_instructions": "pyenv is available with Python 3.12.13. Run: python3.12 -m pip install -e '.[dev]' from the project root.",
+  "environment_constraints": "Python 3.9 is system default but 3.12 available via pyenv. Use python3.12 explicitly. No external services (PostgreSQL, Redis) available - tests must be fully in-memory. No new dependencies allowed per requirements.",
+  "contribution_requirements": "No new dependencies. No frontend changes. Maintain backward compatibility. Follow existing patterns: docstrings on all classes/functions, type hints, async-first design, UUID-based IDs, company_id scoping for multi-tenancy.",
+  "key_patterns": "Routes use APIRouter with tags, Pydantic models for request/response, Annotated dependencies (DbSession, CurrentCompanyId from nexus.api.deps). Modules have __init__.py with __all__ exports. Tests use @pytest.mark.asyncio, fixtures in conftest.py, class-based test grouping. Existing event_bus.py in communication/ uses in-memory handler registry with async/sync dispatch. Memory subsystem uses dataclasses with datetime/UUID fields.",
+  "relevant_files": [
+    "src/nexus/main.py",
+    "src/nexus/api/routes/health.py",
+    "src/nexus/api/routes/communication.py",
+    "src/nexus/api/deps.py",
+    "src/nexus/communication/event_bus.py",
+    "src/nexus/communication/channels.py",
+    "src/nexus/communication/__init__.py",
+    "src/nexus/memory/__init__.py",
+    "src/nexus/memory/layered.py",
+    "src/nexus/memory/store.py",
+    "tests/conftest.py",
+    "tests/test_communication.py",
+    "tests/test_memory.py",
+    "pyproject.toml"
+  ],
+  "directory_structure": "src/nexus/ is root package. Subsystems: api/routes/ (27 routers), communication/ (a2a, channels, event_bus, group, hive_*, webhook_*), memory/ (store, layered, dedup, extract, promotion, retriever, scoping, semantic, reflector), plus adapters/, evolution/, governance/, runtime/, etc. Tests in flat tests/ directory with test_*.py files."
+}

@@ -17,6 +17,7 @@ from nexus.api.routes.communication import router as communication_router
 from nexus.api.routes.companies import router as companies_router
 from nexus.api.routes.company_sim import router as company_sim_router
 from nexus.api.routes.degradation import router as degradation_router
+from nexus.api.routes.events import router as events_router
 from nexus.api.routes.evolution import router as evolution_router
 from nexus.api.routes.goals import router as goals_router
 from nexus.api.routes.health import router as health_router
@@ -33,6 +34,7 @@ from nexus.api.routes.tasks import router as tasks_router
 from nexus.api.routes.tools import router as tools_router
 from nexus.api.routes.triggers import router as triggers_router
 from nexus.api.routes.workflows import router as workflows_router
+from nexus.api.routes.ws import router as ws_router
 from nexus.api.versioning import APIVersionMiddleware
 from nexus.config import settings
 from nexus.logging_config import RequestIDMiddleware, configure_logging
@@ -199,3 +201,5 @@ app.include_router(secrets_router)
 app.include_router(incidents_router)
 app.include_router(degradation_router)
 app.include_router(rotation_router)
+app.include_router(ws_router)
+app.include_router(events_router)
