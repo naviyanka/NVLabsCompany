@@ -2,7 +2,7 @@
   "id": "FEAT-001",
   "type": "feat",
   "description": "Add opt-in JSON file persistence to ControlRegistry, PhaseMachine, and LayeredMemoryStore (L2/L3). All three modules use the same atomic write pattern (write to temp file, os.replace to target). Persistence is opt-in via persist_path parameter - when None, behavior is unchanged (backward compatible).",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "Modify src/nexus/governance/control_registry.py: Add optional persist_path: Path | None parameter to __init__. After every mutation method (pause, pause_auto_delivery, gate_tool, steer, halt, resume, clear_steers), call a _persist() method that serializes self._map to JSON and writes atomically (tempfile in same dir + os.replace). On init, if persist_path exists, load state from it. AgentControl.gated_tools is a set - serialize as sorted list, deserialize back to set.",
     "Modify src/nexus/orchestration/phase_machine.py: Add optional persist_path: Path | None parameter to __init__. After every mutation (state changes in check_plan_detected, approve_plan, check_final_result, handle_user_feedback, reset), call _persist(). Serialize self._phases as {str(uuid): phase_value}. On init, if persist_path exists, load and reconstruct UUID keys.",
@@ -24,5 +24,5 @@
     "python3.12 -m pytest tests/ -q --tb=short"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "All 2299 tests pass (23 new + 2276 existing). Python 3.12 available at /usr/bin/python3.12. pip install -e '.[dev]' must use python3.12 -m pip. The get_agent_facts method increments access_count, so freshly loaded facts will show access_count=1 after first retrieval."
 }
