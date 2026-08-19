@@ -1,0 +1,31 @@
+{
+  "id": "FEAT-005",
+  "type": "fix",
+  "description": "Address 5 review issues: webhook queue dequeue/ack/nack lifecycle gap with _in_flight tracking, wire _extract_durable_facts into heuristic fallback, cache ThreadPoolExecutor, nack returns bool, tighten commit SHA regex.",
+  "status": "completed",
+  "steps": [
+    "Fix webhook queue: add _in_flight dict, dequeue moves items there, ack/nack operate on _in_flight (and persist _in_flight)",
+    "Wire _extract_durable_facts into _heuristic_fallback as hoist_lines",
+    "Cache ThreadPoolExecutor on the MemoryReflector instance instead of creating per call",
+    "Change nack() return type from None to bool (False when delivery_id not found)",
+    "Tighten commit SHA regex to minimum 8 hex chars with context requirement",
+    "Update tests to cover dequeue->ack and dequeue->nack lifecycle flows",
+    "Update tests for nack return value and updated heuristic fallback with hoist lines"
+  ],
+  "acceptance_criteria": [
+    "dequeue() moves item to _in_flight, ack()/nack() operate on _in_flight",
+    "_in_flight is persisted and survives restart",
+    "_heuristic_fallback returns durable facts as hoist_lines (not empty list)",
+    "ThreadPoolExecutor is cached on the instance, not created per call",
+    "nack() returns bool (True if found, False otherwise)",
+    "Commit SHA regex uses minimum 8 hex chars",
+    "All 2054+ existing tests pass",
+    "New tests cover the dequeue->ack/nack lifecycle"
+  ],
+  "verification": [
+    "eval \"$(pyenv init -)\" && cd /projects/sandbox/NVLabsCompany && python -m pytest tests/test_webhook_queue.py tests/test_memory_reflector.py -x -q",
+    "eval \"$(pyenv init -)\" && cd /projects/sandbox/NVLabsCompany && python -m pytest tests/ -q"
+  ],
+  "blocked_reason": null,
+  "findings": "All 5 review issues fixed. Full suite: 2061 tests pass (7 new tests added for lifecycle coverage). The webhook queue now correctly tracks in-flight items, the heuristic fallback hoists durable facts, ThreadPoolExecutor is cached, nack returns bool, and SHA regex minimum is 8 chars."
+}

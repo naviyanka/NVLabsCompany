@@ -138,7 +138,8 @@ class TestNack:
         queue = WebhookDeliveryQueue(persist_path=tmp_path / "queue.json")
         queue.enqueue(_make_delivery(id="d1"))
 
-        queue.nack("d1", "connection timeout")
+        result = queue.nack("d1", "connection timeout")
+        assert result is True
 
         # Item should still be pending with incremented retry
         assert queue.get_pending_count() == 1
@@ -186,7 +187,8 @@ class TestNack:
         delivery = _make_delivery(id="d1", retry_count=3)
         queue.enqueue(delivery)
 
-        queue.nack("d1", "final failure")
+        result = queue.nack("d1", "final failure")
+        assert result is True
 
         assert queue.get_pending_count() == 0
         assert queue.get_dead_letter_count() == 1
@@ -196,12 +198,13 @@ class TestNack:
         assert dead[0].retry_count == 4
         assert dead[0].last_error == "final failure"
 
-    def test_nack_nonexistent_does_nothing(self, tmp_path: Path) -> None:
-        """Nack on a nonexistent delivery does nothing."""
+    def test_nack_nonexistent_returns_false(self, tmp_path: Path) -> None:
+        """Nack on a nonexistent delivery returns False."""
         queue = WebhookDeliveryQueue(persist_path=tmp_path / "queue.json")
         queue.enqueue(_make_delivery(id="d1"))
 
-        queue.nack("nonexistent", "error")
+        result = queue.nack("nonexistent", "error")
+        assert result is False
 
         assert queue.get_pending_count() == 1
         assert queue.get_dead_letter_count() == 0
@@ -311,6 +314,7 @@ class TestPersistence:
         raw = path.read_text(encoding="utf-8")
         data = json.loads(raw)
         assert "pending" in data
+        assert "in_flight" in data
         assert "dead_letters" in data
         assert len(data["pending"]) == 1
         assert data["pending"][0]["id"] == "d1"
@@ -343,3 +347,125 @@ class TestCounts:
         queue.enqueue(_make_delivery(id="d1"))
         queue.nack("d1", "err")
         assert queue.get_dead_letter_count() == 1
+
+
+class TestDequeueAckNackLifecycle:
+    """Tests for the complete dequeue -> ack/nack lifecycle.
+
+    These tests exercise the real-world flow where dequeue() moves items
+    to _in_flight, and then ack/nack operates on _in_flight.
+    """
+
+    def test_dequeue_then_ack_succeeds(self, tmp_path: Path) -> None:
+        """Dequeue followed by ack removes delivery from tracking."""
+        queue = WebhookDeliveryQueue(persist_path=tmp_path / "queue.json")
+        queue.enqueue(_make_delivery(id="d1"))
+        queue.enqueue(_make_delivery(id="d2"))
+
+        delivery = queue.dequeue()
+        assert delivery is not None
+        assert delivery.id == "d1"
+        assert delivery.status == "in_flight"
+
+        # ack should find it in _in_flight
+        assert queue.ack("d1") is True
+        assert queue.get_pending_count() == 1
+        assert len(queue._in_flight) == 0
+
+    def test_dequeue_then_nack_returns_to_pending(self, tmp_path: Path) -> None:
+        """Dequeue followed by nack returns delivery to pending with backoff."""
+        queue = WebhookDeliveryQueue(persist_path=tmp_path / "queue.json")
+        queue.enqueue(_make_delivery(id="d1"))
+
+        delivery = queue.dequeue()
+        assert delivery is not None
+        assert delivery.id == "d1"
+        assert queue.get_pending_count() == 0
+
+        # nack should find it in _in_flight and return to pending
+        result = queue.nack("d1", "timeout")
+        assert result is True
+        assert queue.get_pending_count() == 1
+        assert len(queue._in_flight) == 0
+
+        # Verify retry state
+        requeued = queue._pending[0]
+        assert requeued.retry_count == 1
+        assert requeued.last_error == "timeout"
+        assert requeued.next_retry_at is not None
+        assert requeued.status == "pending"
+
+    def test_dequeue_then_nack_dead_letters(self, tmp_path: Path) -> None:
+        """Dequeue then nack beyond max_retries moves to dead letters."""
+        queue = WebhookDeliveryQueue(
+            persist_path=tmp_path / "queue.json", max_retries=1
+        )
+        queue.enqueue(_make_delivery(id="d1", retry_count=1))
+
+        delivery = queue.dequeue()
+        assert delivery is not None
+
+        result = queue.nack("d1", "permanent failure")
+        assert result is True
+        assert queue.get_pending_count() == 0
+        assert queue.get_dead_letter_count() == 1
+        assert len(queue._in_flight) == 0
+
+    def test_ack_after_dequeue_not_found_in_pending(self, tmp_path: Path) -> None:
+        """After dequeue, ack does not find the item in _pending."""
+        queue = WebhookDeliveryQueue(persist_path=tmp_path / "queue.json")
+        queue.enqueue(_make_delivery(id="d1"))
+
+        queue.dequeue()
+        # Verify the item is NOT in _pending
+        assert queue.get_pending_count() == 0
+        # But ack still works via _in_flight
+        assert queue.ack("d1") is True
+
+    def test_in_flight_persists_across_restart(self, tmp_path: Path) -> None:
+        """In-flight items survive a restart (new instance from same file)."""
+        path = tmp_path / "queue.json"
+        q1 = WebhookDeliveryQueue(persist_path=path)
+        q1.enqueue(_make_delivery(id="d1"))
+        q1.dequeue()
+
+        # New instance should see the in-flight item
+        q2 = WebhookDeliveryQueue(persist_path=path)
+        assert q2.get_pending_count() == 0
+        assert len(q2._in_flight) == 1
+        assert "d1" in q2._in_flight
+
+        # And ack should work on the reloaded instance
+        assert q2.ack("d1") is True
+        assert len(q2._in_flight) == 0
+
+    def test_full_lifecycle_enqueue_dequeue_nack_retry_ack(
+        self, tmp_path: Path
+    ) -> None:
+        """Full lifecycle: enqueue -> dequeue -> nack -> dequeue again -> ack."""
+        queue = WebhookDeliveryQueue(persist_path=tmp_path / "queue.json")
+        queue.enqueue(_make_delivery(id="d1"))
+
+        # First attempt: dequeue and fail
+        delivery = queue.dequeue()
+        assert delivery is not None
+        queue.nack("d1", "first failure")
+
+        # Item should be back in pending with retry delay
+        assert queue.get_pending_count() == 1
+        pending = queue._pending[0]
+        assert pending.retry_count == 1
+
+        # Simulate time passing - set next_retry_at to the past
+        pending.next_retry_at = datetime.now(UTC) - timedelta(seconds=1)
+        queue._save()
+
+        # Second attempt: dequeue again and succeed
+        delivery2 = queue.dequeue()
+        assert delivery2 is not None
+        assert delivery2.id == "d1"
+        assert delivery2.retry_count == 1
+
+        assert queue.ack("d1") is True
+        assert queue.get_pending_count() == 0
+        assert len(queue._in_flight) == 0

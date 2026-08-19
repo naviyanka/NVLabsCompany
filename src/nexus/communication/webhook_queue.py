@@ -68,9 +68,13 @@ class WebhookDelivery:
 class WebhookDeliveryQueue:
     """File-backed delivery queue with retry logic and dead letter storage.
 
-    Persists pending deliveries and dead letters to a JSON file. All writes are
-    atomic using tempfile in the same directory followed by os.replace to prevent
-    corruption on crash.
+    Persists pending deliveries, in-flight items, and dead letters to a JSON
+    file. All writes are atomic using tempfile in the same directory followed
+    by os.replace to prevent corruption on crash.
+
+    Lifecycle: enqueue -> dequeue (moves to _in_flight) -> ack/nack (operates
+    on _in_flight). This ensures items are tracked throughout their full
+    delivery attempt lifecycle.
 
     Exponential backoff formula: min(2^(retry_count - 1), 16) seconds from now.
     """
@@ -79,6 +83,9 @@ class WebhookDeliveryQueue:
     max_retries: int = 5
     dead_letter_cap: int = 100
     _pending: list[WebhookDelivery] = field(default_factory=list, init=False, repr=False)
+    _in_flight: dict[str, WebhookDelivery] = field(
+        default_factory=dict, init=False, repr=False
+    )
     _dead_letters: list[WebhookDelivery] = field(
         default_factory=list, init=False, repr=False
     )
@@ -94,6 +101,7 @@ class WebhookDeliveryQueue:
         """
         if not self.persist_path.exists():
             self._pending = []
+            self._in_flight = {}
             self._dead_letters = []
             return
 
@@ -103,11 +111,16 @@ class WebhookDeliveryQueue:
             self._pending = [
                 WebhookDelivery.from_dict(d) for d in data.get("pending", [])
             ]
+            self._in_flight = {
+                d["id"]: WebhookDelivery.from_dict(d)
+                for d in data.get("in_flight", [])
+            }
             self._dead_letters = [
                 WebhookDelivery.from_dict(d) for d in data.get("dead_letters", [])
             ]
         except (json.JSONDecodeError, KeyError, TypeError, ValueError):
             self._pending = []
+            self._in_flight = {}
             self._dead_letters = []
 
     def _save(self) -> None:
@@ -118,6 +131,7 @@ class WebhookDeliveryQueue:
         """
         data = {
             "pending": [d.to_dict() for d in self._pending],
+            "in_flight": [d.to_dict() for d in self._in_flight.values()],
             "dead_letters": [d.to_dict() for d in self._dead_letters],
         }
         content = json.dumps(data, indent=2)
@@ -161,6 +175,8 @@ class WebhookDeliveryQueue:
         """Remove and return the next ready delivery from the queue.
 
         A delivery is ready if its next_retry_at is None or <= now (UTC).
+        The delivery is moved to the _in_flight tracking dict so that
+        subsequent ack() or nack() calls can find it.
 
         Returns:
             The next ready WebhookDelivery, or None if no deliveries are ready.
@@ -169,12 +185,17 @@ class WebhookDeliveryQueue:
         for i, delivery in enumerate(self._pending):
             if delivery.next_retry_at is None or delivery.next_retry_at <= now:
                 self._pending.pop(i)
+                delivery.status = "in_flight"
+                self._in_flight[delivery.id] = delivery
                 self._save()
                 return delivery
         return None
 
     def ack(self, delivery_id: str) -> bool:
-        """Acknowledge successful delivery, removing it from the queue.
+        """Acknowledge successful delivery, removing it from tracking.
+
+        Looks for the delivery in _in_flight first (normal lifecycle after
+        dequeue), then falls back to _pending for backward compatibility.
 
         Args:
             delivery_id: The ID of the delivery to acknowledge.
@@ -182,6 +203,10 @@ class WebhookDeliveryQueue:
         Returns:
             True if the delivery was found and removed, False otherwise.
         """
+        if delivery_id in self._in_flight:
+            del self._in_flight[delivery_id]
+            self._save()
+            return True
         for i, delivery in enumerate(self._pending):
             if delivery.id == delivery_id:
                 self._pending.pop(i)
@@ -189,8 +214,11 @@ class WebhookDeliveryQueue:
                 return True
         return False
 
-    def nack(self, delivery_id: str, error: str) -> None:
+    def nack(self, delivery_id: str, error: str) -> bool:
         """Report a delivery failure, applying retry logic or dead-lettering.
+
+        Looks for the delivery in _in_flight first (normal lifecycle after
+        dequeue), then falls back to _pending for backward compatibility.
 
         Increments the retry count and computes the next retry time using
         exponential backoff: min(2^(retry_count - 1), 16) seconds.
@@ -202,30 +230,47 @@ class WebhookDeliveryQueue:
         Args:
             delivery_id: The ID of the failed delivery.
             error: Description of the failure.
+
+        Returns:
+            True if the delivery was found and processed, False otherwise.
         """
-        for i, delivery in enumerate(self._pending):
-            if delivery.id == delivery_id:
-                delivery.retry_count += 1
-                delivery.last_error = error
+        delivery: WebhookDelivery | None = None
 
-                if delivery.retry_count > self.max_retries:
-                    # Move to dead letters
-                    delivery.status = "dead"
-                    self._pending.pop(i)
-                    self._dead_letters.append(delivery)
+        # Check _in_flight first (normal dequeue -> nack lifecycle)
+        if delivery_id in self._in_flight:
+            delivery = self._in_flight.pop(delivery_id)
+        else:
+            # Fall back to _pending for backward compatibility
+            for i, d in enumerate(self._pending):
+                if d.id == delivery_id:
+                    delivery = self._pending.pop(i)
+                    break
 
-                    # Enforce dead letter cap - drop oldest
-                    while len(self._dead_letters) > self.dead_letter_cap:
-                        self._dead_letters.pop(0)
-                else:
-                    # Compute exponential backoff
-                    backoff_seconds = min(2 ** (delivery.retry_count - 1), 16)
-                    delivery.next_retry_at = (
-                        datetime.now(UTC) + timedelta(seconds=backoff_seconds)
-                    )
+        if delivery is None:
+            return False
 
-                self._save()
-                return
+        delivery.retry_count += 1
+        delivery.last_error = error
+
+        if delivery.retry_count > self.max_retries:
+            # Move to dead letters
+            delivery.status = "dead"
+            self._dead_letters.append(delivery)
+
+            # Enforce dead letter cap - drop oldest
+            while len(self._dead_letters) > self.dead_letter_cap:
+                self._dead_letters.pop(0)
+        else:
+            # Compute exponential backoff and return to pending
+            backoff_seconds = min(2 ** (delivery.retry_count - 1), 16)
+            delivery.next_retry_at = (
+                datetime.now(UTC) + timedelta(seconds=backoff_seconds)
+            )
+            delivery.status = "pending"
+            self._pending.append(delivery)
+
+        self._save()
+        return True
 
     def get_dead_letters(self) -> list[WebhookDelivery]:
         """Return the list of dead-lettered deliveries.

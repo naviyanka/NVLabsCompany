@@ -793,6 +793,25 @@ class TestHeuristicFallback:
         assert "Sentence C" not in condensed
         assert hoist == []
 
+    def test_heuristic_fallback_hoists_durable_facts(self):
+        """Heuristic fallback returns durable facts as hoist_lines."""
+        reflector = MemoryReflector()
+        evicted = [
+            Section(
+                heading="## Task: deploy",
+                body=(
+                    "We decided to use PostgreSQL for persistence.\n"
+                    "Modified src/nexus/memory/reflector.py.\n"
+                    "Just a regular line with no facts."
+                ),
+            ),
+        ]
+        condensed, hoist = reflector._heuristic_fallback(None, evicted)
+
+        assert "We decided to use PostgreSQL for persistence." in hoist
+        assert "Modified src/nexus/memory/reflector.py." in hoist
+        assert "Just a regular line with no facts." not in hoist
+
 
 class TestExtractDurableFacts:
     """Tests for _extract_durable_facts method."""
@@ -838,22 +857,24 @@ class TestExtractDurableFacts:
         assert "Regular text with no paths." not in facts
 
     def test_identifies_commit_shas(self):
-        """Lines with 7+ hex character strings are extracted."""
+        """Lines with 8+ hex character strings are extracted."""
         reflector = MemoryReflector()
         evicted = [
             Section(
                 heading="## Task: deploy",
                 body=(
-                    "Deployed commit abc1234 to production.\n"
+                    "Deployed commit abc12345 to production.\n"
                     "Fixed in deadbeef.\n"
+                    "Short hex abc1234 should not match.\n"
                     "No hex here at all."
                 ),
             ),
         ]
         facts = reflector._extract_durable_facts(evicted)
 
-        assert "Deployed commit abc1234 to production." in facts
+        assert "Deployed commit abc12345 to production." in facts
         assert "Fixed in deadbeef." in facts
+        assert "Short hex abc1234 should not match." not in facts
         assert "No hex here at all." not in facts
 
     def test_identifies_dollar_amounts_and_percentages(self):

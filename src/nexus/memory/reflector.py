@@ -17,6 +17,7 @@ original file byte-for-byte untouched.
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import json
 import re
 from collections.abc import Awaitable, Callable
@@ -355,6 +356,7 @@ class MemoryReflector:
         """
         self.settings = settings or ReflectSettings()
         self._llm_callable = llm_callable
+        self._executor: "concurrent.futures.ThreadPoolExecutor | None" = None
 
     def should_condense(self, file_bytes: int, section_count: int) -> bool:
         """Check whether a memory file should be condensed.
@@ -513,13 +515,15 @@ class MemoryReflector:
 
         Takes the first 2 sentences of each evicted section body,
         joins them with newlines, and prepends existing condensed text.
+        Uses _extract_durable_facts to provide hoist_lines containing
+        decisions, file paths, commit SHAs, and critical numbers.
 
         Args:
             condensed_text: Existing condensed summary, or None.
             evicted: List of sections being evicted.
 
         Returns:
-            Tuple of (new_condensed_text, empty_hoist_list).
+            Tuple of (new_condensed_text, hoist_lines_from_durable_facts).
         """
         parts: list[str] = []
         if condensed_text:
@@ -530,7 +534,8 @@ class MemoryReflector:
             if truncated and not truncated.endswith("."):
                 truncated += "."
             parts.append(truncated)
-        return ("\n".join(parts), [])
+        hoist_lines = self._extract_durable_facts(evicted)
+        return ("\n".join(parts), hoist_lines)
 
     def _extract_durable_facts(self, evicted: list[Section]) -> list[str]:
         """Scan evicted sections for lines containing durable facts.
@@ -553,7 +558,7 @@ class MemoryReflector:
         file_path_re = re.compile(
             r"(src/[\w/.\-]+|/[\w/.\-]+\.\w+|\*\.\w+)"
         )
-        commit_sha_re = re.compile(r"\b[0-9a-f]{7,40}\b")
+        commit_sha_re = re.compile(r"\b[0-9a-f]{8,40}\b")
         number_re = re.compile(r"(\$[\d,.]+|\d+%)")
 
         results: list[str] = []
@@ -611,16 +616,15 @@ class MemoryReflector:
                 loop = None
 
             if loop and loop.is_running():
-                import concurrent.futures
-
-                with concurrent.futures.ThreadPoolExecutor(1) as pool:
-                    future = pool.submit(
-                        asyncio.run,
-                        self._summarize_evicted(
-                            condensed_text, evicted, pinned
-                        ),
-                    )
-                    return future.result()
+                if self._executor is None:
+                    self._executor = concurrent.futures.ThreadPoolExecutor(1)
+                future = self._executor.submit(
+                    asyncio.run,
+                    self._summarize_evicted(
+                        condensed_text, evicted, pinned
+                    ),
+                )
+                return future.result()
             else:
                 return asyncio.run(
                     self._summarize_evicted(
