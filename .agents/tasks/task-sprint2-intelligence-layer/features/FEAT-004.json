@@ -2,7 +2,7 @@
   "id": "FEAT-004",
   "type": "chore",
   "description": "Generate Alembic migration for all SQLModel tables and verify schema completeness. Since no PostgreSQL is running, generate the migration in offline mode or use a SQLite-based approach to validate the schema.",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "Create alembic/versions/sprint2_initial_complete_schema.py as a manual migration file that consolidates all ~50 SQLModel tables. Use 'alembic revision --autogenerate' pattern but since no DB is running, create the migration manually by: (1) reading all model definitions from src/nexus/models/, (2) writing the upgrade() function with op.create_table() for each table not already covered by existing migrations, and (3) writing the downgrade() function with op.drop_table() in reverse order. Reference existing migrations in alembic/versions/ (db96cb66effc_initial_schema.py and ca7238bc6797_add_kill_switch_records_table.py) to avoid duplicating tables they already create.",
     "Verify the migration file is syntactically valid by importing it with Python. Run: python -c 'import alembic.versions.sprint2_...' or use ast.parse to validate syntax.",
@@ -20,5 +20,5 @@
     "/root/.pyenv/versions/3.12.13/bin/python -m pytest tests/ --tb=short -q"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "Migration a1b2c3d4e5f6 created for circuit_breaker_records table (the only table missing a migration). Migration chain: None -> db96cb66effc -> ca7238bc6797 -> a1b2c3d4e5f6. All 900 tests pass (up from 888 baseline, additional tests from FEAT-001 through FEAT-003). Alembic migration files use annotated assignments (ast.AnnAssign) not plain ast.Assign for revision/down_revision variables. SQLModel.metadata confirms 48 tables total."
 }
