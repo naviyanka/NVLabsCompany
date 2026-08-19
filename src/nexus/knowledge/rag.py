@@ -2,6 +2,11 @@
 
 Provides document chunking, indexing, hybrid search (BM25 + vector similarity),
 result reranking, and context assembly for use in agent prompts.
+
+Supports pluggable components via optional constructor parameters:
+- ranker: Custom result ranker implementing the Ranker protocol
+- retriever: Custom retriever implementing the Retriever protocol
+- parser: Custom document parser implementing the DocumentParser protocol
 """
 
 from __future__ import annotations
@@ -9,7 +14,7 @@ from __future__ import annotations
 import re
 import uuid
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
@@ -20,6 +25,9 @@ from nexus.models.knowledge import KnowledgeChunk
 
 if TYPE_CHECKING:
     from nexus.knowledge.embeddings import EmbeddingProvider
+    from nexus.knowledge.parsers import DocumentParser
+    from nexus.knowledge.rankers import Ranker
+    from nexus.knowledge.retrievers import Retriever
 
 
 class RAGPipeline:
@@ -32,20 +40,206 @@ class RAGPipeline:
     4. Reranking results by relevance heuristics
     5. Assembling a context window within token budgets
 
+    Supports pluggable ranker, retriever, and parser components that
+    can be provided via constructor or the from_config class method.
+
     Attributes:
         db: Async database session for persistence operations.
+        embedding_provider: Optional embedding provider for vector operations.
+        ranker: Optional custom ranker for result reranking.
+        retriever: Optional custom retriever for document retrieval.
+        parser: Optional custom parser for document parsing.
     """
 
-    def __init__(self, db: AsyncSession, embedding_provider: Optional[EmbeddingProvider] = None) -> None:
-        """Initialize RAGPipeline with a database session and optional embedding provider.
+    def __init__(
+        self,
+        db: AsyncSession,
+        embedding_provider: Optional[EmbeddingProvider] = None,
+        ranker: Optional[Ranker] = None,
+        retriever: Optional[Retriever] = None,
+        parser: Optional[DocumentParser] = None,
+    ) -> None:
+        """Initialize RAGPipeline with a database session and optional components.
 
         Args:
             db: An async SQLAlchemy session for database operations.
             embedding_provider: Optional embedding provider for computing vector embeddings.
                 If not provided, vector similarity falls back to token overlap.
+            ranker: Optional custom ranker implementing the Ranker protocol.
+                If provided, used by the rerank method instead of built-in heuristics.
+            retriever: Optional custom retriever implementing the Retriever protocol.
+                If provided, can be used for alternative retrieval strategies.
+            parser: Optional custom document parser implementing the DocumentParser protocol.
+                If provided, used by parse_document method for structured parsing.
         """
         self.db = db
         self.embedding_provider = embedding_provider
+        self.ranker = ranker
+        self.retriever = retriever
+        self.parser = parser
+
+    @classmethod
+    def from_config(
+        cls,
+        db: AsyncSession,
+        embedding_provider: Optional[EmbeddingProvider] = None,
+        ranker_config: Optional[dict[str, Any]] = None,
+        retriever_config: Optional[dict[str, Any]] = None,
+        parser_config: Optional[dict[str, Any]] = None,
+    ) -> RAGPipeline:
+        """Create a RAGPipeline with components configured from dicts.
+
+        Factory method that instantiates ranker, retriever, and parser
+        components based on configuration dictionaries. This allows
+        building a fully configured pipeline from serializable config.
+
+        Args:
+            db: An async SQLAlchemy session for database operations.
+            embedding_provider: Optional embedding provider instance.
+            ranker_config: Optional dict with 'type' key and type-specific options.
+                Supported types: 'bm25', 'cross_encoder', 'pipeline'.
+            retriever_config: Optional dict with 'type' key and type-specific options.
+                Supported types: 'dense', 'sparse', 'hybrid'.
+            parser_config: Optional dict with 'type' key and type-specific options.
+                Supported types: 'text', 'markdown', 'code'.
+
+        Returns:
+            A configured RAGPipeline instance.
+        """
+        ranker = None
+        retriever = None
+        parser = None
+
+        if ranker_config:
+            ranker = cls._build_ranker(ranker_config)
+
+        if retriever_config:
+            retriever = cls._build_retriever(retriever_config, embedding_provider)
+
+        if parser_config:
+            parser = cls._build_parser(parser_config)
+
+        return cls(
+            db=db,
+            embedding_provider=embedding_provider,
+            ranker=ranker,
+            retriever=retriever,
+            parser=parser,
+        )
+
+    @staticmethod
+    def _build_ranker(config: dict[str, Any]) -> Any:
+        """Build a ranker instance from configuration.
+
+        Args:
+            config: Dict with 'type' key and optional parameters.
+
+        Returns:
+            A ranker instance.
+
+        Raises:
+            ValueError: If the ranker type is not recognized.
+        """
+        from nexus.knowledge.rankers import BM25Ranker, CrossEncoderRanker, RerankerPipeline
+
+        ranker_type = config.get("type", "bm25")
+        top_k = config.get("top_k", 10)
+
+        if ranker_type == "bm25":
+            return BM25Ranker(top_k=top_k)
+        elif ranker_type == "cross_encoder":
+            return CrossEncoderRanker(
+                top_k=top_k,
+                bm25_weight=config.get("bm25_weight", 0.6),
+                overlap_weight=config.get("overlap_weight", 0.4),
+            )
+        elif ranker_type == "pipeline":
+            ranker_configs = config.get("rankers", [])
+            pipeline = RerankerPipeline()
+            for rc in ranker_configs:
+                pipeline.add_ranker(RAGPipeline._build_ranker(rc))
+            return pipeline
+        else:
+            raise ValueError(f"Unknown ranker type: {ranker_type}")
+
+    @staticmethod
+    def _build_retriever(config: dict[str, Any], embedding_provider: Any = None) -> Any:
+        """Build a retriever instance from configuration.
+
+        Args:
+            config: Dict with 'type' key and optional parameters.
+            embedding_provider: Embedding provider for dense/hybrid retrievers.
+
+        Returns:
+            A retriever instance.
+
+        Raises:
+            ValueError: If the retriever type is not recognized.
+        """
+        from nexus.knowledge.retrievers import retriever_factory
+
+        strategy = config.get("type", "sparse")
+        documents = config.get("documents", [])
+        alpha = config.get("alpha", 0.5)
+
+        return retriever_factory(
+            strategy=strategy,
+            embedding_provider=embedding_provider,
+            documents=documents,
+            alpha=alpha,
+        )
+
+    @staticmethod
+    def _build_parser(config: dict[str, Any]) -> Any:
+        """Build a parser instance from configuration.
+
+        Args:
+            config: Dict with 'type' key and optional parameters.
+
+        Returns:
+            A parser instance.
+
+        Raises:
+            ValueError: If the parser type is not recognized.
+        """
+        from nexus.knowledge.parsers import CodeParser, MarkdownParser, TextParser
+
+        parser_type = config.get("type", "text")
+
+        if parser_type == "text":
+            return TextParser(
+                max_chunk_size=config.get("max_chunk_size", 1000),
+                min_chunk_size=config.get("min_chunk_size", 50),
+            )
+        elif parser_type == "markdown":
+            return MarkdownParser(
+                include_headers_in_chunks=config.get("include_headers_in_chunks", True),
+            )
+        elif parser_type == "code":
+            return CodeParser(
+                language=config.get("language"),
+                max_chunk_size=config.get("max_chunk_size", 2000),
+            )
+        else:
+            raise ValueError(f"Unknown parser type: {parser_type}")
+
+    def parse_document(self, content: str) -> list[Any]:
+        """Parse a document using the configured parser.
+
+        If a custom parser is configured, uses it to produce structured
+        ParsedChunk instances. Otherwise falls back to the built-in
+        chunk_document method with paragraph strategy.
+
+        Args:
+            content: Raw document content to parse.
+
+        Returns:
+            List of ParsedChunk instances if a parser is configured,
+            or list of strings from chunk_document otherwise.
+        """
+        if self.parser is not None:
+            return self.parser.parse(content)
+        return self.chunk_document(content, strategy="paragraph")
 
     def chunk_document(
         self,
@@ -306,7 +500,8 @@ class RAGPipeline:
     ) -> list[dict]:
         """Rerank search results based on relevance heuristics.
 
-        Applies multiple heuristic signals to rerank results:
+        If a custom ranker is configured, delegates to it. Otherwise
+        applies multiple heuristic signals to rerank results:
         - Term overlap: How many query terms appear in the chunk
         - Position: Earlier chunks (lower chunk_index) are slightly preferred
         - Freshness: More recently created chunks get a small boost
@@ -321,6 +516,11 @@ class RAGPipeline:
         """
         if not results:
             return []
+
+        # Use custom ranker if configured
+        if self.ranker is not None:
+            ranked = self.ranker.rank(query, results)
+            return ranked[:top_k]
 
         query_tokens = set(tokenize(query))
 

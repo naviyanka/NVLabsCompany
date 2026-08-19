@@ -1,0 +1,7 @@
+{
+  "task_id": "task-phase6-rag-plugins-evaluation",
+  "task_description": "Phase 6 implementation: RAG Pipeline Enhancement (pluggable rankers, retrievers, parsers), Plugin SDK (protocol, loader, registry, hook system), and Model Evaluation Framework (benchmarks, evaluator, metrics, reporter). All three subsystems are independent of each other and could be parallelized.",
+  "status": "in_progress",
+  "feature_order": ["FEAT-001", "FEAT-002", "FEAT-003"],
+  "blocked_reason": null
+}

@@ -1,0 +1,32 @@
+{
+  "id": "FEAT-003",
+  "type": "feat",
+  "description": "Model Evaluation Framework - Create src/nexus/evaluation/ package with benchmark definitions, model evaluator, metrics calculations, and JSON reporting. Enables systematic evaluation of different models and prompts to feed into the evolution subsystem.",
+  "status": "pending",
+  "steps": [
+    "Create src/nexus/evaluation/__init__.py with package docstring and __all__ exports",
+    "Create src/nexus/evaluation/benchmark.py with: (1) TestCase dataclass with input (str), expected_output (str), metadata (dict), tags (list[str]) fields, (2) Benchmark class with name, description, test_cases (list[TestCase]), created_at fields, (3) BenchmarkSuite class that groups multiple Benchmarks, supports filtering by tags, and serializes to/from dict for JSON persistence",
+    "Create src/nexus/evaluation/metrics.py with metric calculation functions: (1) accuracy(predictions: list[str], expected: list[str]) -> float (exact match ratio), (2) latency_stats(latencies: list[float]) -> dict with mean, p50, p95, p99, max fields, (3) cost_total(token_counts: list[dict]) -> dict with total_input_tokens, total_output_tokens, estimated_cost fields using a simple pricing model, (4) token_efficiency(outputs: list[str], token_counts: list[int]) -> float (useful output per token ratio)",
+    "Create src/nexus/evaluation/evaluator.py with: (1) EvaluationConfig dataclass with model_name, prompt_template, temperature, max_tokens, num_runs fields, (2) EvaluationResult dataclass with config, predictions, metrics, duration, timestamp fields, (3) ModelEvaluator class with run_benchmark(benchmark, config, adapter_fn) async method that executes test cases through a provided adapter function, collects predictions and timing, computes all metrics, and returns EvaluationResult. The adapter_fn parameter is a callable(input: str) -> str to keep the evaluator decoupled from specific LLM adapters",
+    "Create src/nexus/evaluation/reporter.py with: (1) EvaluationReport dataclass wrapping multiple EvaluationResults with summary statistics, (2) ReportFormat enum (JSON), (3) generate_report(results: list[EvaluationResult]) -> EvaluationReport function that computes comparative statistics, (4) export_report(report: EvaluationReport, format: ReportFormat) -> str function that serializes to JSON string, (5) Compare function that takes two EvaluationResults and produces a comparison dict showing deltas for each metric",
+    "Update src/nexus/evaluation/__init__.py with all public exports: Benchmark, BenchmarkSuite, TestCase, ModelEvaluator, EvaluationConfig, EvaluationResult, EvaluationReport, generate_report, export_report, accuracy, latency_stats, cost_total, token_efficiency",
+    "Create tests/test_evaluation_framework.py with comprehensive tests: TestCase/Benchmark/BenchmarkSuite creation and serialization, all metric functions with known inputs and expected outputs, ModelEvaluator.run_benchmark with a mock adapter function, reporter generation and JSON export, comparison between two evaluation results"
+  ],
+  "acceptance_criteria": [
+    "src/nexus/evaluation/ package exists with __init__.py, benchmark.py, metrics.py, evaluator.py, reporter.py",
+    "Benchmark class supports test case management and serialization",
+    "All 4 metric functions (accuracy, latency_stats, cost_total, token_efficiency) are implemented",
+    "ModelEvaluator can run benchmarks against a provided adapter function and collect results",
+    "Reporter generates JSON evaluation reports with comparative statistics",
+    "tests/test_evaluation_framework.py has comprehensive tests for all components",
+    "All files pass Python AST parsing",
+    "No new external dependencies"
+  ],
+  "verification": [
+    "Run: python3 -c \"import ast; import pathlib; [ast.parse(p.read_text()) for p in pathlib.Path('src/nexus/evaluation').rglob('*.py')]\"",
+    "Run: python3 -c \"import ast; ast.parse(open('tests/test_evaluation_framework.py').read())\"",
+    "Verify all metric functions have correct signatures and return types by AST inspection"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

@@ -1,0 +1,35 @@
+{
+  "id": "FEAT-002",
+  "type": "feat",
+  "description": "Plugin SDK - Create src/nexus/plugins/ package with plugin protocol, loader, registry, and hook system. Provides extensibility mechanism for NEXUS with lifecycle hooks for pre/post task execution, tool calls, and agent lifecycle events. Wire into main.py.",
+  "status": "pending",
+  "steps": [
+    "Create src/nexus/plugins/__init__.py with package docstring and __all__ exports for all public classes",
+    "Create src/nexus/plugins/plugin_protocol.py with: (1) NexusPlugin Protocol class defining on_load() -> None, on_unload() -> None, get_tools() -> list[dict], get_hooks() -> dict[str, Callable] lifecycle methods, (2) PluginMetadata dataclass with name, version, author, description, dependencies fields, (3) PluginStatus enum (loaded, unloaded, error)",
+    "Create src/nexus/plugins/hook_system.py with: (1) HookPoint enum defining hook points: pre_task_execute, post_task_execute, pre_tool_call, post_tool_call, on_agent_create, on_agent_terminate, (2) HookContext dataclass providing context to hook handlers (agent_id, task_id, tool_name, timestamp, metadata dict), (3) HookManager class that registers handlers per hook point, executes them in order with error isolation (one handler failure does not block others), and supports priority ordering",
+    "Create src/nexus/plugins/plugin_loader.py with: (1) PluginLoader class that discovers plugins from a directory path (looks for Python files with a class implementing NexusPlugin protocol), (2) sandboxed_import function that imports a module in a restricted namespace (catches import errors, validates the module has the required protocol methods), (3) discover_plugins(directory: Path) -> list[PluginMetadata] function, (4) load_plugin(path: Path) -> NexusPlugin function",
+    "Create src/nexus/plugins/plugin_registry.py with: (1) PluginRegistry class managing loaded plugins as a dict[str, NexusPlugin], (2) register(plugin: NexusPlugin) method that calls on_load and stores the plugin, (3) unregister(name: str) method that calls on_unload and removes, (4) list_plugins() -> list[PluginMetadata], (5) get_plugin(name: str) -> NexusPlugin | None, (6) Integration with HookManager to auto-register plugin hooks on register",
+    "Wire into src/nexus/main.py: import PluginRegistry and HookManager, instantiate them in lifespan startup (after governance loading), store them in app.state for access by route handlers. Do NOT auto-load plugins from filesystem on startup (just initialize empty registry).",
+    "Create tests/test_plugin_sdk.py with comprehensive tests covering: NexusPlugin protocol conformance checks, HookManager registration/execution/error-isolation, PluginLoader discovery and sandboxed import (using temp directories with sample plugin files), PluginRegistry register/unregister/list/get lifecycle, hook execution order and priority"
+  ],
+  "acceptance_criteria": [
+    "src/nexus/plugins/ package exists with __init__.py, plugin_protocol.py, hook_system.py, plugin_loader.py, plugin_registry.py",
+    "NexusPlugin Protocol defines on_load, on_unload, get_tools, get_hooks methods",
+    "HookPoint enum has all 6 hook points: pre_task_execute, post_task_execute, pre_tool_call, post_tool_call, on_agent_create, on_agent_terminate",
+    "HookManager supports register, unregister, execute with error isolation",
+    "PluginLoader can discover and load plugins from a directory with sandboxed import",
+    "PluginRegistry manages plugin lifecycle (register/unregister/list/get)",
+    "main.py instantiates PluginRegistry and HookManager in lifespan startup",
+    "tests/test_plugin_sdk.py has comprehensive tests for all components",
+    "All files pass Python AST parsing",
+    "No new external dependencies"
+  ],
+  "verification": [
+    "Run: python3 -c \"import ast; import pathlib; [ast.parse(p.read_text()) for p in pathlib.Path('src/nexus/plugins').rglob('*.py')]\"",
+    "Run: python3 -c \"import ast; ast.parse(open('src/nexus/main.py').read())\"",
+    "Run: python3 -c \"import ast; ast.parse(open('tests/test_plugin_sdk.py').read())\"",
+    "Verify main.py contains PluginRegistry and HookManager initialization in lifespan"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}
