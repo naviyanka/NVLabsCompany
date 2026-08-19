@@ -1,0 +1,30 @@
+{
+  "id": "FEAT-001",
+  "type": "feat",
+  "description": "Replace Settings.tsx General tab content with Profile tab content. Keep the same layout structure (page header + left nav + center content + right sidebar) but change the active nav item to Profile and replace the center content and right sidebar with Profile-specific sections.",
+  "status": "in_progress",
+  "steps": [
+    "Update navItems array in Settings.tsx: set General.active to false and Profile.active to true",
+    "Replace center content with Profile sections: (1) Section header with 'Profile' title, subtitle 'View and update your personal information and preferences.', and 'Save Changes' blue button top-right; (2) Profile Information section with large circular avatar (pencil/edit icon overlay), 'Change Photo' teal button, helper text, and 2-column form grid (Full Name, Username, Email Address, Job Title, Phone Number with India flag, Department); (3) About You section with bio textarea and character count '67/200'; (4) Preferences section with Language dropdown, Time Zone dropdown, Date Format dropdown, Theme radio cards (System selected with teal border, Light, Dark), Week Starts On dropdown",
+    "Replace right sidebar with: (1) Account Status card showing green 'Active' badge, member since, last login, account type, 2FA status; (2) Session Activity card with 'View All' link showing current session (green Active badge) and 4 past sessions with dates/devices/IPs; (3) Linked Accounts card with 'Manage' link showing Google/GitHub/Slack connections (all green Connected) and '+ Connect Account' teal button",
+    "Keep footer unchanged (same as General)",
+    "Add any needed lucide-react icon imports (Camera/Pencil for avatar edit, Monitor/Sun/Moon for theme options, etc.)",
+    "Use existing Card component with appropriate padding props",
+    "All form inputs follow the same styling pattern: bg-dark-bg border border-white/[0.08] rounded-lg px-3 py-2 text-white text-sm",
+    "Theme selector cards: three cards in a row, System has teal/primary border (border-primary-500) indicating selected state"
+  ],
+  "acceptance_criteria": [
+    "npm run build passes with zero TypeScript errors",
+    "Left nav highlights 'Profile' (not 'General') with the primary-500/10 bg and primary-400 text",
+    "Center content shows Profile Information, About You, and Preferences sections with all specified form fields",
+    "Right sidebar shows Account Status, Session Activity, and Linked Accounts sections",
+    "Avatar section has circular avatar with edit overlay and 'Change Photo' teal button",
+    "Theme selector shows three cards with 'System' selected (teal/primary border)",
+    "All mock data matches the specification exactly (names, emails, dates, etc.)"
+  ],
+  "verification": [
+    "cd /projects/sandbox/NVLabsCompany/dashboard && npm run build"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}
