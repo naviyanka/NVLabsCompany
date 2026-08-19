@@ -1,0 +1,41 @@
+{
+  "id": "FEAT-001",
+  "type": "feat",
+  "description": "Completely replace src/pages/Tasks.tsx with a new static mock data design matching the dark theme. The new page includes: page header with icon/title/subtitle/action buttons, 5 stat cards row, tab navigation, filter bar, tasks data table with 8 rows, pagination, bottom 3-column charts section (donut, horizontal bar, leaderboard), and a right sidebar task details panel.",
+  "status": "in_progress",
+  "steps": [
+    "Remove all existing content from src/pages/Tasks.tsx including the API-related imports (useApi, tasksApi, Task type, PaginatedResponse, TaskStatus, COMPANY_ID).",
+    "Create static mock data arrays at module level for: task stats (5 cards), tasks table data (8 rows with all fields), chart data (status donut, priority bar chart, top agents), task detail panel data (activity items, metadata, related tasks). Use deterministic values exactly as specified in the requirements.",
+    "Build the page layout with a main content area (left ~75%) and a fixed-width right sidebar (Task Details panel ~25%).",
+    "Implement the page header section: ClipboardList icon + 'Tasks' title, subtitle 'Track and manage all tasks across your AI workforce', right side with Filters button, 'Group: None' dropdown, and green '+ Create Task' button.",
+    "Implement 5 stat cards row using the Card component: Total Tasks (356, +14%), Completed (198, 55.6%), In Progress (98, 27.5%), Pending (42, 11.8%), Failed/Blocked (18, 5.1%) with appropriate colored icons and circular progress indicators.",
+    "Implement tab navigation bar: All Tasks (active), My Tasks, Assigned to Agents, Completed, Blocked.",
+    "Implement filter bar: search input, 4 dropdown selectors (Status, Agents, Pipelines, Priority), Columns button.",
+    "Implement the tasks data table with columns: checkbox, Task, Pipeline, Agent, Priority, Status, Progress, Updated, Actions. Include 8 rows with exact data from requirements. Use colored badges for pipeline names, priority indicators, and status badges.",
+    "Implement pagination: 'Showing 1 to 8 of 356 tasks', page buttons (1,2,3,4...45), '10 / page' dropdown.",
+    "Implement bottom 3-column section: (1) Tasks by Status donut chart using recharts PieChart with center text '356 Total', (2) Tasks by Priority horizontal bar chart using recharts BarChart, (3) Top Agents by Tasks leaderboard list.",
+    "Implement the right sidebar Task Details panel with: header with 'TASK DETAILS' and expand/close buttons, task title 'Analyze target.com' with status badge, task ID, created date, tab navigation (Overview/Subtasks/Artifacts/Logs), description, metadata grid, quick action buttons, activity timeline, and related tasks section.",
+    "Use lucide-react icons throughout (ClipboardList, CheckCircle2, Clock, XCircle, Search, Filter, Plus, ChevronLeft, ChevronRight, MoreHorizontal, ArrowUp, ArrowDown, Copy, Maximize2, X, Square, RefreshCw, etc).",
+    "Use recharts for: PieChart (donut) with Pie, Cell components; BarChart with Bar component (horizontal layout); all with dark theme tooltip styling matching Dashboard.tsx pattern.",
+    "Ensure all Tailwind classes use dark theme tokens: dark-bg, dark-surface backgrounds; border-white/[0.08] borders; text-white primary, text-gray-400 secondary text colors.",
+    "Verify the file compiles with zero TypeScript errors by running: cd /projects/sandbox/NVLabsCompany/dashboard && npm run build"
+  ],
+  "acceptance_criteria": [
+    "npm run build completes with zero TypeScript errors",
+    "Tasks.tsx contains no imports from @/hooks/useApi, @/api/tasks, @/types/task, or @/types/common",
+    "Tasks.tsx uses only static hardcoded mock data (no API calls, no useState for data fetching, no useEffect)",
+    "Page renders 5 stat cards with exact values: 356, 198, 98, 42, 18",
+    "Tasks table has exactly 8 rows with the specified task names and metadata",
+    "Bottom section has 3 chart/visualization cards: donut (Tasks by Status), horizontal bar (Tasks by Priority), and leaderboard (Top Agents)",
+    "Right sidebar shows task details for 'Analyze target.com' with all specified metadata",
+    "Uses Card component from @/components/common/Card",
+    "Uses recharts for PieChart and BarChart",
+    "Uses lucide-react for all icons"
+  ],
+  "verification": [
+    "Run: cd /projects/sandbox/NVLabsCompany/dashboard && npm run build",
+    "Confirm zero errors in TypeScript compilation and Vite build"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}
