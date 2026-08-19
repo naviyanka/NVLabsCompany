@@ -2,7 +2,7 @@
   "id": "FEAT-001",
   "type": "feat",
   "description": "Cost Alerting Service, Secret Rotation Automation, API Versioning Strategy, and Audit Log Export/Retention - four new modules implementing operational maturity features",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "Create src/nexus/governance/cost_alerting.py with CostAlertService class that integrates with BudgetEnforcer's cost tracking. Include AlertThreshold (warn_pct, critical_pct), CostAlert dataclass (agent_id, scope, current_spend, limit, severity), and check_budgets() method. Support callback registration for alert delivery.",
     "Enhance src/nexus/governance/secret_backend.py: add RotationPolicy dataclass (max_age_days, auto_rotate), add check_rotation_needed() method to FernetSecretBackend that identifies secrets past max_age, add rotation_history tracking (when each secret was last rotated).",
@@ -24,5 +24,5 @@
     "pytest (full suite passes with no regressions)"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "All 68 new tests pass. Full suite passes with 2501 tests total (no regressions). Python 3.12 must be used explicitly (python3.12) since default python is 3.9. The APIVersionMiddleware is wired into main.py and adds X-API-Version: 1.0 to all responses. The rotation router is included at /api/v1/rotation prefix."
 }
