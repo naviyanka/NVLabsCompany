@@ -2,7 +2,7 @@
   "id": "FEAT-001",
   "type": "feat",
   "description": "Control Registry (Operator Control) - Port the ControlRegistry from munder-difflin/src/main/control.ts. Provides per-agent operator control state: pause, gate tools, steer (inject guidance FIFO queue), halt, auto-delivery pause, resume. Plus REST API endpoints.",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "Create src/nexus/governance/control_registry.py with a ControlRegistry class. Internal state: a dict mapping agent_id -> AgentControl dataclass (paused: bool, halted: bool, auto_delivery_paused: bool, gated_tools: set[str], steer_queue: list[str]). Methods: pause(agent_id, on), gate_tool(agent_id, tool, on), steer(agent_id, text) with max 10KB per entry and FIFO queue, halt(agent_id), resume(agent_id) clears pause+halt, clear_steers(agent_id), pause_auto_delivery(agent_id, on). Read methods: tool_decision(agent_id, tool) returns tuple (deny: bool, reason: str|None), take_steer(agent_id) dequeues one entry or returns None, snapshot(agent_id) returns AgentControlSnapshot, should_halt(agent_id) returns bool, is_auto_delivery_paused(agent_id) returns bool.",
     "Define AgentControlSnapshot as a dataclass or Pydantic model: paused, halted, auto_delivery_paused, gated_tools (list[str]), pending_steers (int).",
@@ -24,5 +24,5 @@
     "pytest tests/ (full suite to confirm no regressions)"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "Python 3.12+ required (pyenv global 3.12.13 needed). All 35 tests pass. Full suite passes at 1460 tests. Ruff linting/formatting applied. The control router uses sync endpoints (no DB needed) and a module-level singleton registry."
 }
