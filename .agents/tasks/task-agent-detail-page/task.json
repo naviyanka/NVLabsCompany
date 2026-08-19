@@ -1,0 +1,7 @@
+{
+  "task_id": "task-agent-detail-page",
+  "task_description": "Replace the existing AgentDetailPage.tsx with a comprehensive agent detail page matching the provided design spec. Features breadcrumb, profile header, tab navigation, three-column layout with stat cards, workload, skills, performance chart, activity feed, agent info, resources, capabilities, and quick actions.",
+  "status": "in_progress",
+  "feature_order": ["FEAT-001"],
+  "blocked_reason": null
+}

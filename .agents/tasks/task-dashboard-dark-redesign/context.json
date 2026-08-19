@@ -1,0 +1,31 @@
+{
+  "project_type": "React SPA with Vite + TypeScript + Tailwind CSS",
+  "language": "TypeScript/React (TSX)",
+  "build_system": "Vite 6 with TypeScript compilation, path alias @ -> src/",
+  "test_framework": "No test framework configured - only linting via eslint",
+  "build_command": "cd /projects/sandbox/NVLabsCompany/dashboard && npm run build",
+  "test_command": "cd /projects/sandbox/NVLabsCompany/dashboard && npm run build",
+  "verification_instructions": "1. Run npm install in dashboard/. 2. Run npm run build to verify TypeScript compilation and Vite build succeed with no errors.",
+  "snapshot_or_generated_files": null,
+  "setup_instructions": "cd /projects/sandbox/NVLabsCompany/dashboard && npm install",
+  "environment_constraints": "npm packages can be installed. No test runner configured, so verification is via successful tsc + vite build. tsconfig has strict mode with noUnusedLocals and noUnusedParameters.",
+  "contribution_requirements": "Standard React/TS patterns. Use @ alias for imports. Use Tailwind CSS for styling. Use lucide-react for icons. Use recharts for charts.",
+  "key_patterns": "Components use named exports. Pages are in src/pages/. Layout wraps all routes via Outlet. Common UI components in src/components/common/. Charts in src/components/charts/. Config values in src/config.ts and src/config/. Hooks in src/hooks/. API layer in src/api/. Types in src/types/.",
+  "relevant_files": [
+    "dashboard/src/components/layout/Layout.tsx",
+    "dashboard/src/components/layout/Sidebar.tsx",
+    "dashboard/src/components/layout/Header.tsx",
+    "dashboard/src/components/layout/Breadcrumb.tsx",
+    "dashboard/src/pages/Dashboard.tsx",
+    "dashboard/src/index.css",
+    "dashboard/tailwind.config.js",
+    "dashboard/index.html",
+    "dashboard/src/App.tsx",
+    "dashboard/src/components/common/Card.tsx",
+    "dashboard/src/components/charts/CostChart.tsx",
+    "dashboard/src/components/activity/ActivityFeed.tsx",
+    "dashboard/src/types/office.ts",
+    "dashboard/src/config/officeLayout.ts"
+  ],
+  "directory_structure": "dashboard/src/: App.tsx (router), main.tsx (entry), index.css (tailwind base), config.ts (company ID). Components: layout/ (Layout, Sidebar, Header, Breadcrumb), common/ (Card, Button, Badge, etc.), charts/ (CostChart, TaskPieChart, PerformanceChart), activity/ (ActivityFeed, ActivityItem), office/ (OfficeCanvas, FloorPlan, Room, etc.). Pages: Dashboard, Office, Agents, Tasks, etc. Types: agent.ts, task.ts, office.ts, common.ts, etc."
+}

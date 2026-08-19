@@ -1,0 +1,20 @@
+{
+  "id": "FEAT-001",
+  "type": "chore",
+  "description": "Install npm dependencies and verify baseline build compiles successfully before making changes.",
+  "status": "completed",
+  "steps": [
+    "Run npm install in /projects/sandbox/NVLabsCompany/dashboard/",
+    "Run npm run build to verify TypeScript compilation succeeds with zero errors",
+    "If build errors occur, fix any missing type issues or configuration problems"
+  ],
+  "acceptance_criteria": [
+    "npm install completes without errors",
+    "npm run build completes with exit code 0"
+  ],
+  "verification": [
+    "Run: cd /projects/sandbox/NVLabsCompany/dashboard && npm run build"
+  ],
+  "blocked_reason": null,
+  "findings": "Node.js not pre-installed; used mise to install node@22 with MISE_NODE_VERIFY=false (gpg-agent not available). Fixed multiple TS build errors: tsconfig.node.json needed composite+emitDeclarationOnly for project references, added @types/node for vite.config.ts, created src/vite-env.d.ts for import.meta.env, added index signature to ListParams interface, fixed noUncheckedIndexedAccess issues in AgentAvatar, removed unreachable comparison in useOffice, removed unused import in Memory.tsx."
+}

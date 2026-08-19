@@ -1,0 +1,28 @@
+{
+  "id": "FEAT-003",
+  "type": "fix",
+  "description": "Address code review feedback: fix chart data instability (replace Math.random with deterministic values), use Tailwind tokens instead of hardcoded hex, replace <a href> with React Router <Link>, add static data comment.",
+  "status": "in_progress",
+  "steps": [
+    "Step 1 - Replace Math.random() in tokenCostData with deterministic formula using sine waves",
+    "Step 2 - Replace bg-[#1a1b2e] with bg-dark-surface and hover:bg-[#1e2035] with hover:bg-dark-card in Card.tsx",
+    "Step 3 - Replace bg-[#0f1117] with bg-dark-bg in Layout.tsx",
+    "Step 4 - Replace bg-[#12131f] with bg-dark-sidebar in Sidebar.tsx",
+    "Step 5 - Replace bg-[#0f1117] and bg-[#1a1b2e] with bg-dark-bg and bg-dark-surface in Header.tsx",
+    "Step 6 - Replace bg-[#0f1117] and bg-[#1a1b2e] instances in Dashboard.tsx with Tailwind tokens",
+    "Step 7 - Replace all <a href> with <Link to> in Dashboard.tsx, import Link from react-router-dom",
+    "Step 8 - Add comment noting static demo data is intentional",
+    "Step 9 - Run npm run build and verify zero errors"
+  ],
+  "acceptance_criteria": [
+    "No Math.random() in tokenCostData - uses deterministic sine wave formula",
+    "No hardcoded bg-[#0f1117], bg-[#1a1b2e], bg-[#12131f], bg-[#1e2035] in components - uses Tailwind tokens",
+    "No <a href> for internal navigation - uses <Link to> from react-router-dom",
+    "npm run build succeeds with zero errors"
+  ],
+  "verification": [
+    "Run: cd /projects/sandbox/NVLabsCompany/dashboard && npm run build"
+  ],
+  "blocked_reason": null,
+  "findings": null
+}

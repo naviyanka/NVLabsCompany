@@ -1,0 +1,7 @@
+{
+  "task_id": "task-activity-page",
+  "task_description": "Replace the existing Activity.tsx page with a fully redesigned Activity page matching the provided design specification. The page features a header, 6 stat cards, tab navigation, filter bar, activity table with 8 rows, pagination, and a right sidebar with live feed, donut chart, leaderboard, and quick filters.",
+  "status": "in_progress",
+  "feature_order": ["FEAT-001"],
+  "blocked_reason": null
+}

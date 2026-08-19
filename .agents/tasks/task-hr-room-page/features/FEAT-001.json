@@ -1,0 +1,32 @@
+{
+  "id": "FEAT-001",
+  "type": "feat",
+  "description": "Implement the complete HR Room page with all sections: header with tabs, 7 stat cards, three-column main layout (agents table, agent detail panel, enhance/memory/training sidebar), and bottom three-column section (evaluations, skill distribution chart, alerts). Replace the placeholder HRRoom.tsx with the full implementation.",
+  "status": "completed",
+  "steps": [
+    "Replace the contents of src/pages/HRRoom.tsx with the full HR Room page implementation. The page is complex so it should be a single large file (similar pattern to Dashboard.tsx which is ~300 lines) or optionally split into sub-components within the same file.",
+    "Page header: Users icon from lucide-react + 'HR Room' title + subtitle 'Enhance, manage and empower your AI agents' + tab navigation bar (Overview active, Enhance Agents, Skills & Abilities, Memory Center, Performance, Templates, Evaluations, Settings)",
+    "Stat cards row: 7 cards using the Card component - Total Agents (32, +4 this week), Active (24, Running badge), Under Training (5), Inactive (3, up 10%), Avg. Performance (87%, +6%), Skills (128), Memory Items (245.6K, +18.4k). Include small sparkline SVGs for the first 4 cards.",
+    "Left column (~35%): All Agents table with search bar, filter dropdowns (All Roles, All Status, All Backends), green '+ Add Agent' button. Table shows 8 agents with columns: Agent (name+role), Role badge, Backend, Status badge, Performance %, Last Active, Actions. Pagination showing '1 to 8 of 32 agents' with page buttons.",
+    "Center column (~35%): Agent Detail Panel for 'Alpha' - header with name, Working status, title 'Backend Developer Agent', ID AGT-001, Created 12 May 2024, tags. Tab nav (Overview active, Skills, Memory, Tasks, Performance, Settings). Stats grid 2x3. About section with capabilities tags. Current Task with 75% progress. Performance Over Time line chart using recharts.",
+    "Right column (~30%): Three sections - (1) Enhance Agent with 4 action items (Improve Skills, Train Agent, Optimize Memory, Backend Settings), (2) Memory Snapshot with donut/pie chart (Conversations 45%, Knowledge 25%, Documents 15%, Code & Snippets 10%, Other 5%), (3) Training Queue with 3 items showing progress bars.",
+    "Bottom three-column section: (1) Recent Evaluations - 3 entries with agent name, evaluation title, score, timestamp. (2) Skill Distribution donut chart with '128 Total Skills' center text and 5 categories. (3) Alerts & Recommendations - 3 alert items with warning/info/success icons and timestamps.",
+    "All data must be static/hardcoded mock data (same pattern as Dashboard.tsx). Use recharts for the performance line chart, memory donut chart, and skill distribution donut chart. Use Card component from @/components/common/Card for all card sections. Use lucide-react for all icons. All styling with Tailwind using dark theme tokens.",
+    "Ensure TypeScript strict compliance: no unused variables, no unused parameters, handle noUncheckedIndexedAccess where applicable. The file must pass 'tsc -b' with zero errors."
+  ],
+  "acceptance_criteria": [
+    "Running 'npm run build' in the dashboard directory completes with zero TypeScript errors",
+    "HRRoom.tsx contains all sections described in the design: header with tabs, 7 stat cards, three-column main layout, and bottom three-column section",
+    "Uses recharts for charts (line chart, pie/donut charts)",
+    "Uses lucide-react icons throughout",
+    "Uses the Card component from @/components/common/Card",
+    "All text uses white for primary and gray-400 for secondary",
+    "Border colors use border-white/[0.08] or border-white/[0.05]",
+    "All data is static/hardcoded - no API calls, no randomness"
+  ],
+  "verification": [
+    "cd /projects/sandbox/NVLabsCompany/dashboard && npm run build"
+  ],
+  "blocked_reason": null,
+  "findings": "Build passes cleanly. Removed 3 unused lucide-react imports (ArrowUpRight, TrendingUp, Activity) that triggered TS6133 errors under strict mode. Final build produces zero errors. The page uses recharts for 3 charts (performance line chart, memory donut, skill distribution donut), Card component for all sections, and inline dark-theme table instead of the common Table component (which uses light colors)."
+}

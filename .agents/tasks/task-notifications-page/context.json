@@ -1,0 +1,21 @@
+{
+  "project_type": "React 19 SPA with Vite 6 and TypeScript 5.6",
+  "language": "TypeScript (TSX)",
+  "build_system": "Vite 6 with tsc type-checking",
+  "test_framework": "No test framework configured - validation is via TypeScript compilation",
+  "build_command": "cd /projects/sandbox/NVLabsCompany/dashboard && npm run build",
+  "test_command": "cd /projects/sandbox/NVLabsCompany/dashboard && npx tsc --noEmit",
+  "verification_instructions": "Run `npm run build` (tsc -b && vite build) to confirm zero TypeScript errors and successful bundle",
+  "snapshot_or_generated_files": null,
+  "setup_instructions": "cd /projects/sandbox/NVLabsCompany/dashboard && npm install",
+  "environment_constraints": "None significant - standard Node.js environment",
+  "contribution_requirements": "All pages use static mock data, no API calls, no randomness. Dark theme with dark-bg (#0f1117), dark-surface (#1a1b2e), dark-card (#1e2035) tokens.",
+  "key_patterns": "Pages are single-file components in src/pages/. They import Card from @/components/common/Card. They use lucide-react for icons, recharts for charts. Layout pattern: flex gap-4 with flex-1 main content and w-80 sidebar. Mock data is defined as const arrays at the top of the file. Table rows use Card padding='none' wrapper. Text sizing: text-2xl for page titles, text-sm for subtitles/descriptions, text-[10px] for metadata/timestamps. Color coding: green for success, red for errors/high, orange for medium/warnings, blue for info/active states.",
+  "relevant_files": [
+    "src/pages/Notifications.tsx (file to replace)",
+    "src/pages/Activity.tsx (pattern reference - similar layout with sidebar, table, donut chart)",
+    "src/components/common/Card.tsx (Card component API)",
+    "src/App.tsx (route definition)"
+  ],
+  "directory_structure": "dashboard/src/pages/ contains all page components; dashboard/src/components/common/ has shared components like Card"
+}

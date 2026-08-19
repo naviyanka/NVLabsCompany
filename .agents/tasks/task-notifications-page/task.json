@@ -1,0 +1,7 @@
+{
+  "task_id": "task-notifications-page",
+  "task_description": "Implement the Notifications page for the NVLabs dashboard, replacing the existing 5-line placeholder with a full-featured page including notification list, category tabs, filters, pagination, and a right sidebar with summary chart, priority breakdown, recent unread, preferences, and quiet hours sections.",
+  "status": "in_progress",
+  "feature_order": ["FEAT-001"],
+  "blocked_reason": null
+}

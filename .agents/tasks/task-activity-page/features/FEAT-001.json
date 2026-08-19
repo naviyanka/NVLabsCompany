@@ -1,0 +1,33 @@
+{
+  "id": "FEAT-001",
+  "type": "feat",
+  "description": "Completely replace the Activity.tsx page with a new design featuring: page header with icon/title/subtitle and date picker + export button; 6 stat cards row; tab navigation (6 tabs); filter bar with search and 4 dropdowns; activity table with 8 rows and pagination; right sidebar with Live Activity Feed, Activity by Type donut chart, Top Active Agents leaderboard, and Quick Filters grid. All with static mock data, dark theme, using Card component, lucide-react icons, and recharts PieChart.",
+  "status": "in_progress",
+  "steps": [
+    "Replace the entire content of /projects/sandbox/NVLabsCompany/dashboard/src/pages/Activity.tsx with a new implementation",
+    "Import Card from @/components/common/Card, icons from lucide-react (Activity, BarChart3, CheckCircle2, XCircle, Clock, Users, Zap, Search, Filter, ChevronDown, ChevronLeft, ChevronRight, MoreHorizontal, ExternalLink, Calendar), and PieChart/Pie/Cell/Tooltip/ResponsiveContainer from recharts",
+    "Define static mock data: statCards array (6 items with label, value, change, changeUp, icon, iconBg, iconColor), pageTabs array, filterDropdowns, activityRows array (8 entries with event name, type badge, description, metadata, agent/user, time, status), liveFeedItems (5 items), activityByTypeData for donut chart (6 categories with name, value, percentage, color), topAgents (5 items with name, count, color), quickFilters (6 items)",
+    "Build the main component with flex gap-4 layout: flex-1 main content area and w-80 right sidebar",
+    "Main content: page header (Activity icon + title + subtitle, right side date picker and Export button), stat cards in grid-cols-6, tab navigation with All Activity active, filter bar, activity table in Card padding=none with table headers EVENT/DETAILS/AGENT-USER/TIME/STATUS and 8 rows, pagination footer",
+    "Right sidebar: Live Activity Feed section with green Live indicator and 5 feed items with timestamps; Activity by Type donut chart using recharts PieChart with center total label (2,842 Total) and legend; Top Active Agents numbered leaderboard with colored progress bars; Quick Filters 2x3 grid of filter buttons with colored dots",
+    "Ensure all text uses white for primary, gray-400 for secondary. All badges use colored bg with matching text. Table rows have hover:bg-white/[0.02] and border-b border-white/[0.05]",
+    "Run npm run build to verify zero TypeScript errors"
+  ],
+  "acceptance_criteria": [
+    "npm run build (tsc -b && vite build) completes with zero errors",
+    "Activity.tsx exports a function Activity component",
+    "No API calls, useEffect, useState for fetching, or randomness - all data is static",
+    "Uses Card component from @/components/common/Card",
+    "Uses recharts PieChart for the Activity by Type donut chart",
+    "Uses lucide-react for all icons",
+    "Layout uses flex gap-4 with flex-1 main and w-80 sidebar",
+    "Contains all 8 activity rows with exact data specified",
+    "Contains all 6 stat cards with exact values specified",
+    "Contains Live Activity Feed, Activity by Type chart, Top Active Agents, and Quick Filters in sidebar"
+  ],
+  "verification": [
+    "cd /projects/sandbox/NVLabsCompany/dashboard && npm run build"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

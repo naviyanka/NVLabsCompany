@@ -1,0 +1,38 @@
+{
+  "id": "FEAT-001",
+  "type": "feat",
+  "description": "Completely replace AgentDetailPage.tsx with a comprehensive agent detail page featuring breadcrumb navigation, agent profile header with avatar/status/stats, tab navigation, and a three-column layout with stat cards, current workload, skills table, performance chart (recharts), recent activity, agent information sidebar, resource usage, capabilities tags, and quick actions.",
+  "status": "completed",
+  "steps": [
+    "Replace the entire content of src/pages/AgentDetailPage.tsx with the new implementation.",
+    "Import Card from @/components/common/Card, icons from lucide-react (CheckCircle2, BarChart3, Clock, Layers, Signal, ArrowUpRight, ChevronDown, GitCommit, Brain, Play, CheckCircle, MessageSquare, Rocket, AlertTriangle, Edit, Plus, FileText, Eye, Power, etc.), useParams from react-router-dom, and LineChart/Line/XAxis/YAxis/CartesianGrid/Tooltip/ResponsiveContainer from recharts.",
+    "Define static mock data at module top: performance chart data (7 days May 10-16 with tasks completed 60-95 range and success rate 85-100 range), skills data (Python 95%, FastAPI 92%, PostgreSQL 88%, Docker 85%, Redis 80% with colors and experience/last used), activity items (6 items with timestamps), task queue (3 items with priority), resource usage (4 items with percentages), capabilities tags array, agent info metadata.",
+    "Implement the page layout: breadcrumb at top ('Agents > Alpha'), large profile header with gradient avatar circle, green status dot, name 'Alpha', 'Backend Developer Agent' badge, description text, stats row (Role, Primary Model, Version, Joined, Reliability), 'Talk to Agent' button (teal outlined) and 'Actions' dropdown button.",
+    "Implement tab navigation bar with tabs: Overview, Skills, Memory, Tasks, Performance, Settings, Logs, Activity. 'Overview' is the active tab with a teal bottom border indicator.",
+    "Implement three-column layout using Tailwind grid (lg:grid-cols-12): Left section (~5 cols) with stat cards (5 in a grid), Current Workload section with active task progress bar at 75% and task queue, Skills & Proficiency table. Center section (~4 cols) with Performance Overview line chart using recharts (two lines: green for tasks, purple for success rate) and stats below (Tasks/Day 28.4, Errors/Day 0.8, Rework Rate 1.2%), Recent Activity list. Right sidebar (~3 cols) with Agent Information grid, Resource Usage bars, Agent Capabilities tag cloud, Quick Actions buttons.",
+    "Ensure all text uses appropriate colors: white for primary headings/values, gray-400 for labels/secondary text, green-400 for positive changes, red-400 for negative/danger elements.",
+    "Use the Card component for all card containers. Use appropriate padding prop values.",
+    "Ensure the component exports as a named export 'AgentDetailPage' and uses useParams to get the :id param (even if not used for data, to maintain the route contract)."
+  ],
+  "acceptance_criteria": [
+    "Running 'bun run build' in /projects/sandbox/NVLabsCompany/dashboard/ succeeds with zero TypeScript errors",
+    "The file src/pages/AgentDetailPage.tsx contains a complete implementation with all sections described in the design",
+    "Uses static mock data only (no API calls, no useAgent hook, no randomness)",
+    "Uses Card component from @/components/common/Card",
+    "Uses recharts for the Performance Overview line chart with two lines (tasks completed and success rate)",
+    "Uses lucide-react for all icons",
+    "All 8 tabs are rendered in the tab navigation",
+    "Stats cards show the 5 metrics: Tasks Completed (1248), Success Rate (98.6%), Avg Response Time (2.4s), Total Tokens (1.24M), Uptime (99.8%)",
+    "Current Workload shows active task with 75% progress bar and 3 queued tasks with priority indicators",
+    "Skills table has 5 rows with proficiency bars, experience, and last used columns",
+    "Agent Information sidebar has all metadata fields listed in the design",
+    "Resource Usage shows 4 items with progress bars",
+    "Capabilities section shows tag cloud with '8 more' indicator",
+    "Quick Actions section has 4 buttons in 2x2 grid plus a red 'Deactivate Agent' button"
+  ],
+  "verification": [
+    "Run 'bun run build' in /projects/sandbox/NVLabsCompany/dashboard/ and confirm it exits with code 0 and no TypeScript errors"
+  ],
+  "blocked_reason": null,
+  "findings": "Build passes cleanly. Removed unused AlertTriangle import that caused noUnusedLocals error. The changeUp parameter in MetricCard is not flagged by strict mode because it is part of the destructured props type signature. All acceptance criteria met."
+}
