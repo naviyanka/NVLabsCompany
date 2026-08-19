@@ -17,7 +17,7 @@ import tempfile
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
-from cryptography.fernet import Fernet
+from cryptography.fernet import Fernet, InvalidToken
 
 logger = logging.getLogger(__name__)
 
@@ -83,6 +83,9 @@ class FernetSecretBackend:
     operations return failure when no encryption key is available.
     """
 
+    # Salt is intentionally shared across deployments. It prevents rainbow-table
+    # attacks on the PBKDF2 output; deployment isolation comes from the per-deployment
+    # secret_key parameter, which is unique to each environment.
     _SALT = b"nexus-integration-secrets"
     _ITERATIONS = 480_000
 
@@ -222,6 +225,9 @@ class FernetSecretBackend:
 
         Returns:
             Decrypted plaintext, or None if not found or unavailable.
+            Returns None on decryption failure (e.g., ciphertext encrypted
+            with a different key or corrupted data) to maintain fail-closed
+            semantics.
         """
         if not self._available:
             return None
@@ -229,7 +235,14 @@ class FernetSecretBackend:
         ciphertext = self._store.get(ref)
         if ciphertext is None:
             return None
-        return self._fernet.decrypt(ciphertext).decode("utf-8")
+        try:
+            return self._fernet.decrypt(ciphertext).decode("utf-8")
+        except InvalidToken:
+            logger.warning(
+                "Failed to decrypt secret '%s': invalid token (wrong key or corrupt data).",
+                ref,
+            )
+            return None
 
     def has(self, ref: str) -> bool:
         """Check whether a secret exists for the given reference.

@@ -224,7 +224,7 @@ class TestStdioMCPTransportListTools:
     ):
         """list_tools() raises RuntimeError on JSON-RPC error."""
         init_response = _make_jsonrpc_response({"serverInfo": {}})
-        error_response = _make_jsonrpc_error(-32601, "Method not found")
+        error_response = _make_jsonrpc_error(-32601, "Method not found", request_id=2)
         process = _mock_process(
             stdout_lines=[init_response, error_response]
         )
@@ -288,7 +288,7 @@ class TestStdioMCPTransportCallTool:
     ):
         """call_tool() returns MCPResult with is_error=True on JSON-RPC error."""
         init_response = _make_jsonrpc_response({"serverInfo": {}})
-        error_response = _make_jsonrpc_error(-32000, "Tool execution failed")
+        error_response = _make_jsonrpc_error(-32000, "Tool execution failed", request_id=2)
         process = _mock_process(
             stdout_lines=[init_response, error_response]
         )
@@ -564,5 +564,81 @@ class TestStdioMCPTransportRequestIds:
         calls = process.stdin.write.call_args_list
         ids = [json.loads(c[0][0].decode())["id"] for c in calls]
         assert ids == [1, 2, 3]
+
+        await transport.disconnect()
+
+
+class TestStdioMCPTransportNotificationSkipping:
+    """Test that notifications are skipped when reading responses."""
+
+    @patch("nexus.tools.mcp_stdio.asyncio.create_subprocess_exec")
+    async def test_skips_notifications_before_response(
+        self, mock_create_subprocess
+    ):
+        """Notifications (messages without 'id') are skipped until matching response."""
+        init_response = _make_jsonrpc_response({"serverInfo": {}})
+        # A notification has no "id" field
+        notification = (
+            json.dumps({"jsonrpc": "2.0", "method": "notifications/progress", "params": {}})
+            + "\n"
+        ).encode()
+        tools_response = _make_jsonrpc_response({"tools": []}, request_id=2)
+        process = _mock_process(
+            stdout_lines=[init_response, notification, tools_response]
+        )
+        mock_create_subprocess.return_value = process
+
+        transport = StdioMCPTransport()
+        await transport.connect("mcp-server")
+        tools = await transport.list_tools()
+
+        assert tools == []
+        await transport.disconnect()
+
+    @patch("nexus.tools.mcp_stdio.asyncio.create_subprocess_exec")
+    async def test_skips_multiple_notifications(self, mock_create_subprocess):
+        """Multiple notifications are skipped before the response is found."""
+        init_response = _make_jsonrpc_response({"serverInfo": {}})
+        notif1 = (
+            json.dumps({"jsonrpc": "2.0", "method": "notifications/progress", "params": {"progress": 50}})
+            + "\n"
+        ).encode()
+        notif2 = (
+            json.dumps({"jsonrpc": "2.0", "method": "notifications/log", "params": {"message": "working"}})
+            + "\n"
+        ).encode()
+        call_response = _make_jsonrpc_response(
+            {"content": [{"type": "text", "text": "done"}]},
+            request_id=2,
+        )
+        process = _mock_process(
+            stdout_lines=[init_response, notif1, notif2, call_response]
+        )
+        mock_create_subprocess.return_value = process
+
+        transport = StdioMCPTransport()
+        await transport.connect("mcp-server")
+        result = await transport.call_tool("long_task", {"input": "data"})
+
+        assert result.content == "done"
+        assert result.is_error is False
+        await transport.disconnect()
+
+    @patch("nexus.tools.mcp_stdio.asyncio.create_subprocess_exec")
+    async def test_raises_on_response_id_mismatch(self, mock_create_subprocess):
+        """RuntimeError is raised when response ID does not match request ID."""
+        init_response = _make_jsonrpc_response({"serverInfo": {}})
+        # Response with wrong ID (99 instead of expected 2)
+        wrong_id_response = _make_jsonrpc_response({"tools": []}, request_id=99)
+        process = _mock_process(
+            stdout_lines=[init_response, wrong_id_response]
+        )
+        mock_create_subprocess.return_value = process
+
+        transport = StdioMCPTransport()
+        await transport.connect("mcp-server")
+
+        with pytest.raises(RuntimeError, match="MCP response ID mismatch"):
+            await transport.list_tools()
 
         await transport.disconnect()

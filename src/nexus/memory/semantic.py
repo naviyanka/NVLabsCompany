@@ -318,6 +318,10 @@ class SemanticMemoryManager:
 
         for idx, chunk in enumerate(chunks):
             key = f"{agent_id}:{idx}"
+            # Using _compute_embedding directly because it is a deterministic pure
+            # function with no I/O, and the public embed() method is async. Making
+            # the mine/search paths async would break the existing synchronous API
+            # contract used by background workers.
             embedding = self._embedding_provider._compute_embedding(chunk)
             embeddings[key] = {
                 "text": chunk,
@@ -423,6 +427,10 @@ class SemanticMemoryManager:
             return {"ok": True, "output": "", "fallback": True}
 
         # Compute query embedding
+        # Using _compute_embedding directly because it is a deterministic pure
+        # function with no I/O, and the public embed() method is async. Making
+        # the mine/search paths async would break the existing synchronous API
+        # contract used by background workers.
         query_embedding = self._embedding_provider._compute_embedding(query)
 
         # Score all entries
@@ -471,6 +479,12 @@ class SemanticMemoryManager:
         Serializes mining: if already mining, returns immediately.
         Iterates agent subdirectories and mines each that has an updated
         memory.md file.
+
+        Note: The ``_mining`` flag provides re-entry protection for
+        single-threaded synchronous callers only. It is not safe for
+        concurrent async or multi-threaded use. This is acceptable because
+        mine_agent uses subprocess.run (blocking) and was designed for
+        synchronous background workers.
 
         Args:
             agents_dir: Path to the directory containing agent subdirectories.

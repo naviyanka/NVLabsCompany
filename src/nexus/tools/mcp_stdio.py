@@ -229,8 +229,10 @@ class StdioMCPTransport:
     ) -> dict[str, Any]:
         """Send a JSON-RPC request to the subprocess and read the response.
 
-        Writes a newline-terminated JSON message to stdin and reads a
-        newline-terminated JSON response from stdout.
+        Writes a newline-terminated JSON message to stdin and reads
+        newline-terminated JSON responses from stdout until a response
+        with a matching ID is received. Notifications (messages without
+        an "id" field) are skipped automatically.
 
         Args:
             method: The JSON-RPC method name.
@@ -240,7 +242,8 @@ class StdioMCPTransport:
             The parsed JSON-RPC response dictionary.
 
         Raises:
-            RuntimeError: If the process is not available or has exited.
+            RuntimeError: If the process is not available, has exited,
+                or returns a response with a mismatched ID.
             asyncio.TimeoutError: If reading the response times out.
         """
         if self._process is None or self._process.stdin is None:
@@ -252,9 +255,10 @@ class StdioMCPTransport:
             )
 
         self._request_id += 1
+        request_id = self._request_id
         request = {
             "jsonrpc": "2.0",
-            "id": self._request_id,
+            "id": request_id,
             "method": method,
             "params": params,
         }
@@ -264,21 +268,35 @@ class StdioMCPTransport:
         self._process.stdin.write(message.encode())
         await self._process.stdin.drain()
 
-        # Read response line with timeout
+        # Read response lines, skipping notifications (messages without "id")
         if self._process.stdout is None:
             raise RuntimeError("MCP server stdout is not available")
 
-        raw_line = await asyncio.wait_for(
-            self._process.stdout.readline(),
-            timeout=self._timeout_seconds,
-        )
-
-        if not raw_line:
-            raise RuntimeError(
-                "MCP server closed stdout (process may have exited)"
+        while True:
+            raw_line = await asyncio.wait_for(
+                self._process.stdout.readline(),
+                timeout=self._timeout_seconds,
             )
 
-        return json.loads(raw_line.decode().strip())
+            if not raw_line:
+                raise RuntimeError(
+                    "MCP server closed stdout (process may have exited)"
+                )
+
+            parsed = json.loads(raw_line.decode().strip())
+
+            # Skip notifications (JSON-RPC messages without an "id" field)
+            if "id" not in parsed:
+                continue
+
+            # Validate that the response ID matches the request ID
+            if parsed["id"] != request_id:
+                raise RuntimeError(
+                    f"MCP response ID mismatch: expected {request_id}, "
+                    f"got {parsed['id']}"
+                )
+
+            return parsed
 
     async def _read_stderr_task(self) -> None:
         """Background task that reads stderr and logs output.

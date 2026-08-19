@@ -163,11 +163,8 @@ class TestKeyRotation:
         old_backend = FernetSecretBackend(secret_key, persist_path=persist_file)
         # The old key will load the ciphertext but fail to decrypt
         assert old_backend.has("key1")
-        # decrypt should raise or return garbled data - Fernet raises InvalidToken
-        from cryptography.fernet import InvalidToken
-
-        with pytest.raises(InvalidToken):
-            old_backend.decrypt("key1")
+        # decrypt returns None on InvalidToken (fail-closed semantics)
+        assert old_backend.decrypt("key1") is None
 
     def test_rotate_key_returns_correct_count(
         self, secret_key: str, persist_file: Path
