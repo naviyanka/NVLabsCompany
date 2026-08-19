@@ -276,7 +276,7 @@ export function Settings() {
             </div>
 
             {/* Stat Cards */}
-            <div className="grid grid-cols-4 gap-4 mb-6">
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
               {storageStats.map((stat) => (
                 <div
                   key={stat.label}
@@ -374,7 +374,7 @@ export function Settings() {
           </Card>
 
           {/* Quick Actions */}
-          <div className="grid grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
             {quickActions.map((action) => {
               const Icon = action.icon;
               return (
