@@ -2,7 +2,7 @@
   "id": "FEAT-002",
   "type": "feat",
   "description": "Webhook Persistent Delivery Queue - Create WebhookDeliveryQueue class with file-backed persistence, retry with exponential backoff, dead letter storage, and atomic file writes. Integrate with existing WebhookServer for outbound event dispatch.",
-  "status": "pending",
+  "status": "in_progress",
   "steps": [
     "Create src/nexus/communication/webhook_queue.py with WebhookDeliveryQueue class containing: (a) dataclass WebhookDelivery with fields: id (str/uuid), url (str), payload (dict), headers (dict), created_at (datetime), retry_count (int, default 0), next_retry_at (datetime | None), status ('pending'|'in_flight'|'dead'), last_error (str | None), (b) __init__(self, persist_path: Path, max_retries: int = 5, dead_letter_cap: int = 100)",
     "Implement file-backed persistence: _load() on init reads JSON file into _pending and _dead_letters lists; _save() writes both lists atomically using tempfile + os.replace",
