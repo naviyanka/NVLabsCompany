@@ -18,13 +18,12 @@ import {
   ExternalLink,
   ChevronRight,
   ChevronDown,
-  Search,
-  RotateCcw,
-  Pencil,
-  CheckCircle,
-  Target,
-  RefreshCw,
-  BookOpen,
+  Save,
+  Copy,
+  Mail,
+  MessageSquare,
+  Globe,
+  Check,
 } from 'lucide-react';
 
 // ─── Static Mock Data ──────────────────────────────────────────────────────────
@@ -38,8 +37,8 @@ const navItems = [
   { label: 'Teams & Users', icon: Users, active: false },
   { label: 'Roles & Permissions', icon: UserCog, active: false },
   { label: 'Billing & Subscription', icon: CreditCard, active: false },
-  { label: 'System Configuration', icon: SettingsIcon, active: true },
-  { label: 'Notifications', icon: Bell, active: false },
+  { label: 'System Configuration', icon: SettingsIcon, active: false },
+  { label: 'Notifications', icon: Bell, active: true },
   { label: 'Data & Storage', icon: Database, active: false },
   { label: 'Backup & Restore', icon: ArchiveRestore, active: false },
   { label: 'Audit Logs', icon: FileText, active: false },
@@ -54,28 +53,110 @@ const footerLinks = [
   { label: 'Terms of Service' },
 ];
 
-const tabs = [
-  { label: 'General Settings', active: true },
-  { label: 'Security & Access', active: false },
-  { label: 'Performance', active: false },
-  { label: 'Maintenance', active: false },
-  { label: 'Integrations', active: false },
-  { label: 'Advanced', active: false },
+const notificationTabs = [
+  { label: 'Notification Preferences', active: true },
+  { label: 'Channels', active: false },
+  { label: 'Quiet Hours', active: false },
+  { label: 'Digest Settings', active: false },
 ];
 
-const healthItems = [
-  { label: 'System Services', status: 'Healthy' },
-  { label: 'Security Configuration', status: 'Healthy' },
-  { label: 'Database Connections', status: 'Healthy' },
-  { label: 'Storage Systems', status: 'Healthy' },
-  { label: 'Backup Configuration', status: 'Healthy' },
+const notificationCategories = [
+  {
+    name: 'System Alerts',
+    color: 'bg-red-500',
+    description: 'Critical system issues, downtime, and performance alerts.',
+    inApp: true,
+    email: true,
+    push: true,
+    webhook: true,
+  },
+  {
+    name: 'Agent & Task Updates',
+    color: 'bg-green-500',
+    description: 'Agent status changes, task completions, and failures.',
+    inApp: true,
+    email: false,
+    push: true,
+    webhook: false,
+  },
+  {
+    name: 'Pipeline Events',
+    color: 'bg-blue-500',
+    description: 'Pipeline runs, deployments, and stage updates.',
+    inApp: false,
+    email: true,
+    push: false,
+    webhook: true,
+  },
+  {
+    name: 'Security Notifications',
+    color: 'bg-purple-500',
+    description: 'Login alerts, security issues, and access changes.',
+    inApp: true,
+    email: true,
+    push: true,
+    webhook: true,
+  },
+  {
+    name: 'Mentions & Comments',
+    color: 'bg-orange-500',
+    description: 'You were mentioned or someone commented.',
+    inApp: true,
+    email: false,
+    push: true,
+    webhook: false,
+  },
+  {
+    name: 'Reports & Exports',
+    color: 'bg-teal-500',
+    description: 'Report generation, exports, and downloads.',
+    inApp: false,
+    email: true,
+    push: false,
+    webhook: false,
+  },
+  {
+    name: 'Billing & Subscription',
+    color: 'bg-pink-500',
+    description: 'Invoices, payment confirmations, and subscription updates.',
+    inApp: false,
+    email: true,
+    push: false,
+    webhook: false,
+  },
+];
+
+const channels = [
+  {
+    icon: Mail,
+    label: 'Email',
+    detail: 'navi.yanka@nvlabs.dev',
+    status: 'Verified',
+  },
+  {
+    icon: Bell,
+    label: 'Push Notifications',
+    detail: 'iPhone 14 Pro',
+    status: 'Connected',
+  },
+  {
+    icon: MessageSquare,
+    label: 'Slack',
+    detail: '#alerts',
+    status: 'Connected',
+  },
+  {
+    icon: Globe,
+    label: 'Webhook',
+    detail: 'https://hooks.nvlabs.dev/notify',
+    status: 'Active',
+  },
 ];
 
 const helpLinks = [
-  { title: 'System Configuration Guide', description: 'Learn how to configure the platform.' },
-  { title: 'Best Practices', description: 'Follow recommended configuration best practices.' },
-  { title: 'Admin Support', description: 'Get help from our support team.' },
-  { title: 'Community Forum', description: 'Join discussions with other admins.' },
+  { title: 'Notification Guide', description: 'Learn how notifications work' },
+  { title: 'Troubleshooting', description: 'Fix notification issues' },
+  { title: 'Contact Support', description: 'Get help from our team' },
 ];
 
 // ─── Toggle Switch Component ───────────────────────────────────────────────────
@@ -92,69 +173,6 @@ function ToggleSwitch({ enabled }: { enabled: boolean }) {
           enabled ? 'translate-x-6' : 'translate-x-1'
         }`}
       />
-    </div>
-  );
-}
-
-// ─── Config Item Component ─────────────────────────────────────────────────────
-
-function ConfigItem({
-  title,
-  description,
-  children,
-}: {
-  title: string;
-  description: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="flex items-center justify-between py-4 border-b border-white/[0.08] last:border-b-0">
-      <div className="flex-1 min-w-0 pr-4">
-        <p className="text-sm font-medium text-white">{title}</p>
-        <p className="text-xs text-gray-400 mt-0.5">{description}</p>
-      </div>
-      <div className="flex-shrink-0">{children}</div>
-    </div>
-  );
-}
-
-// ─── Input Components ──────────────────────────────────────────────────────────
-
-function TextInput({ value, icon }: { value: string; icon?: React.ReactNode }) {
-  return (
-    <div className="relative flex items-center">
-      <input
-        type="text"
-        readOnly
-        value={value}
-        className="w-64 px-3 py-2 text-sm text-gray-300 bg-white/[0.04] border border-white/[0.08] rounded-lg pr-9"
-      />
-      {icon && (
-        <span className="absolute right-3 text-gray-400">{icon}</span>
-      )}
-    </div>
-  );
-}
-
-function SelectInput({ value }: { value: string }) {
-  return (
-    <div className="relative flex items-center">
-      <select
-        className="w-64 px-3 py-2 text-sm text-gray-300 bg-white/[0.04] border border-white/[0.08] rounded-lg appearance-none pr-9"
-        defaultValue={value}
-      >
-        <option>{value}</option>
-      </select>
-      <ChevronDown size={14} className="absolute right-3 text-gray-400 pointer-events-none" />
-    </div>
-  );
-}
-
-function ChevronInput({ value }: { value: string }) {
-  return (
-    <div className="flex items-center gap-2 w-64 px-3 py-2 text-sm text-gray-300 bg-white/[0.04] border border-white/[0.08] rounded-lg cursor-pointer">
-      <span className="flex-1 truncate">{value}</span>
-      <ChevronRight size={14} className="text-gray-400 flex-shrink-0" />
     </div>
   );
 }
@@ -206,16 +224,22 @@ export function Settings() {
         {/* Center Content */}
         <div className="flex-1 min-w-0 space-y-6">
           {/* Section Header */}
-          <div>
-            <h2 className="text-lg font-semibold text-white">System Configuration</h2>
-            <p className="text-sm text-gray-400 mt-0.5">
-              Configure global system settings and platform behavior.
-            </p>
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-lg font-semibold text-white">Notifications</h2>
+              <p className="text-sm text-gray-400 mt-0.5">
+                Configure how and when you want to be notified.
+              </p>
+            </div>
+            <button className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-green-600 hover:bg-green-700 rounded-lg transition-colors">
+              <Save size={14} />
+              Save Changes
+            </button>
           </div>
 
           {/* Tab Navigation */}
           <div className="flex items-center gap-1 border-b border-white/[0.08]">
-            {tabs.map((tab) => (
+            {notificationTabs.map((tab) => (
               <button
                 key={tab.label}
                 className={`px-4 py-2.5 text-sm font-medium transition-colors border-b-2 ${
@@ -229,129 +253,149 @@ export function Settings() {
             ))}
           </div>
 
-          {/* Search/Actions Bar */}
-          <div className="flex items-center gap-3">
-            <div className="relative flex-1">
-              <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-              <input
-                type="text"
-                placeholder="Search configuration..."
-                className="w-full pl-9 pr-4 py-2 text-sm text-gray-300 bg-white/[0.04] border border-white/[0.08] rounded-lg placeholder-gray-500"
-                readOnly
-              />
-            </div>
-            <button className="flex items-center gap-2 px-4 py-2 text-sm text-gray-300 border border-white/[0.12] rounded-lg hover:bg-white/[0.04] transition-colors">
-              <RotateCcw size={14} />
-              Reset to Defaults
-            </button>
-            <button className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-green-600 hover:bg-green-700 rounded-lg transition-colors">
-              Save Changes
-            </button>
-          </div>
-
-          {/* Section 1: Platform Settings */}
+          {/* Enable Notifications Toggle */}
           <Card padding="lg">
-            <h3 className="text-sm font-semibold text-white mb-1">Platform Settings</h3>
-            <div className="divide-y divide-white/[0.08]">
-              <ConfigItem
-                title="System Name"
-                description="Name of your NVLABS Mission Control instance."
-              >
-                <TextInput value="NVLABS Mission Control" icon={<Pencil size={14} />} />
-              </ConfigItem>
-              <ConfigItem
-                title="Default Time Zone"
-                description="Set the default time zone for the entire platform."
-              >
-                <SelectInput value="(UTC +05:30) Asia/Kolkata" />
-              </ConfigItem>
-              <ConfigItem
-                title="Date & Time Format"
-                description="Choose the default format for date and time."
-              >
-                <SelectInput value="May 19, 2024 02:45 PM (UTC+05:30)" />
-              </ConfigItem>
-              <ConfigItem
-                title="Language"
-                description="Set the default language for the platform."
-              >
-                <SelectInput value="English (US)" />
-              </ConfigItem>
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-white">Enable Notifications</p>
+                <p className="text-xs text-gray-400 mt-0.5">
+                  Turn on or off all notifications for your account.
+                </p>
+              </div>
+              <ToggleSwitch enabled={true} />
             </div>
           </Card>
 
-          {/* Section 2: Session & Access */}
+          {/* Notification Categories */}
           <Card padding="lg">
-            <h3 className="text-sm font-semibold text-white mb-1">Session &amp; Access</h3>
+            <div className="mb-4">
+              <h3 className="text-sm font-semibold text-white">Notification Categories</h3>
+              <p className="text-xs text-gray-400 mt-0.5">
+                Choose which notifications you want to receive.
+              </p>
+            </div>
+
+            {/* Table Header */}
+            <div className="grid grid-cols-[1fr_auto] items-center border-b border-white/[0.08] pb-2 mb-2">
+              <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)] gap-4">
+                <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">Category</span>
+                <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">Description</span>
+              </div>
+              <div className="flex items-center gap-6 pl-4">
+                <span className="text-xs font-medium text-gray-500 uppercase tracking-wide w-12 text-center">In-App</span>
+                <span className="text-xs font-medium text-gray-500 uppercase tracking-wide w-12 text-center">Email</span>
+                <span className="text-xs font-medium text-gray-500 uppercase tracking-wide w-12 text-center">Push</span>
+                <span className="text-xs font-medium text-gray-500 uppercase tracking-wide w-14 text-center">Webhook</span>
+                <span className="w-5" />
+              </div>
+            </div>
+
+            {/* Table Rows */}
             <div className="divide-y divide-white/[0.08]">
-              <ConfigItem
-                title="Session Timeout"
-                description="Automatically log out inactive users after."
-              >
-                <SelectInput value="30 minutes" />
-              </ConfigItem>
-              <ConfigItem
-                title="Require Multi-Factor Authentication (MFA)"
-                description="Require MFA for all users to access the platform."
-              >
+              {notificationCategories.map((category) => (
+                <div
+                  key={category.name}
+                  className="grid grid-cols-[1fr_auto] items-center py-3"
+                >
+                  <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)] gap-4 items-center">
+                    <div className="flex items-center gap-2">
+                      <span className={`w-2 h-2 rounded-full ${category.color} flex-shrink-0`} />
+                      <span className="text-sm font-medium text-white truncate">{category.name}</span>
+                    </div>
+                    <span className="text-xs text-gray-400 truncate">{category.description}</span>
+                  </div>
+                  <div className="flex items-center gap-6 pl-4">
+                    <div className="w-12 flex justify-center">
+                      <ToggleSwitch enabled={category.inApp} />
+                    </div>
+                    <div className="w-12 flex justify-center">
+                      <ToggleSwitch enabled={category.email} />
+                    </div>
+                    <div className="w-12 flex justify-center">
+                      <ToggleSwitch enabled={category.push} />
+                    </div>
+                    <div className="w-14 flex justify-center">
+                      <ToggleSwitch enabled={category.webhook} />
+                    </div>
+                    <ChevronDown size={14} className="text-gray-400 w-5" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </Card>
+
+          {/* Advanced Settings */}
+          <Card padding="lg">
+            <h3 className="text-sm font-semibold text-white mb-4">Advanced Settings</h3>
+            <div className="divide-y divide-white/[0.08]">
+              {/* Do not disturb */}
+              <div className="flex items-center justify-between py-4 first:pt-0">
+                <div className="flex-1 min-w-0 pr-4">
+                  <p className="text-sm font-medium text-white">Do not disturb</p>
+                  <p className="text-xs text-gray-400 mt-0.5">
+                    Temporarily silence non-critical notifications.
+                  </p>
+                </div>
+                <div className="relative flex items-center">
+                  <select
+                    className="w-48 px-3 py-2 text-sm text-gray-300 bg-white/[0.04] border border-white/[0.08] rounded-lg appearance-none pr-9"
+                    defaultValue="Turn off in 1 hour"
+                  >
+                    <option>Turn off in 1 hour</option>
+                  </select>
+                  <ChevronDown size={14} className="absolute right-3 text-gray-400 pointer-events-none" />
+                </div>
+              </div>
+
+              {/* Notification sound */}
+              <div className="flex items-center justify-between py-4">
+                <div className="flex-1 min-w-0 pr-4">
+                  <p className="text-sm font-medium text-white">Notification sound</p>
+                  <p className="text-xs text-gray-400 mt-0.5">
+                    Play a sound for in-app notifications.
+                  </p>
+                </div>
+                <div className="flex items-center gap-3">
+                  <div className="relative flex items-center">
+                    <select
+                      className="w-32 px-3 py-2 text-sm text-gray-300 bg-white/[0.04] border border-white/[0.08] rounded-lg appearance-none pr-9"
+                      defaultValue="Default"
+                    >
+                      <option>Default</option>
+                    </select>
+                    <ChevronDown size={14} className="absolute right-3 text-gray-400 pointer-events-none" />
+                  </div>
+                  <ToggleSwitch enabled={true} />
+                </div>
+              </div>
+
+              {/* Browser notifications */}
+              <div className="flex items-center justify-between py-4">
+                <div className="flex-1 min-w-0 pr-4">
+                  <p className="text-sm font-medium text-white">Browser notifications</p>
+                  <p className="text-xs text-gray-400 mt-0.5">
+                    Show notifications on your desktop.
+                  </p>
+                </div>
                 <ToggleSwitch enabled={true} />
-              </ConfigItem>
-              <ConfigItem
-                title="Allowed IP Ranges"
-                description="Restrict access to the platform by IP range."
-              >
-                <ChevronInput value="192.168.0.0/16, 10.0.0.0/8" />
-              </ConfigItem>
-            </div>
-          </Card>
+              </div>
 
-          {/* Section 3: Data & Operations */}
-          <Card padding="lg">
-            <h3 className="text-sm font-semibold text-white mb-1">Data &amp; Operations</h3>
-            <div className="divide-y divide-white/[0.08]">
-              <ConfigItem
-                title="Default Data Retention"
-                description="Automatically delete data older than the selected period."
-              >
-                <SelectInput value="90 days" />
-              </ConfigItem>
-              <ConfigItem
-                title="Enable Data Anonymization"
-                description="Anonymize sensitive data in logs and analytics."
-              >
-                <ToggleSwitch enabled={true} />
-              </ConfigItem>
-              <ConfigItem
-                title="Audit Log Retention"
-                description="Retain audit logs for the selected period."
-              >
-                <SelectInput value="1 year" />
-              </ConfigItem>
-            </div>
-          </Card>
-
-          {/* Section 4: System Behavior */}
-          <Card padding="lg">
-            <h3 className="text-sm font-semibold text-white mb-1">System Behavior</h3>
-            <div className="divide-y divide-white/[0.08]">
-              <ConfigItem
-                title="Maintenance Mode"
-                description="Put the platform in maintenance mode."
-              >
-                <ToggleSwitch enabled={false} />
-              </ConfigItem>
-              <ConfigItem
-                title="Allow User Self-Registration"
-                description="Allow new users to register without admin invite."
-              >
-                <ToggleSwitch enabled={false} />
-              </ConfigItem>
-              <ConfigItem
-                title="Default Landing Page"
-                description="Select the default page after user login."
-              >
-                <SelectInput value="Dashboard" />
-              </ConfigItem>
+              {/* Webhook URL */}
+              <div className="flex items-center justify-between py-4 last:pb-0">
+                <div className="flex-1 min-w-0 pr-4">
+                  <p className="text-sm font-medium text-white">Webhook URL</p>
+                  <p className="text-xs text-gray-400 mt-0.5">
+                    Send notifications to your custom webhook endpoint.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="flex items-center w-64 px-3 py-2 text-sm text-gray-300 bg-white/[0.04] border border-white/[0.08] rounded-lg">
+                    <span className="flex-1 truncate">https://hooks.nvlabs.dev/notify</span>
+                    <Copy size={14} className="text-gray-400 flex-shrink-0 ml-2" />
+                  </div>
+                  <ChevronRight size={14} className="text-gray-400" />
+                </div>
+              </div>
             </div>
           </Card>
 
@@ -379,75 +423,70 @@ export function Settings() {
 
         {/* Right Sidebar */}
         <div className="w-[25%] flex-shrink-0 space-y-6">
-          {/* About System Configuration */}
+          {/* Notification Preview */}
           <Card padding="lg">
-            <h3 className="text-sm font-semibold text-white mb-2">About System Configuration</h3>
+            <h3 className="text-sm font-semibold text-white mb-2">Notification Preview</h3>
             <p className="text-xs text-gray-400 mb-4">
-              Configure global settings that control how NVLABS Mission Control operates. Changes may affect all users and system behavior.
+              This is how your notification will look.
             </p>
-            <div className="space-y-4">
-              <div className="flex items-start gap-3">
-                <div className="p-1.5 rounded-md bg-purple-500/10">
-                  <Target size={14} className="text-purple-400" />
+            <div className="rounded-lg bg-dark-bg border border-white/[0.08] p-4">
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-primary-500" />
+                  <span className="text-xs font-medium text-white">NVLABS Mission Control</span>
                 </div>
-                <div>
-                  <p className="text-xs font-medium text-white">Global Impact</p>
-                  <p className="text-xs text-gray-400 mt-0.5">
-                    These settings apply across the entire platform and all environments.
-                  </p>
-                </div>
+                <span className="text-xs text-gray-500">now</span>
               </div>
-              <div className="flex items-start gap-3">
-                <div className="p-1.5 rounded-md bg-blue-500/10">
-                  <RefreshCw size={14} className="text-blue-400" />
-                </div>
-                <div>
-                  <p className="text-xs font-medium text-white">Change Control</p>
-                  <p className="text-xs text-gray-400 mt-0.5">
-                    Some settings may require admin approval and system restart.
-                  </p>
-                </div>
+              <div className="flex items-start gap-2 mb-2">
+                <Check size={14} className="text-green-400 flex-shrink-0 mt-0.5" />
+                <p className="text-sm font-medium text-white">Pipeline Deployment Successful</p>
               </div>
-              <div className="flex items-start gap-3">
-                <div className="p-1.5 rounded-md bg-green-500/10">
-                  <BookOpen size={14} className="text-green-400" />
-                </div>
-                <div>
-                  <p className="text-xs font-medium text-white">Best Practices</p>
-                  <p className="text-xs text-gray-400 mt-0.5">
-                    Review best practices before making critical changes.
-                  </p>
-                </div>
-              </div>
+              <p className="text-xs text-gray-400 mb-3 ml-5">
+                Pipeline &apos;Login Service&apos; has been deployed successfully to production.
+              </p>
+              <a href="#" className="text-xs text-teal-400 hover:text-teal-300 ml-5 transition-colors">
+                View Details &rarr;
+              </a>
             </div>
           </Card>
 
-          {/* Configuration Health */}
+          {/* Your Channels */}
           <Card padding="lg">
-            <div className="flex items-center gap-2 mb-1">
-              <CheckCircle size={16} className="text-green-400" />
-              <h3 className="text-sm font-semibold text-white">All Systems Operational</h3>
-            </div>
-            <p className="text-xs text-gray-400 mb-4">Last checked: May 19, 2024 02:45 PM</p>
-            <div className="space-y-0">
-              {healthItems.map((item) => (
-                <div
-                  key={item.label}
-                  className="flex items-center justify-between py-2.5 border-b border-white/[0.08] last:border-b-0"
-                >
-                  <span className="text-xs text-gray-300">{item.label}</span>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-medium text-green-400">{item.status}</span>
-                    <ChevronRight size={12} className="text-gray-400" />
+            <h3 className="text-sm font-semibold text-white mb-2">Your Channels</h3>
+            <p className="text-xs text-gray-400 mb-4">
+              Manage your notification channels.
+            </p>
+            <div className="space-y-3">
+              {channels.map((channel) => {
+                const Icon = channel.icon;
+                return (
+                  <div key={channel.label} className="flex items-center gap-3">
+                    <div className="p-1.5 rounded-md bg-white/[0.04]">
+                      <Icon size={14} className="text-gray-400" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-medium text-white">{channel.label}</p>
+                      <p className="text-xs text-gray-500 truncate">{channel.detail}</p>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <span className="text-xs text-green-400">{channel.status}</span>
+                      <Check size={10} className="text-green-400" />
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
+            <a href="#" className="inline-block mt-4 text-xs text-primary-400 hover:text-primary-300 transition-colors">
+              Manage Channels &rarr;
+            </a>
           </Card>
 
           {/* Need Help? */}
           <Card padding="lg">
             <h3 className="text-sm font-semibold text-white mb-2">Need Help?</h3>
+            <p className="text-xs text-gray-400 mb-4">
+              Learn more about notifications.
+            </p>
             <div className="space-y-3">
               {helpLinks.map((link) => (
                 <a
