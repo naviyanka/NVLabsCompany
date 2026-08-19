@@ -1,0 +1,30 @@
+{
+  "id": "FEAT-005",
+  "type": "feat",
+  "description": "Closing Time Protocol (Graceful Shutdown) - Port the ClosingTimeController from munder-difflin/src/main/closingTime.ts. Protocol phases: STARTED -> PROGRESS -> COMPLETE -> teardown (or TIMEOUT/CANCELLED). Manages ACK tracking, premature COMPLETE rejection, dead worker exclusion, and steer-based interrupt.",
+  "status": "pending",
+  "steps": [
+    "Create src/nexus/runtime/closing_time.py with ClosingTimePhase enum (STARTED, PROGRESS, COMPLETE, TIMEOUT, CANCELLED) and ClosingTimeEvent dataclass (phase, acked: int, total: int). Define ACK_RE and COMPLETE_RE regex patterns (case-insensitive, forgiving of - _ space variants). Constants: TIMEOUT_SECONDS = 360 (6 minutes), TEARDOWN_GRACE_SECONDS = 2.5.",
+    "Create ClosingTimeController class. Constructor takes: send_message callable (to send hive messages), get_live_agent_ids callable (returns list of live agent IDs), on_concluded callable (teardown callback), control_registry (optional ControlRegistry reference for steer injection). Internal state: active: bool, god_id: str, workers: set[str], acked: set[str], events: list[ClosingTimeEvent].",
+    "Implement start() method: validates god agent is live, builds worker roster from live agents excluding god, sends shutdown brief to god via send_message (matching the munder-difflin brief content), steers god and all workers via control_registry if available, sets active=True, emits STARTED event, returns {ok: True} or {ok: False, error: str}.",
+    "Implement on_routed(message) observer method: if ACK_RE matches subject and sender is a known worker -> add to acked set, emit PROGRESS. If COMPLETE_RE matches subject and sender is god -> verify all live workers have acked (dead workers excused), reject premature COMPLETE by sending refuse message back to god listing missing workers, otherwise accept -> emit COMPLETE, schedule teardown.",
+    "Implement cancel() method: clears state, clears steers for god and all workers via control_registry, emits CANCELLED event, sends cancellation notice to god.",
+    "Create tests/test_closing_time.py with comprehensive tests: test start with no live god returns error, test start with live god sends brief and steers, test on_routed ACK from known worker increments acked count, test on_routed ACK from unknown agent ignored, test on_routed COMPLETE from god with all ACKs triggers concluded, test on_routed premature COMPLETE rejected when live workers missing ACKs, test dead workers (not in live list) are excused from ACK requirement, test cancel clears state and emits cancelled, test COMPLETE_RE and ACK_RE regex patterns match variants (CLOSING-TIME-ACK, closing_time_ack, Closing Time Ack), test protocol phases emitted in correct order."
+  ],
+  "acceptance_criteria": [
+    "ClosingTimeController importable from nexus.runtime.closing_time",
+    "Protocol phases emit in correct order: STARTED -> PROGRESS -> COMPLETE",
+    "Premature COMPLETE rejected if live workers are missing ACKs",
+    "Dead workers (not in live agent list) are excused from ACK requirement",
+    "Cancel clears state and informs god",
+    "Steer-based interrupt reaches agents via control_registry integration",
+    "ACK and COMPLETE regex patterns are forgiving of case and separator variants",
+    "All tests pass with pytest tests/test_closing_time.py"
+  ],
+  "verification": [
+    "pytest tests/test_closing_time.py -v",
+    "pytest tests/ (full suite to confirm no regressions)"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

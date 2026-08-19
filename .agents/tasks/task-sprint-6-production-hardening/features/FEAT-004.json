@@ -1,0 +1,27 @@
+{
+  "id": "FEAT-004",
+  "type": "feat",
+  "description": "Webhook Inbound Server - Port the WebhookServer from munder-difflin/src/main/webhook.ts. Production-grade inbound HTTP for external integrations with per-endpoint secrets (constant-time comparison), JSON schema validation, fixed-window rate limiting, capability tokens, body size cap.",
+  "status": "pending",
+  "steps": [
+    "Create src/nexus/communication/webhook_types.py with Pydantic models: WebhookEndpoint (id: str, name: str, secret: str, schema: str default '{}', enabled: bool default True), WebhookInbound (message: str, title: str|None, kind: str|None, from_: str|None using Field(alias='from')), WebhookDispatch (token: str, task_id: str|None, pending: bool), WebhookTaskStatus (status: str, title: str, result: str|None).",
+    "Create src/nexus/communication/webhook_server.py with WebhookServer class. Constructor takes endpoints list, on_message callback, lookup_status callback. Constants: MAX_BODY_BYTES = 1MB, RATE_LIMIT = 120/min global, PER_ENDPOINT_RATE_LIMIT = 60/min, RATE_WINDOW_MS = 60_000, LEGACY_ENDPOINT_ID = 'legacy'. Internal state: endpoints dict, decoy_secret (random 32 bytes hex), rate windows dict. Methods: set_endpoints(list) to swap endpoint config, verify_secret(provided, endpoint) using hmac.compare_digest with constant-time comparison (compare against decoy for unknown endpoints), allow_request(bucket, limit) fixed-window rate limiter, handle_post(endpoint_id, headers, body_bytes) that enforces rate limit -> verifies secret -> validates body size -> parses JSON -> validates against endpoint schema -> extracts WebhookInbound fields -> calls on_message, handle_get(endpoint_id, token) that calls lookup_status. Return proper HTTP-style responses as dicts with status codes.",
+    "Create tests/test_webhook_server.py with comprehensive tests: test verify_secret with correct secret returns True, test verify_secret with wrong secret returns False, test verify_secret with unknown endpoint uses decoy and returns False, test verify_secret timing safety (both paths do comparison), test rate limiter allows up to limit then rejects, test rate limiter resets after window, test global rate limit applied before per-endpoint, test handle_post rejects body over 1MB, test handle_post rejects invalid JSON, test handle_post validates schema, test handle_post extracts WebhookInbound correctly, test handle_get returns status for valid token, test handle_get returns not-found for unknown token, test unknown endpoint ID answered identically to wrong secret."
+  ],
+  "acceptance_criteria": [
+    "WebhookServer class importable from nexus.communication.webhook_server",
+    "All type models importable from nexus.communication.webhook_types",
+    "Secret verification uses hmac.compare_digest for constant-time comparison",
+    "Unknown endpoint IDs answered identically to wrong secrets (no enumeration)",
+    "Rate limiting enforces global 120/min and per-endpoint 60/min with fixed windows",
+    "Body size cap (1MB) enforced before parsing",
+    "Secrets never appear in responses or dispatch data",
+    "All tests pass with pytest tests/test_webhook_server.py"
+  ],
+  "verification": [
+    "pytest tests/test_webhook_server.py -v",
+    "pytest tests/ (full suite to confirm no regressions)"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}
