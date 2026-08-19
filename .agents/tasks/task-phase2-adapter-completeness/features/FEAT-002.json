@@ -2,7 +2,7 @@
   "id": "FEAT-002",
   "type": "feat",
   "description": "Add MCP Stdio Transport: Create src/nexus/tools/mcp_stdio.py implementing an StdioMCPTransport class that spawns MCP servers as subprocesses and communicates via stdin/stdout JSON-RPC",
-  "status": "pending",
+  "status": "in_progress",
   "steps": [
     "Create src/nexus/tools/mcp_stdio.py with class StdioMCPTransport that has the same interface as MCPClient (connect, list_tools, call_tool, disconnect) but communicates via subprocess stdio instead of HTTP.",
     "Implement connect(command: str, args: list[str] | None = None, env: dict[str, str] | None = None) that spawns the MCP server as an asyncio subprocess with stdin=PIPE, stdout=PIPE, stderr=PIPE. Send the JSON-RPC 'initialize' request to stdin (newline-terminated). Read and parse the response from stdout. Store server info.",
