@@ -2,7 +2,7 @@
   "id": "FEAT-001",
   "type": "feat",
   "description": "Memory Reflector LLM Integration - Add llm_callable parameter to MemoryReflector and implement _summarize_evicted() with LLM condensation. Add _extract_durable_facts() for hoisting pinned lines. Include heuristic fallback when LLM is None.",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "In src/nexus/memory/reflector.py, add an optional `llm_callable: Callable[[str], Awaitable[str]] | None = None` parameter to MemoryReflector.__init__() following the same pattern as LLMFactExtractor in src/nexus/memory/llm_extract.py",
     "Add a CONDENSE_PROMPT constant string that instructs the LLM to summarize evicted sections while preserving decisions, file paths, commit SHAs, and numeric results",
@@ -24,5 +24,5 @@
     "eval \"$(pyenv init -)\" && cd /projects/sandbox/NVLabsCompany && python -m pytest tests/test_memory_reflector.py -x -q"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "All 65 tests in test_memory_reflector.py pass (was 44 before, added 21 new tests). Full suite 2017 tests pass. The make_summarizer() with LLM uses a ThreadPoolExecutor workaround to call async from sync context when an event loop is already running (e.g., pytest-asyncio). Tests for async methods use pytest-asyncio auto mode directly."
 }
