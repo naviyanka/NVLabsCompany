@@ -1,0 +1,38 @@
+{
+  "id": "FEAT-001",
+  "type": "feat",
+  "description": "Complete redesign of the Settings page (src/pages/Settings.tsx) with General settings view including left nav, center content with forms/toggles, and right sidebar with account/system info",
+  "status": "completed",
+  "steps": [
+    "Replace the entire contents of /projects/sandbox/NVLabsCompany/dashboard/src/pages/Settings.tsx with the new implementation",
+    "Page header: Settings/gear icon + 'Settings' title + subtitle 'Manage your preferences, system configuration, and platform settings'",
+    "Left navigation sidebar (~20% width): vertical menu with 15 items (General active with blue/indigo highlight, Profile, Security, API Keys, Integrations, Teams & Users, Roles & Permissions, Billing & Subscription, System Configuration, Notifications, Data & Storage, Backup & Restore, Audit Logs, Appearance, Advanced)",
+    "Center content (~50% width) - Section 1 'Platform Information': text inputs for Platform Name ('NVLABS Mission Control'), Tagline ('AI-Powered Security Operations Platform'), Time Zone dropdown ('(GMT+05:30) Asia/Kolkata'), Date Format dropdown ('May 16, 2024 (MMM DD, YYYY)') with 'Save Changes' blue button",
+    "Center content - Section 2 'Language & Region': Language dropdown ('English (US)'), Number Format dropdown ('1,234.56') with 'Save Changes' blue button",
+    "Center content - Section 3 'Default Preferences': 2x2 grid of toggle switches - Auto refresh dashboard (ON), Shortcut tips (ON), Compact mode (OFF), Confirm before delete (ON), each with description text, 'Save Changes' blue button",
+    "Center content - Section 4 'Session Settings': Session Timeout dropdown ('30 minutes') with description, Concurrent Sessions toggle (ON), Max Session Duration dropdown ('8 hours') with description, 'Save Changes' blue button",
+    "Right sidebar (~25% width) - Account Overview: avatar + 'Navi Yanka' + email 'navi.yanka@nvlabs.dev' + 'Edit Profile' outlined button",
+    "Right sidebar - Subscription Plan: 'Enterprise' purple badge, description, Active status (green), Renewal Date June 16 2024, Seats 12/25, Storage 256 GB / 1 TB, 'Manage Subscription' button with external link icon",
+    "Right sidebar - System Information: Version v2.1.0, Environment Production, Uptime 15d 6h 24m, Last Updated May 16 2024 10:25 AM, 'View System Health' button with external link icon",
+    "Right sidebar - Danger Zone: red header, warning text, 'Clear Cache' button with description and chevron, 'Delete Account' button with red text, description, and chevron",
+    "Footer: '© 2024 NVLABS Mission Control. All rights reserved.' with links: Documentation, Support, Privacy Policy, Terms of Service (all with external link icons)",
+    "Styling: dark theme (dark-bg, dark-surface, dark-card tokens), form inputs with bg-dark-bg and border-white/[0.08], toggles styled with Tailwind (blue ON, gray OFF), text-white primary, text-gray-400 secondary",
+    "Use Card component from @/components/common/Card for card sections, lucide-react for all icons",
+    "All data must be static/hardcoded mock data, no API calls, no randomness",
+    "Verify TypeScript compilation passes with zero errors"
+  ],
+  "acceptance_criteria": [
+    "Running 'npx tsc --noEmit' in the dashboard directory produces zero errors",
+    "Running 'npm run build' in the dashboard directory succeeds",
+    "The Settings.tsx file contains the complete redesigned page with all 4 center sections, left nav, right sidebar, and footer",
+    "All form fields contain the exact default values specified in the requirements",
+    "Toggle switches show correct ON/OFF states as specified",
+    "All specified icons from lucide-react are used correctly"
+  ],
+  "verification": [
+    "cd /projects/sandbox/NVLabsCompany/dashboard && npx tsc --noEmit",
+    "cd /projects/sandbox/NVLabsCompany/dashboard && npm run build"
+  ],
+  "blocked_reason": null,
+  "findings": "Build and TypeScript compilation pass cleanly. Removed unused AlertTriangle and Trash2 imports that were causing TS6133 errors. The Card component is imported as named export (not default). Used Cog icon for General nav item instead of SettingsIcon to avoid naming conflict."
+}
