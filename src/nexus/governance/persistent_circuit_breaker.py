@@ -6,7 +6,7 @@ On startup, loads all open circuits from the database to restore state.
 
 import logging
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy import select, update
@@ -63,7 +63,7 @@ class PersistentCircuitBreaker:
         """
         from nexus.governance.circuit_breaker_model import CircuitBreakerRecord
 
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         async with self._session_factory() as session:
             stmt = select(CircuitBreakerRecord).where(
@@ -136,7 +136,7 @@ class PersistentCircuitBreaker:
         """
         from nexus.governance.circuit_breaker_model import CircuitBreakerRecord
 
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         async with self._session_factory() as session:
             stmt = select(CircuitBreakerRecord).where(
@@ -175,7 +175,7 @@ class PersistentCircuitBreaker:
         """
         from nexus.governance.circuit_breaker_model import CircuitBreakerRecord
 
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         async with self._session_factory() as session:
             stmt = select(CircuitBreakerRecord).where(
@@ -218,7 +218,7 @@ class PersistentCircuitBreaker:
         """
         from nexus.governance.circuit_breaker_model import CircuitBreakerRecord
 
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         async with self._session_factory() as session:
             stmt = select(CircuitBreakerRecord).where(

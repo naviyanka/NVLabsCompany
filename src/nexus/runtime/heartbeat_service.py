@@ -1,7 +1,7 @@
 """Heartbeat Service - rich lifecycle management for heartbeat runs."""
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 from nexus.models.heartbeat_run import HeartbeatRun
 
@@ -89,7 +89,7 @@ class HeartbeatService:
             run.stdout_excerpt = stdout_excerpt[:2000]
         if stderr_excerpt is not None:
             run.stderr_excerpt = stderr_excerpt[:2000]
-        run.last_output_at = datetime.utcnow()
+        run.last_output_at = datetime.now(timezone.utc)
         return run
 
     def finish_run(
@@ -119,7 +119,7 @@ class HeartbeatService:
         run.exit_code = exit_code
         run.signal = signal
         run.session_id_after = session_id_after
-        run.finished_at = datetime.utcnow()
+        run.finished_at = datetime.now(timezone.utc)
         if (exit_code is not None and exit_code != 0) or signal is not None:
             run.liveness_state = "confirmed_dead"
         return run
@@ -181,7 +181,7 @@ class HeartbeatService:
         Returns:
             List of stale HeartbeatRun instances.
         """
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         stale: list[HeartbeatRun] = []
         for run in self._runs.values():
             if run.finished_at is not None:

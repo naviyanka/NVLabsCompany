@@ -7,7 +7,7 @@ Uses AsyncMock for the session factory following the conftest.py pattern.
 
 import uuid
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -51,7 +51,7 @@ def _make_record(
         last_failure_at=last_failure_at,
         opened_at=opened_at,
         cooldown_seconds=cooldown_seconds,
-        updated_at=datetime.utcnow(),
+        updated_at=datetime.now(timezone.utc),
     )
 
 
@@ -131,7 +131,7 @@ class TestRecordFailure:
             agent_id,
             consecutive_failures=7,
             is_open=True,
-            opened_at=datetime.utcnow(),
+            opened_at=datetime.now(timezone.utc),
         )
 
         session = AsyncMock()
@@ -179,7 +179,7 @@ class TestRecordSuccess:
             agent_id,
             consecutive_failures=5,
             is_open=True,
-            opened_at=datetime.utcnow(),
+            opened_at=datetime.now(timezone.utc),
         )
 
         session = AsyncMock()
@@ -259,7 +259,7 @@ class TestReset:
             agent_id,
             consecutive_failures=10,
             is_open=True,
-            opened_at=datetime.utcnow(),
+            opened_at=datetime.now(timezone.utc),
         )
 
         session = AsyncMock()
@@ -364,7 +364,7 @@ class TestCooldownAutoReset:
 
         agent_id = uuid.uuid4()
         # Create a record that was opened 600 seconds ago with 300s cooldown
-        opened_at = datetime(2024, 1, 1, 12, 0, 0)
+        opened_at = datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
         record = _make_record(
             agent_id,
             consecutive_failures=5,
@@ -382,12 +382,13 @@ class TestCooldownAutoReset:
         factory = _make_session_factory(session)
         cb = PersistentCircuitBreaker(factory, cooldown_seconds=300)
 
-        # Mock datetime.utcnow to return a time well past the cooldown
-        fake_now = datetime(2024, 1, 1, 12, 10, 0)  # 600s after opened_at
+        # Mock datetime.now to return a time well past the cooldown
+        fake_now = datetime(2024, 1, 1, 12, 10, 0, tzinfo=timezone.utc)  # 600s after opened_at
         with patch(
             "nexus.governance.persistent_circuit_breaker.datetime"
         ) as mock_dt:
-            mock_dt.utcnow.return_value = fake_now
+            mock_dt.now.return_value = fake_now
+            mock_dt.side_effect = lambda *args, **kw: datetime(*args, **kw)
             result = await cb.is_open(agent_id)
 
         assert result is False
@@ -401,7 +402,7 @@ class TestCooldownAutoReset:
         """Circuit remains open when cooldown has NOT elapsed."""
         agent_id = uuid.uuid4()
         # Opened 100 seconds ago with 300s cooldown - should still be open
-        opened_at = datetime(2024, 1, 1, 12, 0, 0)
+        opened_at = datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
         record = _make_record(
             agent_id,
             consecutive_failures=5,
@@ -419,12 +420,13 @@ class TestCooldownAutoReset:
         factory = _make_session_factory(session)
         cb = PersistentCircuitBreaker(factory, cooldown_seconds=300)
 
-        # Mock datetime.utcnow to return a time within the cooldown
-        fake_now = datetime(2024, 1, 1, 12, 1, 40)  # 100s after opened_at
+        # Mock datetime.now to return a time within the cooldown
+        fake_now = datetime(2024, 1, 1, 12, 1, 40, tzinfo=timezone.utc)  # 100s after opened_at
         with patch(
             "nexus.governance.persistent_circuit_breaker.datetime"
         ) as mock_dt:
-            mock_dt.utcnow.return_value = fake_now
+            mock_dt.now.return_value = fake_now
+            mock_dt.side_effect = lambda *args, **kw: datetime(*args, **kw)
             result = await cb.is_open(agent_id)
 
         assert result is True

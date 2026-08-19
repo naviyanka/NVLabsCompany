@@ -6,7 +6,7 @@ multiple times.
 """
 
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 # Fixed UUIDs for deterministic seeding
 COMPANY_ID = uuid.UUID("00000000-0000-4000-8000-000000000001")
@@ -106,7 +106,7 @@ def get_seed_teams() -> list[dict]:
 
 def get_seed_agents() -> list[dict]:
     """Return agent seed data."""
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     return [
         {
             "id": AGENT_CEO,
@@ -267,7 +267,7 @@ def get_seed_agents() -> list[dict]:
 
 def get_seed_goals() -> list[dict]:
     """Return goal seed data."""
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     return [
         {
             "id": GOAL_1,
@@ -294,7 +294,7 @@ def get_seed_goals() -> list[dict]:
 
 def get_seed_projects() -> list[dict]:
     """Return project seed data."""
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     return [
         {
             "id": PROJECT_1,
@@ -312,7 +312,7 @@ def get_seed_projects() -> list[dict]:
 
 def get_seed_tasks() -> list[dict]:
     """Return task seed data."""
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     return [
         {
             "id": TASK_1,

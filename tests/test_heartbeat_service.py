@@ -1,7 +1,7 @@
 """Tests for HeartbeatService - rich heartbeat run lifecycle management."""
 
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from nexus.models.heartbeat_run import HeartbeatRun, InvocationSource, LivenessState
 from nexus.runtime.heartbeat_service import HeartbeatService
@@ -251,7 +251,7 @@ class TestDetectStale:
 
         # Create a run and backdate its started_at
         run = svc.create_run(agent_id=agent_id)
-        run.started_at = datetime.utcnow() - timedelta(seconds=120)
+        run.started_at = datetime.now(timezone.utc) - timedelta(seconds=120)
 
         # Create a fresh run
         fresh_run = svc.create_run(agent_id=agent_id)
@@ -269,9 +269,9 @@ class TestDetectStale:
         agent_id = uuid.uuid4()
 
         run = svc.create_run(agent_id=agent_id)
-        run.started_at = datetime.utcnow() - timedelta(seconds=120)
+        run.started_at = datetime.now(timezone.utc) - timedelta(seconds=120)
         # But output was recent
-        run.last_output_at = datetime.utcnow() - timedelta(seconds=10)
+        run.last_output_at = datetime.now(timezone.utc) - timedelta(seconds=10)
 
         stale = svc.detect_stale(threshold_seconds=60)
         assert len(stale) == 0
@@ -282,7 +282,7 @@ class TestDetectStale:
         agent_id = uuid.uuid4()
 
         run = svc.create_run(agent_id=agent_id)
-        run.started_at = datetime.utcnow() - timedelta(seconds=120)
+        run.started_at = datetime.now(timezone.utc) - timedelta(seconds=120)
         svc.finish_run(run.id, exit_code=0)
 
         stale = svc.detect_stale(threshold_seconds=60)

@@ -7,7 +7,7 @@ with the in-memory middleware registry.
 
 import logging
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import select, update
@@ -58,7 +58,7 @@ class PersistentKillSwitch:
         from nexus.governance.kill_switch_model import KillSwitchRecord
         from nexus.api.middleware import kill_switch_registry
 
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         async with self._session_factory() as session:
             # Check if already active
@@ -121,7 +121,7 @@ class PersistentKillSwitch:
         from nexus.governance.kill_switch_model import KillSwitchRecord
         from nexus.api.middleware import kill_switch_registry
 
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         async with self._session_factory() as session:
             stmt = (

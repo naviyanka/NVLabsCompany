@@ -1,5 +1,6 @@
 """NEXUS FastAPI application entry point."""
 
+import os
 from contextlib import asynccontextmanager
 from collections.abc import AsyncGenerator
 
@@ -65,7 +66,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             select(Company).where(Company.id == default_company_id)
         )
         if result.scalar_one_or_none() is None:
-            now = datetime.utcnow()
+            now = datetime.now(timezone.utc)
             company = Company(
                 id=default_company_id,
                 name="NVLabs",
@@ -110,8 +111,55 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             exc,
         )
 
+    # Run configuration validation (non-blocking, logs warnings only)
+    from nexus.config_validator import validate_config
+    await validate_config()
+
     yield
-    # Shutdown: close connections, flush buffers, etc.
+
+    # Shutdown: flush telemetry, persist state, close connections
+    import logging
+    shutdown_logger = logging.getLogger(__name__)
+    shutdown_logger.info("NEXUS shutdown initiated - flushing state...")
+
+    # Flush telemetry metrics
+    try:
+        from nexus.telemetry import registry as telemetry_registry
+        telemetry_registry.reset()
+        shutdown_logger.info("Telemetry metrics flushed")
+    except Exception as exc:
+        shutdown_logger.warning("Failed to flush telemetry: %s", exc)
+
+    # Persist ControlRegistry state if persistence is configured
+    try:
+        from pathlib import Path
+
+        from nexus.governance.control_registry import ControlRegistry
+
+        persist_path_env = os.environ.get("NEXUS_CONTROL_STATE_PATH", "")
+        if persist_path_env:
+            cr = ControlRegistry(persist_path=Path(persist_path_env))
+            cr._persist()
+            shutdown_logger.info(
+                "ControlRegistry state persisted to %s", persist_path_env
+            )
+    except Exception as exc:
+        shutdown_logger.warning(
+            "Failed to persist ControlRegistry state: %s", exc
+        )
+
+    # Log Redis connection status
+    try:
+        redis_url = settings.redis_url
+        if redis_url:
+            shutdown_logger.info(
+                "Redis connection closing (url=%s)",
+                redis_url.split("@")[-1] if "@" in redis_url else redis_url,
+            )
+    except Exception as exc:
+        shutdown_logger.warning("Error during Redis shutdown logging: %s", exc)
+
+    shutdown_logger.info("NEXUS shutdown complete - all resources released")
 
 
 app = FastAPI(
