@@ -2,7 +2,7 @@
   "id": "FEAT-004",
   "type": "feat",
   "description": "Secret Backend with Fernet Persistence: Enhance FernetSecretBackend to persist encrypted secrets to a JSON file on disk with atomic writes, 0o600 permissions, and key rotation support",
-  "status": "pending",
+  "status": "completed",
   "steps": [
     "In src/nexus/governance/secret_backend.py, add imports for json, os, pathlib.Path, tempfile.",
     "Modify FernetSecretBackend.__init__() to accept a 'persist_path: str | Path | None = None' parameter. Default to None (in-memory only for backward compatibility). When provided, set self._persist_path = Path(persist_path) and call self._load_from_file() at the end of __init__.",
@@ -30,5 +30,5 @@
     "python3.12 -m pytest tests/ --tb=no -q"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "All 20 new tests pass. Full suite now at 1995 tests passing (up from 1975 baseline due to prior features). os.replace mock test required capturing real_replace reference before patching to avoid recursion. Implementation maintains full backward compatibility - existing SecretVault tests unaffected."
 }
