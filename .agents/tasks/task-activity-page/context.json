@@ -1,0 +1,22 @@
+{
+  "project_type": "React 19 SPA with Vite 6, TypeScript 5.6, Tailwind 3.4, recharts 2.13, lucide-react",
+  "language": "TypeScript/React",
+  "build_system": "npm with Vite (tsc -b && vite build)",
+  "test_framework": "No test runner configured - validation is via TypeScript compilation",
+  "build_command": "cd /projects/sandbox/NVLabsCompany/dashboard && npm run build",
+  "test_command": "cd /projects/sandbox/NVLabsCompany/dashboard && npm run build",
+  "verification_instructions": "Run npm run build in the dashboard directory. It runs tsc -b && vite build. Must complete with zero TypeScript errors.",
+  "snapshot_or_generated_files": null,
+  "setup_instructions": "cd /projects/sandbox/NVLabsCompany/dashboard && npm install",
+  "environment_constraints": "None significant - standard Node.js environment",
+  "contribution_requirements": "All pages use static mock data, no API calls, no randomness. Dark theme with tokens: dark-bg (#0f1117), dark-surface (#1a1b2e), dark-card (#1e2035). Use Card component from @/components/common/Card. Use lucide-react for icons, recharts for charts.",
+  "key_patterns": "Pages follow a consistent pattern: flex gap-4 layout with flex-1 main content and w-80 right sidebar. Static mock data at the top, helper components in the middle, main export component at the bottom. Card component used for all card containers. PieChart from recharts for donut charts with innerRadius/outerRadius and center label. Tabs use border-b with active color being indigo-400. Table uses Card with padding='none'. Pagination at table bottom with chevron buttons.",
+  "relevant_files": [
+    "src/pages/Activity.tsx (file to completely replace)",
+    "src/components/common/Card.tsx (Card component to import)",
+    "src/pages/Tasks.tsx (reference for layout pattern: sidebar, table, pagination, stat cards, donut chart)",
+    "src/pages/KnowledgeBase.tsx (reference for stat card icons pattern)",
+    "src/pages/GitRepos.tsx (reference for sidebar layout)"
+  ],
+  "directory_structure": "dashboard/src/pages/ contains all page components. dashboard/src/components/common/ has shared components. All imports use @/ path alias for src/."
+}
