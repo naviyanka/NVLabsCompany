@@ -1,0 +1,22 @@
+{
+  "project_type": "React 19 + Vite 6 + TypeScript 5.6 SPA with Tailwind CSS dark theme",
+  "language": "TypeScript/TSX",
+  "build_system": "Vite 6 with TypeScript compiler (tsc -b && vite build). Use 'bun run build' to execute.",
+  "test_framework": "No test framework configured (no test scripts in package.json)",
+  "build_command": "bun run build",
+  "test_command": "N/A - no tests configured",
+  "verification_instructions": "Run 'bun run build' in /projects/sandbox/NVLabsCompany/dashboard/ to verify TypeScript compilation and Vite build succeed with zero errors.",
+  "snapshot_or_generated_files": null,
+  "setup_instructions": "bun is pre-installed (v1.2.14). node_modules already present. No additional setup needed.",
+  "environment_constraints": "No node/npm available - use 'bun' runtime instead. Network mode appears to be INTEGRATIONS_ONLY based on available tools.",
+  "contribution_requirements": "All pages use static mock data with deterministic values (no randomness, no API calls). Dark theme with Tailwind tokens. Must pass TypeScript compilation with zero errors (strict mode with noUnusedLocals, noUnusedParameters).",
+  "key_patterns": "Pages are self-contained TSX files in src/pages/. Use Card component from @/components/common/Card (padding: none|sm|md|lg). lucide-react for icons. recharts for charts. Static data defined at module level. Colors: dark-bg (#0f1117), dark-surface (#1a1b2e), dark-card (#1e2035). Text: white for primary, gray-400 for secondary. Link component from react-router-dom for navigation.",
+  "relevant_files": [
+    "src/pages/AgentDetailPage.tsx (file to replace entirely)",
+    "src/pages/Dashboard.tsx (pattern reference - stat cards, recharts usage, lucide icons)",
+    "src/pages/Memory.tsx (pattern reference - tabs, stat cards, complex layouts)",
+    "src/components/common/Card.tsx (Card component with padding prop)",
+    "src/App.tsx (route: /agents/:id -> AgentDetailPage)"
+  ],
+  "directory_structure": "dashboard/src/pages/ - page components, dashboard/src/components/common/ - shared components (Card, Badge, Button, etc.), dashboard/src/components/layout/ - Layout component"
+}
