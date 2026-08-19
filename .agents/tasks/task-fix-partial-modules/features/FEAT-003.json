@@ -1,0 +1,26 @@
+{
+  "id": "FEAT-003",
+  "type": "feat",
+  "description": "Add complex condition expressions to context trigger system",
+  "status": "completed",
+  "steps": [
+    "In src/nexus/triggers/context_trigger.py, add condition expression dataclasses: ConditionExpression (base), AndCondition(conditions: list), OrCondition(conditions: list), NotCondition(condition), ThresholdCondition(metric: str, operator: str, value: float), TimeCondition(after: datetime|None, before: datetime|None, weekdays: list[int]|None)",
+    "Add evaluate_condition(expression: ConditionExpression, context: dict) -> bool recursive evaluator function that handles each condition type, with short-circuit evaluation for And/Or",
+    "Add ConditionBuilder class with fluent API: .and_(*conditions), .or_(*conditions), .not_(condition), .threshold(metric, op, value), .time(after, before, weekdays), .build() -> ConditionExpression",
+    "Keep existing ContextRule and ContextTriggerConfig fully working unchanged (backward compatible)",
+    "Create tests/test_context_trigger_conditions.py with tests covering: AndCondition evaluation, OrCondition evaluation, NotCondition, ThresholdCondition with various operators, TimeCondition with weekday/time ranges, nested conditions (And containing Or), short-circuit behavior, ConditionBuilder fluent API, backward compatibility of existing ContextRule"
+  ],
+  "acceptance_criteria": [
+    "pytest tests/test_context_trigger_conditions.py passes all new tests",
+    "evaluate_condition() correctly handles all 5 condition types recursively",
+    "ConditionBuilder produces valid expressions via fluent API",
+    "Existing ContextRule and DEFAULT_CONTEXT_TRIGGER unchanged and still importable",
+    "All existing tests still pass"
+  ],
+  "verification": [
+    "pytest tests/test_context_trigger_conditions.py -v",
+    "pytest tests/test_triggers.py -v"
+  ],
+  "blocked_reason": null,
+  "findings": "Python 3.12 available at /usr/bin/python3.12 (default python3 is 3.9). Used python3.12 -m pip install and python3.12 -m pytest. Ruff format required some line reformatting. All 2220 tests pass including 41 new condition tests."
+}

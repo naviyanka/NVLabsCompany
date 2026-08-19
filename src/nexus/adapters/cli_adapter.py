@@ -98,7 +98,8 @@ class CLIAdapter(BaseAdapter):
         """Initialize CLI session with workspace isolation.
 
         Creates or uses a workspace directory and stores backend metadata
-        in the session for use during execution.
+        in the session for use during execution. Sets the is_interactive
+        and awaiting_input flags based on config.
 
         Args:
             session: The newly created session.
@@ -121,6 +122,10 @@ class CLIAdapter(BaseAdapter):
             "timeout", DEFAULT_TIMEOUT_SECONDS
         )
         session.metadata["backend"] = session.config["backend"]
+        session.metadata["is_interactive"] = session.config.get(
+            "interactive", False
+        )
+        session.metadata["awaiting_input"] = False
 
     async def _do_execute(
         self, session: AgentSession, task_id: uuid.UUID, payload: dict[str, Any]
@@ -183,15 +188,52 @@ class CLIAdapter(BaseAdapter):
             )
             self._processes[session.session_id] = process
 
+            # For interactive sessions, spawn _stream_output as a background
+            # task so output is surfaced in real time while the process runs.
+            is_interactive = session.metadata.get("is_interactive", False)
+            stream_task: asyncio.Task | None = None  # type: ignore[type-arg]
+            if is_interactive and process.stdout is not None:
+                stream_task = asyncio.create_task(
+                    self._stream_output(process, session.session_id)
+                )
+                # Mark session as awaiting input once streaming starts
+                session.metadata["awaiting_input"] = True
+
             # Send prompt via stdin if backend supports it
             stdin_data = prompt.encode("utf-8") if backend.supports_stdin else None
 
             try:
-                stdout_bytes, stderr_bytes = await asyncio.wait_for(
-                    process.communicate(input=stdin_data),
-                    timeout=timeout,
-                )
+                if is_interactive:
+                    # In interactive mode, write the initial prompt to stdin
+                    # (if supported) but don't close stdin - keep it open for
+                    # subsequent send_message() calls. Wait for the process to
+                    # exit while _stream_output consumes stdout in the background.
+                    if stdin_data and process.stdin is not None:
+                        process.stdin.write(stdin_data + b"\n")
+                        await process.stdin.drain()
+                    await asyncio.wait_for(process.wait(), timeout=timeout)
+                    # Ensure all buffered output is consumed
+                    if stream_task is not None:
+                        await stream_task
+                    # Read any stderr that was buffered
+                    stderr_bytes = b""
+                    if process.stderr is not None:
+                        stderr_bytes = await process.stderr.read()
+                    # stdout was consumed by _stream_output
+                    stdout_bytes = b""
+                else:
+                    stdout_bytes, stderr_bytes = await asyncio.wait_for(
+                        process.communicate(input=stdin_data),
+                        timeout=timeout,
+                    )
             except asyncio.TimeoutError:
+                # Cancel the stream task if it's running
+                if stream_task is not None:
+                    stream_task.cancel()
+                    try:
+                        await stream_task
+                    except asyncio.CancelledError:
+                        pass
                 # Graceful termination: SIGTERM then SIGKILL
                 self._add_log(
                     session.session_id,
@@ -286,6 +328,78 @@ class CLIAdapter(BaseAdapter):
         finally:
             self._processes.pop(session.session_id, None)
 
+    async def send_message(self, session_id: str, message: str) -> str:
+        """Send a message to the stdin of a running interactive process.
+
+        Writes the given message (followed by a newline) to the process's
+        stdin pipe. The process must be running and have an open stdin pipe.
+
+        Args:
+            session_id: The session identifier for the running process.
+            message: The text message to send via stdin.
+
+        Returns:
+            Acknowledgment string confirming the message was sent.
+
+        Raises:
+            RuntimeError: If the process has already exited or is not found.
+        """
+        process = self._processes.get(session_id)
+        if process is None:
+            raise RuntimeError(
+                f"No running process for session '{session_id}'. "
+                "Process may have already exited."
+            )
+        if process.returncode is not None:
+            raise RuntimeError(
+                f"Process for session '{session_id}' has already exited "
+                f"with return code {process.returncode}."
+            )
+        if process.stdin is None:
+            raise RuntimeError(
+                f"Process for session '{session_id}' has no stdin pipe."
+            )
+
+        try:
+            encoded = message.encode("utf-8", errors="replace")
+            process.stdin.write(encoded + b"\n")
+            await process.stdin.drain()
+        except BrokenPipeError:
+            raise RuntimeError(
+                f"Broken pipe: process for session '{session_id}' is no "
+                "longer accepting input. The process may have exited."
+            )
+
+        # Update awaiting_input state
+        session = self._sessions.get(session_id)
+        if session:
+            session.metadata["awaiting_input"] = False
+
+        self._add_log(session_id, f"Sent message to stdin ({len(message)} chars)")
+        return f"Message sent ({len(message)} chars)"
+
+    async def _stream_output(
+        self, process: asyncio.subprocess.Process, session_id: str
+    ) -> None:
+        """Read stdout from a process line-by-line and append to session logs.
+
+        Reads incrementally from the process stdout pipe until EOF. Each
+        line is decoded with errors='replace' and added to session logs.
+
+        Args:
+            process: The asyncio subprocess to read from.
+            session_id: The session identifier for log attribution.
+        """
+        if process.stdout is None:
+            return
+
+        while True:
+            line_bytes = await process.stdout.readline()
+            if not line_bytes:
+                break
+            line = line_bytes.decode("utf-8", errors="replace").rstrip("\n")
+            self._add_log(session_id, f"[stdout] {line}")
+
     async def _do_heartbeat(self, session: AgentSession) -> bool:
         """Check if the CLI process is still running.
 
@@ -343,6 +457,7 @@ class CLIAdapter(BaseAdapter):
             "timeout_handling",
             "graceful_termination",
             "multi_backend",
+            "interactive_stdin",
         ]
 
     def _build_args(
