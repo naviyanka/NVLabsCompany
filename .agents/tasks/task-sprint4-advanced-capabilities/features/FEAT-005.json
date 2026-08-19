@@ -2,7 +2,7 @@
   "id": "FEAT-005",
   "type": "feat",
   "description": "Pipeline Stages with Enforced Transitions: Create a pipeline system for multi-step workflow automation with named stages, valid transitions, cases, and hook system.",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "1. Create src/nexus/workflows/pipeline.py with: StageKind enum (working, review, done, cancelled). PipelineStage dataclass (id: str, name: str, kind: StageKind, position: int, config: dict). PipelineTransition dataclass (from_stage_id: str, to_stage_id: str, condition: str | None = None). CaseStatus enum (active, completed, cancelled).",
     "2. Create PipelineCase dataclass: id (str), pipeline_id (str), current_stage_id (str), status (CaseStatus), history (list of stage transitions with timestamps), created_at (datetime), updated_at (datetime).",
@@ -26,5 +26,5 @@
     "python3.12 -m pytest tests/test_workflows.py tests/test_pipeline.py -x -q"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "All 47 tests pass (existing workflow tests + new pipeline tests). Pipeline module follows same patterns as task_flow.py: dataclasses for state, str Enums for status values."
 }
