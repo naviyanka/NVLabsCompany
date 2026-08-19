@@ -1,0 +1,31 @@
+{
+  "id": "FEAT-003",
+  "type": "feat",
+  "description": "Hire Manifests (Portable Agent Role Templates) - JSON-based manifest spec with security validation and filesystem registry, ported from /projects/sandbox/munder-difflin/src/shared/hire.ts",
+  "status": "completed",
+  "steps": [
+    "Create src/nexus/templates/hire_manifest.py with: HIRE_SPEC_V1 = 'nexus/hire@1', MODEL_RE regex (letters, digits, spaces, ._()[]/:@+- max 80 chars), FLAG_RE regex (letters, digits, ._/=:,@+- max 100 chars), SAFE_FLAG_NAMES frozenset ('--model', '--max-turns', '--output-format', '--verbose'). HireManifest Pydantic BaseModel with fields: spec (str default HIRE_SPEC_V1), name (str, min_length=1, max_length=40), description (Optional[str], max_length=200), goal (Optional[str], max_length=4000), provider (Optional[str] validated against known providers from provider_presets), model (Optional[str], max_length=80, validated with MODEL_RE to reject shell metacharacters), command_flags (list[str], max 16 items, validated: each flag must match FLAG_RE, first entry must start with -, flag-shaped entries must be in SAFE_FLAG_NAMES, bare values allowed only after an allowed flag), capabilities (list[str], max 12 items, each max 40 chars), isolate (bool default False), token_cap (Optional[int], gt=0, le=10_000_000_000), author (Optional[str], max_length=80), homepage (Optional[str], max_length=300, must be https if provided). HireValidation dataclass (ok bool, manifest optional, errors list[str]).",
+    "Create src/nexus/templates/hire_security.py with: SAFE_FLAG_NAMES frozenset re-exported, is_safe_flag(token: str) -> bool function that checks if a flag token's name (before =) is in the allowlist (case-insensitive), validate_command_flags(flags: list[str]) -> tuple[bool, list[str]] that returns (ok, errors) applying the full flag validation logic (allowlist, FLAG_RE, value-after-flag rules), validate_model_id(model: str) -> tuple[bool, str] that checks MODEL_RE.",
+    "Create src/nexus/templates/hire_registry.py with ManifestRegistry class: __init__(root: Path) stores manifest directory, load() reads all .json files from root into memory, list_manifests() -> list[HireManifest], get_manifest(name: str) -> HireManifest | None, import_manifest(data: dict) -> HireValidation that validates and saves to disk, _save(manifest: HireManifest) writes as JSON to the root directory.",
+    "Create data/manifests/ directory with 12 default manifests adapted from /projects/sandbox/munder-difflin/docs/hires/manifests/ - adapt spec to 'nexus/hire@1', keep character-based naming (ryan-developer, pam-docs, dwight-qa, jim-pr-reviewer, oscar-analyst, kevin-data, angela-budget, kelly-marketing, creed-security, stanley-migrations, toby-compliance, erin-support). Use NEXUS provider naming (provider field as AgentProviderID values).",
+    "Update src/nexus/templates/__init__.py to export HireManifest, HireValidation, ManifestRegistry, HIRE_SPEC_V1, SAFE_FLAG_NAMES.",
+    "Create tests/test_hire_manifest.py with comprehensive tests: valid manifest parses correctly, name required and max 40 chars, model regex rejects shell metacharacters (& | ; $ ` etc.), model regex accepts valid models (claude-sonnet-4-6[1m], Gemini 3.1 Pro (High)), command_flags allowlist rejects unsafe flags (--permission-mode, --settings, -c), command_flags allows safe flags (--model, --max-turns, --output-format, --verbose), command_flags value allowed only after flag, provider validated against known providers, homepage must be https, token_cap bounds enforced, ManifestRegistry loads/lists/gets manifests from filesystem, import_manifest validates before saving, security boundary tests for each rejection case."
+  ],
+  "acceptance_criteria": [
+    "python3.12 -m pytest tests/test_hire_manifest.py passes with all tests green",
+    "HireManifest Pydantic model validates all fields per spec",
+    "Model regex rejects shell metacharacters (& | ; $ ` < > etc.)",
+    "Command flags allowlist is default-deny (only --model, --max-turns, --output-format, --verbose allowed)",
+    "Provider validated against AgentProviderID enum values",
+    "ManifestRegistry loads, lists, gets, and imports manifests from filesystem",
+    "12 default manifests in data/manifests/ with nexus/hire@1 spec",
+    "Security validation rejects dangerous inputs at every boundary",
+    "All existing 1230 tests still pass"
+  ],
+  "verification": [
+    "python3.12 -m pytest tests/test_hire_manifest.py -v",
+    "python3.12 -m pytest tests/ --tb=short -q"
+  ],
+  "blocked_reason": null,
+  "findings": "All 60 new tests pass. Full suite now at 1398 tests (up from 1338 baseline). All 12 default manifests in data/manifests/ load and validate correctly. The HireManifest model uses Pydantic field_validators for security boundaries (MODEL_RE rejects shell metacharacters, FLAG_RE + SAFE_FLAG_NAMES implement default-deny allowlist, KNOWN_PROVIDERS excludes custom). The ManifestRegistry supports load/list/get/import with JSON persistence. The hire_security module provides standalone validation utilities for use outside the Pydantic model context."
+}

@@ -1,0 +1,36 @@
+{
+  "id": "FEAT-004",
+  "type": "feat",
+  "description": "Hive Protocol (File-Based Agent Coordination) - multi-agent messaging, workspace management, routing, and task ledger ported from /projects/sandbox/munder-difflin/src/main/hive.ts and HIVE.md",
+  "status": "completed",
+  "steps": [
+    "Create src/nexus/communication/hive_protocol.py with: MessageAct str Enum (REQUEST/INFORM/PROPOSE/QUERY/AGREE/REFUSE/DONE), HiveMessage Pydantic BaseModel (id: str default secrets.token_hex(12), conversation: str, in_reply_to: Optional[str], from_agent: str, to_agent: str (agent_id or 'god' or 'broadcast'), act: MessageAct, subject: str, body: str, hops: int default 0, requires_reply: bool default False, needs_human: bool default False, created_at: datetime default utcnow). Anti-livelock constants: HOP_CAP = 12. Helper: requires_reply_for_act(act) returns True only for REQUEST/QUERY/PROPOSE. AgentStatus str Enum (IDLE/WORKING/BLOCKED/GONE). HiveAgentMeta Pydantic BaseModel (id, name, provider optional, role optional, capabilities list[str], cwd str default '', is_god bool default False, status AgentStatus default IDLE, last_seen float default 0.0, archived bool default False).",
+    "Create src/nexus/communication/hive_task.py with: TaskStatus str Enum (TODO/DOING/BLOCKED/DONE), HiveTask Pydantic BaseModel (id: str, title: str, description: Optional[str], assignee: Optional[str], status: TaskStatus default TODO, depends_on: list[str] default [], priority: int default 0, human_qa: list[dict] default [], created_at: datetime default utcnow).",
+    "Create src/nexus/communication/hive_manager.py with HiveManager class: __init__(root: Path) sets up hive directory. _ensure_structure() creates: root/registry.json, root/board.md, root/log.jsonl, root/agents/. register_agent(meta: HiveAgentMeta) adds to registry.json and creates agents/<id>/ with identity.md, memory.md, inbox/, inbox/.done/, outbox/, outbox/.sent/, cursor.json. unregister_agent(agent_id, archive=True) marks as archived. get_registry() -> dict[str, HiveAgentMeta]. get_agent(agent_id) -> HiveAgentMeta | None. update_status(agent_id, status). send_message(msg: HiveMessage) writes msg as JSON to agents/<from_agent>/outbox/<timestamp>-<id>.json. get_inbox(agent_id) -> list[HiveMessage] reads from agents/<id>/inbox/. mark_processed(agent_id, msg_id) moves from inbox/ to inbox/.done/. get_blackboard() -> str reads board.md. update_blackboard(content: str). append_log(event: dict) appends JSON line to log.jsonl. get_log(limit: int) -> list[dict].",
+    "Create src/nexus/communication/hive_router.py with HiveRouter class: __init__(manager: HiveManager). route() -> list[tuple[HiveMessage, list[str]]] drains all outbox/ directories: for each message file in each agent's outbox/, read it, determine recipients (if to_agent='broadcast' fan out to all active non-archived agents except sender; if to_agent='god' deliver to the god agent from registry; if to_agent='human' deliver to god as proxy; otherwise deliver to specific agent), write message JSON to each recipient's inbox/, move original from outbox/ to outbox/.sent/, append delivery event to log. Enforce HOP_CAP: if msg.hops >= 12, do not deliver, log a livelock warning instead. Return list of (message, recipient_ids) tuples for delivered messages.",
+    "Update src/nexus/communication/__init__.py to export HiveMessage, MessageAct, HiveAgentMeta, AgentStatus, HiveManager, HiveRouter, HiveTask, TaskStatus, HOP_CAP.",
+    "Create tests/test_hive_protocol.py with tests: HiveMessage creation with defaults, MessageAct enum values, requires_reply_for_act logic, HiveAgentMeta creation/validation, hop cap constant.",
+    "Create tests/test_hive_manager.py with tests: HiveManager creates directory structure, register_agent creates workspace dirs, get_registry returns registered agents, send_message writes to outbox, get_inbox reads from inbox, mark_processed moves to .done, blackboard read/write, log append/read, unregister marks as archived.",
+    "Create tests/test_hive_router.py with tests: route delivers to specific agent inbox, route handles broadcast (fans out to all active agents except sender), route handles 'god' routing (delivers to god agent), route handles 'human' routing (delivers to god as proxy), route enforces hop cap (does not deliver messages at hop limit), route moves delivered messages to outbox/.sent/, route appends delivery events to log."
+  ],
+  "acceptance_criteria": [
+    "python3.12 -m pytest tests/test_hive_protocol.py tests/test_hive_manager.py tests/test_hive_router.py passes with all tests green",
+    "HiveMessage with full FIPA-lite protocol (7 message acts, conversation threading)",
+    "HiveManager creates and maintains per-agent directory structure",
+    "HiveRouter drains outbox messages to correct inbox destinations",
+    "Broadcast support fans out to all active non-archived agents",
+    "God routing delivers to the god agent from registry",
+    "Human routing delivers to god as proxy",
+    "Hop cap (12) prevents livelock - messages at cap are not delivered",
+    "Only request/query/propose obligate replies",
+    "HiveTask model with todo/doing/blocked/done states",
+    "Append-only event log in JSONL format",
+    "All existing 1230 tests still pass"
+  ],
+  "verification": [
+    "python3.12 -m pytest tests/test_hive_protocol.py tests/test_hive_manager.py tests/test_hive_router.py -v",
+    "python3.12 -m pytest tests/ --tb=short -q"
+  ],
+  "blocked_reason": null,
+  "findings": "All 27 new tests pass. Full suite: 1425 tests passing (up from 1398 baseline). No issues encountered. The HiveManager.deliver_to_inbox() helper method was added beyond the spec to support the router's inbox delivery without duplicating logic."
+}
