@@ -1,0 +1,28 @@
+{
+  "id": "FEAT-001",
+  "type": "feat",
+  "description": "Control Registry (Operator Control) - Port the ControlRegistry from munder-difflin/src/main/control.ts. Provides per-agent operator control state: pause, gate tools, steer (inject guidance FIFO queue), halt, auto-delivery pause, resume. Plus REST API endpoints.",
+  "status": "completed",
+  "steps": [
+    "Create src/nexus/governance/control_registry.py with a ControlRegistry class. Internal state: a dict mapping agent_id -> AgentControl dataclass (paused: bool, halted: bool, auto_delivery_paused: bool, gated_tools: set[str], steer_queue: list[str]). Methods: pause(agent_id, on), gate_tool(agent_id, tool, on), steer(agent_id, text) with max 10KB per entry and FIFO queue, halt(agent_id), resume(agent_id) clears pause+halt, clear_steers(agent_id), pause_auto_delivery(agent_id, on). Read methods: tool_decision(agent_id, tool) returns tuple (deny: bool, reason: str|None), take_steer(agent_id) dequeues one entry or returns None, snapshot(agent_id) returns AgentControlSnapshot, should_halt(agent_id) returns bool, is_auto_delivery_paused(agent_id) returns bool.",
+    "Define AgentControlSnapshot as a dataclass or Pydantic model: paused, halted, auto_delivery_paused, gated_tools (list[str]), pending_steers (int).",
+    "Create src/nexus/api/routes/control.py with FastAPI APIRouter. Endpoints: POST /control/{agent_id}/pause, POST /control/{agent_id}/gate-tool (body: tool name, on bool), POST /control/{agent_id}/steer (body: text str), POST /control/{agent_id}/halt, POST /control/{agent_id}/resume, GET /control/{agent_id}/snapshot. Use Pydantic request/response models following the pattern in src/nexus/api/routes/communication.py.",
+    "Create tests/test_control_registry.py with comprehensive tests: test pause denies all tools, test gate denies specific tool, test steer enqueues and take_steer dequeues FIFO, test steer max 10KB truncation, test halt sets halt flag, test resume clears pause+halt but keeps gates, test snapshot returns correct state, test tool_decision for unknown agent returns deny=False, test combined scenarios (pause + gate, halt + steer)."
+  ],
+  "acceptance_criteria": [
+    "ControlRegistry class is importable from nexus.governance.control_registry",
+    "All operator actions (pause, gate_tool, steer, halt, resume, clear_steers, pause_auto_delivery) work correctly",
+    "tool_decision returns deny=True with reason when agent is paused or tool is gated",
+    "take_steer dequeues FIFO, one entry at a time",
+    "steer entries are truncated to 10KB max",
+    "resume clears pause+halt but preserves gate state",
+    "REST endpoints follow FastAPI patterns and return proper status codes",
+    "All tests pass with pytest tests/test_control_registry.py"
+  ],
+  "verification": [
+    "pytest tests/test_control_registry.py -v",
+    "pytest tests/ (full suite to confirm no regressions)"
+  ],
+  "blocked_reason": null,
+  "findings": "35 tests pass. Full suite: 1460 tests."
+}

@@ -1,0 +1,25 @@
+{
+  "id": "FEAT-003",
+  "type": "feat",
+  "description": "Knowledge Graph - Port the KnowledgeManager from munder-difflin/src/main/knowledge.ts. File-backed knowledge store with ingest, search (BM25), CRUD, and stats. Uses existing BM25 retriever from nexus.memory.retriever.",
+  "status": "completed",
+  "steps": [
+    "Create src/nexus/knowledge/graph_types.py with Pydantic models: KgMeta (id: str, title: str, source: str, modality: str default 'text', mime: str|None, bytes_: int, tags: list[str], caption: str|None, chunk_count: int, added_at: str), KgHit (doc_id: str, title: str, source: str, chunk_idx: int, score: float, snippet: str), IngestResult (doc_id: str, chunk_count: int, meta: KgMeta), KnowledgeStatus (enabled: bool, root: str, doc_count: int, chunk_count: int, by_modality: dict[str, int]).",
+    "Create src/nexus/knowledge/graph.py with KnowledgeManager class. Constructor takes root: str (the directory for storage). Directory layout: <root>/index.json (list of KgMeta entries), <root>/chunks/<doc_id>/ (per-document chunk files as .txt). Methods: ingest_file(src_path, title=None, tags=None, caption=None) reads file and delegates to _ingest_content. ingest_text(text, title=None, tags=None) delegates to _ingest_content. _ingest_content(content, title, source, tags, mime, modality) generates doc_id (uuid), chunks the content (paragraph-based, configurable chunk_size default 500), writes chunks to disk, updates index.json, returns IngestResult. search(query, limit=10) loads all chunks, uses BM25 from nexus.memory.retriever (tokenize + bm25_score + search functions), returns top KgHit results. list_docs() returns all KgMeta from index. get_doc(doc_id) returns meta + full text (reconstructed from chunks). remove_doc(doc_id) removes from index and deletes chunk directory. stats() returns KnowledgeStatus with counts by modality.",
+    "Create tests/test_knowledge_graph.py with comprehensive tests using tmp_path fixture: test ingest_text creates index.json and chunk files, test ingest_file reads from disk, test search returns relevant hits scored by BM25, test search with no results returns empty list, test list_docs returns all ingested docs, test get_doc returns full text, test get_doc for unknown returns None, test remove_doc removes from index and disk, test remove_doc for unknown returns False, test stats counts correctly, test multiple ingests with different modalities counted in by_modality."
+  ],
+  "acceptance_criteria": [
+    "KnowledgeManager class importable from nexus.knowledge.graph",
+    "All type models importable from nexus.knowledge.graph_types",
+    "ingest_text and ingest_file create proper directory structure with index.json and chunk files",
+    "search uses BM25 from nexus.memory.retriever and returns ranked results",
+    "list_docs, get_doc, remove_doc, stats all work correctly",
+    "All tests pass with pytest tests/test_knowledge_graph.py"
+  ],
+  "verification": [
+    "pytest tests/test_knowledge_graph.py -v",
+    "pytest tests/ (full suite to confirm no regressions)"
+  ],
+  "blocked_reason": null,
+  "findings": "31 tests pass. Full suite: 1535 tests."
+}

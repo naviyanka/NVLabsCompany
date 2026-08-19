@@ -1,0 +1,30 @@
+{
+  "project_type": "Python FastAPI backend - autonomous AI company OS",
+  "language": "Python 3.12+",
+  "build_system": "setuptools via pyproject.toml, pip install -e '.[dev]'",
+  "test_framework": "pytest with pytest-asyncio (asyncio_mode=auto), tests/ directory, conftest.py with mock_db_session fixtures",
+  "build_command": "pip install -e '.[dev]'",
+  "test_command": "pytest tests/",
+  "verification_instructions": "Run pytest from project root. All 1425 existing tests + new tests must pass.",
+  "snapshot_or_generated_files": null,
+  "setup_instructions": "pip install -e '.[dev]'",
+  "environment_constraints": "OPEN_INTERNET - full network access. Python 3.12 required. Do NOT touch dashboard/ directory.",
+  "contribution_requirements": "All code must have docstrings, type hints, Python 3.12 style (type unions with |). Follow ruff rules (100 char lines, E/F/I/N/W/UP). Modules must be independently testable.",
+  "key_patterns": "Pydantic BaseModel for API request/response models. Dataclasses for internal state. In-memory state classes (no DB required for new modules). Tests use plain pytest classes (TestXxx) with descriptive test methods. Existing patterns: ControlRegistry-like classes use a dict/map internally, expose typed methods, return typed results. Modules separate types into _types.py files (breaker_types.py pattern). API routes use FastAPI APIRouter with tags.",
+  "relevant_files": [
+    "src/nexus/governance/circuit_breaker_advanced.py",
+    "src/nexus/governance/breaker_types.py",
+    "src/nexus/memory/layered.py",
+    "src/nexus/memory/retriever.py",
+    "src/nexus/knowledge/rag.py",
+    "src/nexus/communication/hive_protocol.py",
+    "src/nexus/communication/hive_manager.py",
+    "src/nexus/runtime/lifecycle.py",
+    "src/nexus/runtime/watchdog.py",
+    "src/nexus/api/routes/communication.py",
+    "tests/test_circuit_breaker_advanced.py",
+    "tests/test_hive_protocol.py",
+    "tests/conftest.py"
+  ],
+  "directory_structure": "src/nexus/ is the main package. Subpackages: governance/, memory/, knowledge/, communication/, runtime/, api/routes/. Tests in tests/ at project root. Each domain module has its own types file (e.g., breaker_types.py). API routes are in src/nexus/api/routes/ and follow FastAPI router pattern."
+}

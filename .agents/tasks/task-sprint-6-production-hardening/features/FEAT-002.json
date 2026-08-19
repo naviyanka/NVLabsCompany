@@ -1,0 +1,27 @@
+{
+  "id": "FEAT-002",
+  "type": "feat",
+  "description": "Memory Reflector (Auto-Condense) - Port the MemoryReflector from munder-difflin/src/main/reflect.ts. Provides auto-condensation of oversized memory files with a 3-region structure (pinned, condensed, recent), verify-dont-trust gate, and atomic swap.",
+  "status": "completed",
+  "steps": [
+    "Create src/nexus/memory/reflector_types.py with dataclasses/Pydantic models: ReflectSettings (enabled: bool, interval_seconds: int default 300, byte_trigger_pct: int default 80, section_trigger: int default 20, recent_keep: int default 5, min_bytes: int default 4096), ReflectResult (id: str, condensed: bool, reason: str, old_bytes: int|None, new_bytes: int|None), Section (heading: str, body: str), ParsedMemory (header: str, pinned: str|None, condensed: str|None, recent: list[Section]).",
+    "Create src/nexus/memory/reflector.py with pure helper functions: parse_memory(text) -> ParsedMemory that splits into header, pinned (## pinned heading), condensed (## condensed heading), and recent sections. count_sections(text) -> int counting ## headings. pinned_lines(pinned: str|None) -> list[str] non-empty trimmed lines. merge_pinned(old_lines, hoist) -> list[str] appending new lines not already present. rebuild(header, pinned_lines, condensed, keep_sections) -> str reassembling the canonical 3-region file. verify(rebuilt, new_bytes, old_bytes, old_pinned_lines, merged_pinned, condensed, keep) -> VerifyResult checking: structure has all 3 regions, new_bytes < old_bytes * 0.95, new_bytes > 200, condensed non-empty, pinned lines preserved, recent sections byte-for-byte preserved.",
+    "Add MemoryReflector class (stateless for now - the LLM summarization is stubbed as a method that can be overridden/injected). It holds settings, exposes should_condense(file_bytes, section_count) -> bool for threshold checking, and condense(agent_id, text, summarizer) -> ReflectResult that runs the full pipeline: parse, split recent into keep/evict, call summarizer for evicted sections, rebuild, verify, return result. The summarizer is a callable (async or sync) that takes (condensed_text, evicted_sections, pinned_text) and returns (new_condensed: str, hoist: list[str]).",
+    "Create tests/test_memory_reflector.py with comprehensive tests: test parse_memory round-trip (parse then rebuild produces valid structure), test parse_memory with legacy flat file (no pinned/condensed headings), test count_sections, test pinned_lines filters empty lines, test merge_pinned deduplicates, test rebuild produces valid 3-region output, test verify rejects: structure missing region, too small, empty condensed, not smaller, pinned line dropped, recent section altered. Test verify accepts valid rewrite. Test should_condense threshold logic (below min_bytes, above byte trigger, above section trigger)."
+  ],
+  "acceptance_criteria": [
+    "All types importable from nexus.memory.reflector_types",
+    "parse_memory correctly splits 3-region and legacy flat files",
+    "rebuild produces a well-formed 3-region file",
+    "verify gate rejects all 6 failure conditions (structure-missing-region, too-small, empty-condensed, not-smaller, pinned-line-dropped, recent-section-altered)",
+    "verify gate accepts a valid condensation",
+    "should_condense correctly evaluates byte and section thresholds",
+    "All tests pass with pytest tests/test_memory_reflector.py"
+  ],
+  "verification": [
+    "pytest tests/test_memory_reflector.py -v",
+    "pytest tests/ (full suite to confirm no regressions)"
+  ],
+  "blocked_reason": null,
+  "findings": "44 tests pass. Full suite: 1504 tests."
+}

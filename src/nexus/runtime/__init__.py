@@ -4,6 +4,7 @@ from nexus.runtime.adapter import AgentAdapter, AgentSession, TaskResult
 from nexus.runtime.lifecycle import AgentLifecycleManager
 from nexus.runtime.executor import TaskExecutor
 from nexus.runtime.checkpoint import CheckpointManager, ExecutionCheckpoint
+from nexus.runtime.closing_time import ClosingTimeController, ClosingTimeEvent, ClosingTimePhase
 from nexus.runtime.cycle_guard import CycleGuard, CycleGuardError
 from nexus.runtime.heartbeat import HeartbeatMonitor
 from nexus.runtime.heartbeat_service import HeartbeatService
@@ -16,6 +17,9 @@ __all__ = [
     "AgentSession",
     "TaskResult",
     "AgentLifecycleManager",
+    "ClosingTimeController",
+    "ClosingTimeEvent",
+    "ClosingTimePhase",
     "TaskExecutor",
     "CheckpointManager",
     "CycleGuard",
