@@ -21,6 +21,7 @@ export interface ApiError {
 
 /** Query parameters for list endpoints */
 export interface ListParams {
+  [key: string]: string | number | undefined;
   page?: number;
   page_size?: number;
   sort_by?: string;
