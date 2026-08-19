@@ -2,7 +2,7 @@
   "id": "FEAT-003",
   "type": "feat",
   "description": "Skills Discovery + Skills Catalog + Semantic Memory (Features 15-16 from the import plan). Implements local skill scanning with frontmatter parsing, remote catalog fetching/caching, and the semantic memory manager wrapping embedding-based retrieval.",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "Create src/nexus/tools/skills_discovery.py with: LocalSkill dataclass (id, name, description, provider, scope, path); parse_skill_frontmatter(md) function extracting name+description from YAML frontmatter in SKILL.md (handle block scalar descriptions with | or > indicators); scan_skill_dir(dir, provider, scope) function walking a directory for folders containing SKILL.md; list_local_skills(cwds, bundled_dir) function scanning Claude skills dirs (~/.claude/skills/ + project .claude/skills/), OpenCode plugin dirs (~/.config/opencode/plugin/), Codex plugin dirs (~/.codex/plugins/); deduplicates by provider+name with scope precedence: project > user > bundled. Port logic from munder-difflin/src/main/skills.ts.",
     "Create src/nexus/tools/skills_catalog.py with: CatalogSkill dataclass (name, description, url, category, owner); parse_catalog_markdown(md) function parsing GitHub README tables into entries (handles ## Category headings, | Name | Description | Link | table rows, extracts GitHub owner from URL); load_catalog(cache_path, force=False) async function fetching from URL with disk cache (24h TTL), stale-on-failure fallback. Port parsing logic from parseCatalogMarkdown in munder-difflin/src/main/skills.ts.",
@@ -30,5 +30,5 @@
     "python3.12 -m pytest tests/ -x -q (full suite still passes)"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "All 50 new tests pass. Full suite passes (1828 total, up from 1778). Three modules implemented: skills_discovery.py (LocalSkill dataclass, YAML frontmatter parsing with block scalars, filesystem scanning, deduplication with scope precedence), skills_catalog.py (CatalogSkill dataclass, markdown table parsing, async load with httpx and 24h TTL disk cache), semantic.py (EmbeddingModel enum, SemanticMemoryManager with binary detection caching, mtime-based skip logic, subprocess delegation, serialized mining, silent degradation)."
 }
