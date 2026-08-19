@@ -18,6 +18,7 @@ from nexus.api.routes.companies import router as companies_router
 from nexus.api.routes.company_sim import router as company_sim_router
 from nexus.api.routes.degradation import router as degradation_router
 from nexus.api.routes.events import router as events_router
+from nexus.api.routes.okr import router as okr_router
 from nexus.api.routes.evolution import router as evolution_router
 from nexus.api.routes.goals import router as goals_router
 from nexus.api.routes.health import router as health_router
@@ -212,3 +213,4 @@ app.include_router(degradation_router)
 app.include_router(rotation_router)
 app.include_router(ws_router)
 app.include_router(events_router)
+app.include_router(okr_router)

@@ -1,0 +1,35 @@
+{
+  "id": "FEAT-001",
+  "type": "feat",
+  "description": "Tree-of-Thought Reasoning Engine and OKR Management System. Creates src/nexus/orchestration/reasoning.py with ThoughtNode, ThoughtTree, and ToTPlanner classes for tree-based reasoning. Also creates src/nexus/company/okr.py with Objective, KeyResult, and OKRManager classes, plus src/nexus/api/routes/okr.py REST API. Both modules have comprehensive tests.",
+  "status": "in_progress",
+  "steps": [
+    "Create src/nexus/orchestration/reasoning.py with: (1) ThoughtNode dataclass (id, content, parent_id, children list, score float, depth int, metadata dict), (2) ThoughtTree class (root ThoughtNode, expand method that uses LLM callable to generate child thoughts, evaluate method that scores nodes using LLM callable, select_best_path method that returns the highest-scoring path from root to leaf, prune method to remove low-scoring branches), (3) ToTPlanner class that decomposes tasks using tree exploration with configurable branching_factor (default 3), max_depth (default 3), beam_width (default 2). Uses LLM callable (Callable[[str], Awaitable[str]]) for expansion and evaluation. Falls back to linear planning (using existing TaskPlanner) if tree exploration fails. Follow the pattern in src/nexus/orchestration/llm_planner.py.",
+    "Create src/nexus/company/okr.py with: (1) Objective dataclass (id UUID, title str, description str, owner_agent_id UUID, time_frame str, status str, key_results list, created_at datetime), (2) KeyResult dataclass (id UUID, objective_id UUID, title str, target_value float, current_value float, unit str, status str, updated_at datetime), (3) OKRManager class with methods: create_objective, add_key_result, update_progress, get_company_okrs, compute_objective_progress (weighted average of key results), detect_at_risk_objectives (key results below 30% progress past 70% of time_frame).",
+    "Create src/nexus/api/routes/okr.py with FastAPI APIRouter providing REST endpoints: POST /okrs/objectives, GET /okrs/objectives, GET /okrs/objectives/{id}, POST /okrs/objectives/{id}/key-results, PUT /okrs/key-results/{id}/progress, GET /okrs/at-risk. Uses CurrentCompanyId dependency. Wire the router into src/nexus/main.py.",
+    "Update src/nexus/company/__init__.py to export OKRManager, Objective, KeyResult.",
+    "Create tests/test_reasoning.py with comprehensive tests: ThoughtNode creation, ThoughtTree expand/evaluate/select_best_path/prune, ToTPlanner decomposition with mocked LLM callable, fallback to linear planning on failure, branching_factor/max_depth/beam_width config respected. At least 15 test methods.",
+    "Create tests/test_okr.py with comprehensive tests: Objective/KeyResult creation, OKRManager CRUD operations, compute_objective_progress calculation, detect_at_risk_objectives logic, API route integration tests using TestClient. At least 15 test methods."
+  ],
+  "acceptance_criteria": [
+    "src/nexus/orchestration/reasoning.py exists with ThoughtNode, ThoughtTree, and ToTPlanner classes",
+    "ToTPlanner accepts an LLM callable and falls back to linear planning on failure",
+    "ToTPlanner respects branching_factor, max_depth, and beam_width configuration",
+    "src/nexus/company/okr.py exists with Objective, KeyResult dataclasses and OKRManager class",
+    "OKRManager has all 6 required methods: create_objective, add_key_result, update_progress, get_company_okrs, compute_objective_progress, detect_at_risk_objectives",
+    "src/nexus/api/routes/okr.py provides REST endpoints wired into main.py",
+    "tests/test_reasoning.py has 15+ test methods covering all ToT functionality",
+    "tests/test_okr.py has 15+ test methods covering OKR CRUD and business logic",
+    "All new .py files pass AST validation (valid Python 3.12 syntax)"
+  ],
+  "verification": [
+    "Run: python3 -c \"import ast; ast.parse(open('src/nexus/orchestration/reasoning.py').read())\"",
+    "Run: python3 -c \"import ast; ast.parse(open('src/nexus/company/okr.py').read())\"",
+    "Run: python3 -c \"import ast; ast.parse(open('src/nexus/api/routes/okr.py').read())\"",
+    "Run: python3 -c \"import ast; ast.parse(open('tests/test_reasoning.py').read())\"",
+    "Run: python3 -c \"import ast; ast.parse(open('tests/test_okr.py').read())\"",
+    "Verify main.py includes the okr_router import and registration"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}
