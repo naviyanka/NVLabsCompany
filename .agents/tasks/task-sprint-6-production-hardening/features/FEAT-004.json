@@ -23,5 +23,5 @@
     "pytest tests/ (full suite to confirm no regressions)"
   ],
   "blocked_reason": null,
-  "findings": "jsonschema library added as a dependency (pyproject.toml). Installed for pyenv Python 3.12.13. All 54 webhook tests pass plus full suite of 1589 tests passes with no regressions. Ruff linting and formatting verified clean."
+  "findings": "54 tests pass. Full suite: 1589 tests."
 }

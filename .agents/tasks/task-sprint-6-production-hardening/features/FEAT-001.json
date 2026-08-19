@@ -24,5 +24,5 @@
     "pytest tests/ (full suite to confirm no regressions)"
   ],
   "blocked_reason": null,
-  "findings": "Python 3.12+ required (pyenv global 3.12.13 needed). All 35 tests pass. Full suite passes at 1460 tests. Ruff linting/formatting applied. The control router uses sync endpoints (no DB needed) and a module-level singleton registry."
+  "findings": "35 tests pass. Full suite: 1460 tests."
 }

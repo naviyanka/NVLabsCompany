@@ -26,5 +26,5 @@
     "pytest tests/ (full suite to confirm no regressions)"
   ],
   "blocked_reason": null,
-  "findings": "Used StrEnum instead of (str, Enum) per ruff UP042 rule. 51 tests pass. Full suite passes with 1640 tests. ControlRegistry.steer() and clear_steers() used for steer-based interrupt."
+  "findings": "51 tests pass. Full suite: 1640 tests."
 }

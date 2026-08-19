@@ -21,5 +21,5 @@
     "pytest tests/ (full suite to confirm no regressions)"
   ],
   "blocked_reason": null,
-  "findings": "All 31 tests pass. Full suite (1535 tests) passes with no regressions. Used datetime.UTC alias per ruff UP017 rule. KgMeta bytes_ field uses Pydantic alias='bytes' with populate_by_name=True for proper serialization. Ruff auto-fix needed for import ordering in tests."
+  "findings": "31 tests pass. Full suite: 1535 tests."
 }
