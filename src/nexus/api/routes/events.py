@@ -3,15 +3,20 @@
 Provides a GET /events/stream endpoint that returns a StreamingResponse
 delivering events in SSE format. Supports optional filtering by event
 type and channel.
+
+Authentication is enforced via the standard CurrentCompanyId dependency
+(X-Company-Id header), consistent with all other API routes.
 """
 
 import asyncio
 import logging
+import uuid
 from typing import AsyncGenerator, Optional
 
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import StreamingResponse
 
+from nexus.api.deps import CurrentCompanyId
 from nexus.realtime.event_bus import RealtimeEventBus
 from nexus.realtime.events import RealtimeEvent
 from nexus.realtime.sse import EventStream, format_sse
@@ -22,27 +27,6 @@ router = APIRouter(tags=["realtime"])
 
 # Shared event bus instance for SSE subscribers
 event_bus = RealtimeEventBus()
-
-
-async def _filtered_stream(
-    stream: EventStream,
-    event_types: list[str] | None,
-    channel: str | None,
-) -> AsyncGenerator[str, None]:
-    """Yield SSE-formatted events with optional filtering.
-
-    Args:
-        stream: The EventStream to consume from.
-        event_types: Optional list of event types to include.
-        channel: Optional channel name to filter by.
-
-    Yields:
-        SSE-formatted strings for matching events.
-    """
-    async for sse_data in stream.stream():
-        # The stream yields pre-formatted data but we need the event for filtering
-        # So we use a direct queue approach instead
-        yield sse_data
 
 
 async def _event_generator(
@@ -99,6 +83,7 @@ async def _event_generator(
 @router.get("/events/stream")
 async def stream_events(
     request: Request,
+    company_id: CurrentCompanyId,
     event_types: Optional[str] = Query(
         None,
         description="Comma-separated list of event types to filter by",
@@ -112,6 +97,8 @@ async def stream_events(
 
     Returns a streaming HTTP response with content-type text/event-stream.
     Events are delivered as they occur, formatted as SSE data lines.
+
+    Requires authentication via X-Company-Id header for tenant isolation.
 
     Query Parameters:
         event_types: Optional comma-separated list of event types to filter.

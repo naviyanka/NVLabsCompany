@@ -57,10 +57,21 @@ class WebSocketManager:
     async def disconnect(self, client_id: str) -> None:
         """Remove a client connection and clean up channel subscriptions.
 
+        If the underlying WebSocket connection is still open, it is closed
+        gracefully before removing tracking state. This handles the proactive
+        disconnect case (e.g., auth revocation, eviction) where the server
+        initiates the disconnection.
+
         Args:
             client_id: UUID string identifying the client to disconnect.
         """
-        self._connections.pop(client_id, None)
+        websocket = self._connections.pop(client_id, None)
+        if websocket is not None:
+            try:
+                await websocket.close()
+            except Exception:
+                # Connection may already be closed by the client
+                pass
         # Remove from all channels
         for subscribers in self._channels.values():
             subscribers.discard(client_id)

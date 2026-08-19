@@ -2,6 +2,31 @@
 
 Provides the RealtimeChannel dataclass and ChannelRegistry for managing
 named channels that clients can subscribe to for scoped event delivery.
+
+Architecture note on dual channel registries:
+----------------------------------------------
+The ChannelRegistry in this module and WebSocketManager._channels serve
+different purposes and are intentionally independent:
+
+- ChannelRegistry is the **metadata registry**: it manages channel lifecycle
+  (creation, deletion, listing) and stores channel metadata (name, description,
+  creation time). It is the source of truth for what channels exist and their
+  configuration. Think of it as the "channel catalog."
+
+- WebSocketManager._channels is the **delivery routing table**: it tracks
+  which client_ids are actively subscribed to each channel for the purpose
+  of broadcasting messages. It is optimized for fast fan-out during message
+  delivery. Think of it as the "live subscription set."
+
+These two registries are not synchronized because they serve different
+layers. A channel can exist in the ChannelRegistry (created by an admin,
+available for subscription) without any active WebSocket subscribers. And
+a WebSocket client can subscribe to a channel name in the manager that
+has not been formally registered (ad-hoc/dynamic channels).
+
+If your use case requires consistency between the two, coordinate at the
+application layer (e.g., validate channel existence in ChannelRegistry
+before allowing WebSocket subscription).
 """
 
 import uuid

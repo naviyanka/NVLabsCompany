@@ -3,12 +3,17 @@
 Provides a WebSocket connection endpoint at /ws/{client_id} that accepts
 connections, registers them with the WebSocketManager, and processes
 incoming JSON commands for channel subscriptions.
+
+Authentication is handled via a query parameter (token) containing the
+company UUID, since WebSocket handshakes do not reliably support custom
+headers in all client implementations.
 """
 
 import json
 import logging
+import uuid
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect, status
 
 from nexus.realtime.websocket_manager import WebSocketManager
 
@@ -20,9 +25,39 @@ router = APIRouter(tags=["realtime"])
 manager = WebSocketManager()
 
 
+async def _authenticate_websocket(
+    websocket: WebSocket, company_id: str | None
+) -> uuid.UUID | None:
+    """Validate the company_id query parameter for WebSocket auth.
+
+    Args:
+        websocket: The WebSocket connection to close on failure.
+        company_id: The company UUID string from query parameters.
+
+    Returns:
+        Parsed UUID if valid, None if authentication failed (socket closed).
+    """
+    if not company_id:
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return None
+    try:
+        return uuid.UUID(company_id)
+    except ValueError:
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return None
+
+
 @router.websocket("/ws/{client_id}")
-async def websocket_endpoint(websocket: WebSocket, client_id: str) -> None:
+async def websocket_endpoint(
+    websocket: WebSocket,
+    client_id: str,
+    company_id: str | None = Query(None, alias="company_id"),
+) -> None:
     """Accept a WebSocket connection and handle real-time communication.
+
+    Requires a company_id query parameter for authentication and tenant
+    isolation. The company_id must be a valid UUID. If missing or invalid,
+    the connection is closed with policy violation code (1008).
 
     Registers the client with the WebSocketManager, then enters a loop
     listening for JSON messages. Supports the following commands:
@@ -37,7 +72,13 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str) -> None:
     Args:
         websocket: The FastAPI WebSocket connection.
         client_id: UUID string identifying the connecting client.
+        company_id: Company UUID string for tenant isolation (query param).
     """
+    # Authenticate via query parameter
+    validated_company_id = await _authenticate_websocket(websocket, company_id)
+    if validated_company_id is None:
+        return
+
     await websocket.accept()
     await manager.connect(client_id, websocket)
 

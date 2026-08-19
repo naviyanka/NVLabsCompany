@@ -79,6 +79,11 @@ class RealtimeEventBus:
         Uses non-blocking put_nowait to fan out to subscriber queues.
         If a queue is full, the event is dropped for that subscriber.
 
+        In addition to delivering to subscribers of the exact topic,
+        events are also fanned out to subscribers of the special "__all__"
+        catch-all topic. This allows clients to receive all events without
+        subscribing to each topic individually.
+
         Args:
             topic: The topic to publish to.
             event: The RealtimeEvent to deliver.
@@ -97,6 +102,19 @@ class RealtimeEventBus:
                     "Subscriber queue full for topic '%s', dropping event",
                     topic,
                 )
+
+        # Fan out to "__all__" catch-all subscribers (skip if topic is already "__all__")
+        if topic != "__all__":
+            all_subscribers = self._subscriptions.get("__all__", [])
+            for queue in list(all_subscribers):
+                try:
+                    queue.put_nowait(event)
+                    delivered += 1
+                except asyncio.QueueFull:
+                    logger.debug(
+                        "Subscriber queue full for '__all__' catch-all, dropping event",
+                    )
+
         return delivered
 
     def subscriber_count(self, topic: str) -> int:
