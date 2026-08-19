@@ -2,7 +2,7 @@
   "id": "FEAT-003",
   "type": "feat",
   "description": "4-Layer Memory System (L0-L3) - Upgrade from 3-temperature store to intelligent 4-layer memory with rule-based fact extraction, Jaccard deduplication, and L2->L3 promotion logic.",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "Create src/nexus/memory/layered.py with: MemoryLayer enum (L0_EPHEMERAL, L1_SESSION, L2_AGENT, L3_SHARED), LayeredMemoryConfig dataclass (l1_ring_size: int = 50, l2_max_facts: int = 500, l3_promotion_threshold: int = 3, dedup_similarity: float = 0.8). Fact dataclass (content: str, source_agent_id: UUID | None, created_at: datetime, access_count: int = 0, metadata: dict | None = None). L1Summary dataclass (summary: str, task_id: UUID, created_at: datetime). LayeredMemoryStore class with: L0 is caller-managed (no storage in this class, just documented). L1: ring buffer of session summaries (list with max size, oldest evicted). L2: per-agent fact store (dict[UUID, list[Fact]]) with dedup on insert. L3: shared organizational knowledge (list[Fact] accessible by all agents, promoted from L2). Methods: add_session_summary(task_id, summary) -> stores in L1 ring buffer; store_fact(agent_id, content, metadata) -> stores in L2 with dedup check; get_agent_facts(agent_id, limit) -> retrieves from L2; get_shared_knowledge(limit) -> retrieves from L3; promote_to_shared(agent_id, fact_content) -> moves fact from L2 to L3 if promotion criteria met; get_context_window(agent_id, limit) -> combines L1 + L2 + L3 for agent context.",
     "Create src/nexus/memory/extract.py with: ExtractionRule dataclass (pattern: str, fact_type: str, transform: Callable | None). FactExtractor class that uses regex-based rules to extract facts from agent output text. Rules include: (1) 'learned that...' pattern, (2) 'important:...' pattern, (3) 'note:...' pattern, (4) 'always...' / 'never...' pattern for behavioral rules, (5) error patterns for defensive rules. Method: extract_facts(text: str, agent_id: UUID) -> list[Fact]. Include default_rules() class method returning standard rule set.",
@@ -24,5 +24,5 @@
     "/root/.pyenv/versions/3.12.13/bin/python -m pytest tests/ --tb=short -q"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "All 60 new tests pass. Full suite at 888 tests (749 baseline + 41 FEAT-001 + 38 FEAT-002 + 60 FEAT-003). The tokenize function in dedup.py filters common English stopwords but keeps single-char tokens that are meaningful (numbers like '5', '8'). Jaccard similarity threshold of 0.8 requires near-subset relationships between token sets to trigger dedup (at least 5 shared tokens with at most 1 unique to achieve 0.83). The dedup module's tokenize function is separate from retriever.py's tokenize (which returns a list and does not filter stopwords) - both are imported at different levels. The __init__.py re-exports 'tokenize' from retriever.py (existing behavior preserved)."
 }
