@@ -43,5 +43,5 @@
     "cd /projects/sandbox/NVLabsCompany/dashboard && npm run build"
   ],
   "blocked_reason": null,
-  "findings": "All 14 components created plus config. TypeScript strict mode passes cleanly. Vite build succeeds (bundle is large due to Three.js - 1.7MB chunk - warning is informational only). Used static mock data with 12 agents + 1 manager across 9 zones. CameraControls uses drei OrbitControls with limited polar/azimuth angles for isometric feel. THREE.Event typing required type assertion for stopPropagation (R3F event system)."
+  "findings": "All 14 components created plus config. TypeScript strict mode passes cleanly. Vite build succeeds (bundle is large due to Three.js - 1.7MB chunk - warning is informational only). Used static mock data with 12 agents + 1 manager across 9 zones. CameraControls uses drei OrbitControls with limited polar/azimuth angles for isometric feel. THREE.Event typing required type assertion for stopPropagation (R3F event system). POST-FIX: Camera zoom reduced from 28 to 18, position moved to [20,25,20], OrbitControls target set to [-3,0,-3] to center view. ZoneLabel distanceFactor reduced from 20 to 8 to fix enormous text labels filling the viewport."
 }
