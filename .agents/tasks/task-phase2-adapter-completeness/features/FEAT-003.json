@@ -2,7 +2,7 @@
   "id": "FEAT-003",
   "type": "feat",
   "description": "Semantic Memory Embedding Fallback: Enhance SemanticMemoryManager to use LocalEmbeddingProvider as a built-in fallback when mempalace is unavailable, storing embeddings in a JSON file and searching via cosine similarity",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "In src/nexus/memory/semantic.py, import LocalEmbeddingProvider and cosine_similarity from src/nexus/knowledge/embeddings.py. Since LocalEmbeddingProvider uses async methods, add an asyncio import.",
     "Add an __init__ parameter 'embeddings_path: str | None = None' that defaults to None. If provided, it sets the path for the JSON embeddings store file. If None and palace_path is set, default to '<palace_path>/embeddings.json'.",
@@ -27,5 +27,5 @@
     "python3.12 -m pytest tests/ --tb=no -q"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "Changed fallback behavior: when no embeddings_path is configured and mempalace is unavailable, returns reason=unavailable for backward compat with existing test_semantic_memory.py. The test_mine_when_unavailable test expects this behavior. Total tests went from 1944 to 1975 (31 new tests added)."
 }
