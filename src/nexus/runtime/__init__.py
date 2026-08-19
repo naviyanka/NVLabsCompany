@@ -7,6 +7,7 @@ from nexus.runtime.cycle_guard import CycleGuard, CycleGuardError
 from nexus.runtime.heartbeat import HeartbeatMonitor
 from nexus.runtime.replay import ReplayEngine
 from nexus.runtime.watchdog import Watchdog, WatchdogConfig
+from nexus.runtime.worktree import WorktreeManager, WorktreeInfo, MergeResult
 
 __all__ = [
     "AgentAdapter",
@@ -17,7 +18,10 @@ __all__ = [
     "CycleGuard",
     "CycleGuardError",
     "HeartbeatMonitor",
+    "MergeResult",
     "ReplayEngine",
     "Watchdog",
     "WatchdogConfig",
+    "WorktreeInfo",
+    "WorktreeManager",
 ]
