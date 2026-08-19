@@ -447,7 +447,7 @@ export function Tasks() {
             <h3 className="text-white font-semibold text-sm mb-3">Top Agents by Tasks</h3>
             <div className="space-y-3">
               {topAgents.map((agent, idx) => {
-                const maxTasks = 96;
+                const maxTasks = Math.max(...topAgents.filter(a => a.name !== 'Others').map(a => a.tasks));
                 const barWidth = (agent.tasks / maxTasks) * 100;
                 return (
                   <div key={agent.name}>
@@ -557,8 +557,8 @@ export function Tasks() {
               <div>
                 <p className="text-[9px] text-gray-500 uppercase">Status</p>
                 <div className="flex items-center gap-1 mt-0.5">
-                  <span className="w-1.5 h-1.5 rounded-full bg-green-400" />
-                  <span className="text-xs text-green-400">In Progress</span>
+                  <span className="w-1.5 h-1.5 rounded-full bg-blue-400" />
+                  <span className="text-xs text-blue-400">In Progress</span>
                 </div>
               </div>
               <div className="col-span-2">
