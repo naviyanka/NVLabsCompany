@@ -16,14 +16,11 @@ import {
   Palette,
   Wrench,
   ExternalLink,
-  ChevronRight,
   ChevronDown,
-  Save,
-  Copy,
-  Mail,
-  MessageSquare,
-  Globe,
-  Check,
+  Trash2,
+  Archive,
+  Download,
+  FolderOpen,
 } from 'lucide-react';
 
 // ─── Static Mock Data ──────────────────────────────────────────────────────────
@@ -38,8 +35,8 @@ const navItems = [
   { label: 'Roles & Permissions', icon: UserCog, active: false },
   { label: 'Billing & Subscription', icon: CreditCard, active: false },
   { label: 'System Configuration', icon: SettingsIcon, active: false },
-  { label: 'Notifications', icon: Bell, active: true },
-  { label: 'Data & Storage', icon: Database, active: false },
+  { label: 'Notifications', icon: Bell, active: false },
+  { label: 'Data & Storage', icon: Database, active: true },
   { label: 'Backup & Restore', icon: ArchiveRestore, active: false },
   { label: 'Audit Logs', icon: FileText, active: false },
   { label: 'Appearance', icon: Palette, active: false },
@@ -53,129 +50,143 @@ const footerLinks = [
   { label: 'Terms of Service' },
 ];
 
-const notificationTabs = [
-  { label: 'Notification Preferences', active: true },
-  { label: 'Channels', active: false },
-  { label: 'Quiet Hours', active: false },
-  { label: 'Digest Settings', active: false },
+const storageTabs = [
+  { label: 'Storage Overview', active: true },
+  { label: 'Data Retention', active: false },
+  { label: 'Data Classification', active: false },
+  { label: 'Export & Import', active: false },
 ];
 
-const notificationCategories = [
+const storageStats = [
   {
-    name: 'System Alerts',
-    color: 'bg-red-500',
-    description: 'Critical system issues, downtime, and performance alerts.',
-    inApp: true,
-    email: true,
-    push: true,
-    webhook: true,
+    label: 'Total Storage Used',
+    value: '1.42 TB',
+    sub: 'of 5 TB',
+    change: null,
   },
   {
-    name: 'Agent & Task Updates',
-    color: 'bg-green-500',
-    description: 'Agent status changes, task completions, and failures.',
-    inApp: true,
-    email: false,
-    push: true,
-    webhook: false,
+    label: 'Storage Utilization',
+    value: '28.4%',
+    sub: null,
+    change: '+3.2% this month',
   },
   {
-    name: 'Pipeline Events',
-    color: 'bg-blue-500',
-    description: 'Pipeline runs, deployments, and stage updates.',
-    inApp: false,
-    email: true,
-    push: false,
-    webhook: true,
+    label: 'Objects Stored',
+    value: '3.21M',
+    sub: null,
+    change: '+15% this month',
   },
   {
-    name: 'Security Notifications',
+    label: 'Storage Cost (Est.)',
+    value: '$142.48',
+    sub: '/ this month',
+    change: null,
+  },
+];
+
+const storageSegments = [
+  { label: 'Agents Data', size: '620 GB', percent: 43.7, color: 'bg-purple-500' },
+  { label: 'Pipeline Artifacts', size: '420 GB', percent: 29.6, color: 'bg-blue-500' },
+  { label: 'Logs & Events', size: '240 GB', percent: 16.9, color: 'bg-teal-500' },
+  { label: 'Backups', size: '140 GB', percent: 9.8, color: 'bg-orange-500' },
+];
+
+const dataBreakdown = [
+  {
+    type: 'Agents Data',
     color: 'bg-purple-500',
-    description: 'Login alerts, security issues, and access changes.',
-    inApp: true,
-    email: true,
-    push: true,
-    webhook: true,
+    description: 'Agent memory, sessions, and knowledge.',
+    storage: '620 GB',
+    storagePercent: 43.7,
+    objects: '1.24M',
+    lastUpdated: 'May 19, 2024 02:30 PM',
   },
   {
-    name: 'Mentions & Comments',
-    color: 'bg-orange-500',
-    description: 'You were mentioned or someone commented.',
-    inApp: true,
-    email: false,
-    push: true,
-    webhook: false,
+    type: 'Pipeline Artifacts',
+    color: 'bg-blue-500',
+    description: 'Build artifacts, test results, and outputs.',
+    storage: '420 GB',
+    storagePercent: 29.6,
+    objects: '843K',
+    lastUpdated: 'May 19, 2024 02:25 PM',
   },
   {
-    name: 'Reports & Exports',
+    type: 'Logs & Events',
     color: 'bg-teal-500',
-    description: 'Report generation, exports, and downloads.',
-    inApp: false,
-    email: true,
-    push: false,
-    webhook: false,
+    description: 'System logs, audit events, and monitoring.',
+    storage: '240 GB',
+    storagePercent: 16.9,
+    objects: '882K',
+    lastUpdated: 'May 19, 2024 02:30 PM',
   },
   {
-    name: 'Billing & Subscription',
-    color: 'bg-pink-500',
-    description: 'Invoices, payment confirmations, and subscription updates.',
-    inApp: false,
-    email: true,
-    push: false,
-    webhook: false,
+    type: 'Backups',
+    color: 'bg-orange-500',
+    description: 'Automated backups and snapshots.',
+    storage: '140 GB',
+    storagePercent: 9.8,
+    objects: '24K',
+    lastUpdated: 'May 19, 2024 01:50 PM',
+  },
+  {
+    type: 'Other Data',
+    color: 'bg-gray-500',
+    description: 'Configs, settings, and miscellaneous.',
+    storage: '32 GB',
+    storagePercent: 2.3,
+    objects: '18K',
+    lastUpdated: 'May 19, 2024 01:30 PM',
   },
 ];
 
-const channels = [
+const quickActions = [
   {
-    icon: Mail,
-    label: 'Email',
-    detail: 'navi.yanka@nvlabs.dev',
-    status: 'Verified',
+    icon: Trash2,
+    iconColor: 'text-red-400',
+    iconBg: 'bg-red-500/10',
+    title: 'Clean Up Storage',
+    description: 'Remove old logs, artifacts, and temp files.',
+    link: 'Run Cleanup',
   },
   {
-    icon: Bell,
-    label: 'Push Notifications',
-    detail: 'iPhone 14 Pro',
-    status: 'Connected',
+    icon: Archive,
+    iconColor: 'text-blue-400',
+    iconBg: 'bg-blue-500/10',
+    title: 'Archive Old Data',
+    description: 'Archive data to reduce active storage.',
+    link: 'Archive Now',
   },
   {
-    icon: MessageSquare,
-    label: 'Slack',
-    detail: '#alerts',
-    status: 'Connected',
+    icon: Download,
+    iconColor: 'text-green-400',
+    iconBg: 'bg-green-500/10',
+    title: 'Export Data',
+    description: 'Export your data in CSV, JSON or Parquet.',
+    link: 'Export Now',
   },
   {
-    icon: Globe,
-    label: 'Webhook',
-    detail: 'https://hooks.nvlabs.dev/notify',
-    status: 'Active',
+    icon: FolderOpen,
+    iconColor: 'text-purple-400',
+    iconBg: 'bg-purple-500/10',
+    title: 'Manage Buckets',
+    description: 'View and manage storage buckets.',
+    link: 'Manage',
   },
 ];
 
-const helpLinks = [
-  { title: 'Notification Guide', description: 'Learn how notifications work' },
-  { title: 'Troubleshooting', description: 'Fix notification issues' },
-  { title: 'Contact Support', description: 'Get help from our team' },
+const topConsumers = [
+  { label: 'Agent Memory', size: '620 GB', percent: 43, color: 'bg-purple-500' },
+  { label: 'Pipeline Runs', size: '420 GB', percent: 29.6, color: 'bg-blue-500' },
+  { label: 'Logs', size: '240 GB', percent: 16.9, color: 'bg-teal-500' },
+  { label: 'Backups', size: '140 GB', percent: 9.8, color: 'bg-orange-500' },
 ];
 
-// ─── Toggle Switch Component ───────────────────────────────────────────────────
-
-function ToggleSwitch({ enabled }: { enabled: boolean }) {
-  return (
-    <div
-      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-        enabled ? 'bg-primary-500' : 'bg-gray-600'
-      }`}
-    >
-      <span
-        className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-          enabled ? 'translate-x-6' : 'translate-x-1'
-        }`}
-      />
-    </div>
-  );
-}
+const dataProtection = [
+  { label: 'Encryption at Rest', value: 'AES-256' },
+  { label: 'Encryption in Transit', value: 'TLS 1.3' },
+  { label: 'Redundant Storage', value: 'Multi-region' },
+  { label: 'Daily Backups', value: 'Enabled' },
+];
 
 // ─── Main Component ────────────────────────────────────────────────────────────
 
@@ -224,22 +235,16 @@ export function Settings() {
         {/* Center Content */}
         <div className="flex-1 min-w-0 space-y-6">
           {/* Section Header */}
-          <div className="flex items-center justify-between">
-            <div>
-              <h2 className="text-lg font-semibold text-white">Notifications</h2>
-              <p className="text-sm text-gray-400 mt-0.5">
-                Configure how and when you want to be notified.
-              </p>
-            </div>
-            <button className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-green-600 hover:bg-green-700 rounded-lg transition-colors">
-              <Save size={14} />
-              Save Changes
-            </button>
+          <div>
+            <h2 className="text-lg font-semibold text-white">Data &amp; Storage</h2>
+            <p className="text-sm text-gray-400 mt-0.5">
+              Manage how your data is stored, retained, and protected.
+            </p>
           </div>
 
           {/* Tab Navigation */}
           <div className="flex items-center gap-1 border-b border-white/[0.08]">
-            {notificationTabs.map((tab) => (
+            {storageTabs.map((tab) => (
               <button
                 key={tab.label}
                 className={`px-4 py-2.5 text-sm font-medium transition-colors border-b-2 ${
@@ -253,151 +258,139 @@ export function Settings() {
             ))}
           </div>
 
-          {/* Enable Notifications Toggle */}
+          {/* Storage Usage Section */}
           <Card padding="lg">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between mb-4">
               <div>
-                <p className="text-sm font-medium text-white">Enable Notifications</p>
+                <h3 className="text-sm font-semibold text-white">Storage Usage</h3>
                 <p className="text-xs text-gray-400 mt-0.5">
-                  Turn on or off all notifications for your account.
+                  Overview of your platform storage across all data types.
                 </p>
               </div>
-              <ToggleSwitch enabled={true} />
-            </div>
-          </Card>
-
-          {/* Notification Categories */}
-          <Card padding="lg">
-            <div className="mb-4">
-              <h3 className="text-sm font-semibold text-white">Notification Categories</h3>
-              <p className="text-xs text-gray-400 mt-0.5">
-                Choose which notifications you want to receive.
-              </p>
-            </div>
-
-            {/* Table Header */}
-            <div className="grid grid-cols-[1fr_auto] items-center border-b border-white/[0.08] pb-2 mb-2">
-              <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)] gap-4">
-                <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">Category</span>
-                <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">Description</span>
-              </div>
-              <div className="flex items-center gap-6 pl-4">
-                <span className="text-xs font-medium text-gray-500 uppercase tracking-wide w-12 text-center">In-App</span>
-                <span className="text-xs font-medium text-gray-500 uppercase tracking-wide w-12 text-center">Email</span>
-                <span className="text-xs font-medium text-gray-500 uppercase tracking-wide w-12 text-center">Push</span>
-                <span className="text-xs font-medium text-gray-500 uppercase tracking-wide w-14 text-center">Webhook</span>
-                <span className="w-5" />
+              <div className="relative flex items-center">
+                <select className="px-3 py-1.5 text-sm text-gray-300 bg-white/[0.04] border border-white/[0.08] rounded-lg appearance-none pr-8">
+                  <option>All Environments</option>
+                </select>
+                <ChevronDown size={14} className="absolute right-2.5 text-gray-400 pointer-events-none" />
               </div>
             </div>
 
-            {/* Table Rows */}
-            <div className="divide-y divide-white/[0.08]">
-              {notificationCategories.map((category) => (
+            {/* Stat Cards */}
+            <div className="grid grid-cols-4 gap-4 mb-6">
+              {storageStats.map((stat) => (
                 <div
-                  key={category.name}
-                  className="grid grid-cols-[1fr_auto] items-center py-3"
+                  key={stat.label}
+                  className="rounded-lg bg-dark-bg border border-white/[0.08] p-4"
                 >
-                  <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)] gap-4 items-center">
-                    <div className="flex items-center gap-2">
-                      <span className={`w-2 h-2 rounded-full ${category.color} flex-shrink-0`} />
-                      <span className="text-sm font-medium text-white truncate">{category.name}</span>
-                    </div>
-                    <span className="text-xs text-gray-400 truncate">{category.description}</span>
+                  <p className="text-xs text-gray-400 mb-1">{stat.label}</p>
+                  <div className="flex items-baseline gap-1.5">
+                    <span className="text-xl font-bold text-white">{stat.value}</span>
+                    {stat.sub && (
+                      <span className="text-xs text-gray-500">{stat.sub}</span>
+                    )}
                   </div>
-                  <div className="flex items-center gap-6 pl-4">
-                    <div className="w-12 flex justify-center">
-                      <ToggleSwitch enabled={category.inApp} />
-                    </div>
-                    <div className="w-12 flex justify-center">
-                      <ToggleSwitch enabled={category.email} />
-                    </div>
-                    <div className="w-12 flex justify-center">
-                      <ToggleSwitch enabled={category.push} />
-                    </div>
-                    <div className="w-14 flex justify-center">
-                      <ToggleSwitch enabled={category.webhook} />
-                    </div>
-                    <ChevronDown size={14} className="text-gray-400 w-5" />
-                  </div>
+                  {stat.change && (
+                    <p className="text-xs text-green-400 mt-1">{stat.change}</p>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            {/* Stacked Horizontal Progress Bar */}
+            <div className="h-4 w-full rounded-full overflow-hidden flex">
+              {storageSegments.map((segment) => (
+                <div
+                  key={segment.label}
+                  className={`${segment.color} h-full`}
+                  style={{ width: `${segment.percent}%` }}
+                />
+              ))}
+            </div>
+
+            {/* Legend */}
+            <div className="flex items-center gap-6 mt-3">
+              {storageSegments.map((segment) => (
+                <div key={segment.label} className="flex items-center gap-1.5">
+                  <span className={`w-2.5 h-2.5 rounded-full ${segment.color}`} />
+                  <span className="text-xs text-gray-400">
+                    {segment.label}: {segment.size}
+                  </span>
                 </div>
               ))}
             </div>
           </Card>
 
-          {/* Advanced Settings */}
+          {/* Data Breakdown Section */}
           <Card padding="lg">
-            <h3 className="text-sm font-semibold text-white mb-4">Advanced Settings</h3>
-            <div className="divide-y divide-white/[0.08]">
-              {/* Do not disturb */}
-              <div className="flex items-center justify-between py-4 first:pt-0">
-                <div className="flex-1 min-w-0 pr-4">
-                  <p className="text-sm font-medium text-white">Do not disturb</p>
-                  <p className="text-xs text-gray-400 mt-0.5">
-                    Temporarily silence non-critical notifications.
-                  </p>
-                </div>
-                <div className="relative flex items-center">
-                  <select
-                    className="w-48 px-3 py-2 text-sm text-gray-300 bg-white/[0.04] border border-white/[0.08] rounded-lg appearance-none pr-9"
-                    defaultValue="Turn off in 1 hour"
-                  >
-                    <option>Turn off in 1 hour</option>
-                  </select>
-                  <ChevronDown size={14} className="absolute right-3 text-gray-400 pointer-events-none" />
-                </div>
-              </div>
-
-              {/* Notification sound */}
-              <div className="flex items-center justify-between py-4">
-                <div className="flex-1 min-w-0 pr-4">
-                  <p className="text-sm font-medium text-white">Notification sound</p>
-                  <p className="text-xs text-gray-400 mt-0.5">
-                    Play a sound for in-app notifications.
-                  </p>
-                </div>
-                <div className="flex items-center gap-3">
-                  <div className="relative flex items-center">
-                    <select
-                      className="w-32 px-3 py-2 text-sm text-gray-300 bg-white/[0.04] border border-white/[0.08] rounded-lg appearance-none pr-9"
-                      defaultValue="Default"
-                    >
-                      <option>Default</option>
-                    </select>
-                    <ChevronDown size={14} className="absolute right-3 text-gray-400 pointer-events-none" />
-                  </div>
-                  <ToggleSwitch enabled={true} />
-                </div>
-              </div>
-
-              {/* Browser notifications */}
-              <div className="flex items-center justify-between py-4">
-                <div className="flex-1 min-w-0 pr-4">
-                  <p className="text-sm font-medium text-white">Browser notifications</p>
-                  <p className="text-xs text-gray-400 mt-0.5">
-                    Show notifications on your desktop.
-                  </p>
-                </div>
-                <ToggleSwitch enabled={true} />
-              </div>
-
-              {/* Webhook URL */}
-              <div className="flex items-center justify-between py-4 last:pb-0">
-                <div className="flex-1 min-w-0 pr-4">
-                  <p className="text-sm font-medium text-white">Webhook URL</p>
-                  <p className="text-xs text-gray-400 mt-0.5">
-                    Send notifications to your custom webhook endpoint.
-                  </p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className="flex items-center w-64 px-3 py-2 text-sm text-gray-300 bg-white/[0.04] border border-white/[0.08] rounded-lg">
-                    <span className="flex-1 truncate">https://hooks.nvlabs.dev/notify</span>
-                    <Copy size={14} className="text-gray-400 flex-shrink-0 ml-2" />
-                  </div>
-                  <ChevronRight size={14} className="text-gray-400" />
-                </div>
-              </div>
+            <div className="mb-4">
+              <h3 className="text-sm font-semibold text-white">Data Breakdown</h3>
+              <p className="text-xs text-gray-400 mt-0.5">
+                Detailed view of storage usage by data type.
+              </p>
             </div>
+
+            {/* Table Header */}
+            <div className="grid grid-cols-[2fr_1.2fr_0.8fr_1.2fr_0.6fr] gap-4 items-center border-b border-white/[0.08] pb-2 mb-2">
+              <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">Data Type</span>
+              <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">Storage Used</span>
+              <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">Objects</span>
+              <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">Last Updated</span>
+              <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">Actions</span>
+            </div>
+
+            {/* Table Rows */}
+            <div className="divide-y divide-white/[0.08]">
+              {dataBreakdown.map((row) => (
+                <div
+                  key={row.type}
+                  className="grid grid-cols-[2fr_1.2fr_0.8fr_1.2fr_0.6fr] gap-4 items-center py-3"
+                >
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className={`w-2 h-2 rounded-full ${row.color} flex-shrink-0`} />
+                      <span className="text-sm font-medium text-white">{row.type}</span>
+                    </div>
+                    <p className="text-xs text-gray-500 mt-0.5 ml-4">{row.description}</p>
+                  </div>
+                  <div>
+                    <span className="text-sm text-white">{row.storage}</span>
+                    <div className="w-full h-1.5 rounded-full bg-white/[0.08] mt-1">
+                      <div
+                        className={`h-full rounded-full ${row.color}`}
+                        style={{ width: `${row.storagePercent}%` }}
+                      />
+                    </div>
+                  </div>
+                  <span className="text-sm text-gray-300">{row.objects}</span>
+                  <span className="text-xs text-gray-400">{row.lastUpdated}</span>
+                  <a href="#" className="text-xs text-primary-400 hover:text-primary-300 transition-colors">
+                    View
+                  </a>
+                </div>
+              ))}
+            </div>
+
+            <p className="text-xs text-gray-500 mt-4">Showing 1 to 5 of 5 items</p>
           </Card>
+
+          {/* Quick Actions */}
+          <div className="grid grid-cols-4 gap-4">
+            {quickActions.map((action) => {
+              const Icon = action.icon;
+              return (
+                <Card key={action.title} padding="lg">
+                  <div className={`p-2 rounded-lg ${action.iconBg} w-fit mb-3`}>
+                    <Icon size={16} className={action.iconColor} />
+                  </div>
+                  <h4 className="text-sm font-medium text-white mb-1">{action.title}</h4>
+                  <p className="text-xs text-gray-400 mb-3">{action.description}</p>
+                  <a href="#" className="text-xs text-primary-400 hover:text-primary-300 transition-colors">
+                    {action.link} &rarr;
+                  </a>
+                </Card>
+              );
+            })}
+          </div>
 
           {/* Footer */}
           <div className="border-t border-white/[0.08] pt-6 pb-4">
@@ -423,61 +416,104 @@ export function Settings() {
 
         {/* Right Sidebar */}
         <div className="w-[25%] flex-shrink-0 space-y-6">
-          {/* Notification Preview */}
+          {/* Storage Quota */}
           <Card padding="lg">
-            <h3 className="text-sm font-semibold text-white mb-2">Notification Preview</h3>
+            <h3 className="text-sm font-semibold text-white mb-2">Storage Quota</h3>
             <p className="text-xs text-gray-400 mb-4">
-              This is how your notification will look.
+              Configure and manage your storage limits.
             </p>
-            <div className="rounded-lg bg-dark-bg border border-white/[0.08] p-4">
-              <div className="flex items-center justify-between mb-3">
-                <div className="flex items-center gap-2">
-                  <span className="w-2 h-2 rounded-full bg-primary-500" />
-                  <span className="text-xs font-medium text-white">NVLABS Mission Control</span>
+
+            {/* Circular Progress Ring */}
+            <div className="flex justify-center mb-4">
+              <div className="relative w-32 h-32">
+                <svg className="w-full h-full -rotate-90" viewBox="0 0 120 120">
+                  <circle
+                    cx="60"
+                    cy="60"
+                    r="52"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="10"
+                    className="text-white/[0.08]"
+                  />
+                  <circle
+                    cx="60"
+                    cy="60"
+                    r="52"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="10"
+                    strokeLinecap="round"
+                    className="text-primary-500"
+                    strokeDasharray={`${2 * Math.PI * 52}`}
+                    strokeDashoffset={`${2 * Math.PI * 52 * (1 - 0.7)}`}
+                  />
+                </svg>
+                <div className="absolute inset-0 flex flex-col items-center justify-center">
+                  <span className="text-lg font-bold text-white">70%</span>
                 </div>
-                <span className="text-xs text-gray-500">now</span>
               </div>
-              <div className="flex items-start gap-2 mb-2">
-                <Check size={14} className="text-green-400 flex-shrink-0 mt-0.5" />
-                <p className="text-sm font-medium text-white">Pipeline Deployment Successful</p>
+            </div>
+
+            <div className="text-center mb-4">
+              <p className="text-sm font-medium text-white">5 TB Total Quota</p>
+              <p className="text-xs text-gray-400 mt-0.5">3.58 TB Used</p>
+            </div>
+
+            <div className="border-t border-white/[0.08] pt-4">
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-xs text-gray-400">Alert Threshold</span>
+                <span className="text-xs font-medium text-white">85%</span>
               </div>
-              <p className="text-xs text-gray-400 mb-3 ml-5">
-                Pipeline &apos;Login Service&apos; has been deployed successfully to production.
+              <p className="text-xs text-gray-500 mb-3">
+                You will be notified when usage exceeds this limit.
               </p>
-              <a href="#" className="text-xs text-teal-400 hover:text-teal-300 ml-5 transition-colors">
-                View Details &rarr;
-              </a>
+              <button className="w-full px-3 py-1.5 text-xs font-medium text-gray-300 border border-white/[0.08] rounded-lg hover:bg-white/[0.04] transition-colors">
+                Change Threshold
+              </button>
             </div>
           </Card>
 
-          {/* Your Channels */}
+          {/* Top Consumers */}
           <Card padding="lg">
-            <h3 className="text-sm font-semibold text-white mb-2">Your Channels</h3>
+            <h3 className="text-sm font-semibold text-white mb-2">Top Consumers</h3>
             <p className="text-xs text-gray-400 mb-4">
-              Manage your notification channels.
+              Top contributors to storage usage.
             </p>
             <div className="space-y-3">
-              {channels.map((channel) => {
-                const Icon = channel.icon;
-                return (
-                  <div key={channel.label} className="flex items-center gap-3">
-                    <div className="p-1.5 rounded-md bg-white/[0.04]">
-                      <Icon size={14} className="text-gray-400" />
+              {topConsumers.map((consumer) => (
+                <div key={consumer.label}>
+                  <div className="flex items-center justify-between mb-1">
+                    <div className="flex items-center gap-2">
+                      <span className={`w-2 h-2 rounded-full ${consumer.color}`} />
+                      <span className="text-xs text-gray-300">{consumer.label}</span>
                     </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs font-medium text-white">{channel.label}</p>
-                      <p className="text-xs text-gray-500 truncate">{channel.detail}</p>
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <span className="text-xs text-green-400">{channel.status}</span>
-                      <Check size={10} className="text-green-400" />
-                    </div>
+                    <span className="text-xs text-gray-400">{consumer.size}</span>
                   </div>
-                );
-              })}
+                  <div className="w-full h-1.5 rounded-full bg-white/[0.08]">
+                    <div
+                      className={`h-full rounded-full ${consumer.color}`}
+                      style={{ width: `${consumer.percent}%` }}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </Card>
+
+          {/* Data Protection */}
+          <Card padding="lg">
+            <h3 className="text-sm font-semibold text-white mb-2">Data Protection</h3>
+            <div className="space-y-3">
+              {dataProtection.map((item) => (
+                <div key={item.label} className="flex items-center justify-between">
+                  <span className="text-xs text-gray-400">{item.label}</span>
+                  <span className="text-xs font-medium text-white">{item.value}</span>
+                </div>
+              ))}
             </div>
             <a href="#" className="inline-block mt-4 text-xs text-primary-400 hover:text-primary-300 transition-colors">
-              Manage Channels &rarr;
+              View Backup Settings &rarr;
             </a>
           </Card>
 
@@ -485,24 +521,21 @@ export function Settings() {
           <Card padding="lg">
             <h3 className="text-sm font-semibold text-white mb-2">Need Help?</h3>
             <p className="text-xs text-gray-400 mb-4">
-              Learn more about notifications.
+              Learn more about data &amp; storage.
             </p>
             <div className="space-y-3">
-              {helpLinks.map((link) => (
-                <a
-                  key={link.title}
-                  href="#"
-                  className="flex items-start gap-2 group"
-                >
-                  <ExternalLink size={12} className="text-gray-400 flex-shrink-0 mt-0.5" />
-                  <div>
-                    <p className="text-xs font-medium text-gray-300 group-hover:text-white transition-colors">
-                      {link.title}
-                    </p>
-                    <p className="text-xs text-gray-500 mt-0.5">{link.description}</p>
-                  </div>
-                </a>
-              ))}
+              <a href="#" className="flex items-center gap-2 group">
+                <ExternalLink size={12} className="text-gray-400 flex-shrink-0" />
+                <span className="text-xs font-medium text-gray-300 group-hover:text-white transition-colors">
+                  Data &amp; Storage Guide
+                </span>
+              </a>
+              <a href="#" className="flex items-center gap-2 group">
+                <ExternalLink size={12} className="text-gray-400 flex-shrink-0" />
+                <span className="text-xs font-medium text-gray-300 group-hover:text-white transition-colors">
+                  Contact Support
+                </span>
+              </a>
             </div>
           </Card>
         </div>
