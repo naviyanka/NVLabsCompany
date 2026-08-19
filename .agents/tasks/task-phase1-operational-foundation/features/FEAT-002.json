@@ -2,7 +2,7 @@
   "id": "FEAT-002",
   "type": "feat",
   "description": "Restrict CORS to configured origins and add health/readiness probes that actually check dependencies.",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "Modify src/nexus/config.py: Add cors_origins: str = 'http://localhost:3000,http://localhost:5173' to Settings class. This is a comma-separated string that gets split at runtime.",
     "Modify src/nexus/main.py: Replace allow_origins=['*'] with allow_origins=settings.cors_origins.split(',') (import settings from nexus.config). Strip whitespace from each origin.",
@@ -23,5 +23,5 @@
     "python3.12 -m pytest tests/ -q --tb=short"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "Pre-existing ruff lint issues (I001 import sorting, F401 unused import) in main.py were present before this change (6 errors) and remain unchanged. All new/modified files pass ruff cleanly. All 2305 tests pass."
 }
