@@ -2,7 +2,7 @@
   "id": "FEAT-005",
   "type": "feat",
   "description": "Pipeline Stages with Enforced Transitions: Create a pipeline system for multi-step workflow automation with named stages, valid transitions, cases, and hook system.",
-  "status": "pending",
+  "status": "in_progress",
   "steps": [
     "1. Create src/nexus/workflows/pipeline.py with: StageKind enum (working, review, done, cancelled). PipelineStage dataclass (id: str, name: str, kind: StageKind, position: int, config: dict). PipelineTransition dataclass (from_stage_id: str, to_stage_id: str, condition: str | None = None). CaseStatus enum (active, completed, cancelled).",
     "2. Create PipelineCase dataclass: id (str), pipeline_id (str), current_stage_id (str), status (CaseStatus), history (list of stage transitions with timestamps), created_at (datetime), updated_at (datetime).",
