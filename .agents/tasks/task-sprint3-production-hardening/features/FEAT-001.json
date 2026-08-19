@@ -2,7 +2,7 @@
   "id": "FEAT-001",
   "type": "feat",
   "description": "Enhanced Tool Model - Add ToolConnection, ToolCatalogEntry, ToolProfile, ToolProfileBinding, ToolPolicy SQLModel tables and in-memory policy engine for enterprise-grade tool governance.",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "Enhance src/nexus/models/tool.py: Add ToolConnection model (id, company_id, name, transport_type [mcp_remote/rest_api/local_stdio], endpoint_url, auth_kind [none/api_key/oauth/bearer], credential_ref, health_status [healthy/degraded/unhealthy/unknown], last_health_check_at, is_active, created_at, updated_at)",
     "Add ToolCatalogEntry model to src/nexus/models/tool.py (id, company_id, connection_id FK to tool_connections, tool_name, display_name, description, risk_level [read/write/destructive], input_schema JSON, output_schema JSON, version, is_active, discovered_at, updated_at)",
@@ -27,5 +27,5 @@
     "python3.12 -m pytest tests/ -x -q"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "Updated test_alembic_migration.py expected table count from 48 to 53 to account for the 5 new tool governance tables. All 936 tests pass. The existing models use datetime.utcnow() which generates DeprecationWarnings but this is consistent with codebase convention."
 }
