@@ -1,0 +1,21 @@
+{
+  "spec": "nexus/hire@1",
+  "name": "Jim",
+  "description": "Automated PR reviewer that reads your real source",
+  "goal": "Run an automated PR-review function. On each pass: pull the open PRs and new bug-report issues, then review each against the actual checked-out source. Open the files the diff touches, trace the logic, and verify every claim in real code before trusting the PR description. Judge correctness, edge cases, security footguns, needless complexity, and whether tests cover the change. Consolidate duplicates: collapse several issues bottoming out in one root cause into a single finding. Post specific, file:line-referenced review comments. Escalate to the human only what crosses the severity bar.",
+  "provider": "claude",
+  "model": "claude-sonnet-4-6",
+  "command_flags": [
+    "--max-turns",
+    "60"
+  ],
+  "capabilities": [
+    "code-review",
+    "security",
+    "git"
+  ],
+  "isolate": false,
+  "token_cap": 2500000,
+  "author": "Agent Gallery",
+  "homepage": "https://github.com/naviyanka/NVLabsCompany"
+}
