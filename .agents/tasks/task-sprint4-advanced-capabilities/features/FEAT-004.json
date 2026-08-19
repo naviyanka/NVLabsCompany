@@ -2,7 +2,7 @@
   "id": "FEAT-004",
   "type": "feat",
   "description": "LLM Provider Registry (Self-Registering): Create a pluggable provider system with self-registration at import time, capability metadata, and task-based routing.",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "1. Create src/nexus/models_router/provider_registry.py with: LLMProviderSpec dataclass (name: str, models_available: list[str], pricing: dict[str, dict[str, float]], capabilities: dict[str, ModelCapabilities], api_base: str, is_local: bool). ModelCapabilities dataclass (context_window: int, supports_tools: bool, supports_vision: bool, supports_streaming: bool, supports_json_mode: bool).",
     "2. Create ProviderRegistry class (singleton pattern via class-level _instance): register(spec: LLMProviderSpec) class method, get_provider(name: str) -> LLMProviderSpec | None, list_providers() -> list[LLMProviderSpec], unregister(name: str) for testing. Add route_to_provider(task_type: str, requirements: dict) -> LLMProviderSpec | None method that selects best provider based on requirements (e.g., needs_vision=True, min_context_window=128000, prefer_local=True).",
@@ -23,5 +23,5 @@
     "python3.12 -m pytest tests/test_provider_registry.py -x -q"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "All 21 provider registry tests pass. Full suite passes at 1187 tests. Singleton pattern uses class-level _instance with reset() classmethod. Built-in providers self-register at module level at the bottom of provider_registry.py."
 }
