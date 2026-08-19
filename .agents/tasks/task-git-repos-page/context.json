@@ -1,0 +1,25 @@
+{
+  "project_type": "React SPA with Vite bundler",
+  "language": "TypeScript",
+  "build_system": "Vite 6 with tsc for type checking",
+  "test_framework": "No test framework configured",
+  "build_command": "npm run build",
+  "test_command": "No test command - use build for validation",
+  "verification_instructions": "Run 'npm run build' in /projects/sandbox/NVLabsCompany/dashboard to verify TypeScript compilation and Vite bundling pass with zero errors",
+  "snapshot_or_generated_files": null,
+  "setup_instructions": "cd /projects/sandbox/NVLabsCompany/dashboard && npm install",
+  "environment_constraints": "None identified",
+  "contribution_requirements": "All redesigned pages use static mock data, no API calls, no randomness",
+  "key_patterns": "Pages import Card from '@/components/common/Card', use lucide-react for icons, recharts for charts, Tailwind CSS for styling. Pages follow pattern: static mock data at top, helper components if needed, main export function. Layout uses flex with gap for sidebar pages (see Tasks.tsx). Dark theme colors: dark-bg (#0f1117), dark-surface (#1a1b2e), dark-card (#1e2035). Stat cards use Card with padding='lg'. Tables use Card with padding='none'. Charts use ResponsiveContainer. Text colors: white for primary, gray-400 for secondary, gray-500 for tertiary.",
+  "relevant_files": [
+    "dashboard/src/pages/GitRepos.tsx",
+    "dashboard/src/pages/Tasks.tsx",
+    "dashboard/src/pages/Dashboard.tsx",
+    "dashboard/src/pages/Pipelines.tsx",
+    "dashboard/src/pages/Memory.tsx",
+    "dashboard/src/components/common/Card.tsx",
+    "dashboard/tailwind.config.js",
+    "dashboard/package.json"
+  ],
+  "directory_structure": "dashboard/src/pages/ contains all page components, dashboard/src/components/common/ has shared components (Card, Badge, Button, etc.), dashboard/src/App.tsx has routing"
+}
