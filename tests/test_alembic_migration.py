@@ -61,6 +61,7 @@ EXPECTED_TABLES = {
     "tool_access",
     "tool_catalog_entries",
     "tool_connections",
+    "tool_invocations",
     "tool_policies",
     "tool_profile_bindings",
     "tool_profiles",
@@ -95,10 +96,10 @@ class TestModelMetadata:
     """Verify all SQLModel tables are discoverable in metadata."""
 
     def test_all_expected_tables_in_metadata(self) -> None:
-        """Import all models and confirm metadata contains all 53 expected tables."""
+        """Import all models and confirm metadata contains all 54 expected tables."""
         actual_tables = set(SQLModel.metadata.tables.keys())
-        assert len(actual_tables) == 53, (
-            f"Expected 53 tables, found {len(actual_tables)}: "
+        assert len(actual_tables) == 54, (
+            f"Expected 54 tables, found {len(actual_tables)}: "
             f"missing={EXPECTED_TABLES - actual_tables}, "
             f"extra={actual_tables - EXPECTED_TABLES}"
         )
@@ -188,4 +189,4 @@ class TestSchemaCreation:
         assert "circuit_breaker_records" in created_tables
         assert "kill_switch_records" in created_tables
         assert "agents" in created_tables
-        assert len(created_tables) == 53
+        assert len(created_tables) == 54

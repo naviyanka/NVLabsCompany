@@ -1,0 +1,28 @@
+{
+  "id": "FEAT-002",
+  "type": "feat",
+  "description": "ToolInvocation Audit Table and audit query module - comprehensive audit trail for every tool execution with scrubbed argument storage and query/filter capabilities.",
+  "status": "in_progress",
+  "steps": [
+    "Create src/nexus/models/tool_invocation.py: ToolInvocation SQLModel table (id UUID PK, company_id FK, agent_id FK to agents, tool_id FK to tools, connection_id UUID nullable, tool_name str, arguments_scrubbed JSON, result_summary str nullable, status [success/error/timeout/denied/rate_limited], duration_ms int, cost_cents int default 0, approval_state [not_required/approved/denied] default not_required, error str nullable, created_at datetime, completed_at datetime nullable)",
+    "Update src/nexus/models/__init__.py to import and export ToolInvocation",
+    "Create src/nexus/tools/audit.py: ToolAuditStore class with in-memory list storage. Methods: record(invocation: ToolInvocation), query(agent_id=None, tool_id=None, status=None, since=None, limit=100) -> list[ToolInvocation], get_stats(agent_id=None, since=None) -> AuditStats dataclass (total_invocations, success_count, error_count, total_cost_cents, avg_duration_ms)",
+    "Enhance src/nexus/tools/executor.py: Add optional audit_store: ToolAuditStore parameter to ToolExecutor.__init__. After each execution in the execute() method, if audit_store is set, create a ToolInvocation record and call audit_store.record(). Scrub sensitive fields from arguments (keys containing 'password', 'secret', 'token', 'key' get replaced with '***').",
+    "Create tests/test_tool_audit.py: Test ToolInvocation model instantiation, ToolAuditStore record/query/stats, argument scrubbing in executor, integration test of executor -> audit_store recording flow"
+  ],
+  "acceptance_criteria": [
+    "ToolInvocation model importable from nexus.models",
+    "ToolAuditStore correctly records and queries invocations with filters",
+    "get_stats returns accurate aggregated statistics",
+    "ToolExecutor with audit_store records invocations on success, failure, timeout, and permission denial",
+    "Sensitive argument keys are scrubbed before storage",
+    "python3.12 -m pytest tests/test_tool_audit.py passes",
+    "python3.12 -m pytest tests/ -x -q passes (no regressions)"
+  ],
+  "verification": [
+    "python3.12 -m pytest tests/test_tool_audit.py -v",
+    "python3.12 -m pytest tests/ -x -q"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

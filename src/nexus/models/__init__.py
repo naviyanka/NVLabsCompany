@@ -31,6 +31,7 @@ from nexus.models.tool import (
     ToolProfile,
     ToolProfileBinding,
 )
+from nexus.models.tool_invocation import ToolInvocation
 from nexus.models.trigger import Trigger, TriggerExecution
 from nexus.governance.kill_switch_model import KillSwitchRecord
 from nexus.governance.circuit_breaker_model import CircuitBreakerRecord
@@ -79,6 +80,7 @@ __all__ = [
     "ToolProfile",
     "ToolProfileBinding",
     "ToolPolicy",
+    "ToolInvocation",
     # Memory
     "MemoryRecord",
     # Triggers
