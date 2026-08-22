@@ -22,8 +22,11 @@ dependencies = [
     "pydantic-settings>=2.0.0",
     "redis>=5.0.0",
     "httpx>=0.27.0",
-    "python-jose[cryptography]>=3.3.0",
-    "passlib[bcrypt]>=1.7.4",
+    # Authentication. Brings pwdlib[argon2,bcrypt] for hashing and pyjwt for
+    # token signing, replacing the previously declared (and unused)
+    # python-jose and passlib. fastapi-users-db-sqlalchemy pins
+    # sqlalchemy[asyncio]<2.1.0, which is the effective upper bound now.
+    "fastapi-users[sqlalchemy]>=15.0.5",
     "jsonschema>=4.20.0",
 ]
 

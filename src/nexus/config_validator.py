@@ -20,6 +20,8 @@ async def validate_config() -> None:
     Checks performed:
     - Missing or empty API keys (openai_api_key, anthropic_api_key)
     - Database URL format validation
+    - Authentication and CORS settings (wildcard origins, default secret key,
+      disabled auth, insecure session cookies)
     - Redis connectivity (non-blocking, logs warning on failure)
     - Data directory writability (if configured via environment)
 
@@ -28,9 +30,50 @@ async def validate_config() -> None:
     """
     _check_api_keys()
     _check_database_url()
+    _check_auth_settings()
     await _check_redis_connectivity()
     _check_data_directory()
     logger.info("Configuration validation complete")
+
+
+def _check_auth_settings() -> None:
+    """Warn about authentication and CORS misconfigurations.
+
+    Cookie-based sessions are only safe when the browser is allowed to send
+    credentials to an explicitly enumerated set of origins. A wildcard origin
+    combined with allow_credentials=True is rejected by browsers outright and
+    signals a misconfigured deployment, so it is called out loudly.
+    """
+    origins = [o.strip() for o in settings.cors_origins.split(",") if o.strip()]
+    if not origins:
+        logger.warning(
+            "CORS_ORIGINS is empty - the dashboard will not be able to call the API"
+        )
+    if "*" in origins:
+        logger.warning(
+            "CORS_ORIGINS contains '*', which is incompatible with "
+            "credentialed cookie authentication. List the dashboard origins "
+            "explicitly instead."
+        )
+
+    if settings.secret_key == "dev-secret-key-change-in-production":
+        logger.warning(
+            "SECRET_KEY is still the built-in development default - "
+            "set a unique value before exposing this deployment"
+        )
+
+    if not settings.auth_enabled:
+        logger.warning(
+            "AUTH_ENABLED is False - the API is trusting the X-Company-Id "
+            "header and every tenant is impersonable. Do not run this way "
+            "outside local development."
+        )
+
+    if not settings.session_cookie_secure:
+        logger.warning(
+            "SESSION_COOKIE_SECURE is False - session cookies will be sent "
+            "over plain HTTP"
+        )
 
 
 def _check_api_keys() -> None:

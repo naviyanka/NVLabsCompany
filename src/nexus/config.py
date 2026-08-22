@@ -22,6 +22,24 @@ class Settings(BaseSettings):
     # CORS
     cors_origins: str = "http://localhost:3000,http://localhost:5173"
 
+    # Authentication
+    # When False, requests without a resolvable principal fall back to the
+    # legacy X-Company-Id header. Intended only as an emergency escape hatch
+    # during rollout; production must leave this True.
+    auth_enabled: bool = True
+    session_cookie_name: str = "nv_session"
+    csrf_cookie_name: str = "nv_csrf"
+    # 7 days. Sessions are DB-backed, so this is the absolute expiry stored on
+    # the user_sessions row as well as the cookie max-age.
+    session_lifetime_seconds: int = 604800
+    # Set False only for plain-HTTP local development; browsers refuse to send
+    # Secure cookies over http:// on non-localhost origins.
+    session_cookie_secure: bool = True
+    session_cookie_samesite: str = "lax"
+    # Minimum accepted password length for logins created through bootstrap,
+    # setup, or invite acceptance.
+    password_min_length: int = 12
+
     # Server
     debug: bool = False
     log_level: str = "INFO"

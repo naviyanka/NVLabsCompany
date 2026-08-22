@@ -4,6 +4,7 @@ All models are imported here so Alembic can discover them for migration autogene
 """
 
 from nexus.models.agent import Agent
+from nexus.models.auth import Invite
 from nexus.models.budget import BudgetPolicy, CostEvent
 from nexus.models.communication import Event, Group, GroupMember, Message
 from nexus.models.company import Company, CompanyMembership, Department, Team
@@ -35,6 +36,8 @@ from nexus.models.tool_invocation import ToolInvocation
 from nexus.models.trigger import Trigger, TriggerExecution
 from nexus.governance.kill_switch_model import KillSwitchRecord
 from nexus.governance.circuit_breaker_model import CircuitBreakerRecord
+from nexus.models.api_key import ApiKey
+from nexus.models.user_profile import UserProfile, UserSession
 from nexus.models.heartbeat_run import HeartbeatRun
 from nexus.runtime.checkpoint import ExecutionCheckpoint
 
@@ -113,4 +116,9 @@ __all__ = [
     # Runtime persistence
     "ExecutionCheckpoint",
     "HeartbeatRun",
+    # Authentication / authorization
+    "UserProfile",
+    "UserSession",
+    "Invite",
+    "ApiKey",
 ]

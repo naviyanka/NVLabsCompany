@@ -18,8 +18,10 @@ EXPECTED_TABLES = {
     "agent_skills",
     "agent_versions",
     "agents",
+    "api_keys",
     "approvals",
     "audit_log",
+    "auth_invites",
     "budget_policies",
     "circuit_breaker_records",
     "companies",
@@ -70,6 +72,8 @@ EXPECTED_TABLES = {
     "tools",
     "trigger_executions",
     "triggers",
+    "user_profiles",
+    "user_sessions",
 }
 
 MIGRATION_FILES = [
@@ -98,10 +102,10 @@ class TestModelMetadata:
     """Verify all SQLModel tables are discoverable in metadata."""
 
     def test_all_expected_tables_in_metadata(self) -> None:
-        """Import all models and confirm metadata contains all 56 expected tables."""
+        """Import all models and confirm metadata contains all 60 expected tables."""
         actual_tables = set(SQLModel.metadata.tables.keys())
-        assert len(actual_tables) == 56, (
-            f"Expected 56 tables, found {len(actual_tables)}: "
+        assert len(actual_tables) == 60, (
+            f"Expected 60 tables, found {len(actual_tables)}: "
             f"missing={EXPECTED_TABLES - actual_tables}, "
             f"extra={actual_tables - EXPECTED_TABLES}"
         )
@@ -191,4 +195,4 @@ class TestSchemaCreation:
         assert "circuit_breaker_records" in created_tables
         assert "kill_switch_records" in created_tables
         assert "agents" in created_tables
-        assert len(created_tables) == 56
+        assert len(created_tables) == 60
