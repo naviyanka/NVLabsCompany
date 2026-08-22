@@ -24,8 +24,13 @@ from sqlmodel import select
 from nexus.auth.passwords import hash_password
 from nexus.config import settings
 from nexus.models.auth import normalize_role
-from nexus.models.company import CompanyMembership
+from nexus.models.company import Company, CompanyMembership
 from nexus.models.user_profile import UserProfile
+
+# The company ``main.lifespan`` seeds for local development. First-run setup
+# adopts it when it exists, so the first administrator lands in the same tenant
+# as the seeded demo data instead of creating an empty second company.
+DEFAULT_COMPANY_ID = uuid.UUID("00000000-0000-4000-8000-000000000001")
 
 
 class UserManager(UUIDIDMixin, BaseUserManager[UserProfile, uuid.UUID]):
@@ -158,3 +163,43 @@ async def create_user(
     await db.flush()
     await grant_membership(db, user_id=user.id, company_id=company_id, role=role)
     return user
+
+
+async def pick_setup_company(
+    db: AsyncSession,
+    *,
+    company_id: uuid.UUID | None = None,
+    company_name: str = "NVLabs",
+) -> Company:
+    """Find or create the company an out-of-band administrator belongs to.
+
+    Shared by first-run setup and the bootstrap command so both land in the same
+    tenant. An explicit id must already exist — silently creating a company under
+    a caller-supplied id would let a typo split a deployment in two. Otherwise
+    the seeded development company wins, then the oldest existing company, and
+    only an entirely empty install creates one.
+    """
+    if company_id is not None:
+        company = await db.get(Company, company_id)
+        if company is None:
+            raise LookupError(f"No company with id {company_id}")
+        return company
+
+    company = await db.get(Company, DEFAULT_COMPANY_ID)
+    if company is not None:
+        return company
+
+    stmt = select(Company).order_by(Company.created_at)  # type: ignore[arg-type]
+    company = (await db.execute(stmt)).scalars().first()
+    if company is not None:
+        return company
+
+    company = Company(
+        name=company_name.strip() or "NVLabs",
+        description="Created during first-run setup",
+        status="active",
+    )
+    db.add(company)
+    await db.flush()
+    return company
+

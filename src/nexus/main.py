@@ -13,6 +13,7 @@ from nexus.auth.middleware import AuthenticationMiddleware
 from nexus.api.routes.adapters import router as adapters_router
 from nexus.api.routes.agents import router as agents_router
 from nexus.api.routes.approvals import router as approvals_router
+from nexus.api.routes.auth import router as auth_router
 from nexus.api.routes.budgets import router as budgets_router
 from nexus.api.routes.communication import router as communication_router
 from nexus.api.routes.companies import router as companies_router
@@ -220,6 +221,7 @@ Afterwards, accounts are created by invitation.
     redoc_url="/redoc",
     openapi_tags=[
         {"name": "health", "description": "Health checks and readiness probes"},
+        {"name": "auth", "description": "Login, sessions, invites, and first-run setup"},
         {"name": "agents", "description": "Agent CRUD and lifecycle operations (wake/pause/heartbeat)"},
         {"name": "tasks", "description": "Task management — create, assign, update status"},
         {"name": "goals", "description": "Strategic goals and OKR tracking"},
@@ -292,6 +294,7 @@ app.add_middleware(
 # Include route modules
 app.include_router(health_router)
 app.include_router(metrics_router)
+app.include_router(auth_router)
 app.include_router(companies_router)
 app.include_router(agents_router)
 app.include_router(tasks_router)
