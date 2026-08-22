@@ -16,7 +16,6 @@ or by the one-shot first-run setup endpoint; everyone else arrives through an
 
 import uuid
 from datetime import datetime
-from typing import Optional
 
 from sqlmodel import Field, SQLModel
 
@@ -52,7 +51,9 @@ class Invite(SQLModel, table=True):
     email: str = Field(max_length=255, index=True)
     role: str = Field(default="viewer", max_length=20)
     token_hash: str = Field(max_length=64, index=True, unique=True)
+    # Timestamps are naive UTC because the underlying columns are declared
+    # without a timezone; see nexus.models._time for why.
     expires_at: datetime
-    accepted_at: Optional[datetime] = Field(default=None)
-    created_by: Optional[uuid.UUID] = Field(default=None, foreign_key="user_profiles.id")
+    accepted_at: datetime | None = Field(default=None)
+    created_by: uuid.UUID | None = Field(default=None, foreign_key="user_profiles.id")
     created_at: datetime = Field(default_factory=utcnow)

@@ -1,11 +1,12 @@
 """API Key model for external service authentication."""
 
-import uuid
 import secrets
+import uuid
 from datetime import datetime
-from typing import Optional
 
 from sqlmodel import Field, SQLModel
+
+from nexus.models._time import utcnow
 
 
 class ApiKey(SQLModel, table=True):
@@ -21,7 +22,7 @@ class ApiKey(SQLModel, table=True):
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     company_id: uuid.UUID = Field(foreign_key="companies.id", index=True)
     name: str = Field(max_length=255)
-    description: Optional[str] = Field(default=None, max_length=500)
+    description: str | None = Field(default=None, max_length=500)
     key_prefix: str = Field(max_length=20)  # First 8 chars for identification
     key_hash: str = Field(max_length=255, index=True)   # SHA-256 hash of full key
     environment: str = Field(default="production", max_length=50)
@@ -29,10 +30,12 @@ class ApiKey(SQLModel, table=True):
     # Authority granted to requests bearing this key. One of
     # nexus.models.auth.VALID_ROLES; unrecognised values resolve to "viewer".
     role: str = Field(default="viewer", max_length=20)
-    created_by: Optional[uuid.UUID] = Field(default=None, foreign_key="user_profiles.id")
-    last_used_at: Optional[datetime] = Field(default=None)
-    expires_at: Optional[datetime] = Field(default=None)
-    created_at: datetime = Field(default_factory=lambda: datetime.utcnow())
+    created_by: uuid.UUID | None = Field(default=None, foreign_key="user_profiles.id")
+    # Timestamps are naive UTC because the underlying columns are declared
+    # without a timezone; see nexus.models._time for why.
+    last_used_at: datetime | None = Field(default=None)
+    expires_at: datetime | None = Field(default=None)
+    created_at: datetime = Field(default_factory=utcnow)
 
     @staticmethod
     def generate_key() -> str:

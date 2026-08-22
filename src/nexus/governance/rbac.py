@@ -89,6 +89,56 @@ STANDARD_ROLES: dict[str, Role] = {
 }
 
 
+def permission_grants(
+    permission: Permission,
+    action: str,
+    resource_type: str,
+    resource_id: str | None = "*",
+) -> bool:
+    """Whether one permission entry covers the requested action.
+
+    A ``"*"`` in the permission's action, resource type or resource ID matches
+    anything in that position.
+    """
+    if permission.action != "*" and permission.action != action:
+        return False
+
+    if permission.resource_type != "*" and permission.resource_type != resource_type:
+        return False
+
+    if resource_id and permission.resource_id != "*":
+        if permission.resource_id != resource_id:
+            return False
+
+    return True
+
+
+def role_allows(
+    role_name: str,
+    action: str,
+    resource_type: str,
+    resource_id: str = "*",
+) -> bool:
+    """Whether a named standard role permits an action on a resource.
+
+    This is the stateless counterpart to :meth:`RBACManager.check_permission`,
+    for callers that know a role name rather than an actor id — request
+    authorization reads the role off the caller's membership or API key, and
+    must not have to register that caller in a process-global permission table
+    first.
+
+    An unrecognised role name grants nothing.
+    """
+    role = STANDARD_ROLES.get(role_name)
+    if role is None:
+        return False
+
+    return any(
+        permission_grants(perm, action, resource_type, resource_id)
+        for perm in role.permissions
+    )
+
+
 class RBACManager:
     """Role-based access control manager with capability-based tool access.
 
@@ -216,20 +266,7 @@ class RBACManager:
         Returns:
             True if the permission grants the requested access.
         """
-        # Wildcard action matches everything
-        if permission.action != "*" and permission.action != action:
-            return False
-
-        # Wildcard resource type matches everything
-        if permission.resource_type != "*" and permission.resource_type != resource_type:
-            return False
-
-        # Wildcard resource ID matches everything
-        if resource_id and permission.resource_id != "*":
-            if permission.resource_id != resource_id:
-                return False
-
-        return True
+        return permission_grants(permission, action, resource_type, resource_id)
 
     def get_permissions(self, actor_id: uuid.UUID) -> list[Permission]:
         """Get all effective permissions for an actor.
