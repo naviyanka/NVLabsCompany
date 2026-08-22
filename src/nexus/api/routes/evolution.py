@@ -8,7 +8,12 @@ from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy import select
 
-from nexus.api.deps import CurrentCompanyId, DbSession
+from nexus.api.deps import (
+    CurrentCompanyId,
+    DbSession,
+    PathCompanyId,
+    require_permission,
+)
 from nexus.models.evolution import (
     EvolutionEvaluation,
     EvolutionProposal,
@@ -132,7 +137,7 @@ class CreateSkillVersionRequest(BaseModel):
     response_model=list[PatternResponse],
 )
 async def get_detected_patterns(
-    company_id: uuid.UUID, db: DbSession
+    company_id: PathCompanyId, db: DbSession
 ) -> Any:
     """Get detected patterns for a company.
 
@@ -153,7 +158,7 @@ async def get_detected_patterns(
     response_model=ProposalResponse,
 )
 async def create_proposal(
-    company_id: uuid.UUID, body: CreateProposalRequest, db: DbSession
+    company_id: PathCompanyId, body: CreateProposalRequest, db: DbSession
 ) -> Any:
     """Create a new evolution proposal."""
     proposal = EvolutionProposal(
@@ -176,7 +181,7 @@ async def create_proposal(
     response_model=list[ProposalResponse],
 )
 async def list_proposals(
-    company_id: uuid.UUID,
+    company_id: PathCompanyId,
     db: DbSession,
     status_filter: Optional[str] = None,
     limit: int = 100,
@@ -211,6 +216,7 @@ async def get_proposal(proposal_id: uuid.UUID, db: DbSession, company_id: Curren
 @router.post(
     "/api/v1/evolution/proposals/{proposal_id}/evaluate",
     response_model=EvaluationResponse,
+    dependencies=[require_permission("read", "evolution")],
 )
 async def evaluate_proposal(proposal_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId) -> Any:
     """Trigger evaluation for a proposal."""
@@ -245,6 +251,7 @@ async def evaluate_proposal(proposal_id: uuid.UUID, db: DbSession, company_id: C
 @router.post(
     "/api/v1/evolution/proposals/{proposal_id}/promote",
     response_model=ProposalResponse,
+    dependencies=[require_permission("write", "evolution")],
 )
 async def promote_proposal(
     proposal_id: uuid.UUID, body: PromoteRequest, db: DbSession, company_id: CurrentCompanyId
@@ -286,6 +293,7 @@ async def promote_proposal(
 @router.post(
     "/api/v1/evolution/proposals/{proposal_id}/rollback",
     response_model=ProposalResponse,
+    dependencies=[require_permission("write", "evolution")],
 )
 async def rollback_proposal(
     proposal_id: uuid.UUID, body: RollbackRequest, db: DbSession, company_id: CurrentCompanyId
@@ -316,7 +324,7 @@ async def rollback_proposal(
     response_model=list[ChangeHistoryEntry],
 )
 async def get_change_history(
-    company_id: uuid.UUID,
+    company_id: PathCompanyId,
     db: DbSession,
     limit: int = 100,
     offset: int = 0,
@@ -355,7 +363,7 @@ async def get_change_history(
     response_model=list[SkillVersionResponse],
 )
 async def get_skill_versions(
-    company_id: uuid.UUID, skill_id: uuid.UUID, db: DbSession
+    company_id: PathCompanyId, skill_id: uuid.UUID, db: DbSession
 ) -> Any:
     """Get version history for a skill."""
     stmt = (
@@ -371,9 +379,10 @@ async def get_skill_versions(
     "/api/v1/companies/{company_id}/evolution/skills/{skill_id}/versions",
     status_code=status.HTTP_201_CREATED,
     response_model=SkillVersionResponse,
+    dependencies=[require_permission("write", "evolution")],
 )
 async def create_skill_version(
-    company_id: uuid.UUID,
+    company_id: PathCompanyId,
     skill_id: uuid.UUID,
     body: CreateSkillVersionRequest,
     db: DbSession,
@@ -412,7 +421,7 @@ async def create_skill_version(
     "/api/v1/companies/{company_id}/evolution/evaluations",
     response_model=list[EvaluationResponse],
 )
-async def list_evaluations(company_id: uuid.UUID, db: DbSession, limit: int = 50) -> Any:
+async def list_evaluations(company_id: PathCompanyId, db: DbSession, limit: int = 50) -> Any:
     """List evaluations for a company."""
     stmt = (
         select(EvolutionEvaluation)
@@ -424,7 +433,11 @@ async def list_evaluations(company_id: uuid.UUID, db: DbSession, limit: int = 50
     return list(result.scalars().all())
 
 
-@router.post("/api/v1/evolution/proposals/{proposal_id}/approve", response_model=ProposalResponse)
+@router.post(
+    "/api/v1/evolution/proposals/{proposal_id}/approve",
+    response_model=ProposalResponse,
+    dependencies=[require_permission("approve", "approval")],
+)
 async def approve_proposal(
     proposal_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId
 ) -> Any:
@@ -445,7 +458,11 @@ async def approve_proposal(
     return proposal
 
 
-@router.post("/api/v1/evolution/proposals/{proposal_id}/reject", response_model=ProposalResponse)
+@router.post(
+    "/api/v1/evolution/proposals/{proposal_id}/reject",
+    response_model=ProposalResponse,
+    dependencies=[require_permission("approve", "approval")],
+)
 async def reject_proposal(
     proposal_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId
 ) -> Any:
@@ -465,39 +482,3 @@ async def reject_proposal(
     await db.flush()
     return proposal
 
-
-
-@router.get("/api/v1/companies/{company_id}/evolution/evaluations", response_model=list[EvaluationResponse])
-async def list_evaluations(company_id: uuid.UUID, db: DbSession, limit: int = 20) -> Any:
-    """List all evolution evaluations for a company."""
-    stmt = select(EvolutionEvaluation).where(EvolutionEvaluation.company_id == company_id).order_by(EvolutionEvaluation.evaluated_at.desc()).limit(limit)
-    result = await db.execute(stmt)
-    return list(result.scalars().all())
-
-
-@router.post("/api/v1/evolution/proposals/{proposal_id}/approve", response_model=ProposalResponse)
-async def approve_proposal(proposal_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId) -> Any:
-    """Approve an evolution proposal."""
-    stmt = select(EvolutionProposal).where(EvolutionProposal.id == proposal_id, EvolutionProposal.company_id == company_id)
-    result = await db.execute(stmt)
-    proposal = result.scalar_one_or_none()
-    if not proposal:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Proposal not found")
-    proposal.status = "approved"
-    proposal.updated_at = datetime.now(timezone.utc)
-    await db.flush()
-    return proposal
-
-
-@router.post("/api/v1/evolution/proposals/{proposal_id}/reject", response_model=ProposalResponse)
-async def reject_proposal(proposal_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId) -> Any:
-    """Reject an evolution proposal."""
-    stmt = select(EvolutionProposal).where(EvolutionProposal.id == proposal_id, EvolutionProposal.company_id == company_id)
-    result = await db.execute(stmt)
-    proposal = result.scalar_one_or_none()
-    if not proposal:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Proposal not found")
-    proposal.status = "rejected"
-    proposal.updated_at = datetime.now(timezone.utc)
-    await db.flush()
-    return proposal

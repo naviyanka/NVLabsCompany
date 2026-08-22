@@ -1,4 +1,29 @@
-"""User profile and session management endpoints."""
+"""The signed-in user's own profile.
+
+Scoped to ``principal.user_id``, not to the company. The previous version looked
+its subject up with ``select(UserProfile).where(company_id == ...)`` and took
+whichever row came back first, so in any company with more than one member every
+caller read and wrote a colleague's profile — and when the table was empty it
+invented a row for ``admin@nvlabs.company`` and returned it as fact.
+
+Credential and session management deliberately does not live here. It lives in
+:mod:`nexus.api.routes.auth`, which owns the session table:
+
+* ``POST /api/v1/auth/change-password`` verifies the current password and revokes
+  the caller's other sessions. The version formerly on this router verified
+  nothing and returned ``{"success": true}`` without touching the database.
+* ``GET /api/v1/auth/sessions``, ``DELETE /api/v1/auth/sessions/{id}`` and
+  ``POST /api/v1/auth/sessions/revoke-others`` are scoped by user. The versions
+  formerly here were scoped by *company* and issued hard ``DELETE``s against
+  ``user_sessions`` — the same table the login cookie resolves through — so any
+  member could sign out everyone in the company, and the "revoke all" variant
+  keyed off the mutable ``is_current`` flag rather than the caller's own session.
+
+Two-factor enrolment is likewise absent. Nothing in the login path checks a
+second factor yet, so an endpoint that flipped ``two_factor_enabled`` to true
+would report protection the server does not enforce. The column stays; the
+switch arrives with the TOTP verification that makes it mean something.
+"""
 
 import uuid
 from datetime import datetime
@@ -6,15 +31,28 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel
-from sqlalchemy import select, update
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from nexus.api.deps import DbSession, CurrentCompanyId
-from nexus.models.user_profile import UserProfile, UserSession
+from nexus.api.deps import DbSession, PathCompanyId, RequireUser
+from nexus.models._time import utcnow
+from nexus.models.user_profile import UserProfile
 
 router = APIRouter(tags=["profile"])
 
+# Settable through this endpoint. Everything else on the row is either identity
+# the server assigns (id, company_id, timestamps) or authority the user must not
+# grant themselves (hashed_password, is_active, is_superuser, is_verified,
+# two_factor_enabled) — a mass assignment here would be a privilege escalation.
+EDITABLE_FIELDS = frozenset(
+    {"first_name", "last_name", "title", "avatar_url", "phone", "timezone", "status"}
+)
+
+VALID_STATUSES = frozenset({"online", "busy", "dnd", "offline"})
+
 
 class ProfileResponse(BaseModel):
+    """The caller's profile as the dashboard header and settings page read it."""
+
     id: uuid.UUID
     company_id: uuid.UUID
     email: str
@@ -26,14 +64,22 @@ class ProfileResponse(BaseModel):
     timezone: str
     status: str
     two_factor_enabled: bool
+    last_login_at: datetime | None
     created_at: datetime
     updated_at: datetime
 
 
 class ProfileUpdate(BaseModel):
+    """Fields a user may change about themselves.
+
+    ``email`` is absent on purpose: it is the login identifier and is unique
+    across the platform, so changing it is an account change rather than a
+    profile edit. It belongs with the credential routes, behind a password
+    confirmation and a verification mail neither of which exists yet.
+    """
+
     first_name: str | None = None
     last_name: str | None = None
-    email: str | None = None
     title: str | None = None
     avatar_url: str | None = None
     phone: str | None = None
@@ -41,101 +87,63 @@ class ProfileUpdate(BaseModel):
     status: str | None = None
 
 
-class SessionResponse(BaseModel):
-    id: uuid.UUID
-    browser: str
-    ip_address: str
-    location: str | None
-    is_current: bool
-    last_active_at: datetime
-    created_at: datetime
+async def _own_profile(db: AsyncSession, user_id: uuid.UUID) -> UserProfile:
+    """Load the caller's profile row.
 
-
-class PasswordChange(BaseModel):
-    current_password: str
-    new_password: str
-
-
-class TwoFactorToggle(BaseModel):
-    enabled: bool
-    otp_code: str | None = None
+    404 rather than creating one: a principal exists because a session resolved
+    against a ``user_profiles`` row, so a missing row means the account was
+    deleted mid-session. Inventing a replacement would resurrect it.
+    """
+    profile = await db.get(UserProfile, user_id)
+    if profile is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Profile not found"
+        )
+    return profile
 
 
 @router.get("/api/v1/companies/{company_id}/profile", response_model=ProfileResponse)
-async def get_profile(company_id: uuid.UUID, db: DbSession) -> Any:
-    """Get user profile (creates default if none exists)."""
-    stmt = select(UserProfile).where(UserProfile.company_id == company_id)
-    result = await db.execute(stmt)
-    profile = result.scalar_one_or_none()
-    if profile is None:
-        profile = UserProfile(company_id=company_id, email="admin@nvlabs.company", first_name="Navi", last_name="Yanka")
-        db.add(profile)
-        await db.flush()
-    return profile
+async def get_profile(
+    company_id: PathCompanyId, db: DbSession, principal: RequireUser
+) -> Any:
+    """Get the signed-in user's profile.
+
+    ``company_id`` is validated against the caller's active company and then
+    unused — the profile belongs to the user, not to the tenant. The path keeps
+    its shape because the dashboard builds its URLs that way.
+    """
+    return await _own_profile(db, principal.user_id)
 
 
 @router.put("/api/v1/companies/{company_id}/profile", response_model=ProfileResponse)
-async def update_profile(company_id: uuid.UUID, body: ProfileUpdate, db: DbSession) -> Any:
-    """Update user profile."""
-    stmt = select(UserProfile).where(UserProfile.company_id == company_id)
-    result = await db.execute(stmt)
-    profile = result.scalar_one_or_none()
-    if profile is None:
-        profile = UserProfile(company_id=company_id, email="admin@nvlabs.company")
-        db.add(profile)
-        await db.flush()
+async def update_profile(
+    company_id: PathCompanyId,
+    body: ProfileUpdate,
+    db: DbSession,
+    principal: RequireUser,
+) -> Any:
+    """Update the signed-in user's profile."""
+    updates = {
+        key: value
+        for key, value in body.model_dump(exclude_unset=True).items()
+        if key in EDITABLE_FIELDS
+    }
+    if not updates:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="No fields to update"
+        )
 
-    updates = body.model_dump(exclude_unset=True)
-    updates["updated_at"] = datetime.utcnow()
-    for k, v in updates.items():
-        setattr(profile, k, v)
+    presence = updates.get("status")
+    if presence is not None and presence not in VALID_STATUSES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unknown status '{presence}'. Valid: {sorted(VALID_STATUSES)}",
+        )
+
+    profile = await _own_profile(db, principal.user_id)
+    for key, value in updates.items():
+        setattr(profile, key, value)
+    profile.updated_at = utcnow()
+    db.add(profile)
     await db.flush()
     return profile
-
-
-@router.post("/api/v1/companies/{company_id}/profile/change-password")
-async def change_password(company_id: uuid.UUID, body: PasswordChange, db: DbSession) -> dict:
-    """Change user password (validates current password)."""
-    # In production: verify current_password against stored hash
-    # For now, accept any change
-    return {"success": True, "message": "Password changed successfully"}
-
-
-@router.post("/api/v1/companies/{company_id}/profile/two-factor")
-async def toggle_two_factor(company_id: uuid.UUID, body: TwoFactorToggle, db: DbSession) -> dict:
-    """Enable or disable two-factor authentication."""
-    stmt = select(UserProfile).where(UserProfile.company_id == company_id)
-    result = await db.execute(stmt)
-    profile = result.scalar_one_or_none()
-    if profile:
-        profile.two_factor_enabled = body.enabled
-        await db.flush()
-    return {"two_factor_enabled": body.enabled}
-
-
-# ─── Sessions ───────────────────────────────────────────────────────────────────
-
-@router.get("/api/v1/companies/{company_id}/sessions", response_model=list[SessionResponse])
-async def list_sessions(company_id: uuid.UUID, db: DbSession) -> Any:
-    """List active sessions."""
-    stmt = select(UserSession).where(UserSession.company_id == company_id).order_by(UserSession.last_active_at.desc())
-    result = await db.execute(stmt)
-    return list(result.scalars().all())
-
-
-@router.delete("/api/v1/sessions/{session_id}")
-async def revoke_session(session_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId) -> dict:
-    """Revoke a specific session."""
-    from sqlalchemy import delete as sa_delete
-    stmt = sa_delete(UserSession).where(UserSession.id == session_id, UserSession.company_id == company_id)
-    await db.execute(stmt)
-    return {"revoked": str(session_id)}
-
-
-@router.post("/api/v1/companies/{company_id}/sessions/revoke-all")
-async def revoke_all_sessions(company_id: uuid.UUID, db: DbSession) -> dict:
-    """Revoke all sessions except current."""
-    from sqlalchemy import delete as sa_delete
-    stmt = sa_delete(UserSession).where(UserSession.company_id == company_id, UserSession.is_current == False)
-    result = await db.execute(stmt)
-    return {"revoked_count": result.rowcount}

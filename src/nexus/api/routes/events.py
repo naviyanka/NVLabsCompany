@@ -4,8 +4,11 @@ Provides a GET /events/stream endpoint that returns a StreamingResponse
 delivering events in SSE format. Supports optional filtering by event
 type and channel.
 
-Authentication is enforced via the standard CurrentCompanyId dependency
-(X-Company-Id header), consistent with all other API routes.
+Authentication is enforced via the standard CurrentCompanyId dependency, which
+reads the company off the authenticated principal. An anonymous request is
+rejected with 401 before the stream opens, and the company cannot be chosen per
+request — events are filtered to the tenant the caller's session or API key is
+bound to.
 """
 
 import asyncio
@@ -109,7 +112,7 @@ async def stream_events(
     Returns a streaming HTTP response with content-type text/event-stream.
     Events are delivered as they occur, formatted as SSE data lines.
 
-    Requires authentication via X-Company-Id header for tenant isolation.
+    Requires an authenticated caller; events are scoped to that caller's company.
 
     Query Parameters:
         event_types: Optional comma-separated list of event types to filter.

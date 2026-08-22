@@ -12,7 +12,7 @@ from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy import select, update
 
-from nexus.api.deps import CurrentCompanyId, DbSession
+from nexus.api.deps import CurrentCompanyId, DbSession, require_permission
 from nexus.config import settings
 from nexus.governance.secrets.vault import _HAS_FERNET, _FernetEncryptor, _TestOnlyXOREncryptor
 from nexus.models.secret import Secret, SecretBinding, SecretVersion
@@ -93,6 +93,7 @@ class SecretRotateRequest(BaseModel):
     "/api/v1/secrets",
     status_code=status.HTTP_201_CREATED,
     response_model=SecretMetadataResponse,
+    dependencies=[require_permission("write", "secret")],
 )
 async def create_secret(
     body: SecretCreate,
@@ -131,6 +132,7 @@ async def create_secret(
 @router.get(
     "/api/v1/secrets",
     response_model=list[SecretMetadataResponse],
+    dependencies=[require_permission("read", "secret")],
 )
 async def list_secrets(
     db: DbSession,
@@ -155,6 +157,7 @@ async def list_secrets(
     "/api/v1/secrets/{secret_id}/bind",
     status_code=status.HTTP_201_CREATED,
     response_model=SecretBindResponse,
+    dependencies=[require_permission("write", "secret")],
 )
 async def bind_secret(
     secret_id: uuid.UUID,
@@ -197,6 +200,7 @@ async def bind_secret(
 @router.post(
     "/api/v1/secrets/{secret_id}/revoke",
     response_model=SecretMetadataResponse,
+    dependencies=[require_permission("write", "secret")],
 )
 async def revoke_secret(
     secret_id: uuid.UUID,
@@ -230,6 +234,7 @@ async def revoke_secret(
 @router.post(
     "/api/v1/secrets/{secret_id}/rotate",
     response_model=SecretMetadataResponse,
+    dependencies=[require_permission("write", "secret")],
 )
 async def rotate_secret(
     secret_id: uuid.UUID,

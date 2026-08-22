@@ -4,17 +4,26 @@ Provides a WebSocket connection endpoint at /ws/{client_id} that accepts
 connections, registers them with the WebSocketManager, and processes
 incoming JSON commands for channel subscriptions.
 
-Authentication is handled via a query parameter (token) containing the
-company UUID, since WebSocket handshakes do not reliably support custom
-headers in all client implementations.
+Authentication comes from the same credentials as the REST API. Browsers cannot
+set headers on a WebSocket handshake, but they *do* send cookies, so the session
+cookie carries the identity; non-browser clients can still use an API key in the
+``Authorization`` header. :class:`~nexus.auth.middleware.AuthenticationMiddleware`
+resolves either one before the route runs and also rejects handshakes from an
+origin outside the allowlist, which is what stops a third-party page from
+opening a socket with the visitor's ambient cookie.
+
+The company is taken from that principal and never from the query string. It
+used to be a ``company_id`` query parameter, which meant anyone who could guess
+a UUID could stream another tenant's events.
 """
 
 import json
 import logging
-import uuid
 
-from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect, status
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
 
+from nexus.auth.middleware import get_principal_from_scope
+from nexus.auth.principal import Principal
 from nexus.realtime.websocket_manager import WebSocketManager
 
 logger = logging.getLogger(__name__)
@@ -25,39 +34,30 @@ router = APIRouter(tags=["realtime"])
 manager = WebSocketManager()
 
 
-async def _authenticate_websocket(
-    websocket: WebSocket, company_id: str | None
-) -> uuid.UUID | None:
-    """Validate the company_id query parameter for WebSocket auth.
+async def _authenticate_websocket(websocket: WebSocket) -> Principal | None:
+    """Return the handshake's principal, closing the socket if there is none.
 
-    Args:
-        websocket: The WebSocket connection to close on failure.
-        company_id: The company UUID string from query parameters.
-
-    Returns:
-        Parsed UUID if valid, None if authentication failed (socket closed).
+    Closing with 1008 rather than accepting-then-closing keeps an unauthenticated
+    client from ever reaching the receive loop. The client sees a failed handshake,
+    which is the signal the dashboard uses to stop retrying and redirect to login.
     """
-    if not company_id:
+    principal = get_principal_from_scope(websocket.scope)
+    if principal is None:
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return None
-    try:
-        return uuid.UUID(company_id)
-    except ValueError:
-        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
-        return None
+    return principal
 
 
 @router.websocket("/ws/{client_id}")
 async def websocket_endpoint(
     websocket: WebSocket,
     client_id: str,
-    company_id: str | None = Query(None, alias="company_id"),
 ) -> None:
     """Accept a WebSocket connection and handle real-time communication.
 
-    Requires a company_id query parameter for authentication and tenant
-    isolation. The company_id must be a valid UUID. If missing or invalid,
-    the connection is closed with policy violation code (1008).
+    The caller must present a session cookie or an API key; the connection is
+    scoped to that credential's company. An unauthenticated handshake is closed
+    with policy violation code (1008).
 
     Registers the client with the WebSocketManager, then enters a loop
     listening for JSON messages. Supports the following commands:
@@ -72,15 +72,13 @@ async def websocket_endpoint(
     Args:
         websocket: The FastAPI WebSocket connection.
         client_id: UUID string identifying the connecting client.
-        company_id: Company UUID string for tenant isolation (query param).
     """
-    # Authenticate via query parameter
-    validated_company_id = await _authenticate_websocket(websocket, company_id)
-    if validated_company_id is None:
+    principal = await _authenticate_websocket(websocket)
+    if principal is None:
         return
 
     await websocket.accept()
-    await manager.connect(client_id, websocket, validated_company_id)
+    await manager.connect(client_id, websocket, principal.company_id)
 
     try:
         while True:

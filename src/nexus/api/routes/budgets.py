@@ -1,14 +1,21 @@
-"""Budget API endpoints - policy creation and usage reporting."""
+"""Budget API endpoints - policy creation and usage reporting.
+
+Spend is commercially sensitive and a budget policy is what stops a runaway
+agent from spending without limit, so the company in these URLs is validated
+against the caller's own tenant (:data:`~nexus.api.deps.PathCompanyId`) and
+writing a policy requires the administrator role.
+"""
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, status
 from pydantic import BaseModel
-from sqlalchemy import select, func
+from sqlalchemy import func, select
 
-from nexus.api.deps import CurrentCompanyId, DbSession
+from nexus.api.deps import CurrentCompanyId, DbSession, PathCompanyId, RequireAdmin
+from nexus.models._time import utcnow
 from nexus.models.budget import BudgetPolicy, CostEvent
 
 router = APIRouter(tags=["budgets"])
@@ -60,7 +67,10 @@ class BudgetUsageResponse(BaseModel):
     response_model=BudgetPolicyResponse,
 )
 async def create_budget_policy(
-    company_id: uuid.UUID, body: BudgetPolicyCreate, db: DbSession
+    company_id: PathCompanyId,
+    body: BudgetPolicyCreate,
+    db: DbSession,
+    principal: RequireAdmin,
 ) -> Any:
     """Create a new budget policy for a company."""
     policy = BudgetPolicy(
@@ -83,10 +93,10 @@ async def create_budget_policy(
     response_model=BudgetUsageResponse,
 )
 async def get_company_budget_usage(
-    company_id: uuid.UUID, db: DbSession
+    company_id: PathCompanyId, db: DbSession
 ) -> Any:
     """Get budget usage for a company."""
-    now = datetime.utcnow()
+    now = utcnow()
     window_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
     stmt = select(
@@ -121,7 +131,7 @@ async def get_agent_budget_usage(
     agent_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId
 ) -> Any:
     """Get budget usage for an agent."""
-    now = datetime.utcnow()
+    now = utcnow()
     window_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
     stmt = select(
@@ -151,19 +161,34 @@ async def get_agent_budget_usage(
 
 
 @router.get("/api/v1/companies/{company_id}/budgets/cost-trend")
-async def cost_trend(company_id: uuid.UUID, db: DbSession, days: int = 7) -> list[dict[str, Any]]:
+async def cost_trend(
+    company_id: PathCompanyId, db: DbSession, days: int = 7
+) -> list[dict[str, Any]]:
     """Daily cost trend for the last N days."""
-    from datetime import timedelta
-    now = datetime.now(timezone.utc)
+    now = utcnow()
     results = []
     for i in range(days):
         day = now - timedelta(days=days - 1 - i)
         day_start = day.replace(hour=0, minute=0, second=0, microsecond=0)
         day_end = day_start + timedelta(days=1)
         row = await db.execute(
-            select(func.coalesce(func.sum(CostEvent.cost_cents), 0), func.coalesce(func.sum(CostEvent.input_tokens), 0), func.coalesce(func.sum(CostEvent.output_tokens), 0))
-            .where(CostEvent.company_id == company_id, CostEvent.occurred_at >= day_start, CostEvent.occurred_at < day_end)
+            select(
+                func.coalesce(func.sum(CostEvent.cost_cents), 0),
+                func.coalesce(func.sum(CostEvent.input_tokens), 0),
+                func.coalesce(func.sum(CostEvent.output_tokens), 0),
+            ).where(
+                CostEvent.company_id == company_id,
+                CostEvent.occurred_at >= day_start,
+                CostEvent.occurred_at < day_end,
+            )
         )
         r = row.one()
-        results.append({"date": day_start.strftime("%Y-%m-%d"), "cost_cents": r[0], "input_tokens": r[1], "output_tokens": r[2]})
+        results.append(
+            {
+                "date": day_start.strftime("%Y-%m-%d"),
+                "cost_cents": r[0],
+                "input_tokens": r[1],
+                "output_tokens": r[2],
+            }
+        )
     return results

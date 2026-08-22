@@ -67,6 +67,29 @@ def get_current_company_id(
     return principal.company_id
 
 
+def get_scoped_company_id(
+    company_id: uuid.UUID,
+    principal: Annotated[Principal, Depends(get_principal)],
+) -> uuid.UUID:
+    """Validate a ``{company_id}`` path parameter against the caller's tenant.
+
+    A number of routes were written with the company in the URL. That reads
+    naturally and the dashboard builds its links that way, but taken at face
+    value it lets any authenticated caller substitute another company's UUID and
+    read or write that tenant's rows. Declaring the parameter as
+    :data:`PathCompanyId` keeps the URL shape and turns the mismatch into a 403.
+
+    403 rather than 404: the caller is authenticated and the company probably
+    exists, they simply have no standing in it.
+    """
+    if company_id != principal.company_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have access to that company",
+        )
+    return company_id
+
+
 def require_permission(
     action: str,
     resource_type: str,
@@ -135,5 +158,6 @@ DbSession = Annotated[AsyncSession, Depends(get_db)]
 CurrentPrincipal = Annotated[Principal, Depends(get_principal)]
 OptionalPrincipal = Annotated[Principal | None, Depends(get_optional_principal)]
 CurrentCompanyId = Annotated[uuid.UUID, Depends(get_current_company_id)]
+PathCompanyId = Annotated[uuid.UUID, Depends(get_scoped_company_id)]
 RequireAdmin = Annotated[Principal, Depends(require_admin)]
 RequireUser = Annotated[Principal, Depends(require_user)]

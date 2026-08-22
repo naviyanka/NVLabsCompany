@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy import select, update
 
-from nexus.api.deps import CurrentCompanyId, DbSession
+from nexus.api.deps import CurrentCompanyId, DbSession, require_permission
 from nexus.governance.policies.context import PolicyContext
 from nexus.governance.policies.engine import (
     Policy as EnginePolicy,
@@ -102,6 +102,7 @@ async def list_policies(
     "/api/v1/policies",
     status_code=status.HTTP_201_CREATED,
     response_model=PolicyResponse,
+    dependencies=[require_permission("write", "policy")],
 )
 async def create_policy(
     body: PolicyCreate,
@@ -136,6 +137,7 @@ async def create_policy(
 @router.put(
     "/api/v1/policies/{policy_id}",
     response_model=PolicyResponse,
+    dependencies=[require_permission("write", "policy")],
 )
 async def update_policy(
     policy_id: uuid.UUID,
@@ -201,6 +203,7 @@ async def update_policy(
 @router.delete(
     "/api/v1/policies/{policy_id}",
     status_code=status.HTTP_200_OK,
+    dependencies=[require_permission("write", "policy")],
 )
 async def disable_policy(
     policy_id: uuid.UUID,
@@ -225,6 +228,7 @@ async def disable_policy(
 @router.post(
     "/api/v1/policies/evaluate",
     response_model=PolicyEvaluateResponse,
+    dependencies=[require_permission("read", "policy")],
 )
 async def evaluate_policies(
     body: PolicyEvaluateRequest,

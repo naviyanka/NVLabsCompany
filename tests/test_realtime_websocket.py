@@ -26,6 +26,7 @@ from nexus.realtime import (
     WebSocketManager,
 )
 from nexus.api.routes.ws import _authenticate_websocket
+from nexus.auth.principal import Principal
 
 
 @pytest.fixture
@@ -436,37 +437,53 @@ class TestRealtimeEventBus:
 class TestWebSocketAuth:
     """Tests for WebSocket authentication enforcement."""
 
-    @pytest.mark.asyncio
-    async def test_authenticate_rejects_missing_company_id(self):
-        """_authenticate_websocket closes with 1008 when company_id is None."""
+    @staticmethod
+    def _socket(principal=None):
+        """A stand-in WebSocket whose scope carries the given principal."""
         ws = AsyncMock()
-        result = await _authenticate_websocket(ws, None)
+        ws.scope = {"type": "websocket", "state": {"principal": principal}}
+        return ws
+
+    @pytest.mark.asyncio
+    async def test_authenticate_rejects_anonymous_handshake(self):
+        """_authenticate_websocket closes with 1008 when no principal resolved."""
+        ws = self._socket(None)
+        result = await _authenticate_websocket(ws)
         assert result is None
         ws.close.assert_awaited_once_with(code=1008)
 
     @pytest.mark.asyncio
-    async def test_authenticate_rejects_empty_company_id(self):
-        """_authenticate_websocket closes with 1008 when company_id is empty string."""
+    async def test_authenticate_rejects_scope_without_state(self):
+        """A handshake that never reached the auth middleware is rejected."""
         ws = AsyncMock()
-        result = await _authenticate_websocket(ws, "")
+        ws.scope = {"type": "websocket"}
+        result = await _authenticate_websocket(ws)
         assert result is None
         ws.close.assert_awaited_once_with(code=1008)
 
     @pytest.mark.asyncio
-    async def test_authenticate_rejects_invalid_uuid(self):
-        """_authenticate_websocket closes with 1008 when company_id is not a valid UUID."""
-        ws = AsyncMock()
-        result = await _authenticate_websocket(ws, "not-a-uuid")
+    async def test_authenticate_ignores_company_id_query_param(self):
+        """A company_id in the query string grants nothing on its own."""
+        ws = self._socket(None)
+        ws.scope["query_string"] = f"company_id={uuid.uuid4()}".encode()
+        result = await _authenticate_websocket(ws)
         assert result is None
         ws.close.assert_awaited_once_with(code=1008)
 
     @pytest.mark.asyncio
-    async def test_authenticate_accepts_valid_uuid(self):
-        """_authenticate_websocket returns UUID when company_id is valid."""
-        ws = AsyncMock()
-        valid_id = str(uuid.uuid4())
-        result = await _authenticate_websocket(ws, valid_id)
-        assert result == uuid.UUID(valid_id)
+    async def test_authenticate_accepts_resolved_principal(self):
+        """_authenticate_websocket returns the principal the middleware resolved."""
+        principal = Principal(
+            kind="user",
+            company_id=uuid.uuid4(),
+            role="admin",
+            user_id=uuid.uuid4(),
+            email="admin@example.com",
+        )
+        ws = self._socket(principal)
+        result = await _authenticate_websocket(ws)
+        assert result is principal
+        assert result.company_id == principal.company_id
         ws.close.assert_not_awaited()
 
     @pytest.mark.asyncio

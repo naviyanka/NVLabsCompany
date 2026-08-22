@@ -188,40 +188,58 @@ class TestEventStreamSSE:
 
 
 class TestSSEAuthEnforcement:
-    """Tests for SSE endpoint authentication enforcement."""
+    """Tests for SSE endpoint authentication enforcement.
 
-    def test_sse_endpoint_rejects_missing_company_id_header(self):
-        """GET /events/stream returns 400 without X-Company-Id header."""
+    The stream used to be gated on an ``X-Company-Id`` header, which any client
+    could set to any value. It is now gated on the authenticated principal, so
+    an anonymous request is a 401 and the company is never read off the wire.
+    """
+
+    def test_sse_endpoint_rejects_anonymous_request(self):
+        """GET /events/stream returns 401 without a session or API key."""
         from nexus.main import app
 
         client = TestClient(app, raise_server_exceptions=False)
         response = client.get("/events/stream")
-        assert response.status_code == 400
-        assert "X-Company-Id" in response.json()["detail"]
+        assert response.status_code == 401
+        assert response.headers["www-authenticate"] == "Bearer"
 
-    def test_sse_endpoint_rejects_invalid_company_id_header(self):
-        """GET /events/stream returns 400 with invalid UUID in X-Company-Id."""
+    def test_sse_endpoint_ignores_company_id_header(self):
+        """A self-asserted X-Company-Id header no longer authenticates anything."""
         from nexus.main import app
 
         client = TestClient(app, raise_server_exceptions=False)
         response = client.get(
             "/events/stream",
-            headers={"X-Company-Id": "not-a-valid-uuid"},
+            headers={"X-Company-Id": str(uuid.uuid4())},
         )
-        assert response.status_code == 400
-        assert "valid UUID" in response.json()["detail"]
+        assert response.status_code == 401
 
-    @pytest.mark.asyncio
-    async def test_sse_endpoint_accepts_valid_company_id_header(self):
-        """GET /events/stream accepts a valid X-Company-Id without raising."""
+    def test_sse_endpoint_rejects_bogus_bearer_token(self):
+        """An unresolvable bearer token is anonymous, not an error."""
+        from nexus.main import app
+
+        client = TestClient(app, raise_server_exceptions=False)
+        response = client.get(
+            "/events/stream",
+            headers={"Authorization": "Bearer nvk_not_a_real_key"},
+        )
+        assert response.status_code == 401
+
+    def test_sse_dependency_returns_principal_company(self):
+        """get_current_company_id reads the company off the principal."""
         from nexus.api.deps import get_current_company_id
+        from nexus.auth.principal import Principal
 
-        # Test the dependency directly to confirm it accepts valid UUIDs
-        # (the endpoint integration is confirmed by the 400 rejection tests
-        # proving the dependency is wired in)
-        valid_uuid = str(uuid.uuid4())
-        result = await get_current_company_id(valid_uuid)
-        assert result == uuid.UUID(valid_uuid)
+        company_id = uuid.uuid4()
+        principal = Principal(
+            kind="user",
+            company_id=company_id,
+            role="admin",
+            user_id=uuid.uuid4(),
+            email="admin@example.com",
+        )
+        assert get_current_company_id(principal) == company_id
 
 
 class TestSSETenantIsolation:

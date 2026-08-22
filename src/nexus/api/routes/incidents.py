@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy import select, update
 
-from nexus.api.deps import CurrentCompanyId, DbSession
+from nexus.api.deps import CurrentCompanyId, DbSession, require_permission
 from nexus.models.incident import Incident, IncidentAction, IncidentEvent
 
 router = APIRouter(tags=["incidents"])
@@ -79,6 +79,7 @@ class TimelineResponse(BaseModel):
     "/api/v1/incidents",
     status_code=status.HTTP_201_CREATED,
     response_model=IncidentResponse,
+    dependencies=[require_permission("write", "incident")],
 )
 async def create_incident(
     body: IncidentCreate,
@@ -133,6 +134,7 @@ async def list_incidents(
 @router.put(
     "/api/v1/incidents/{incident_id}/resolve",
     response_model=IncidentResponse,
+    dependencies=[require_permission("write", "incident")],
 )
 async def resolve_incident(
     incident_id: uuid.UUID,
