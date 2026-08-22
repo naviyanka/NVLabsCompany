@@ -1,7 +1,7 @@
 """Tool invocation audit model - records every tool execution for compliance and analytics."""
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime
 
 from sqlalchemy import JSON
 from sqlmodel import Column, Field, SQLModel
@@ -32,6 +32,6 @@ class ToolInvocation(SQLModel, table=True):
     )  # not_required, approved, denied
     error: str | None = Field(default=None)
     created_at: datetime = Field(
-        default_factory=lambda: datetime.now(timezone.utc)
+        default_factory=lambda: datetime.utcnow()
     )
     completed_at: datetime | None = Field(default=None)

@@ -1,7 +1,7 @@
 """Meeting API endpoints - scheduling, conducting, and recording meetings."""
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException, status
@@ -229,7 +229,7 @@ async def start_meeting(meeting_id: uuid.UUID, db: DbSession, company_id: Curren
             detail=f"Meeting cannot be started from status '{meeting.status}'",
         )
     meeting.status = "in_progress"
-    meeting.started_at = datetime.now(timezone.utc)
+    meeting.started_at = datetime.utcnow()
     await db.flush()
     return meeting
 
@@ -254,7 +254,7 @@ async def end_meeting(meeting_id: uuid.UUID, db: DbSession, company_id: CurrentC
             detail=f"Meeting cannot be ended from status '{meeting.status}'",
         )
     meeting.status = "completed"
-    meeting.completed_at = datetime.now(timezone.utc)
+    meeting.completed_at = datetime.utcnow()
     await db.flush()
     return meeting
 
@@ -355,3 +355,55 @@ async def get_template(template_type: str) -> Any:
             detail=f"Template '{template_type}' not found",
         )
     return template
+
+
+
+# ---------------------------------------------------------------------------
+# Additional Meeting Endpoints
+# ---------------------------------------------------------------------------
+
+
+@router.delete("/api/v1/meetings/{meeting_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_meeting(meeting_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId) -> None:
+    """Delete/cancel a meeting with company_id check."""
+    from sqlalchemy import delete as sa_delete
+
+    stmt = sa_delete(Meeting).where(Meeting.id == meeting_id, Meeting.company_id == company_id)
+    await db.execute(stmt)
+
+
+@router.get("/api/v1/companies/{company_id}/meetings/upcoming", response_model=list[MeetingResponse])
+async def list_upcoming_meetings(company_id: uuid.UUID, db: DbSession, limit: int = 50) -> Any:
+    """List upcoming meetings (scheduled and in the future)."""
+    now = datetime.utcnow()
+    stmt = (
+        select(Meeting)
+        .where(
+            Meeting.company_id == company_id,
+            Meeting.status == "scheduled",
+            Meeting.scheduled_at > now,
+        )
+        .order_by(Meeting.scheduled_at.asc())
+        .limit(limit)
+    )
+    result = await db.execute(stmt)
+    return list(result.scalars().all())
+
+
+
+@router.delete("/api/v1/meetings/{meeting_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_meeting(meeting_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId) -> None:
+    """Delete/cancel a meeting."""
+    from sqlalchemy import delete as sa_delete
+    await sa_delete(MeetingParticipant).where(MeetingParticipant.meeting_id == meeting_id)
+    await db.execute(sa_delete(Meeting).where(Meeting.id == meeting_id, Meeting.company_id == company_id))
+
+
+@router.get("/api/v1/companies/{company_id}/meetings/upcoming", response_model=list[MeetingResponse])
+async def upcoming_meetings(company_id: uuid.UUID, db: DbSession, limit: int = 10) -> Any:
+    """List upcoming scheduled meetings."""
+    from datetime import datetime
+    now = datetime.utcnow()
+    stmt = select(Meeting).where(Meeting.company_id == company_id, Meeting.status == "scheduled").order_by(Meeting.scheduled_at).limit(limit)
+    result = await db.execute(stmt)
+    return list(result.scalars().all())

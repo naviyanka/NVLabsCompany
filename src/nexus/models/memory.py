@@ -1,7 +1,7 @@
 """Memory record model for the 3-temperature memory system."""
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any, Optional
 
 from sqlalchemy import JSON
@@ -35,5 +35,5 @@ class MemoryRecord(SQLModel, table=True):
     access_count: int = Field(default=0)
     last_accessed_at: Optional[datetime] = Field(default=None)
     tier: str = Field(default="warm", max_length=20)  # hot, warm, cold
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=lambda: datetime.utcnow())
+    updated_at: datetime = Field(default_factory=lambda: datetime.utcnow())

@@ -1,0 +1,26 @@
+{
+  "name": "nvlabscompany",
+  "version": "1.0.0",
+  "description": "NEXUS transforms multiple open-source agent frameworks into a unified system that operates as a real autonomous AI company. It combines organizational structure, durable agent execution, persistent identity, proactive behavior, and self-evolution into a single coherent platform.",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs",
+    "test": "tests"
+  },
+  "scripts": {},
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/naviyanka/NVLabsCompany.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/naviyanka/NVLabsCompany/issues"
+  },
+  "homepage": "https://github.com/naviyanka/NVLabsCompany#readme",
+  "devDependencies": {
+    "@playwright/test": "^1.62.1",
+    "@types/node": "^26.2.0"
+  }
+}

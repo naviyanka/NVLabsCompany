@@ -1,5 +1,6 @@
-import { lazy, Suspense } from 'react';
+import { lazy, Suspense, useEffect } from 'react';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { loadAndApplyTheme } from '@/utils/themeEngine';
 import { Layout } from '@/components/layout/Layout';
 import { Dashboard } from '@/pages/Dashboard';
 import { Agents } from '@/pages/Agents';
@@ -38,6 +39,10 @@ function OfficeFallback() {
 }
 
 export default function App() {
+  useEffect(() => {
+    loadAndApplyTheme();
+  }, []);
+
   return (
     <BrowserRouter>
       <Routes>

@@ -1,3 +1,4 @@
+import { useNavigate } from 'react-router-dom';
 import { X, Cpu, MemoryStick, ChevronRight, User, ClipboardList, ScrollText } from 'lucide-react';
 import { status3DColors, statusLabels } from '@/config/office3dLayout';
 import type { MockAgent3D } from '@/config/office3dLayout';
@@ -6,20 +7,46 @@ interface AgentDetailSidebarProps {
   agent: MockAgent3D;
   onClose: () => void;
   onViewProfile?: (agent: MockAgent3D) => void;
+  onShowToast?: (message: string) => void;
 }
 
 /**
  * Right sidebar that shows detailed agent information when an agent is clicked.
  * Quick action buttons are wired up to navigation callbacks.
  */
-export function AgentDetailSidebar({ agent, onClose, onViewProfile }: AgentDetailSidebarProps) {
+export function AgentDetailSidebar({ agent, onClose, onViewProfile, onShowToast }: AgentDetailSidebarProps) {
+  const navigate = useNavigate();
   const statusColor = status3DColors[agent.status] ?? '#9ca3af';
   const statusLabel = statusLabels[agent.status] ?? 'Unknown';
 
   const quickActions = [
-    { label: 'View Full Profile', icon: User, action: () => onViewProfile?.(agent) },
-    { label: 'Assign New Task', icon: ClipboardList, action: () => { /* placeholder - task assignment not yet wired */ } },
-    { label: 'View Logs', icon: ScrollText, action: () => { /* placeholder - logs page not yet built */ } },
+    {
+      label: 'View Full Profile',
+      icon: User,
+      action: () => {
+        if (onViewProfile) {
+          onViewProfile(agent);
+        } else {
+          navigate(`/agents/${agent.id}`);
+        }
+      },
+    },
+    {
+      label: 'Assign New Task',
+      icon: ClipboardList,
+      action: () => {
+        navigate('/tasks');
+        onShowToast?.(`Assigning new task to ${agent.name}...`);
+      },
+    },
+    {
+      label: 'View Activity Logs',
+      icon: ScrollText,
+      action: () => {
+        navigate('/activity');
+        onShowToast?.(`Viewing telemetry logs for ${agent.name}...`);
+      },
+    },
   ];
 
   return (

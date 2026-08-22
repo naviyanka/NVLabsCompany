@@ -17,6 +17,7 @@ export interface CompanyCreateRequest {
   description?: string;
   budget_monthly_cents?: number;
   issue_prefix?: string;
+  status?: CompanyStatus;
 }
 
 export interface BudgetPolicy {
@@ -52,7 +53,6 @@ export interface Approval {
   payload: Record<string, unknown>;
   decision_note: string | null;
   decided_by: string | null;
-  decided_at: DateTimeString | null;
   expires_at: DateTimeString | null;
   created_at: DateTimeString;
   updated_at: DateTimeString;

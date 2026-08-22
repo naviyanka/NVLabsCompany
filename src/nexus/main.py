@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from nexus import __version__
 from nexus.api.middleware import GovernanceMiddleware
+from nexus.auth.middleware import AuthenticationMiddleware
 from nexus.api.routes.adapters import router as adapters_router
 from nexus.api.routes.agents import router as agents_router
 from nexus.api.routes.approvals import router as approvals_router
@@ -36,6 +37,19 @@ from nexus.api.routes.tools import router as tools_router
 from nexus.api.routes.triggers import router as triggers_router
 from nexus.api.routes.workflows import router as workflows_router
 from nexus.api.routes.ws import router as ws_router
+from nexus.api.routes.notifications import router as notifications_router
+from nexus.api.routes.dashboard import router as dashboard_router
+from nexus.api.routes.activity import router as activity_router
+from nexus.api.routes.agent_logs import router as agent_logs_router
+from nexus.api.routes.settings import router as settings_router
+from nexus.api.routes.pipelines import router as pipelines_router
+from nexus.api.routes.repositories import router as repositories_router
+from nexus.api.routes.api_keys import router as api_keys_router
+from nexus.api.routes.profile import router as profile_router
+from nexus.api.routes.audit import router as audit_router
+from nexus.api.routes.memory_global import router as memory_global_router
+from nexus.api.routes.hr import router as hr_router
+from nexus.api.routes.departments import router as departments_router
 from nexus.api.versioning import APIVersionMiddleware
 from nexus.config import settings
 from nexus.logging_config import RequestIDMiddleware, configure_logging
@@ -159,22 +173,100 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
 app = FastAPI(
     title="NEXUS",
-    description="Autonomous AI Company Operating System",
+    description="""# NEXUS — Autonomous AI Company Operating System
+
+A full-stack platform for managing autonomous AI agents as employees within a virtual company.
+
+## Features
+- **Agents** — Create, manage, wake, pause, and terminate AI agents with different LLM backends
+- **Tasks & Goals** — Assign work, track progress, manage OKRs
+- **Pipelines** — Multi-step automated workflows with execution history
+- **Memory** — 3-temperature memory system (hot/warm/cold) for agent knowledge
+- **Governance** — Rate limiting, kill switch, RBAC, audit logging, budget enforcement
+- **Evolution** — Agent self-improvement proposals, evaluation, and promotion
+- **Communication** — Inter-agent messaging, groups, events
+- **Knowledge Base** — Versioned documentation with RAG search
+- **Meetings** — Scheduled meetings with minutes and action items
+- **Notifications** — Real-time event notifications with preferences
+- **Settings** — Company-wide configuration management
+- **Repositories** — Connected git repository management
+- **Secrets** — Encrypted secret storage with access control
+
+## Authentication
+
+Every endpoint outside `/health`, `/metrics` and `/api/v1/auth` requires an
+authenticated caller. Two credentials are accepted:
+
+- **Session cookie** — `POST /api/v1/auth/login` with an email and password sets
+  an httpOnly session cookie. Browser clients must also send the `X-CSRF-Token`
+  header on any request that changes state; its value is the `nv_csrf` cookie
+  set alongside the session.
+- **API key** — `Authorization: Bearer nv_...`. A key is issued for one company
+  and carries its own role, so it can be given less authority than the
+  administrator who created it. API keys are exempt from the CSRF check because
+  a browser will not attach them to a cross-site request on its own.
+
+The caller's company is taken from their credential, never from a request
+header. `X-Company-Id` is ignored unless `AUTH_ENABLED=false`, which exists only
+to keep local development and the existing test suite working.
+
+The first administrator is created by `python -m nexus.auth.bootstrap` or by
+`POST /api/v1/auth/setup`, which only answers while the user table is empty.
+Afterwards, accounts are created by invitation.
+""",
     version=__version__,
     lifespan=lifespan,
+    docs_url="/docs",
+    redoc_url="/redoc",
+    openapi_tags=[
+        {"name": "health", "description": "Health checks and readiness probes"},
+        {"name": "agents", "description": "Agent CRUD and lifecycle operations (wake/pause/heartbeat)"},
+        {"name": "tasks", "description": "Task management — create, assign, update status"},
+        {"name": "goals", "description": "Strategic goals and OKR tracking"},
+        {"name": "pipelines", "description": "Multi-step pipeline definitions and execution"},
+        {"name": "notifications", "description": "Notification delivery, preferences, and read status"},
+        {"name": "dashboard", "description": "Aggregated stats and daily metrics for overview"},
+        {"name": "activity", "description": "Company-wide and per-agent activity feeds"},
+        {"name": "agent-logs", "description": "Agent execution logs and summaries"},
+        {"name": "settings", "description": "Company-wide configuration settings"},
+        {"name": "repositories", "description": "Connected git repository management"},
+        {"name": "memory", "description": "Agent memory store, search, and retrieval"},
+        {"name": "knowledge", "description": "Knowledge base pages, RAG search, experience records"},
+        {"name": "evolution", "description": "Agent self-improvement proposals and evaluations"},
+        {"name": "communication", "description": "Inter-agent messaging, groups, and events"},
+        {"name": "meetings", "description": "Meeting scheduling, minutes, and action items"},
+        {"name": "budgets", "description": "Budget policies and usage tracking"},
+        {"name": "approvals", "description": "Governance approval workflows"},
+        {"name": "adapters", "description": "LLM adapter types and CLI backend detection"},
+        {"name": "skills", "description": "Skill registry and agent-skill assignments"},
+        {"name": "tools", "description": "Tool registry and agent tool access control"},
+        {"name": "triggers", "description": "Scheduled and webhook-triggered agent activations"},
+        {"name": "workflows", "description": "Company and task workflow orchestration"},
+        {"name": "secrets", "description": "Encrypted secret storage with versioning"},
+        {"name": "policies", "description": "Policy engine rules and evaluation"},
+        {"name": "incidents", "description": "Incident tracking and resolution"},
+        {"name": "companies", "description": "Company/tenant management"},
+        {"name": "identity", "description": "Agent persona and soul templates"},
+    ],
 )
 
-# CORS middleware - restrict to configured origins
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[o.strip() for o in settings.cors_origins.split(",")],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# Middleware stack. Starlette wraps each new middleware around the previous
+# one, so the LAST call below is the OUTERMOST layer and runs first.
+#
+# Resulting request order:
+#   CORS -> RequestID -> Metrics -> APIVersion -> Authentication -> Governance
+#
+# Two constraints fix this order. Authentication must sit outside Governance,
+# because Governance reads the caller's company from the resolved principal to
+# pick a kill switch, policy set and budget. CORS must be outermost, because a
+# 401 or 403 produced by an inner layer never reaches the CORS layer otherwise
+# and the browser reports it as a network error instead of the real status.
 
-# Governance middleware for policy enforcement, audit logging, and rate limiting
+# Governance: policy enforcement, audit logging, rate limit headers
 app.add_middleware(GovernanceMiddleware)
+
+# Authentication: resolves the request's principal from cookie or API key
+app.add_middleware(AuthenticationMiddleware)
 
 # API version middleware for X-API-Version header
 app.add_middleware(APIVersionMiddleware, version="1.0")
@@ -182,8 +274,20 @@ app.add_middleware(APIVersionMiddleware, version="1.0")
 # Metrics middleware for HTTP request tracking
 app.add_middleware(MetricsMiddleware)
 
-# Request ID middleware (added last = outermost in ASGI stack)
+# Request ID middleware
 app.add_middleware(RequestIDMiddleware)
+
+# CORS middleware - restrict to configured origins. Credentials are allowed
+# because the dashboard authenticates with a cookie, which also means the
+# origin list must stay explicit: "*" is rejected by browsers alongside
+# credentials, and would defeat the purpose here anyway.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[o.strip() for o in settings.cors_origins.split(",") if o.strip()],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Include route modules
 app.include_router(health_router)
@@ -212,5 +316,18 @@ app.include_router(incidents_router)
 app.include_router(degradation_router)
 app.include_router(rotation_router)
 app.include_router(ws_router)
+app.include_router(notifications_router)
+app.include_router(dashboard_router)
+app.include_router(activity_router)
+app.include_router(agent_logs_router)
+app.include_router(settings_router)
+app.include_router(pipelines_router)
+app.include_router(repositories_router)
+app.include_router(api_keys_router)
+app.include_router(profile_router)
+app.include_router(audit_router)
+app.include_router(memory_global_router)
+app.include_router(hr_router)
+app.include_router(departments_router)
 app.include_router(events_router)
 app.include_router(okr_router)

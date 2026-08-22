@@ -10,8 +10,13 @@
     "lint": "eslint ."
   },
   "dependencies": {
+    "@babylonjs/core": "^9.21.2",
+    "@babylonjs/gui": "^9.21.2",
+    "@babylonjs/loaders": "^9.21.2",
+    "@babylonjs/materials": "^9.21.2",
     "@react-three/drei": "^10.7.8",
     "@react-three/fiber": "^9.7.0",
+    "@types/three": "^0.185.4",
     "lucide-react": "^0.460.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
@@ -23,7 +28,6 @@
     "@types/node": "^26.2.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
-    "@types/three": "^0.185.4",
     "@vitejs/plugin-react": "^4.3.0",
     "autoprefixer": "^10.4.20",
     "postcss": "^8.4.49",

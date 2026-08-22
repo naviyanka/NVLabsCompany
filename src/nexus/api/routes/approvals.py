@@ -1,7 +1,7 @@
 """Approval API endpoints - governance approval workflows."""
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, status
@@ -108,8 +108,8 @@ async def approve(
             status="approved",
             decided_by=body.decided_by,
             decision_note=body.decision_note,
-            decided_at=datetime.now(timezone.utc),
-            updated_at=datetime.now(timezone.utc),
+            decided_at=datetime.utcnow(),
+            updated_at=datetime.utcnow(),
         )
     )
     result = await db.execute(stmt)
@@ -138,8 +138,8 @@ async def reject(
             status="rejected",
             decided_by=body.decided_by,
             decision_note=body.decision_note,
-            decided_at=datetime.now(timezone.utc),
-            updated_at=datetime.now(timezone.utc),
+            decided_at=datetime.utcnow(),
+            updated_at=datetime.utcnow(),
         )
     )
     result = await db.execute(stmt)

@@ -18,7 +18,7 @@ export const companiesApi = {
   },
 
   update(companyId: UUID, data: Partial<CompanyCreateRequest>): Promise<Company> {
-    return apiClient.patch<Company>(`${basePath}/${companyId}`, data);
+    return apiClient.put<Company>(`${basePath}/${companyId}`, data);
   },
 
   delete(companyId: UUID): Promise<void> {

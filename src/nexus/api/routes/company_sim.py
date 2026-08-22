@@ -220,7 +220,7 @@ async def delegate_task(
     from datetime import timezone
 
     delegation_id = uuid.uuid4()
-    now = datetime.now(timezone.utc)
+    now = datetime.utcnow()
     delegation = DelegationResponse(
         id=delegation_id,
         task_id=body.task_id,
@@ -341,7 +341,7 @@ async def submit_peer_review(
         reviewer_agent_id=body.reviewer_agent_id,
         rating=body.rating,
         feedback=body.feedback,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.utcnow(),
     )
 
 

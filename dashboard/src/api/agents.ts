@@ -1,35 +1,47 @@
 import { apiClient } from './client';
 import type { Agent, AgentCreateRequest, AgentUpdateRequest, MemoryEntry } from '@/types/agent';
-import type { PaginatedResponse, ListParams, UUID } from '@/types/common';
+import type { UUID } from '@/types/common';
 
 const basePath = (companyId: UUID) => `/api/v1/companies/${companyId}/agents`;
 
 export const agentsApi = {
-  list(companyId: UUID, params?: ListParams): Promise<PaginatedResponse<Agent>> {
-    return apiClient.get<PaginatedResponse<Agent>>(basePath(companyId), params);
+  /** List all agents for a company. Backend returns Agent[] directly. */
+  list(companyId: UUID, params?: { page_size?: number }): Promise<Agent[]> {
+    return apiClient.get<Agent[]>(basePath(companyId), params);
   },
 
-  get(companyId: UUID, agentId: UUID): Promise<Agent> {
-    return apiClient.get<Agent>(`${basePath(companyId)}/${agentId}`);
+  /** Get single agent by ID (uses /api/v1/agents/{id} with X-Company-Id header) */
+  get(agentId: UUID): Promise<Agent> {
+    return apiClient.get<Agent>(`/api/v1/agents/${agentId}`);
   },
 
+  /** Create a new agent */
   create(companyId: UUID, data: AgentCreateRequest): Promise<Agent> {
     return apiClient.post<Agent>(basePath(companyId), data);
   },
 
-  update(companyId: UUID, agentId: UUID, data: AgentUpdateRequest): Promise<Agent> {
-    return apiClient.patch<Agent>(`${basePath(companyId)}/${agentId}`, data);
+  /** Update an agent */
+  update(agentId: UUID, data: AgentUpdateRequest): Promise<Agent> {
+    return apiClient.put<Agent>(`/api/v1/agents/${agentId}`, data);
   },
 
-  delete(companyId: UUID, agentId: UUID): Promise<void> {
-    return apiClient.delete<void>(`${basePath(companyId)}/${agentId}`);
+  /** Delete an agent */
+  delete(agentId: UUID): Promise<void> {
+    return apiClient.delete<void>(`/api/v1/agents/${agentId}`);
   },
 
-  getMemory(agentId: UUID, params?: ListParams): Promise<PaginatedResponse<MemoryEntry>> {
-    return apiClient.get<PaginatedResponse<MemoryEntry>>(`/api/v1/agents/${agentId}/memory`, params);
+  /** Wake an agent */
+  wake(agentId: UUID): Promise<Agent> {
+    return apiClient.post<Agent>(`/api/v1/agents/${agentId}/wake`);
   },
 
-  searchMemory(companyId: UUID, query: string): Promise<MemoryEntry[]> {
-    return apiClient.post<MemoryEntry[]>(`/api/v1/companies/${companyId}/memory/search`, { query });
+  /** Pause an agent */
+  pause(agentId: UUID): Promise<Agent> {
+    return apiClient.post<Agent>(`/api/v1/agents/${agentId}/pause`);
+  },
+
+  /** Get agent memory */
+  getMemory(agentId: UUID, params?: { limit?: number }): Promise<MemoryEntry[]> {
+    return apiClient.get<MemoryEntry[]>(`/api/v1/agents/${agentId}/memory`, params);
   },
 };

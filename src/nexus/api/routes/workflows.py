@@ -5,7 +5,7 @@ and single task flows, including status tracking and execution traces.
 """
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, status
@@ -115,7 +115,7 @@ async def start_company_flow(body: StartCompanyFlowRequest) -> dict[str, Any]:
     Returns:
         A WorkflowStartedResponse with the workflow_id and initial status.
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.utcnow()
     workflow_id = str(uuid.uuid4())
     company_id = body.company_id or str(uuid.uuid4())
 
@@ -171,7 +171,7 @@ async def start_task_flow(body: StartTaskFlowRequest) -> dict[str, Any]:
     Returns:
         A WorkflowStartedResponse with the workflow_id and initial status.
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.utcnow()
     workflow_id = str(uuid.uuid4())
     task_id = body.task_id or str(uuid.uuid4())
 
@@ -282,4 +282,56 @@ async def get_workflow_trace(workflow_id: str) -> dict[str, Any]:
         "started_at": workflow.get("started_at"),
         "completed_at": workflow.get("completed_at"),
         "metadata": workflow.get("metadata"),
+    }
+
+
+
+# ---------------------------------------------------------------------------
+# Additional Workflow Endpoints
+# ---------------------------------------------------------------------------
+
+
+@router.get("/api/v1/companies/{company_id}/workflows")
+async def list_company_workflows(company_id: uuid.UUID) -> list[dict[str, Any]]:
+    """List workflows for a company (from in-memory store)."""
+    results = []
+    for wf in _workflows.values():
+        if wf.get("company_id") == str(company_id) or wf.get("company_id") == company_id:
+            results.append({
+                "workflow_id": wf["workflow_id"],
+                "workflow_type": wf.get("workflow_type", "unknown"),
+                "status": wf["status"],
+                "objective": wf["objective"],
+                "started_at": wf.get("started_at"),
+                "completed_at": wf.get("completed_at"),
+            })
+    # Also return any recent workflows regardless (for demo purposes)
+    if not results:
+        for wf in list(_workflows.values())[:20]:
+            results.append({
+                "workflow_id": wf["workflow_id"],
+                "workflow_type": wf.get("workflow_type", "unknown"),
+                "status": wf["status"],
+                "objective": wf["objective"],
+                "started_at": wf.get("started_at"),
+                "completed_at": wf.get("completed_at"),
+            })
+    return results
+
+
+@router.post("/api/v1/workflows/{workflow_id}/cancel")
+async def cancel_workflow(workflow_id: str) -> dict[str, Any]:
+    """Cancel a workflow."""
+    workflow = _workflows.get(workflow_id)
+    if workflow is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Workflow {workflow_id} not found",
+        )
+    workflow["status"] = "cancelled"
+    workflow["completed_at"] = datetime.utcnow().isoformat()
+    return {
+        "workflow_id": workflow_id,
+        "status": "cancelled",
+        "completed_at": workflow["completed_at"],
     }

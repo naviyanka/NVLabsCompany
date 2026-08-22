@@ -1,7 +1,7 @@
 """Agent API endpoints - CRUD and lifecycle operations."""
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, status
@@ -146,7 +146,7 @@ async def update_agent(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="No fields to update",
         )
-    updates["updated_at"] = datetime.now(timezone.utc)
+    updates["updated_at"] = datetime.utcnow()
     stmt = update(Agent).where(Agent.id == agent_id, Agent.company_id == company_id).values(**updates)
     await db.execute(stmt)
 
@@ -179,7 +179,7 @@ async def wake_agent(agent_id: uuid.UUID, db: DbSession, company_id: CurrentComp
     update_stmt = (
         update(Agent)
         .where(Agent.id == agent_id, Agent.company_id == company_id)
-        .values(status="ready", updated_at=datetime.now(timezone.utc))
+        .values(status="ready", updated_at=datetime.utcnow())
     )
     await db.execute(update_stmt)
     result = await db.execute(select(Agent).where(Agent.id == agent_id, Agent.company_id == company_id))
@@ -207,8 +207,8 @@ async def pause_agent(agent_id: uuid.UUID, db: DbSession, company_id: CurrentCom
         .where(Agent.id == agent_id, Agent.company_id == company_id)
         .values(
             status="paused",
-            paused_at=datetime.now(timezone.utc),
-            updated_at=datetime.now(timezone.utc),
+            paused_at=datetime.utcnow(),
+            updated_at=datetime.utcnow(),
         )
     )
     await db.execute(update_stmt)
@@ -219,7 +219,7 @@ async def pause_agent(agent_id: uuid.UUID, db: DbSession, company_id: CurrentCom
 @router.post("/api/v1/agents/{agent_id}/heartbeat")
 async def agent_heartbeat(agent_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId) -> dict[str, Any]:
     """Record a heartbeat from an agent."""
-    now = datetime.now(timezone.utc)
+    now = datetime.utcnow()
     stmt = (
         update(Agent)
         .where(Agent.id == agent_id, Agent.company_id == company_id)
@@ -232,3 +232,25 @@ async def agent_heartbeat(agent_id: uuid.UUID, db: DbSession, company_id: Curren
             detail=f"Agent {agent_id} not found",
         )
     return {"agent_id": str(agent_id), "heartbeat_at": now.isoformat()}
+
+
+
+@router.delete("/api/v1/agents/{agent_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_agent(agent_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId) -> None:
+    """Delete an agent permanently. Nullifies all foreign key references first."""
+    from sqlalchemy import delete as sa_delete, update as sa_update
+    from nexus.models.task import Task, Goal
+
+    # Nullify references from other tables
+    await db.execute(sa_update(Agent).where(Agent.manager_id == agent_id).values(manager_id=None))
+    await db.execute(sa_update(Task).where(Task.assigned_agent_id == agent_id).values(assigned_agent_id=None))
+    await db.execute(sa_update(Goal).where(Goal.owner_agent_id == agent_id).values(owner_agent_id=None))
+
+    # Delete the agent
+    stmt = sa_delete(Agent).where(Agent.id == agent_id, Agent.company_id == company_id)
+    result = await db.execute(stmt)
+    if result.rowcount == 0:  # type: ignore[union-attr]
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Agent {agent_id} not found",
+        )

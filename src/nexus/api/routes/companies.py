@@ -1,7 +1,7 @@
 """Company CRUD API endpoints."""
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, status
@@ -98,7 +98,7 @@ async def update_company(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="No fields to update",
         )
-    updates["updated_at"] = datetime.now(timezone.utc)
+    updates["updated_at"] = datetime.utcnow()
     stmt = update(Company).where(Company.id == company_id).values(**updates)
     await db.execute(stmt)
 

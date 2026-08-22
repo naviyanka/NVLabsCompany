@@ -162,3 +162,94 @@ async def list_agent_tools(
     stmt = select(ToolAccess).where(ToolAccess.agent_id == agent_id, ToolAccess.company_id == company_id)
     result = await db.execute(stmt)
     return list(result.scalars().all())
+
+
+
+class ToolUpdate(BaseModel):
+    """Request body for updating a tool."""
+
+    name: str | None = None
+    description: str | None = None
+    tool_type: str | None = None
+    schema_def: dict[str, Any] | None = None
+    endpoint: str | None = None
+    risk_level: str | None = None
+    is_active: bool | None = None
+
+
+@router.get("/api/v1/tools/{tool_id}", response_model=ToolResponse)
+async def get_tool(tool_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId) -> Any:
+    """Get a tool by ID with company_id check."""
+    stmt = select(Tool).where(Tool.id == tool_id, Tool.company_id == company_id)
+    result = await db.execute(stmt)
+    tool = result.scalar_one_or_none()
+    if tool is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Tool {tool_id} not found",
+        )
+    return tool
+
+
+@router.patch("/api/v1/tools/{tool_id}", response_model=ToolResponse)
+async def update_tool(
+    tool_id: uuid.UUID, body: ToolUpdate, db: DbSession, company_id: CurrentCompanyId
+) -> Any:
+    """Update a tool."""
+    stmt = select(Tool).where(Tool.id == tool_id, Tool.company_id == company_id)
+    result = await db.execute(stmt)
+    tool = result.scalar_one_or_none()
+    if tool is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Tool {tool_id} not found",
+        )
+    updates = body.model_dump(exclude_unset=True)
+    for key, value in updates.items():
+        setattr(tool, key, value)
+    await db.flush()
+    return tool
+
+
+@router.delete("/api/v1/tools/{tool_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_tool(tool_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId) -> None:
+    """Delete a tool with company_id check."""
+    from sqlalchemy import delete as sa_delete
+
+    stmt = sa_delete(Tool).where(Tool.id == tool_id, Tool.company_id == company_id)
+    await db.execute(stmt)
+
+
+
+@router.get("/api/v1/tools/{tool_id}", response_model=ToolResponse)
+async def get_tool(tool_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId) -> Any:
+    """Get a tool by ID."""
+    stmt = select(Tool).where(Tool.id == tool_id, Tool.company_id == company_id)
+    result = await db.execute(stmt)
+    tool = result.scalar_one_or_none()
+    if not tool:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tool not found")
+    return tool
+
+
+@router.patch("/api/v1/tools/{tool_id}", response_model=ToolResponse)
+async def update_tool(tool_id: uuid.UUID, body: ToolCreate, db: DbSession, company_id: CurrentCompanyId) -> Any:
+    """Update a tool."""
+    stmt = select(Tool).where(Tool.id == tool_id, Tool.company_id == company_id)
+    result = await db.execute(stmt)
+    tool = result.scalar_one_or_none()
+    if not tool:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tool not found")
+    updates = body.model_dump(exclude_unset=True)
+    for k, v in updates.items():
+        setattr(tool, k, v)
+    await db.flush()
+    return tool
+
+
+@router.delete("/api/v1/tools/{tool_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_tool(tool_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId) -> None:
+    """Delete a tool."""
+    from sqlalchemy import delete as sa_delete
+    stmt = sa_delete(Tool).where(Tool.id == tool_id, Tool.company_id == company_id)
+    await db.execute(stmt)

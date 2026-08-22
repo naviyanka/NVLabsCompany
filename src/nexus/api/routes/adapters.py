@@ -5,7 +5,7 @@ and session lifecycle operations (pause, resume, terminate).
 """
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, status
@@ -176,7 +176,7 @@ async def execute_task(agent_id: uuid.UUID, body: ExecuteTaskRequest) -> dict[st
     Returns:
         A TaskResultResponse with the initial execution state.
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.utcnow()
     task_id = str(uuid.uuid4())
 
     # Create a task execution record
@@ -266,7 +266,7 @@ async def pause_session(agent_id: uuid.UUID, session_id: uuid.UUID) -> dict[str,
             detail=f"Session cannot be paused from status '{session['status']}'",
         )
 
-    now = datetime.now(timezone.utc)
+    now = datetime.utcnow()
     session["status"] = "paused"
     session["last_activity_at"] = now.isoformat()
 
@@ -311,7 +311,7 @@ async def resume_session(agent_id: uuid.UUID, session_id: uuid.UUID) -> dict[str
             detail=f"Session cannot be resumed from status '{session['status']}'",
         )
 
-    now = datetime.now(timezone.utc)
+    now = datetime.utcnow()
     session["status"] = "active"
     session["last_activity_at"] = now.isoformat()
 
@@ -358,7 +358,7 @@ async def terminate_session(
             detail="Session is already terminated",
         )
 
-    now = datetime.now(timezone.utc)
+    now = datetime.utcnow()
     session["status"] = "terminated"
     session["last_activity_at"] = now.isoformat()
 
@@ -369,3 +369,42 @@ async def terminate_session(
         "status": "terminated",
         "timestamp": now.isoformat(),
     }
+
+
+
+# ---------------------------------------------------------------------------
+# CLI Backend Detection
+# ---------------------------------------------------------------------------
+
+
+@router.get("/api/v1/adapters/cli-backends")
+async def list_cli_backends() -> list[dict[str, Any]]:
+    """List all known CLI backends with their installation status.
+
+    Probes the system PATH to detect which CLI tools are installed.
+    Returns id, name, command, description, and installed (bool).
+    """
+    from nexus.adapters.cli_registry import CLIRegistry
+
+    registry = CLIRegistry(auto_detect=True)
+    all_backends = registry.get_all()
+
+    results = []
+    for backend in all_backends:
+        installed = registry.is_available(backend.id)
+        version = None
+        if installed:
+            version = registry.probe_version(backend.id)
+
+        results.append({
+            "id": backend.id,
+            "name": backend.name,
+            "command": backend.command,
+            "description": getattr(backend, 'description', ''),
+            "guard_type": getattr(backend, 'guard_type', 'none'),
+            "installed": installed,
+            "path": registry.get_path(backend.id),
+            "version": version,
+        })
+
+    return results

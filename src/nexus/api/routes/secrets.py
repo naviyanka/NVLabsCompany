@@ -5,7 +5,7 @@ Only metadata (name, category, version, timestamps) is exposed.
 """
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, status
@@ -207,7 +207,7 @@ async def revoke_secret(
     stmt = (
         update(Secret)
         .where(Secret.id == secret_id, Secret.company_id == company_id)
-        .values(is_revoked=True, updated_at=datetime.now(timezone.utc))
+        .values(is_revoked=True, updated_at=datetime.utcnow())
     )
     result = await db.execute(stmt)
     if result.rowcount == 0:  # type: ignore[union-attr]
@@ -273,7 +273,7 @@ async def rotate_secret(
             SecretVersion.secret_id == secret_id,
             SecretVersion.revoked_at == None,  # noqa: E711
         )
-        .values(revoked_at=datetime.now(timezone.utc))
+        .values(revoked_at=datetime.utcnow())
     )
 
     # Create new version
@@ -291,7 +291,7 @@ async def rotate_secret(
         .values(
             current_version=new_version_number,
             encrypted_value=encrypted_new_value,
-            updated_at=datetime.now(timezone.utc),
+            updated_at=datetime.utcnow(),
         )
     )
     await db.flush()

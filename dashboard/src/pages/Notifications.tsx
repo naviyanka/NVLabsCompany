@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Card } from '@/components/common/Card';
 import {
   Bell,
@@ -222,6 +223,69 @@ const recentUnread = [
 // ─── Main Component ────────────────────────────────────────────────────────────
 
 export function Notifications() {
+  const [activeCategory, setActiveCategory] = useState('All');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [notifications, setNotifications] = useState(notificationRows);
+  const [readIds, setReadIds] = useState<Set<number>>(new Set());
+  const [typeFilter, setTypeFilter] = useState('All Types');
+  const [moduleFilter, setModuleFilter] = useState('All Modules');
+  const [priorityFilter, setPriorityFilter] = useState('All Priorities');
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [perPage, setPerPage] = useState(10);
+  const [quietHoursEnabled, setQuietHoursEnabled] = useState(true);
+  const [quietStart, setQuietStart] = useState('22:00');
+  const [quietEnd, setQuietEnd] = useState('07:00');
+  const [emailEnabled, setEmailEnabled] = useState(true);
+  const [pushEnabled, setPushEnabled] = useState(true);
+  const [slackEnabled, setSlackEnabled] = useState(false);
+
+  const filteredNotifications = notifications.filter((n) => {
+    const matchesCategory =
+      activeCategory === 'All' ||
+      (activeCategory === 'Unread' && !readIds.has(n.id)) ||
+      (activeCategory === 'Mentions' && n.module === 'Mentions') ||
+      (activeCategory === 'Alerts' && n.priority === 'High') ||
+      (activeCategory === 'System' && n.module === 'System');
+    const matchesSearch = !searchQuery ||
+      n.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      n.description.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesType = typeFilter === 'All Types' ||
+      (typeFilter === 'Success' && n.priority === 'Success') ||
+      (typeFilter === 'Warning' && n.priority === 'Medium') ||
+      (typeFilter === 'Error' && n.priority === 'High') ||
+      (typeFilter === 'Info' && n.priority === 'Low');
+    const matchesModule = moduleFilter === 'All Modules' || n.module === moduleFilter;
+    const matchesPriority = priorityFilter === 'All Priorities' || n.priority === priorityFilter;
+    return matchesCategory && matchesSearch && matchesType && matchesModule && matchesPriority;
+  });
+
+  const totalPages = Math.ceil(filteredNotifications.length / perPage);
+  const paginatedNotifications = filteredNotifications.slice((currentPage - 1) * perPage, currentPage * perPage);
+  const unreadCount = notifications.filter((n) => !readIds.has(n.id)).length;
+
+  const handleMarkAllRead = () => {
+    setReadIds(new Set(notifications.map((n) => n.id)));
+  };
+
+  const handleMarkRead = (id: number) => {
+    setReadIds((prev) => new Set([...prev, id]));
+  };
+
+  const handleDismiss = (id: number) => {
+    setNotifications((prev) => prev.filter((n) => n.id !== id));
+  };
+
+  const dynamicTabs = [
+    { label: 'All', count: notifications.length },
+    { label: 'Unread', count: unreadCount },
+    { label: 'Mentions', count: notifications.filter((n) => n.module === 'Mentions').length },
+    { label: 'Alerts', count: notifications.filter((n) => n.priority === 'High').length },
+    { label: 'System', count: notifications.filter((n) => n.module === 'System').length },
+  ];
+
+  const uniqueModules = [...new Set(notifications.map((n) => n.module))];
+  const uniquePriorities = [...new Set(notifications.map((n) => n.priority))];
   return (
     <div className="flex gap-4">
       {/* Main Content Area */}
@@ -236,10 +300,10 @@ export function Notifications() {
             <p className="text-sm text-gray-400 mt-1">Stay updated with important events and activities across the platform</p>
           </div>
           <div className="flex items-center gap-3">
-            <button className="flex items-center gap-2 px-3 py-2 bg-dark-surface border border-white/[0.08] rounded-lg text-sm text-gray-400 hover:text-white transition-colors">
+            <button onClick={handleMarkAllRead} className="flex items-center gap-2 px-3 py-2 bg-dark-surface border border-white/[0.08] rounded-lg text-sm text-gray-400 hover:text-white transition-colors">
               Mark all as read
             </button>
-            <button className="flex items-center gap-2 px-3 py-2 bg-red-500/20 border border-red-500/30 rounded-lg text-sm text-red-400 hover:bg-red-500/30 transition-colors">
+            <button onClick={() => setShowSettingsModal(true)} className="flex items-center gap-2 px-3 py-2 bg-red-500/20 border border-red-500/30 rounded-lg text-sm text-red-400 hover:bg-red-500/30 transition-colors">
               <Settings size={14} />
               Notification Settings
             </button>
@@ -248,17 +312,18 @@ export function Notifications() {
 
         {/* Category Tabs */}
         <div className="flex items-center gap-2">
-          {categoryTabs.map((tab) => (
+          {dynamicTabs.map((tab) => (
             <button
               key={tab.label}
+              onClick={() => setActiveCategory(tab.label)}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
-                tab.active
+                activeCategory === tab.label
                   ? 'bg-blue-500/20 text-blue-400'
                   : 'bg-dark-surface border border-white/[0.08] text-gray-400 hover:text-white'
               }`}
             >
               {tab.label}
-              <span className={`text-[10px] ${tab.active ? 'text-blue-400' : 'text-gray-500'}`}>
+              <span className={`text-[10px] ${activeCategory === tab.label ? 'text-blue-400' : 'text-gray-500'}`}>
                 {tab.count}
               </span>
             </button>
@@ -269,20 +334,32 @@ export function Notifications() {
         <div className="flex items-center gap-3">
           <div className="flex-1 flex items-center gap-2 px-3 py-2 bg-dark-surface border border-white/[0.08] rounded-lg">
             <Search size={14} className="text-gray-500" />
-            <span className="text-sm text-gray-500">Search notifications...</span>
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search notifications..."
+              className="flex-1 bg-transparent text-sm text-white placeholder-gray-500 outline-none"
+            />
           </div>
-          <select className="px-3 py-2 bg-dark-surface border border-white/[0.08] rounded-lg text-sm text-gray-400 appearance-none pr-8">
+          <select value={typeFilter} onChange={(e) => { setTypeFilter(e.target.value); setCurrentPage(1); }} className="px-3 py-2 bg-dark-surface border border-white/[0.08] rounded-lg text-sm text-gray-400">
             <option>All Types</option>
+            <option>Success</option>
+            <option>Warning</option>
+            <option>Error</option>
+            <option>Info</option>
           </select>
-          <select className="px-3 py-2 bg-dark-surface border border-white/[0.08] rounded-lg text-sm text-gray-400 appearance-none pr-8">
+          <select value={moduleFilter} onChange={(e) => { setModuleFilter(e.target.value); setCurrentPage(1); }} className="px-3 py-2 bg-dark-surface border border-white/[0.08] rounded-lg text-sm text-gray-400">
             <option>All Modules</option>
+            {uniqueModules.map(m => <option key={m} value={m}>{m}</option>)}
           </select>
-          <select className="px-3 py-2 bg-dark-surface border border-white/[0.08] rounded-lg text-sm text-gray-400 appearance-none pr-8">
+          <select value={priorityFilter} onChange={(e) => { setPriorityFilter(e.target.value); setCurrentPage(1); }} className="px-3 py-2 bg-dark-surface border border-white/[0.08] rounded-lg text-sm text-gray-400">
             <option>All Priorities</option>
+            {uniquePriorities.map(p => <option key={p} value={p}>{p}</option>)}
           </select>
-          <button className="flex items-center gap-2 px-3 py-2 bg-dark-surface border border-white/[0.08] rounded-lg text-sm text-gray-400 hover:text-white transition-colors">
+          <button onClick={() => { setTypeFilter('All Types'); setModuleFilter('All Modules'); setPriorityFilter('All Priorities'); setSearchQuery(''); setActiveCategory('All'); setCurrentPage(1); }} className="flex items-center gap-2 px-3 py-2 bg-dark-surface border border-white/[0.08] rounded-lg text-sm text-gray-400 hover:text-white transition-colors">
             <Filter size={14} />
-            Filters
+            Clear Filters
           </button>
         </div>
 
@@ -297,12 +374,15 @@ export function Notifications() {
                 </tr>
               </thead>
               <tbody>
-                {notificationRows.map((row) => {
+                {paginatedNotifications.map((row) => {
                   const IconComponent = row.icon;
+                  const isRead = readIds.has(row.id);
                   return (
-                    <tr key={row.id} className="border-b border-white/[0.05] hover:bg-white/[0.02]">
+                    <tr key={row.id} className={`border-b border-white/[0.05] hover:bg-white/[0.02] ${isRead ? 'opacity-60' : ''}`}>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-3">
+                          {!isRead && <span className="w-2 h-2 rounded-full bg-blue-400 flex-shrink-0" />}
+                          {isRead && <span className="w-2 h-2 flex-shrink-0" />}
                           <div className={`w-9 h-9 rounded-full ${row.iconBg} flex items-center justify-center flex-shrink-0`}>
                             <IconComponent size={16} className={row.iconColor} />
                           </div>
@@ -324,7 +404,12 @@ export function Notifications() {
                       <td className="px-3 py-3 text-right align-top">
                         <div className="flex items-center justify-end gap-2">
                           <span className="text-[10px] text-gray-500">{row.time}</span>
-                          <button className="text-gray-500 hover:text-gray-300">
+                          {!isRead && (
+                            <button onClick={() => handleMarkRead(row.id)} className="text-[10px] text-blue-400 hover:text-blue-300" title="Mark as read">
+                              ✓
+                            </button>
+                          )}
+                          <button onClick={() => handleDismiss(row.id)} className="text-gray-500 hover:text-red-400" title="Dismiss">
                             <MoreHorizontal size={14} />
                           </button>
                         </div>
@@ -332,28 +417,32 @@ export function Notifications() {
                     </tr>
                   );
                 })}
+                {filteredNotifications.length === 0 && (
+                  <tr><td colSpan={2} className="px-4 py-8 text-center text-sm text-gray-500">No notifications match your filter</td></tr>
+                )}
               </tbody>
             </table>
           </div>
 
           {/* Pagination */}
           <div className="px-4 py-3 flex items-center justify-between border-t border-white/[0.05]">
-            <span className="text-[10px] text-gray-500">Showing 1 to 12 of 148 notifications</span>
+            <span className="text-[10px] text-gray-500">Showing {((currentPage - 1) * perPage) + 1} to {Math.min(currentPage * perPage, filteredNotifications.length)} of {filteredNotifications.length} notifications</span>
             <div className="flex items-center gap-1">
-              <button className="w-7 h-7 flex items-center justify-center rounded text-gray-500 hover:bg-white/[0.05]">
+              <button onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1} className="w-7 h-7 flex items-center justify-center rounded text-gray-500 hover:bg-white/[0.05] disabled:opacity-30">
                 <ChevronLeft size={12} />
               </button>
-              <button className="w-7 h-7 flex items-center justify-center rounded bg-indigo-500/20 text-indigo-400 text-[10px]">1</button>
-              <button className="w-7 h-7 flex items-center justify-center rounded text-gray-500 hover:bg-white/[0.05] text-[10px]">2</button>
-              <button className="w-7 h-7 flex items-center justify-center rounded text-gray-500 hover:bg-white/[0.05] text-[10px]">3</button>
-              <span className="text-[10px] text-gray-500 px-1">...</span>
-              <button className="w-7 h-7 flex items-center justify-center rounded text-gray-500 hover:bg-white/[0.05] text-[10px]">13</button>
-              <button className="w-7 h-7 flex items-center justify-center rounded text-gray-500 hover:bg-white/[0.05]">
+              {Array.from({ length: Math.min(totalPages, 5) }, (_, i) => i + 1).map(page => (
+                <button key={page} onClick={() => setCurrentPage(page)} className={`w-7 h-7 flex items-center justify-center rounded text-[10px] ${currentPage === page ? 'bg-indigo-500/20 text-indigo-400' : 'text-gray-500 hover:bg-white/[0.05]'}`}>{page}</button>
+              ))}
+              {totalPages > 5 && <span className="text-[10px] text-gray-500 px-1">...</span>}
+              <button onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages || totalPages === 0} className="w-7 h-7 flex items-center justify-center rounded text-gray-500 hover:bg-white/[0.05] disabled:opacity-30">
                 <ChevronRight size={12} />
               </button>
             </div>
-            <select className="px-2 py-1 bg-dark-bg border border-white/[0.05] rounded text-[10px] text-gray-400 appearance-none">
-              <option>10 / page</option>
+            <select value={perPage} onChange={(e) => { setPerPage(parseInt(e.target.value)); setCurrentPage(1); }} className="px-2 py-1 bg-dark-bg border border-white/[0.05] rounded text-[10px] text-gray-400">
+              <option value={5}>5 / page</option>
+              <option value={10}>10 / page</option>
+              <option value={25}>25 / page</option>
             </select>
           </div>
         </Card>
@@ -448,7 +537,7 @@ export function Notifications() {
         <Card padding="lg">
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-white font-semibold text-sm">Recent Unread</h3>
-            <span className="text-[10px] text-indigo-400 cursor-pointer">Mark all as read</span>
+            <span onClick={handleMarkAllRead} className="text-[10px] text-indigo-400 cursor-pointer">Mark all as read</span>
           </div>
           <div className="space-y-3">
             {recentUnread.map((item, idx) => (
@@ -472,27 +561,24 @@ export function Notifications() {
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <span className="text-xs text-gray-300">Email Notifications</span>
-              <div className="flex items-center gap-1">
-                <span className="text-[10px] text-green-400">Enabled</span>
-                <ChevronRight size={12} className="text-gray-500" />
-              </div>
+              <button onClick={() => setEmailEnabled(!emailEnabled)} className={`relative w-9 h-5 rounded-full transition-colors ${emailEnabled ? 'bg-green-500' : 'bg-gray-600'}`}>
+                <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full transition-transform ${emailEnabled ? 'left-[18px]' : 'left-0.5'}`} />
+              </button>
             </div>
             <div className="flex items-center justify-between">
               <span className="text-xs text-gray-300">Push Notifications</span>
-              <div className="flex items-center gap-1">
-                <span className="text-[10px] text-green-400">Enabled</span>
-                <ChevronRight size={12} className="text-gray-500" />
-              </div>
+              <button onClick={() => setPushEnabled(!pushEnabled)} className={`relative w-9 h-5 rounded-full transition-colors ${pushEnabled ? 'bg-green-500' : 'bg-gray-600'}`}>
+                <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full transition-transform ${pushEnabled ? 'left-[18px]' : 'left-0.5'}`} />
+              </button>
             </div>
             <div className="flex items-center justify-between">
               <span className="text-xs text-gray-300">Slack Notifications</span>
-              <div className="flex items-center gap-1">
-                <span className="text-[10px] text-red-400">Disabled</span>
-                <ChevronRight size={12} className="text-gray-500" />
-              </div>
+              <button onClick={() => setSlackEnabled(!slackEnabled)} className={`relative w-9 h-5 rounded-full transition-colors ${slackEnabled ? 'bg-green-500' : 'bg-gray-600'}`}>
+                <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full transition-transform ${slackEnabled ? 'left-[18px]' : 'left-0.5'}`} />
+              </button>
             </div>
             <div className="pt-2 border-t border-white/[0.05]">
-              <button className="text-[10px] text-indigo-400 hover:text-indigo-300 transition-colors">
+              <button onClick={() => setShowSettingsModal(true)} className="text-[10px] text-indigo-400 hover:text-indigo-300 transition-colors">
                 Manage Preferences
               </button>
             </div>
@@ -503,12 +589,82 @@ export function Notifications() {
         <Card padding="lg">
           <div className="flex items-center justify-between mb-3">
             <h3 className="text-white font-semibold text-sm">Quiet Hours</h3>
-            <span className="text-[10px] text-indigo-400 cursor-pointer">Edit</span>
+            <button onClick={() => setQuietHoursEnabled(!quietHoursEnabled)} className={`relative w-9 h-5 rounded-full transition-colors ${quietHoursEnabled ? 'bg-indigo-500' : 'bg-gray-600'}`}>
+              <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full transition-transform ${quietHoursEnabled ? 'left-[18px]' : 'left-0.5'}`} />
+            </button>
           </div>
-          <p className="text-xs text-gray-300">10:00 PM – 7:00 AM (Daily)</p>
-          <p className="text-[10px] text-gray-500 mt-1">You won't receive non-urgent notifications</p>
+          {quietHoursEnabled ? (
+            <div className="space-y-2">
+              <div className="flex items-center gap-2">
+                <input type="time" value={quietStart} onChange={(e) => setQuietStart(e.target.value)} className="bg-dark-bg border border-white/[0.08] rounded px-2 py-1 text-xs text-white" />
+                <span className="text-xs text-gray-500">to</span>
+                <input type="time" value={quietEnd} onChange={(e) => setQuietEnd(e.target.value)} className="bg-dark-bg border border-white/[0.08] rounded px-2 py-1 text-xs text-white" />
+              </div>
+              <p className="text-[10px] text-gray-500">Non-urgent notifications are silenced during these hours</p>
+            </div>
+          ) : (
+            <p className="text-xs text-gray-500">Quiet hours are disabled. You'll receive all notifications.</p>
+          )}
         </Card>
       </div>
+
+      {/* Settings Modal */}
+      {showSettingsModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="w-full max-w-md mx-4 bg-[#0B1626] border border-white/10 rounded-xl shadow-2xl overflow-hidden">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-white/10">
+              <h3 className="text-white font-semibold">Notification Settings</h3>
+              <button onClick={() => setShowSettingsModal(false)} className="text-gray-400 hover:text-white text-lg">×</button>
+            </div>
+            <div className="p-5 space-y-4 max-h-[60vh] overflow-y-auto">
+              <div className="space-y-3">
+                <h4 className="text-xs text-gray-400 font-medium uppercase">Channels</h4>
+                <ToggleRow label="Email Notifications" description="Receive alerts via email" enabled={emailEnabled} onToggle={() => setEmailEnabled(!emailEnabled)} />
+                <ToggleRow label="Push Notifications" description="Browser push notifications" enabled={pushEnabled} onToggle={() => setPushEnabled(!pushEnabled)} />
+                <ToggleRow label="Slack Integration" description="Forward notifications to Slack" enabled={slackEnabled} onToggle={() => setSlackEnabled(!slackEnabled)} />
+              </div>
+              <div className="space-y-3 pt-3 border-t border-white/[0.06]">
+                <h4 className="text-xs text-gray-400 font-medium uppercase">Quiet Hours</h4>
+                <ToggleRow label="Enable Quiet Hours" description="Silence non-urgent notifications" enabled={quietHoursEnabled} onToggle={() => setQuietHoursEnabled(!quietHoursEnabled)} />
+                {quietHoursEnabled && (
+                  <div className="flex items-center gap-2 pl-4">
+                    <input type="time" value={quietStart} onChange={(e) => setQuietStart(e.target.value)} className="bg-dark-bg border border-white/[0.08] rounded px-2 py-1 text-xs text-white" />
+                    <span className="text-xs text-gray-500">to</span>
+                    <input type="time" value={quietEnd} onChange={(e) => setQuietEnd(e.target.value)} className="bg-dark-bg border border-white/[0.08] rounded px-2 py-1 text-xs text-white" />
+                  </div>
+                )}
+              </div>
+              <div className="space-y-3 pt-3 border-t border-white/[0.06]">
+                <h4 className="text-xs text-gray-400 font-medium uppercase">Notification Types</h4>
+                <ToggleRow label="Agent Completions" description="When agents finish tasks" enabled={true} onToggle={() => {}} />
+                <ToggleRow label="Pipeline Failures" description="When pipelines fail" enabled={true} onToggle={() => {}} />
+                <ToggleRow label="Security Alerts" description="Security scan results" enabled={true} onToggle={() => {}} />
+                <ToggleRow label="System Updates" description="Deployments and maintenance" enabled={true} onToggle={() => {}} />
+                <ToggleRow label="Mentions" description="When someone mentions you" enabled={true} onToggle={() => {}} />
+              </div>
+            </div>
+            <div className="px-5 py-3 border-t border-white/[0.06] flex justify-end">
+              <button onClick={() => setShowSettingsModal(false)} className="px-4 py-2 bg-indigo-500/20 text-indigo-400 text-sm font-medium rounded-lg hover:bg-indigo-500/30">
+                Save Preferences
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ToggleRow({ label, description, enabled, onToggle }: { label: string; description: string; enabled: boolean; onToggle: () => void }) {
+  return (
+    <div className="flex items-center justify-between">
+      <div>
+        <p className="text-xs text-white">{label}</p>
+        <p className="text-[10px] text-gray-500">{description}</p>
+      </div>
+      <button onClick={onToggle} className={`relative w-9 h-5 rounded-full transition-colors ${enabled ? 'bg-green-500' : 'bg-gray-600'}`}>
+        <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full transition-transform ${enabled ? 'left-[18px]' : 'left-0.5'}`} />
+      </button>
     </div>
   );
 }

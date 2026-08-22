@@ -1,7 +1,11 @@
 """Health check and readiness probe endpoints."""
 
-import resource
 import time
+
+try:
+    import resource
+except ImportError:
+    resource = None  # type: ignore[assignment]  # Not available on Windows
 
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
@@ -58,9 +62,12 @@ async def health_check() -> JSONResponse:
     except Exception:
         db_status = "disconnected"
 
-    # Memory usage via resource module (no external deps)
-    usage = resource.getrusage(resource.RUSAGE_SELF)
-    memory_mb = round(usage.ru_maxrss / 1024, 2)  # KB to MB on Linux
+    # Memory usage via resource module (not available on Windows)
+    if resource is not None:
+        usage = resource.getrusage(resource.RUSAGE_SELF)
+        memory_mb = round(usage.ru_maxrss / 1024, 2)  # KB to MB on Linux
+    else:
+        memory_mb = 0.0
 
     status = "healthy" if db_status == "connected" else "degraded"
 

@@ -7,19 +7,20 @@ interface ZoneLabelProps {
 }
 
 /**
- * Floating text label for a zone that always faces the camera.
- * Uses drei Html for crisp text rendering over the 3D scene.
+ * Fixed-size floating label above a zone.
+ * No distanceFactor — stays constant size regardless of zoom.
+ * sprite mode keeps it facing camera. pointerEvents none so controls work.
  */
 export function ZoneLabel({ text, position, color }: ZoneLabelProps) {
   return (
     <Html
       position={[position[0], position[1] + 1.5, position[2]]}
       center
-      distanceFactor={8}
+      sprite
       style={{ pointerEvents: 'none' }}
     >
       <div
-        className="px-1.5 py-0.5 rounded text-[10px] font-semibold whitespace-nowrap select-none"
+        className="px-1.5 py-0.5 rounded text-[10px] font-semibold whitespace-nowrap select-none pointer-events-none"
         style={{
           color,
           backgroundColor: 'rgba(15, 17, 23, 0.85)',

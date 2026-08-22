@@ -400,8 +400,9 @@ async def seed_database(session) -> dict[str, int]:
         "tasks": 0,
     }
 
-    # Check if already seeded (look for the CEO agent)
-    result = await session.execute(select(Agent).where(Agent.id == AGENT_CEO))
+    # Check if already seeded (look for any department — departments aren't user-deletable)
+    from nexus.models.company import Department
+    result = await session.execute(select(Department).where(Department.company_id == COMPANY_ID).limit(1))
     if result.scalar_one_or_none() is not None:
         return counts  # Already seeded
 

@@ -1,7 +1,7 @@
 """Trigger API endpoints - proactive agent activation and scheduling."""
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, status
@@ -150,7 +150,7 @@ async def fire_trigger(trigger_id: uuid.UUID, db: DbSession, company_id: Current
             detail=f"Trigger {trigger_id} not found",
         )
 
-    now = datetime.now(timezone.utc)
+    now = datetime.utcnow()
 
     # Update trigger last_fired_at
     update_stmt = (

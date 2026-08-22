@@ -209,7 +209,7 @@ async def update_page(
     page.version += 1
     from datetime import timezone
 
-    page.updated_at = datetime.now(timezone.utc)
+    page.updated_at = datetime.utcnow()
     await db.flush()
     return page
 
@@ -329,3 +329,145 @@ async def search_experiences(
     stmt = stmt.limit(limit).order_by(ExperienceRecord.created_at.desc())
     result = await db.execute(stmt)
     return list(result.scalars().all())
+
+
+
+# ---------------------------------------------------------------------------
+# Knowledge Stats & Bulk Operations
+# ---------------------------------------------------------------------------
+
+
+@router.get("/api/v1/companies/{company_id}/knowledge/stats")
+async def get_knowledge_stats(company_id: uuid.UUID, db: DbSession) -> dict[str, Any]:
+    """Knowledge base statistics for a company."""
+    from sqlalchemy import func
+
+    # Total pages
+    pages_result = await db.execute(
+        select(func.count(KnowledgePage.id)).where(KnowledgePage.company_id == company_id)
+    )
+    total_pages = pages_result.scalar() or 0
+
+    # Total chunks
+    chunks_result = await db.execute(
+        select(func.count(KnowledgeChunk.id)).where(KnowledgeChunk.company_id == company_id)
+    )
+    total_chunks = chunks_result.scalar() or 0
+
+    # By status
+    status_result = await db.execute(
+        select(KnowledgePage.status, func.count(KnowledgePage.id))
+        .where(KnowledgePage.company_id == company_id)
+        .group_by(KnowledgePage.status)
+    )
+    by_status = dict(status_result.all())
+
+    # By category
+    cat_result = await db.execute(
+        select(KnowledgePage.category, func.count(KnowledgePage.id))
+        .where(KnowledgePage.company_id == company_id, KnowledgePage.category.isnot(None))
+        .group_by(KnowledgePage.category)
+    )
+    by_category = dict(cat_result.all())
+
+    return {
+        "total_pages": total_pages,
+        "total_chunks": total_chunks,
+        "by_status": by_status,
+        "by_category": by_category,
+    }
+
+
+@router.get("/api/v1/companies/{company_id}/knowledge/categories")
+async def list_knowledge_categories(company_id: uuid.UUID, db: DbSession) -> list[dict[str, Any]]:
+    """List unique categories with page count per category."""
+    from sqlalchemy import func
+
+    stmt = (
+        select(KnowledgePage.category, func.count(KnowledgePage.id).label("count"))
+        .where(KnowledgePage.company_id == company_id, KnowledgePage.category.isnot(None))
+        .group_by(KnowledgePage.category)
+        .order_by(func.count(KnowledgePage.id).desc())
+    )
+    result = await db.execute(stmt)
+    rows = result.all()
+    return [{"category": row[0], "count": row[1]} for row in rows]
+
+
+@router.delete("/api/v1/knowledge/{page_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_knowledge_page(page_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId) -> None:
+    """Delete a knowledge page with company_id check."""
+    from sqlalchemy import delete as sa_delete
+
+    stmt = sa_delete(KnowledgePage).where(KnowledgePage.id == page_id, KnowledgePage.company_id == company_id)
+    await db.execute(stmt)
+
+
+class BulkImportRequest(BaseModel):
+    """Request body for bulk importing knowledge pages."""
+
+    pages: list[PublishPageRequest]
+
+
+@router.post("/api/v1/companies/{company_id}/knowledge/import")
+async def import_knowledge_pages(
+    company_id: uuid.UUID, body: BulkImportRequest, db: DbSession
+) -> dict[str, Any]:
+    """Bulk create knowledge pages. Returns count created."""
+    created = 0
+    for page_data in body.pages:
+        page = KnowledgePage(
+            company_id=company_id,
+            title=page_data.title,
+            content=page_data.content,
+            category=page_data.category,
+            tags=page_data.tags,
+            author_agent_id=page_data.author_agent_id,
+            status="published",
+        )
+        db.add(page)
+        created += 1
+    await db.flush()
+    return {"created": created}
+
+
+
+@router.get("/api/v1/companies/{company_id}/knowledge/stats")
+async def knowledge_stats(company_id: uuid.UUID, db: DbSession) -> dict[str, Any]:
+    """Knowledge base statistics."""
+    from sqlalchemy import func
+    total_pages = await db.execute(select(func.count(KnowledgePage.id)).where(KnowledgePage.company_id == company_id))
+    total_chunks = await db.execute(select(func.count(KnowledgeChunk.id)).where(KnowledgeChunk.company_id == company_id))
+    by_status = await db.execute(select(KnowledgePage.status, func.count(KnowledgePage.id)).where(KnowledgePage.company_id == company_id).group_by(KnowledgePage.status))
+    by_category = await db.execute(select(KnowledgePage.category, func.count(KnowledgePage.id)).where(KnowledgePage.company_id == company_id, KnowledgePage.category != None).group_by(KnowledgePage.category))
+    return {"total_pages": total_pages.scalar() or 0, "total_chunks": total_chunks.scalar() or 0, "by_status": dict(by_status.all()), "by_category": dict(by_category.all())}
+
+
+@router.get("/api/v1/companies/{company_id}/knowledge/categories")
+async def knowledge_categories(company_id: uuid.UUID, db: DbSession) -> list[dict[str, Any]]:
+    """List knowledge base categories with counts."""
+    from sqlalchemy import func
+    stmt = select(KnowledgePage.category, func.count(KnowledgePage.id)).where(KnowledgePage.company_id == company_id, KnowledgePage.category != None).group_by(KnowledgePage.category)
+    result = await db.execute(stmt)
+    return [{"category": cat, "count": count} for cat, count in result.all()]
+
+
+@router.delete("/api/v1/knowledge/{page_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_page(page_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId) -> None:
+    """Delete a knowledge page."""
+    from sqlalchemy import delete as sa_delete
+    await db.execute(sa_delete(KnowledgeChunk).where(KnowledgeChunk.page_id == page_id, KnowledgeChunk.company_id == company_id))
+    await db.execute(sa_delete(KnowledgePage).where(KnowledgePage.id == page_id, KnowledgePage.company_id == company_id))
+
+
+@router.post("/api/v1/companies/{company_id}/knowledge/import")
+async def import_knowledge(company_id: uuid.UUID, db: DbSession, body: dict[str, Any] = {}) -> dict[str, int]:
+    """Bulk import knowledge pages."""
+    pages = body.get("pages", [])
+    created = 0
+    for page_data in pages:
+        page = KnowledgePage(company_id=company_id, title=page_data.get("title", "Untitled"), content=page_data.get("content", ""), category=page_data.get("category"), tags=page_data.get("tags"), status="published")
+        db.add(page)
+        created += 1
+    await db.flush()
+    return {"created": created}

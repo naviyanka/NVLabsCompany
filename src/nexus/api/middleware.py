@@ -23,6 +23,8 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from nexus.auth.middleware import get_principal_from_scope
+
 logger = logging.getLogger(__name__)
 
 # Methods considered mutating and subject to audit logging
@@ -97,14 +99,12 @@ class GovernanceMiddleware:
         request = Request(scope, receive)
         start_time = time.time()
 
-        # Extract company ID from headers
-        company_id_header = request.headers.get("x-company-id")
-        company_id: uuid.UUID | None = None
-        if company_id_header:
-            try:
-                company_id = uuid.UUID(company_id_header)
-            except ValueError:
-                pass
+        # Tenant scope comes from the authenticated principal, which
+        # AuthenticationMiddleware has already resolved and placed on the scope.
+        # Reading it from a header here would let any caller pick the company
+        # whose kill switch, policies and budget apply to their request.
+        principal = get_principal_from_scope(scope)
+        company_id: uuid.UUID | None = principal.company_id if principal else None
 
         # 1. Kill switch check
         if company_id and kill_switch_registry.is_killed(company_id):

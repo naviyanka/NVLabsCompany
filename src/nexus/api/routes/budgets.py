@@ -1,7 +1,7 @@
 """Budget API endpoints - policy creation and usage reporting."""
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, status
@@ -86,7 +86,7 @@ async def get_company_budget_usage(
     company_id: uuid.UUID, db: DbSession
 ) -> Any:
     """Get budget usage for a company."""
-    now = datetime.now(timezone.utc)
+    now = datetime.utcnow()
     window_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
     stmt = select(
@@ -121,7 +121,7 @@ async def get_agent_budget_usage(
     agent_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId
 ) -> Any:
     """Get budget usage for an agent."""
-    now = datetime.now(timezone.utc)
+    now = datetime.utcnow()
     window_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
     stmt = select(
@@ -147,3 +147,23 @@ async def get_agent_budget_usage(
         total_output_tokens=int(total_output),
         event_count=int(count),
     )
+
+
+
+@router.get("/api/v1/companies/{company_id}/budgets/cost-trend")
+async def cost_trend(company_id: uuid.UUID, db: DbSession, days: int = 7) -> list[dict[str, Any]]:
+    """Daily cost trend for the last N days."""
+    from datetime import timedelta
+    now = datetime.now(timezone.utc)
+    results = []
+    for i in range(days):
+        day = now - timedelta(days=days - 1 - i)
+        day_start = day.replace(hour=0, minute=0, second=0, microsecond=0)
+        day_end = day_start + timedelta(days=1)
+        row = await db.execute(
+            select(func.coalesce(func.sum(CostEvent.cost_cents), 0), func.coalesce(func.sum(CostEvent.input_tokens), 0), func.coalesce(func.sum(CostEvent.output_tokens), 0))
+            .where(CostEvent.company_id == company_id, CostEvent.occurred_at >= day_start, CostEvent.occurred_at < day_end)
+        )
+        r = row.one()
+        results.append({"date": day_start.strftime("%Y-%m-%d"), "cost_cents": r[0], "input_tokens": r[1], "output_tokens": r[2]})
+    return results

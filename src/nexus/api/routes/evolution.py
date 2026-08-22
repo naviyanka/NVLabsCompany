@@ -1,7 +1,7 @@
 """Evolution API endpoints - proposals, evaluations, skill versioning."""
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException, status
@@ -225,7 +225,7 @@ async def evaluate_proposal(proposal_id: uuid.UUID, db: DbSession, company_id: C
 
     # Update proposal status
     proposal.status = "evaluating"
-    proposal.updated_at = datetime.now(timezone.utc)
+    proposal.updated_at = datetime.utcnow()
 
     # Create evaluation record (placeholder scores)
     evaluation = EvolutionEvaluation(
@@ -278,7 +278,7 @@ async def promote_proposal(
     # Require approval_id for promotion gate
     proposal.status = "promoted"
     proposal.approval_id = body.approval_id
-    proposal.updated_at = datetime.now(timezone.utc)
+    proposal.updated_at = datetime.utcnow()
     await db.flush()
     return proposal
 
@@ -301,7 +301,7 @@ async def rollback_proposal(
         )
 
     proposal.status = "rolled_back"
-    proposal.updated_at = datetime.now(timezone.utc)
+    proposal.updated_at = datetime.utcnow()
     await db.flush()
     return proposal
 
@@ -400,3 +400,104 @@ async def create_skill_version(
     db.add(version)
     await db.flush()
     return version
+
+
+
+# ---------------------------------------------------------------------------
+# Additional Evolution Endpoints
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/api/v1/companies/{company_id}/evolution/evaluations",
+    response_model=list[EvaluationResponse],
+)
+async def list_evaluations(company_id: uuid.UUID, db: DbSession, limit: int = 50) -> Any:
+    """List evaluations for a company."""
+    stmt = (
+        select(EvolutionEvaluation)
+        .where(EvolutionEvaluation.company_id == company_id)
+        .order_by(EvolutionEvaluation.evaluated_at.desc())
+        .limit(limit)
+    )
+    result = await db.execute(stmt)
+    return list(result.scalars().all())
+
+
+@router.post("/api/v1/evolution/proposals/{proposal_id}/approve", response_model=ProposalResponse)
+async def approve_proposal(
+    proposal_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId
+) -> Any:
+    """Approve an evolution proposal."""
+    stmt = select(EvolutionProposal).where(
+        EvolutionProposal.id == proposal_id, EvolutionProposal.company_id == company_id
+    )
+    result = await db.execute(stmt)
+    proposal = result.scalar_one_or_none()
+    if proposal is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Proposal {proposal_id} not found",
+        )
+    proposal.status = "approved"
+    proposal.updated_at = datetime.utcnow()
+    await db.flush()
+    return proposal
+
+
+@router.post("/api/v1/evolution/proposals/{proposal_id}/reject", response_model=ProposalResponse)
+async def reject_proposal(
+    proposal_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId
+) -> Any:
+    """Reject an evolution proposal."""
+    stmt = select(EvolutionProposal).where(
+        EvolutionProposal.id == proposal_id, EvolutionProposal.company_id == company_id
+    )
+    result = await db.execute(stmt)
+    proposal = result.scalar_one_or_none()
+    if proposal is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Proposal {proposal_id} not found",
+        )
+    proposal.status = "rejected"
+    proposal.updated_at = datetime.utcnow()
+    await db.flush()
+    return proposal
+
+
+
+@router.get("/api/v1/companies/{company_id}/evolution/evaluations", response_model=list[EvaluationResponse])
+async def list_evaluations(company_id: uuid.UUID, db: DbSession, limit: int = 20) -> Any:
+    """List all evolution evaluations for a company."""
+    stmt = select(EvolutionEvaluation).where(EvolutionEvaluation.company_id == company_id).order_by(EvolutionEvaluation.evaluated_at.desc()).limit(limit)
+    result = await db.execute(stmt)
+    return list(result.scalars().all())
+
+
+@router.post("/api/v1/evolution/proposals/{proposal_id}/approve", response_model=ProposalResponse)
+async def approve_proposal(proposal_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId) -> Any:
+    """Approve an evolution proposal."""
+    stmt = select(EvolutionProposal).where(EvolutionProposal.id == proposal_id, EvolutionProposal.company_id == company_id)
+    result = await db.execute(stmt)
+    proposal = result.scalar_one_or_none()
+    if not proposal:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Proposal not found")
+    proposal.status = "approved"
+    proposal.updated_at = datetime.now(timezone.utc)
+    await db.flush()
+    return proposal
+
+
+@router.post("/api/v1/evolution/proposals/{proposal_id}/reject", response_model=ProposalResponse)
+async def reject_proposal(proposal_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId) -> Any:
+    """Reject an evolution proposal."""
+    stmt = select(EvolutionProposal).where(EvolutionProposal.id == proposal_id, EvolutionProposal.company_id == company_id)
+    result = await db.execute(stmt)
+    proposal = result.scalar_one_or_none()
+    if not proposal:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Proposal not found")
+    proposal.status = "rejected"
+    proposal.updated_at = datetime.now(timezone.utc)
+    await db.flush()
+    return proposal

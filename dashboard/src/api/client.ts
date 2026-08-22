@@ -1,3 +1,5 @@
+import { COMPANY_ID } from '@/config';
+
 export class ApiClientError extends Error {
   constructor(
     public readonly status: number,
@@ -10,6 +12,14 @@ export class ApiClientError extends Error {
 }
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+
+/** Default headers including tenant company ID */
+function defaultHeaders(): Record<string, string> {
+  return {
+    'Content-Type': 'application/json',
+    'X-Company-Id': COMPANY_ID,
+  };
+}
 
 async function handleResponse<T>(response: Response): Promise<T> {
   if (!response.ok) {
@@ -47,7 +57,7 @@ export const apiClient = {
     const url = buildUrl(path, params);
     const response = await fetch(url, {
       method: 'GET',
-      headers: { 'Content-Type': 'application/json' },
+      headers: defaultHeaders(),
     });
     return handleResponse<T>(response);
   },
@@ -56,7 +66,7 @@ export const apiClient = {
     const url = buildUrl(path);
     const response = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: defaultHeaders(),
       body: body ? JSON.stringify(body) : undefined,
     });
     return handleResponse<T>(response);
@@ -66,7 +76,7 @@ export const apiClient = {
     const url = buildUrl(path);
     const response = await fetch(url, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      headers: defaultHeaders(),
       body: body ? JSON.stringify(body) : undefined,
     });
     return handleResponse<T>(response);
@@ -76,7 +86,7 @@ export const apiClient = {
     const url = buildUrl(path);
     const response = await fetch(url, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
+      headers: defaultHeaders(),
       body: body ? JSON.stringify(body) : undefined,
     });
     return handleResponse<T>(response);
@@ -86,7 +96,7 @@ export const apiClient = {
     const url = buildUrl(path);
     const response = await fetch(url, {
       method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
+      headers: defaultHeaders(),
     });
     return handleResponse<T>(response);
   },
