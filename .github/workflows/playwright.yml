@@ -13,12 +13,24 @@ jobs:
     - uses: actions/setup-node@v4
       with:
         node-version: lts/*
-    - name: Install dependencies
+
+    - name: Install root dependencies (Playwright)
       run: npm ci
+
+    - name: Install dashboard dependencies
+      run: npm ci
+      working-directory: dashboard
+
+    - name: Build dashboard
+      run: npm run build
+      working-directory: dashboard
+
     - name: Install Playwright Browsers
       run: npx playwright install --with-deps
+
     - name: Run Playwright tests
       run: npx playwright test
+
     - uses: actions/upload-artifact@v4
       if: ${{ !cancelled() }}
       with:
