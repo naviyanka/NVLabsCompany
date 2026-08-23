@@ -78,20 +78,30 @@ export function UserMenu() {
     <div className="relative pl-2 border-l border-white/[0.08]" ref={containerRef}>
       <button
         onClick={() => setOpen(!open)}
-        className="flex items-center gap-2 py-1 pl-1 pr-1.5 rounded-[6px] hover:bg-white/[0.04] transition-colors cursor-pointer"
+        className="flex items-center gap-2.5 p-1 rounded-lg hover:bg-white/[0.04] transition-colors cursor-pointer group text-left"
         aria-label="Account menu"
         aria-expanded={open}
       >
-        <div className="w-6 h-6 rounded-full bg-[#FFB020]/15 border border-[#FFB020]/25 flex items-center justify-center">
-          <span className="text-[10px] font-mono font-medium text-[#FFB020]">
-            {initials(me.display_name)}
-          </span>
+        <div className="relative">
+          <div className="w-8 h-8 rounded-full bg-[#FFB020]/15 ring-1 ring-[#FFB020]/30 group-hover:ring-[#FFB020] flex items-center justify-center">
+            <span className="text-[11px] font-mono font-medium text-[#FFB020]">
+              {initials(me.display_name)}
+            </span>
+          </div>
+          <span className="absolute bottom-0 right-0 w-2 h-2 rounded-full bg-emerald-400 ring-2 ring-[#0A0A0B]" />
         </div>
-        <span className="hidden sm:inline text-xs font-mono text-[#A8A8AB] max-w-[9rem] truncate">
-          {me.company_name}
-        </span>
+
+        <div className="hidden md:block max-w-[10rem]">
+          <div className="text-xs font-semibold text-[#F2F1EE] leading-tight truncate">
+            {me.display_name}
+          </div>
+          <div className="text-[10px] text-[#A8A8AB] font-mono leading-tight truncate">
+            {role || 'unknown'} · {me.company_name}
+          </div>
+        </div>
+
         <ChevronDown
-          className={`w-3.5 h-3.5 text-[#6B6B6E] transition-transform ${open ? 'rotate-180' : ''}`}
+          className={`w-3.5 h-3.5 text-[#6B6B6E] group-hover:text-[#F2F1EE] transition-transform ${open ? 'rotate-180' : ''}`}
         />
       </button>
 

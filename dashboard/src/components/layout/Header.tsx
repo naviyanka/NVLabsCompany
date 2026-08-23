@@ -10,6 +10,8 @@ import {
   UserCheck,
 } from 'lucide-react';
 import { apiClient } from '../../api/client';
+import { getActiveCompanyId } from '@/config';
+import { UserMenu } from './UserMenu';
 
 export interface HeaderProps {
   onToggleSidebar?: () => void;
@@ -186,15 +188,8 @@ export function Header({ onToggleSidebar, onOpenCommandPalette }: HeaderProps) {
           )}
         </div>
 
-        {/* User Identity Avatar */}
-        <div className="flex items-center gap-2 pl-2 border-l border-white/[0.08]">
-          <div className="w-7 h-7 rounded-full bg-[#FFB020] text-[#0A0A0B] font-mono font-bold text-xs flex items-center justify-center">
-            OP
-          </div>
-          <span className="hidden sm:inline text-xs font-mono font-medium text-[#F2F1EE]">
-            Operator
-          </span>
-        </div>
+        {/* Identity, company switcher, sign out — driven by the live session */}
+        <UserMenu />
       </div>
     </header>
   );

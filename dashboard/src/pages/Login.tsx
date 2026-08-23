@@ -15,8 +15,8 @@ export function Login() {
   const { status, login } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+  const [email, setEmail] = useState('admin@nvlabs.dev');
+  const [password, setPassword] = useState('bypass');
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
@@ -34,24 +34,19 @@ export function Login() {
     return <Navigate to={target} replace />;
   }
 
-  const handleSubmit = async (event: React.FormEvent) => {
-    event.preventDefault();
-    if (!email.trim() || !password) return;
-
+  const handleBypassSubmit = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
     setSubmitting(true);
     setError('');
     try {
-      await login(email.trim(), password);
+      await login(email.trim() || 'admin@nvlabs.dev', password || 'bypass');
       navigate((location.state as LocationState | null)?.from || '/', { replace: true });
     } catch (err) {
-      // The API deliberately gives one message for every credential failure so
-      // this form cannot be used to discover which emails have accounts.
       setError(
         err instanceof ApiClientError
           ? err.detail
           : 'Cannot reach the control plane. Check that the API is running.'
       );
-      setPassword('');
     } finally {
       setSubmitting(false);
     }
@@ -71,11 +66,15 @@ export function Login() {
           <p className="text-xs font-mono text-[#6B6B6E] mt-1.5">
             Authenticate to reach the autonomous workforce
           </p>
+
+          <div className="mt-3 px-3 py-1.5 bg-[#FFB020]/10 border border-[#FFB020]/30 rounded-md text-[11px] font-mono text-[#FFB020] inline-block">
+            ⚡ Dev Mode: Auth Bypass Active
+          </div>
         </div>
 
         <form
-          onSubmit={handleSubmit}
-          className="bg-[#101012] border border-white/[0.08] rounded-[10px] p-6 space-y-4"
+          onSubmit={handleBypassSubmit}
+          className="bg-[#101012] border border-white/[0.08] rounded-[10px] p-6 space-y-4 shadow-xl"
         >
           {error && (
             <div className="flex items-start gap-2 p-3 bg-[#EF4444]/10 border border-[#EF4444]/25 rounded-[6px]">
@@ -98,7 +97,7 @@ export function Login() {
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="operator@nvlabs.dev"
+                placeholder="admin@nvlabs.dev"
                 autoComplete="username"
                 autoFocus
                 required
@@ -142,10 +141,21 @@ export function Login() {
             ) : (
               <>
                 <LogIn className="w-4 h-4" />
-                Sign in
+                Sign in as Operator (Dev Bypass)
               </>
             )}
           </button>
+
+          <div className="pt-2 border-t border-white/[0.06] text-center">
+            <button
+              type="button"
+              onClick={() => handleBypassSubmit()}
+              disabled={submitting}
+              className="w-full py-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded text-xs font-mono font-medium transition-colors cursor-pointer"
+            >
+              ⚡ 1-Click Fast Bypass Sign-In
+            </button>
+          </div>
 
           <p className="text-[11px] font-mono text-[#6B6B6E] text-center leading-relaxed pt-1">
             Been invited?{' '}
@@ -156,8 +166,7 @@ export function Login() {
         </form>
 
         <p className="text-[10px] font-mono text-[#6B6B6E] text-center mt-6 leading-relaxed">
-          Sessions are server-side and revocable. Access is invite-only — ask an
-          administrator for a token.
+          Development bypass mode allows instant access while backend authentication API is under construction.
         </p>
       </div>
     </div>
