@@ -1,9 +1,6 @@
 name: Playwright Tests
 on:
-  push:
-    branches: [ main, master ]
-  pull_request:
-    branches: [ main, master ]
+  workflow_dispatch:  # Manual trigger only — no auto-run on push until real e2e tests exist
 jobs:
   test:
     timeout-minutes: 60
