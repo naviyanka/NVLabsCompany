@@ -1,57 +1,67 @@
 import type { Agent } from '@/types/agent';
 import { Card } from '@/components/common/Card';
-import { StatusIndicator } from '@/components/common/StatusIndicator';
 import { Badge } from '@/components/common/Badge';
-import { Bot } from 'lucide-react';
+import { Cpu, Activity } from 'lucide-react';
 
 export interface AgentCardProps {
   agent: Agent;
   onClick?: (agent: Agent) => void;
 }
 
-function agentStatusToIndicator(status: Agent['status']): 'online' | 'offline' | 'busy' | 'idle' | 'error' {
-  switch (status) {
-    case 'active':
-      return 'online';
-    case 'idle':
-      return 'idle';
-    case 'busy':
-      return 'busy';
-    case 'offline':
-      return 'offline';
-    case 'error':
-      return 'error';
-    default:
-      return 'offline';
-  }
-}
-
 export function AgentCard({ agent, onClick }: AgentCardProps) {
+  const badgeVariant =
+    agent.status === 'active'
+      ? 'active'
+      : agent.status === 'busy'
+      ? 'in_progress'
+      : agent.status === 'error'
+      ? 'failed'
+      : 'idle';
+
   return (
     <Card
-      className="hover:border-primary-200"
+      className="hover:border-white/[0.2] transition-all cursor-pointer group"
       onClick={onClick ? () => onClick(agent) : undefined}
+      padding="sm"
     >
-      <div className="flex items-start gap-3">
-        <div className="flex-shrink-0 w-10 h-10 bg-primary-100 text-primary-600 rounded-lg flex items-center justify-center">
-          <Bot size={20} />
-        </div>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
-            <h3 className="text-sm font-semibold text-gray-900 truncate">{agent.name}</h3>
-            <StatusIndicator status={agentStatusToIndicator(agent.status)} size="sm" />
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="w-9 h-9 rounded-[6px] bg-white/[0.04] border border-white/[0.08] flex items-center justify-center font-mono font-bold text-xs text-[#FFB020] shrink-0">
+            {agent.name.substring(0, 2).toUpperCase()}
           </div>
-          <p className="text-xs text-gray-500 mt-0.5">{agent.title}</p>
-          <div className="flex items-center gap-2 mt-2">
-            <Badge variant="primary" size="sm">{agent.role}</Badge>
-            <Badge variant="default" size="sm">{agent.model}</Badge>
+          <div className="min-w-0">
+            <h3 className="text-sm font-display font-medium text-[#F2F1EE] group-hover:text-[#FFB020] transition-colors truncate">
+              {agent.name}
+            </h3>
+            <p className="text-xs font-mono text-[#6B6B6E] truncate">{agent.title}</p>
           </div>
-          {agent.objectives && (
-            <p className="text-xs text-gray-500 mt-2 truncate">
-              {agent.objectives}
-            </p>
-          )}
         </div>
+
+        <Badge variant={badgeVariant as any}>{agent.status}</Badge>
+      </div>
+
+      <div className="mt-4 pt-3 border-t border-white/[0.06] grid grid-cols-2 gap-2 text-[11px] font-mono text-[#6B6B6E]">
+        <div className="flex items-center gap-1.5 truncate">
+          <Cpu className="w-3.5 h-3.5 text-[#9C9C9F] shrink-0" />
+          <span className="truncate text-[#A8A8AB]">{agent.model}</span>
+        </div>
+        <div className="flex items-center justify-end gap-1 text-[#22C55E]">
+          <Activity className="w-3.5 h-3.5 shrink-0" />
+          <span>Score {agent.performance_score ?? 94}%</span>
+        </div>
+      </div>
+
+      {agent.responsibilities && (
+        <p className="text-xs text-[#9C9C9F] mt-2.5 line-clamp-2 leading-relaxed font-sans">
+          {agent.responsibilities}
+        </p>
+      )}
+
+      <div className="mt-3 flex items-center justify-between text-[10px] font-mono text-[#6B6B6E]">
+        <span>Spend MTD</span>
+        <span className="text-[#F2F1EE] font-medium">
+          ${((agent.spent_monthly_cents ?? 0) / 100).toFixed(2)}
+        </span>
       </div>
     </Card>
   );

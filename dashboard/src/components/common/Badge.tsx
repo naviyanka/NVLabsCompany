@@ -1,33 +1,70 @@
-export type BadgeVariant = 'default' | 'primary' | 'success' | 'warning' | 'danger' | 'info';
-export type BadgeSize = 'sm' | 'md';
+import type { ReactNode } from 'react';
+
+export type BadgeVariant =
+  | 'active'
+  | 'working'
+  | 'idle'
+  | 'paused'
+  | 'completed'
+  | 'in_progress'
+  | 'pending'
+  | 'failed'
+  | 'error'
+  | 'warning'
+  | 'success'
+  | 'info'
+  | 'neutral'
+  | 'amber'
+  | 'primary'
+  | 'danger'
+  | 'default';
 
 export interface BadgeProps {
-  children: React.ReactNode;
+  children: ReactNode;
   variant?: BadgeVariant;
-  size?: BadgeSize;
+  dot?: boolean;
+  size?: 'sm' | 'md' | 'lg' | string;
   className?: string;
 }
 
-const variantClasses: Record<BadgeVariant, string> = {
-  default: 'bg-gray-100 text-gray-700',
-  primary: 'bg-primary-100 text-primary-700',
-  success: 'bg-emerald-100 text-emerald-700',
-  warning: 'bg-amber-100 text-amber-700',
-  danger: 'bg-rose-100 text-rose-700',
-  info: 'bg-sky-100 text-sky-700',
+const statusConfig: Record<BadgeVariant, { dotColor: string; textColor: string; bgColor: string }> = {
+  active: { dotColor: 'bg-[#22C55E]', textColor: 'text-[#22C55E]', bgColor: 'bg-[#22C55E]/10' },
+  working: { dotColor: 'bg-[#22C55E]', textColor: 'text-[#22C55E]', bgColor: 'bg-[#22C55E]/10' },
+  success: { dotColor: 'bg-[#22C55E]', textColor: 'text-[#22C55E]', bgColor: 'bg-[#22C55E]/10' },
+  completed: { dotColor: 'bg-[#22C55E]', textColor: 'text-[#22C55E]', bgColor: 'bg-[#22C55E]/10' },
+  
+  in_progress: { dotColor: 'bg-[#38BDF8]', textColor: 'text-[#38BDF8]', bgColor: 'bg-[#38BDF8]/10' },
+  info: { dotColor: 'bg-[#38BDF8]', textColor: 'text-[#38BDF8]', bgColor: 'bg-[#38BDF8]/10' },
+  primary: { dotColor: 'bg-[#FFB020]', textColor: 'text-[#FFB020]', bgColor: 'bg-[#FFB020]/10' },
+  
+  warning: { dotColor: 'bg-[#F97316]', textColor: 'text-[#F97316]', bgColor: 'bg-[#F97316]/10' },
+  amber: { dotColor: 'bg-[#FFB020]', textColor: 'text-[#FFB020]', bgColor: 'bg-[#FFB020]/10' },
+  
+  failed: { dotColor: 'bg-[#EF4444]', textColor: 'text-[#EF4444]', bgColor: 'bg-[#EF4444]/10' },
+  error: { dotColor: 'bg-[#EF4444]', textColor: 'text-[#EF4444]', bgColor: 'bg-[#EF4444]/10' },
+  danger: { dotColor: 'bg-[#EF4444]', textColor: 'text-[#EF4444]', bgColor: 'bg-[#EF4444]/10' },
+  
+  idle: { dotColor: 'bg-[#6B6B6E]', textColor: 'text-[#9C9C9F]', bgColor: 'bg-white/[0.04]' },
+  paused: { dotColor: 'bg-[#6B6B6E]', textColor: 'text-[#9C9C9F]', bgColor: 'bg-white/[0.04]' },
+  pending: { dotColor: 'bg-[#6B6B6E]', textColor: 'text-[#9C9C9F]', bgColor: 'bg-white/[0.04]' },
+  neutral: { dotColor: 'bg-[#6B6B6E]', textColor: 'text-[#9C9C9F]', bgColor: 'bg-white/[0.04]' },
+  default: { dotColor: 'bg-[#6B6B6E]', textColor: 'text-[#9C9C9F]', bgColor: 'bg-white/[0.04]' },
 };
 
-const sizeClasses: Record<BadgeSize, string> = {
-  sm: 'px-1.5 py-0.5 text-xs',
-  md: 'px-2.5 py-1 text-xs',
-};
+export function Badge({
+  children,
+  variant = 'neutral',
+  dot = true,
+  className = '',
+}: BadgeProps) {
+  const config = statusConfig[variant] || statusConfig.neutral;
 
-export function Badge({ children, variant = 'default', size = 'md', className = '' }: BadgeProps) {
   return (
     <span
-      className={`inline-flex items-center font-medium rounded-full ${variantClasses[variant]} ${sizeClasses[size]} ${className}`}
+      className={`inline-flex items-center gap-1.5 px-2 py-0.5 text-[11px] font-mono whitespace-nowrap rounded-[4px] border border-white/[0.06] ${config.bgColor} ${config.textColor} ${className}`}
     >
-      {children}
+      {dot && <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${config.dotColor}`} />}
+      <span className="leading-none">{children}</span>
     </span>
   );
 }

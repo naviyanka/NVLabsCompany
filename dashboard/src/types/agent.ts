@@ -17,6 +17,7 @@ export interface Agent {
   objectives: string;
   budget_monthly_cents: number;
   spent_monthly_cents: number;
+  performance_score?: number;
   soul_description: string;
   last_heartbeat_at: DateTimeString | null;
   created_at: DateTimeString;

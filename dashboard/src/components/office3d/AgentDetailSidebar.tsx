@@ -1,187 +1,152 @@
 import { useNavigate } from 'react-router-dom';
-import { X, Cpu, MemoryStick, ChevronRight, User, ClipboardList, ScrollText } from 'lucide-react';
+import { X, User, ClipboardList, MessageSquare, Cpu, MemoryStick, ChevronRight } from 'lucide-react';
 import { status3DColors, statusLabels } from '@/config/office3dLayout';
 import type { MockAgent3D } from '@/config/office3dLayout';
+import { Button } from '@/components/common/Button';
 
 interface AgentDetailSidebarProps {
   agent: MockAgent3D;
   onClose: () => void;
   onViewProfile?: (agent: MockAgent3D) => void;
-  onShowToast?: (message: string) => void;
 }
 
-/**
- * Right sidebar that shows detailed agent information when an agent is clicked.
- * Quick action buttons are wired up to navigation callbacks.
- */
-export function AgentDetailSidebar({ agent, onClose, onViewProfile, onShowToast }: AgentDetailSidebarProps) {
+export function AgentDetailSidebar({ agent, onClose, onViewProfile }: AgentDetailSidebarProps) {
   const navigate = useNavigate();
   const statusColor = status3DColors[agent.status] ?? '#9ca3af';
   const statusLabel = statusLabels[agent.status] ?? 'Unknown';
 
-  const quickActions = [
-    {
-      label: 'View Full Profile',
-      icon: User,
-      action: () => {
-        if (onViewProfile) {
-          onViewProfile(agent);
-        } else {
-          navigate(`/agents/${agent.id}`);
-        }
-      },
-    },
-    {
-      label: 'Assign New Task',
-      icon: ClipboardList,
-      action: () => {
-        navigate('/tasks');
-        onShowToast?.(`Assigning new task to ${agent.name}...`);
-      },
-    },
-    {
-      label: 'View Activity Logs',
-      icon: ScrollText,
-      action: () => {
-        navigate('/activity');
-        onShowToast?.(`Viewing telemetry logs for ${agent.name}...`);
-      },
-    },
-  ];
+  const handleOpenTasks = () => {
+    navigate('/tasks');
+  };
+
+  const handleOpenChat = () => {
+    navigate(`/agents/${agent.id}`);
+  };
 
   return (
-    <div className="absolute top-14 right-0 bottom-0 w-80 z-20 bg-dark-surface/95 backdrop-blur-sm border-l border-white/[0.08] flex flex-col overflow-hidden">
+    <div className="absolute top-10 right-0 bottom-0 w-80 z-20 bg-[#141416] border-l border-white/[0.08] flex flex-col overflow-hidden shadow-2xl">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-white/[0.08]">
-        <div className="flex items-center gap-2">
+      <div className="flex items-center justify-between px-4 py-3 border-b border-white/[0.08] bg-[#101012]">
+        <div className="flex items-center gap-2.5">
           <div
-            className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold"
+            className="w-8 h-8 rounded-[4px] flex items-center justify-center text-xs font-bold font-mono"
             style={{
               backgroundColor: `${statusColor}20`,
               color: statusColor,
-              border: `2px solid ${statusColor}`,
+              border: `1px solid ${statusColor}`,
             }}
           >
-            {agent.name[0]}
+            {agent.name.substring(0, 2)}
           </div>
           <div>
-            <div className="text-sm font-semibold text-white">{agent.name}</div>
-            <div className="text-[10px] text-gray-400">{agent.role}</div>
+            <div className="text-sm font-display font-medium text-[#F2F1EE]">{agent.name}</div>
+            <div className="text-[10px] font-mono text-[#6B6B6E]">{agent.role}</div>
           </div>
         </div>
         <button
           onClick={onClose}
-          className="p-1 rounded hover:bg-white/10 transition-colors"
+          className="p-1 rounded-[4px] text-[#6B6B6E] hover:text-[#F2F1EE] hover:bg-white/[0.06] transition-colors cursor-pointer"
+          aria-label="Close sidebar"
         >
-          <X size={16} className="text-gray-400" />
+          <X size={16} />
         </button>
       </div>
 
       {/* Status */}
-      <div className="px-4 py-3 border-b border-white/[0.08]">
+      <div className="px-4 py-3 border-b border-white/[0.08] flex items-center justify-between">
         <div className="flex items-center gap-2">
           <div className="w-2 h-2 rounded-full" style={{ backgroundColor: statusColor }} />
-          <span className="text-xs font-medium" style={{ color: statusColor }}>
+          <span className="text-xs font-mono font-medium" style={{ color: statusColor }}>
             {statusLabel}
           </span>
-          <span className="text-xs text-gray-500 ml-auto">{agent.model}</span>
         </div>
+        <span className="text-xs font-mono text-[#6B6B6E]">{agent.model}</span>
       </div>
 
-      {/* Current Task */}
-      <div className="px-4 py-3 border-b border-white/[0.08]">
-        <div className="text-[10px] text-gray-500 uppercase tracking-wider mb-2">Current Task</div>
-        <div className="text-xs text-gray-300 mb-2">{agent.currentTask}</div>
-        {agent.taskProgress > 0 && (
-          <div className="relative">
-            <div className="w-full h-1.5 bg-dark-bg rounded-full overflow-hidden">
-              <div
-                className="h-full rounded-full transition-all duration-300"
-                style={{
-                  width: `${agent.taskProgress}%`,
-                  backgroundColor: statusColor,
-                }}
-              />
-            </div>
-            <div className="text-[10px] text-gray-500 mt-1 text-right">
-              {agent.taskProgress}%
-            </div>
+      {/* Content */}
+      <div className="flex-1 overflow-y-auto p-4 space-y-4">
+        {/* Current Task */}
+        <div>
+          <div className="text-[10px] font-mono text-[#6B6B6E] uppercase tracking-wider mb-1.5">
+            Active Assignment
           </div>
-        )}
-      </div>
+          <div className="p-3 bg-[#101012] border border-white/[0.06] rounded-[6px] text-xs text-[#F2F1EE] font-sans">
+            {agent.currentTask ?? 'No active task assigned.'}
+          </div>
+        </div>
 
-      {/* Performance */}
-      <div className="px-4 py-3 border-b border-white/[0.08]">
-        <div className="text-[10px] text-gray-500 uppercase tracking-wider mb-2">Performance</div>
-        <div className="grid grid-cols-2 gap-3">
-          <div className="flex items-center gap-2 p-2 bg-dark-bg/60 rounded-lg">
-            <Cpu size={12} className="text-blue-400" />
-            <div>
-              <div className="text-[10px] text-gray-500">CPU</div>
-              <div className="text-xs font-semibold text-white">{agent.cpu}%</div>
+        {/* Telemetry Stats */}
+        <div className="grid grid-cols-2 gap-2">
+          <div className="p-3 bg-[#101012] border border-white/[0.06] rounded-[6px]">
+            <div className="flex items-center gap-1.5 text-[10px] font-mono text-[#6B6B6E] mb-1">
+              <Cpu size={12} />
+              Model Provider
             </div>
+            <div className="text-xs font-mono font-medium text-[#F2F1EE] truncate">{agent.model}</div>
           </div>
-          <div className="flex items-center gap-2 p-2 bg-dark-bg/60 rounded-lg">
-            <MemoryStick size={12} className="text-purple-400" />
-            <div>
-              <div className="text-[10px] text-gray-500">Memory</div>
-              <div className="text-xs font-semibold text-white">{agent.memory}%</div>
+          <div className="p-3 bg-[#101012] border border-white/[0.06] rounded-[6px]">
+            <div className="flex items-center gap-1.5 text-[10px] font-mono text-[#6B6B6E] mb-1">
+              <MemoryStick size={12} />
+              Tokens Processed
+            </div>
+            <div className="text-xs font-mono font-medium text-[#FFB020]">
+              {(agent.tokensUsed ?? 0).toLocaleString()}
             </div>
           </div>
         </div>
-      </div>
 
-      {/* Sparkline - simple bars */}
-      <div className="px-4 py-3 border-b border-white/[0.08]">
-        <div className="text-[10px] text-gray-500 uppercase tracking-wider mb-2">Activity (8h)</div>
-        <div className="flex items-end gap-0.5 h-8">
-          {agent.sparklineData.map((value, i) => (
-            <div
-              key={i}
-              className="flex-1 rounded-sm"
-              style={{
-                height: `${(value / 100) * 100}%`,
-                backgroundColor: `${statusColor}80`,
-                minHeight: 2,
-              }}
-            />
-          ))}
-        </div>
-      </div>
-
-      {/* Capabilities */}
-      <div className="px-4 py-3 border-b border-white/[0.08]">
-        <div className="text-[10px] text-gray-500 uppercase tracking-wider mb-2">Capabilities</div>
-        <div className="flex flex-wrap gap-1.5">
-          {agent.capabilities.map((cap) => (
-            <span
-              key={cap}
-              className="px-2 py-0.5 rounded-full text-[10px] bg-dark-bg border border-white/[0.08] text-gray-300"
-            >
-              {cap}
-            </span>
-          ))}
-        </div>
-      </div>
-
-      {/* Quick Actions */}
-      <div className="px-4 py-3 mt-auto">
-        <div className="text-[10px] text-gray-500 uppercase tracking-wider mb-2">Quick Actions</div>
-        <div className="space-y-1.5">
-          {quickActions.map(({ label, icon: Icon, action }) => (
+        {/* Quick actions */}
+        <div>
+          <div className="text-[10px] font-mono text-[#6B6B6E] uppercase tracking-wider mb-2">
+            Operations & Actions
+          </div>
+          <div className="space-y-1.5">
             <button
-              key={label}
-              onClick={action}
-              className="w-full flex items-center justify-between px-3 py-2 text-xs text-gray-300 bg-dark-bg/60 rounded-lg hover:bg-white/5 transition-colors border border-white/[0.05]"
+              onClick={() => onViewProfile?.(agent)}
+              className="w-full flex items-center justify-between px-3 py-2 text-xs text-[#F2F1EE] bg-[#101012] hover:bg-white/[0.04] border border-white/[0.06] rounded-[6px] transition-colors cursor-pointer"
             >
-              <span className="flex items-center gap-2">
-                <Icon size={10} className="text-indigo-400" />
-                {label}
-              </span>
-              <ChevronRight size={10} className="text-gray-500" />
+              <div className="flex items-center gap-2">
+                <User size={14} className="text-[#FFB020]" />
+                <span>View Full Agent Dossier</span>
+              </div>
+              <ChevronRight size={14} className="text-[#6B6B6E]" />
             </button>
-          ))}
+
+            <button
+              onClick={handleOpenChat}
+              className="w-full flex items-center justify-between px-3 py-2 text-xs text-[#F2F1EE] bg-[#101012] hover:bg-white/[0.04] border border-white/[0.06] rounded-[6px] transition-colors cursor-pointer"
+            >
+              <div className="flex items-center gap-2">
+                <MessageSquare size={14} className="text-[#38BDF8]" />
+                <span>Live Chat & Commands</span>
+              </div>
+              <ChevronRight size={14} className="text-[#6B6B6E]" />
+            </button>
+
+            <button
+              onClick={handleOpenTasks}
+              className="w-full flex items-center justify-between px-3 py-2 text-xs text-[#F2F1EE] bg-[#101012] hover:bg-white/[0.04] border border-white/[0.06] rounded-[6px] transition-colors cursor-pointer"
+            >
+              <div className="flex items-center gap-2">
+                <ClipboardList size={14} className="text-[#22C55E]" />
+                <span>Assign New Task</span>
+              </div>
+              <ChevronRight size={14} className="text-[#6B6B6E]" />
+            </button>
+          </div>
         </div>
+      </div>
+
+      {/* Footer */}
+      <div className="p-3 border-t border-white/[0.08] bg-[#101012]">
+        <Button
+          variant="primary"
+          size="sm"
+          className="w-full"
+          onClick={() => onViewProfile?.(agent)}
+        >
+          Open Dossier
+        </Button>
       </div>
     </div>
   );

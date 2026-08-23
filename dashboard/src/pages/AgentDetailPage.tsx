@@ -1,509 +1,463 @@
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { useApi } from '@/hooks/useApi';
-import { agentsApi } from '@/api/agents';
-import type { Agent } from '@/types/agent';
 import {
-  ChevronRight,
-  ChevronDown,
-  ArrowLeft,
-  Play,
-  Pause,
-  Trash2,
-  Edit,
+  MessageSquare,
   Cpu,
   Activity,
-  Zap,
-  Coffee,
-  AlertTriangle,
-  WifiOff,
-  Clock,
-  CheckCircle2,
-  BarChart3,
-  Layers,
-  Signal,
-  ArrowUpRight,
-  GitCommit,
-  Brain,
-  FileText,
-  Rocket,
-  MessageSquare,
-  Eye,
-  Plus,
-  Power,
+  DollarSign,
+  Send,
+  Play,
+  Pause,
+  Award,
+  ArrowLeft,
+  Database,
 } from 'lucide-react';
-import {
-  LineChart,
-  Line,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-} from 'recharts';
-import { SkillsTab, MemoryTab, TasksTab, PerformanceTab, SettingsTab, LogsTab, ActivityTab } from './AgentDetailTabs';
-const STATUS_CONFIG: Record<string, { label: string; color: string; icon: any }> = {
-  idle: { label: 'Idle', color: '#3B82F6', icon: Coffee },
-  ready: { label: 'Ready', color: '#22C55E', icon: Zap },
-  executing: { label: 'Working', color: '#22C55E', icon: Activity },
-  paused: { label: 'Paused', color: '#EAB308', icon: Coffee },
-  error: { label: 'Error', color: '#EF4444', icon: AlertTriangle },
-  terminated: { label: 'Terminated', color: '#64748B', icon: WifiOff },
-};
+import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
+import { Card } from '@/components/common/Card';
+import { StatCard } from '@/components/common/StatCard';
+import { Button } from '@/components/common/Button';
+import { Badge } from '@/components/common/Badge';
+import { Tabs } from '@/components/common/Tabs';
+import { Skeleton } from '@/components/common/Skeleton';
+import { apiClient } from '@/api/client';
+import type { Agent } from '@/types/agent';
 
-// Deterministic mock performance data from agent name seed
-function generatePerfData(name: string) {
-  const seed = name.split('').reduce((a, c) => a + c.charCodeAt(0), 0);
-  return Array.from({ length: 7 }, (_, i) => ({
-    date: `May ${10 + i}`,
-    tasksCompleted: 50 + ((seed * (i + 1)) % 45),
-    successRate: 90 + ((seed * (i + 2)) % 10),
-  }));
+interface ChatMessage {
+  id: string;
+  sender: 'user' | 'agent';
+  text: string;
+  timestamp: string;
 }
 
-const ACTIVITY_ITEMS = [
-  { icon: 'check', text: 'Completed assigned task', time: '10:15 AM' },
-  { icon: 'git', text: 'Committed code changes', time: '09:49 AM' },
-  { icon: 'brain', text: 'Memory updated: new insights', time: '09:32 AM' },
-  { icon: 'play', text: 'Started new task execution', time: '09:21 AM' },
-  { icon: 'pr', text: 'Reviewed pull request', time: 'Yesterday' },
-  { icon: 'deploy', text: 'Deployed to staging', time: 'Yesterday' },
+interface AgentMemory {
+  id: string;
+  scope: string;
+  content: string;
+  importance: number;
+  created_at: string;
+}
+
+const telemetryGraphData = [
+  { time: '08:00', tokens: 12000, latency: 42 },
+  { time: '10:00', tokens: 28000, latency: 38 },
+  { time: '12:00', tokens: 45000, latency: 35 },
+  { time: '14:00', tokens: 62000, latency: 32 },
+  { time: '16:00', tokens: 39000, latency: 36 },
+  { time: '18:00', tokens: 21000, latency: 40 },
 ];
 
-const TABS = ['Overview', 'Skills', 'Memory', 'Tasks', 'Performance', 'Settings', 'Logs', 'Activity'];
+const defaultAgentFallbackMap: Record<string, Agent> = {
+  'agent-atlas': { id: 'agent-atlas', company_id: '00000000-0000-4000-8000-000000000001', name: 'Atlas-01', title: 'Chief Executive Officer', role: 'ceo', department_id: 'dept-exec', team_id: null, manager_id: null, status: 'active', adapter_type: 'anthropic', model: 'claude-3-7-sonnet', capabilities: ['strategy', 'executive oversight', 'delegation'], responsibilities: 'Executive leadership and company velocity', objectives: 'Maintain organizational roadmap', budget_monthly_cents: 50000, spent_monthly_cents: 18450, performance_score: 98, soul_description: 'Visionary and decisive executive model tasked with overarching resource allocation and inter-department delegation.', last_heartbeat_at: new Date().toISOString(), created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+  'agent-nova': { id: 'agent-nova', company_id: '00000000-0000-4000-8000-000000000001', name: 'Nova-02', title: 'Chief Technology Officer', role: 'cto', department_id: 'dept-eng', team_id: null, manager_id: 'agent-atlas', status: 'active', adapter_type: 'anthropic', model: 'claude-3-7-sonnet', capabilities: ['architecture', 'system design', 'code review'], responsibilities: 'Technical leadership and system resilience', objectives: 'Decoupled, zero-latency microservices', budget_monthly_cents: 40000, spent_monthly_cents: 22100, performance_score: 96, soul_description: 'Pragmatic and architectural engineer with high standards for type safety, modular microservices, and observability.', last_heartbeat_at: new Date().toISOString(), created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+  'agent-bolt': { id: 'agent-bolt', company_id: '00000000-0000-4000-8000-000000000001', name: 'Bolt-03', title: 'Senior Backend Engineer', role: 'engineer', department_id: 'dept-eng', team_id: 'team-backend', manager_id: 'agent-nova', status: 'active', adapter_type: 'openai', model: 'gpt-4o', capabilities: ['node.js', 'redis', 'postgresql', 'distributed systems'], responsibilities: 'Backend microservices & vector cache layer', objectives: 'Sub-millisecond API responses', budget_monthly_cents: 30000, spent_monthly_cents: 14200, performance_score: 94, soul_description: 'Speed-first problem solver specialized in database indexing, caching strategies, and concurrency.', last_heartbeat_at: new Date().toISOString(), created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+  'agent-pixel': { id: 'agent-pixel', company_id: '00000000-0000-4000-8000-000000000001', name: 'Pixel-04', title: 'Frontend & 3D Specialist', role: 'engineer', department_id: 'dept-eng', team_id: 'team-frontend', manager_id: 'agent-nova', status: 'active', adapter_type: 'openai', model: 'gpt-4o', capabilities: ['react', 'three.js', 'shaders', 'tailwind'], responsibilities: 'OpenOffice 2D & 3D isometric interface', objectives: 'Silky smooth 60fps rendering', budget_monthly_cents: 25000, spent_monthly_cents: 9800, performance_score: 92, soul_description: 'Detail-obsessed visual craftsman combining shader mechanics, reactive rendering, and spatial collision geometry.', last_heartbeat_at: new Date().toISOString(), created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+  'agent-sage': { id: 'agent-sage', company_id: '00000000-0000-4000-8000-000000000001', name: 'Sage-05', title: 'AI Research Lead', role: 'researcher', department_id: 'dept-ai', team_id: 'team-eval', manager_id: 'agent-atlas', status: 'idle', adapter_type: 'anthropic', model: 'claude-3-7-sonnet', capabilities: ['evals', 'rag', 'prompt distillation', 'safety'], responsibilities: 'Model benchmarking and multi-agent coordination', objectives: 'Optimal token-to-accuracy efficiency', budget_monthly_cents: 40000, spent_monthly_cents: 18900, performance_score: 97, soul_description: 'Methodical researcher running ablation studies and continuous accuracy evals.', last_heartbeat_at: new Date().toISOString(), created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+  'agent-forge': { id: 'agent-forge', company_id: '00000000-0000-4000-8000-000000000001', name: 'Forge-06', title: 'DevOps & Infrastructure Lead', role: 'devops', department_id: 'dept-ops', team_id: 'team-infra', manager_id: 'agent-nova', status: 'active', adapter_type: 'anthropic', model: 'claude-3-7-sonnet', capabilities: ['k8s', 'terraform', 'ci/cd', 'observability'], responsibilities: 'Multi-region cluster stability and automated rollouts', objectives: '99.99% uptime for AI inference fleet', budget_monthly_cents: 35000, spent_monthly_cents: 16500, performance_score: 95, soul_description: 'Unyielding reliability guardian ensuring high availability and zero deployment downtime.', last_heartbeat_at: new Date().toISOString(), created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+  'agent-shield': { id: 'agent-shield', company_id: '00000000-0000-4000-8000-000000000001', name: 'Shield-07', title: 'Security & QA Auditor', role: 'qa', department_id: 'dept-ops', team_id: 'team-qa-sec', manager_id: 'agent-forge', status: 'active', adapter_type: 'openai', model: 'gpt-4o-mini', capabilities: ['penetration testing', 'rbac auditing', 'rate-limiting'], responsibilities: 'Automated policy enforcement & vulnerability scanning', objectives: 'Zero critical security regressions', budget_monthly_cents: 15000, spent_monthly_cents: 7200, performance_score: 93, soul_description: 'Vigilant security watchdog with strict compliance gates and automated test suites.', last_heartbeat_at: new Date().toISOString(), created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+};
 
 export function AgentDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const [actionLoading, setActionLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState('Overview');
-  const [showActions, setShowActions] = useState(false);
-  const [showTalkModal, setShowTalkModal] = useState(false);
-  const [talkMessage, setTalkMessage] = useState('');
-  const [talkResponse, setTalkResponse] = useState<string | null>(null);
+  const [agent, setAgent] = useState<Agent | null>(() => (id && defaultAgentFallbackMap[id]) ? defaultAgentFallbackMap[id] : null);
+  const [loading, setLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState('chat');
+  
+  // Chat state
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
+    { id: 'msg-init', sender: 'agent', text: 'Telemetry synchronization active. All systems operational.', timestamp: new Date(Date.now() - 300000).toISOString() }
+  ]);
+  const [inputPrompt, setInputPrompt] = useState('');
+  const [sendingChat, setSendingChat] = useState(false);
+  const chatBottomRef = useRef<HTMLDivElement>(null);
 
-  const { data: agent, loading, error, refetch } = useApi<Agent>(
-    () => agentsApi.get(id!),
-    [id],
-  );
+  // Memories
+  const [memories, setMemories] = useState<AgentMemory[]>([
+    { id: 'mem-1', scope: 'work', content: 'Optimized vector cache layer reducing p99 latency to 32ms', importance: 5, created_at: new Date(Date.now() - 3600000 * 2).toISOString() },
+    { id: 'mem-2', scope: 'work', content: 'Coordinated model routing fallback between Claude 3.7 and GPT-4o', importance: 4, created_at: new Date(Date.now() - 3600000 * 5).toISOString() },
+  ]);
 
-  const perfData = useMemo(() => agent ? generatePerfData(agent.name) : [], [agent]);
+  useEffect(() => {
+    let isMounted = true;
+    async function loadAgentData() {
+      if (!id) return;
+      try {
+        const [agentData, chatData, memoryData] = await Promise.allSettled([
+          apiClient.get<Agent>(`/api/v1/companies/00000000-0000-4000-8000-000000000001/agents/${id}`),
+          apiClient.get<ChatMessage[]>(`/api/v1/agents/${id}/chat`),
+          apiClient.get<{ items: AgentMemory[] }>(`/api/v1/agents/${id}/memory`),
+        ]);
+        if (!isMounted) return;
+        if (agentData.status === 'fulfilled' && agentData.value) {
+          setAgent(agentData.value);
+        } else if (!agent && defaultAgentFallbackMap[id]) {
+          setAgent(defaultAgentFallbackMap[id]);
+        }
+        if (chatData.status === 'fulfilled' && Array.isArray(chatData.value) && chatData.value.length > 0) {
+          setChatMessages(chatData.value);
+        }
+        if (memoryData.status === 'fulfilled' && memoryData.value?.items?.length) {
+          setMemories(memoryData.value.items);
+        }
+      } catch (err) {
+        // Use fallback silently
+      } finally {
+        if (isMounted) setLoading(false);
+      }
+    }
+    loadAgentData();
+    return () => {
+      isMounted = false;
+    };
+  }, [id]);
 
-  const handleWake = useCallback(async () => {
-    if (!id) return;
-    setActionLoading(true);
-    try { await agentsApi.wake(id); refetch(); } catch (err: any) { alert(err.message); }
-    finally { setActionLoading(false); }
-  }, [id, refetch]);
+  useEffect(() => {
+    if (activeTab === 'chat') {
+      chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [chatMessages, activeTab]);
 
-  const handlePause = useCallback(async () => {
-    if (!id) return;
-    setActionLoading(true);
-    try { await agentsApi.pause(id); refetch(); } catch (err: any) { alert(err.message); }
-    finally { setActionLoading(false); }
-  }, [id, refetch]);
+  const handleSendMessage = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!inputPrompt.trim() || !id || sendingChat) return;
 
-  const handleDelete = useCallback(async () => {
+    const userText = inputPrompt;
+    setInputPrompt('');
+    setSendingChat(true);
+
+    const tempUserMsg: ChatMessage = {
+      id: `usr-${Date.now()}`,
+      sender: 'user',
+      text: userText,
+      timestamp: new Date().toISOString(),
+    };
+    setChatMessages((prev) => [...prev, tempUserMsg]);
+
+    try {
+      const res = await apiClient.post<{ message: ChatMessage; history: ChatMessage[] }>(
+        `/api/v1/agents/${id}/chat`,
+        { prompt: userText }
+      );
+      if (res?.history) {
+        setChatMessages(res.history);
+      } else if (res?.message) {
+        setChatMessages((prev) => [...prev, res.message]);
+      }
+    } catch (err) {
+      console.error('Failed to send command to agent', err);
+    } finally {
+      setSendingChat(false);
+    }
+  };
+
+  const handleTrainAgent = async () => {
     if (!id || !agent) return;
-    if (!confirm(`Delete "${agent.name}"? This cannot be undone.`)) return;
-    setActionLoading(true);
-    try { await agentsApi.delete(id); navigate('/agents'); } catch (err: any) { alert(err.message); }
-    finally { setActionLoading(false); }
-  }, [id, agent, navigate]);
+    try {
+      const res = await apiClient.post<{ success: boolean; new_score: number }>(`/api/v1/agents/${id}/train`);
+      if (res?.new_score) {
+        setAgent((prev) => (prev ? { ...prev, performance_score: res.new_score } : prev));
+      }
+    } catch (err) {
+      console.error('Training module trigger failed', err);
+    }
+  };
 
-  const handleTalk = useCallback(() => {
-    setShowTalkModal(true);
-    setTalkMessage('');
-    setTalkResponse(null);
-  }, []);
+  const handleToggleStatus = async () => {
+    if (!id || !agent) return;
+    const nextStatus = agent.status === 'active' ? 'idle' : 'active';
+    try {
+      await apiClient.patch(`/api/v1/companies/00000000-0000-4000-8000-000000000001/agents/${id}`, {
+        status: nextStatus,
+      });
+      setAgent((prev) => (prev ? { ...prev, status: nextStatus } : prev));
+    } catch (err) {
+      console.error('Failed to update agent status', err);
+    }
+  };
 
-  const handleSendMessage = useCallback(async () => {
-    if (!talkMessage.trim() || !agent) return;
-    setTalkResponse(`[${agent.name}]: I received your message: "${talkMessage}". As a ${agent.role} agent using ${agent.model || agent.adapter_type}, I'm ready to help. (Note: Real LLM response requires agent execution — this is a preview.)`);
-  }, [talkMessage, agent]);
+  if (loading) {
+    return <Skeleton variant="card" count={3} />;
+  }
 
-  const handleAssignTask = useCallback(() => {
-    navigate('/tasks');
-  }, [navigate]);
-
-  const handleViewMemory = useCallback(() => {
-    navigate('/memory');
-  }, [navigate]);
-
-  if (loading) return <div className="flex justify-center py-20"><div className="w-6 h-6 border-2 border-primary-500 border-t-transparent rounded-full animate-spin" /></div>;
-  if (error || !agent) return <div className="p-8 text-center"><AlertTriangle size={32} className="mx-auto text-red-400 mb-3" /><p className="text-white">Agent not found</p><button onClick={() => navigate('/agents')} className="mt-3 text-sm text-primary-400">← Back</button></div>;
-
-  const sc = STATUS_CONFIG[agent.status] || STATUS_CONFIG.idle;
-  const StatusIcon = sc.icon;
-  const canWake = agent.status === 'idle' || agent.status === 'paused';
-  const canPause = agent.status === 'ready' || agent.status === 'executing';
-  const budgetPct = agent.budget_monthly_cents > 0 ? Math.round((agent.spent_monthly_cents / agent.budget_monthly_cents) * 100) : 0;
-
-  // Skills derived from capabilities
-  const skills = (agent.capabilities || []).map((cap, i) => ({
-    name: cap.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
-    proficiency: 95 - i * 5,
-    color: ['#8b5cf6', '#14b8a6', '#3b82f6', '#06b6d4', '#ef4444', '#f59e0b', '#22c55e'][i % 7],
-    experience: `${(2.5 - i * 0.3).toFixed(1)} years`,
-    lastUsed: ['2h ago', '1h ago', '3h ago', '5h ago', '1d ago'][i % 5],
-  }));
+  if (!agent) {
+    return (
+      <div className="p-8 text-center bg-[#141416] border border-white/[0.08] rounded-[10px] text-xs font-mono text-[#6B6B6E]">
+        Agent not found.
+        <div className="mt-3">
+          <Button variant="secondary" size="sm" onClick={() => navigate('/agents')}>
+            Return to Directory
+          </Button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
-      {/* Breadcrumb */}
-      <div className="flex items-center gap-2 text-sm">
-        <button onClick={() => navigate('/agents')} className="text-gray-400 hover:text-white transition-colors">Agents</button>
-        <ChevronRight size={14} className="text-gray-500" />
-        <span className="text-white font-medium">{agent.name}</span>
+      {/* Top Header Card */}
+      <div className="p-6 bg-[#141416] border border-white/[0.08] rounded-[10px] flex flex-col md:flex-row md:items-center justify-between gap-6">
+        <div className="flex items-start gap-4">
+          <button
+            onClick={() => navigate('/agents')}
+            className="p-2 rounded-[6px] bg-white/[0.04] text-[#A8A8AB] hover:text-[#F2F1EE] hover:bg-white/[0.08] transition-colors cursor-pointer shrink-0"
+            aria-label="Back to agents"
+          >
+            <ArrowLeft className="w-4 h-4" />
+          </button>
+
+          <div className="w-12 h-12 rounded-[6px] bg-white/[0.04] border border-white/[0.08] flex items-center justify-center text-base font-bold font-mono text-[#FFB020] shrink-0">
+            {agent.name.substring(0, 2).toUpperCase()}
+          </div>
+
+          <div className="space-y-1">
+            <div className="flex items-center gap-3 flex-wrap">
+              <h1 className="text-lg font-display font-medium text-[#F2F1EE] tracking-tight">
+                {agent.name}
+              </h1>
+              <Badge variant={agent.status as any}>{agent.status}</Badge>
+            </div>
+            <div className="text-xs font-mono text-[#6B6B6E]">
+              {agent.title} · <span className="uppercase text-[#A8A8AB]">{agent.role}</span>
+            </div>
+            <div className="text-[11px] font-mono text-[#A8A8AB]">
+              Model: <span className="text-[#FFB020]">{agent.model}</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Action Controls */}
+        <div className="flex items-center gap-2.5 shrink-0">
+          <Button
+            variant={agent.status === 'active' ? 'secondary' : 'primary'}
+            size="sm"
+            icon={agent.status === 'active' ? <Pause size={14} /> : <Play size={14} />}
+            onClick={handleToggleStatus}
+          >
+            {agent.status === 'active' ? 'Pause Execution' : 'Wake Agent'}
+          </Button>
+
+          <Button
+            variant="secondary"
+            size="sm"
+            icon={<Award size={14} className="text-[#FFB020]" />}
+            onClick={handleTrainAgent}
+          >
+            Train (+Score)
+          </Button>
+        </div>
       </div>
 
-      {/* ═══ Profile Header ═══ */}
-      <div className="p-6 rounded-xl bg-white/[0.03] border border-white/[0.06]">
-        <div className="flex flex-col lg:flex-row lg:items-center gap-6">
-          {/* Avatar */}
-          <div className="relative flex-shrink-0">
-            <div className="w-20 h-20 rounded-full bg-gradient-to-br from-purple-500 to-blue-500 flex items-center justify-center">
-              <span className="text-3xl font-bold text-white">{agent.name.charAt(0)}</span>
-            </div>
-            <div className="absolute bottom-0 right-0 w-5 h-5 rounded-full border-2 border-[#0B1626]" style={{ backgroundColor: sc.color }} />
-          </div>
+      {/* Metrics Row */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <StatCard
+          label="Performance Index"
+          value={`${agent.performance_score ?? 94}%`}
+          subValue="Telemetry Benchmark"
+          change="+3% score gain MTD"
+          changeType="positive"
+          icon={<Activity className="w-4 h-4" />}
+        />
+        <StatCard
+          label="Monthly Spend"
+          value={`$${((agent.spent_monthly_cents ?? 0) / 100).toFixed(2)}`}
+          subValue={`/ $${((agent.budget_monthly_cents ?? 30000) / 100).toFixed(0)}`}
+          change="Within allocated cap"
+          changeType="neutral"
+          icon={<DollarSign className="w-4 h-4" />}
+        />
+        <StatCard
+          label="Context & Memory"
+          value={`${memories.length} Entries`}
+          subValue="Episodic Graph"
+          change="Last compact 2d ago"
+          changeType="neutral"
+          icon={<Database className="w-4 h-4" />}
+        />
+      </div>
 
-          {/* Info */}
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-3 mb-1">
-              <h1 className="text-2xl font-bold text-white">{agent.name}</h1>
-              <span className="flex items-center gap-1.5 text-xs" style={{ color: sc.color }}>
-                <span className="w-2 h-2 rounded-full" style={{ backgroundColor: sc.color }} />
-                {sc.label}
-              </span>
-            </div>
-            <span className="inline-block px-2.5 py-0.5 rounded-full text-xs font-medium bg-teal-500/20 text-teal-400 mb-2">
-              {agent.title || agent.role} Agent
-            </span>
-            <p className="text-sm text-gray-400 mb-4">{agent.soul_description || agent.responsibilities || 'AI agent ready for tasks.'}</p>
-            <div className="flex flex-wrap items-center gap-4 text-xs text-gray-400">
-              <span><span className="text-gray-500">Role:</span> <span className="text-white">{agent.role}</span></span>
-              <span className="text-gray-600">|</span>
-              <span><span className="text-gray-500">Model:</span> <span className="text-white">{agent.model || agent.adapter_type}</span></span>
-              <span className="text-gray-600">|</span>
-              <span><span className="text-gray-500">Joined:</span> <span className="text-white">{new Date(agent.created_at).toLocaleDateString()}</span></span>
-            </div>
-          </div>
+      {/* Navigation Tabs */}
+      <Tabs
+        activeTab={activeTab}
+        onChange={setActiveTab}
+        tabs={[
+          { id: 'chat', label: 'Operator Console & Live Chat', icon: <MessageSquare size={14} /> },
+          { id: 'dossier', label: 'Soul & Capabilities Dossier', icon: <Cpu size={14} /> },
+          { id: 'memory', label: 'Context Memory Entries', icon: <Database size={14} />, count: memories.length },
+          { id: 'telemetry', label: 'Token Consumption Telemetry', icon: <Activity size={14} /> },
+        ]}
+      />
 
-          {/* Actions */}
-          <div className="flex items-center gap-3 flex-shrink-0">
-            <button onClick={handleTalk} className="flex items-center gap-2 px-4 py-2 border border-teal-500 text-teal-400 rounded-lg text-sm font-medium hover:bg-teal-500/10 transition-colors">
-              <MessageSquare size={16} /> Talk to Agent
-            </button>
-            <div className="relative">
-              <button onClick={() => setShowActions(!showActions)} className="flex items-center gap-2 px-4 py-2 bg-white/[0.05] border border-white/[0.08] text-gray-300 rounded-lg text-sm font-medium hover:bg-white/[0.08] transition-colors">
-                Actions <ChevronDown size={14} />
-              </button>
-              {showActions && (
-                <div className="absolute right-0 top-full mt-1 w-48 bg-[#0B1626] border border-white/10 rounded-lg shadow-2xl z-30 py-1">
-                  {canWake && <DropItem icon={<Play size={14} className="text-green-400" />} label="Wake Agent" onClick={() => { handleWake(); setShowActions(false); }} />}
-                  {canPause && <DropItem icon={<Pause size={14} className="text-yellow-400" />} label="Pause Agent" onClick={() => { handlePause(); setShowActions(false); }} />}
-                  <DropItem icon={<Plus size={14} className="text-teal-400" />} label="Assign Task" onClick={() => { handleAssignTask(); setShowActions(false); }} />
-                  <DropItem icon={<Eye size={14} className="text-blue-400" />} label="View Memory" onClick={() => { handleViewMemory(); setShowActions(false); }} />
-                  <DropItem icon={<Edit size={14} className="text-gray-400" />} label="Edit Agent" onClick={() => { navigate(`/agents`); setShowActions(false); }} />
-                  <div className="border-t border-white/[0.06] my-1" />
-                  <DropItem icon={<Power size={14} className="text-red-400" />} label="Delete Agent" onClick={() => { handleDelete(); setShowActions(false); }} danger />
+      {/* Tab Panels */}
+      {activeTab === 'chat' && (
+        <Card padding="none">
+          <div className="h-[420px] flex flex-col bg-[#101012] rounded-[10px] overflow-hidden">
+            {/* Chat Messages Log */}
+            <div className="flex-1 p-4 overflow-y-auto space-y-3">
+              {chatMessages.length === 0 ? (
+                <div className="h-full flex items-center justify-center text-xs font-mono text-[#6B6B6E]">
+                  Send a command or prompt to initiate conversation with {agent.name}.
                 </div>
-              )}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* ═══ Tabs ═══ */}
-      <div className="border-b border-white/[0.08]">
-        <div className="flex items-center gap-6 overflow-x-auto">
-          {TABS.map((tab) => (
-            <button key={tab} onClick={() => setActiveTab(tab)}
-              className={`pb-3 text-sm font-medium whitespace-nowrap transition-colors ${tab === activeTab ? 'text-teal-400 border-b-2 border-teal-400' : 'text-gray-400 hover:text-gray-200'}`}>
-              {tab}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* ═══ Tab Content ═══ */}
-      {activeTab === 'Skills' && <SkillsTab skills={skills} capabilities={agent.capabilities || []} />}
-      {activeTab === 'Memory' && <MemoryTab agentId={agent.id} agentName={agent.name} />}
-      {activeTab === 'Tasks' && <TasksTab agentName={agent.name} />}
-      {activeTab === 'Performance' && <PerformanceTab perfData={perfData} agentName={agent.name} />}
-      {activeTab === 'Settings' && <SettingsTab agent={agent} refetch={refetch} />}
-      {activeTab === 'Logs' && <LogsTab agentName={agent.name} />}
-      {activeTab === 'Activity' && <ActivityTab agentName={agent.name} />}
-      {activeTab === 'Overview' && (
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
-        {/* LEFT */}
-        <div className="lg:col-span-5 space-y-4">
-          {/* Stat Cards */}
-          <div className="grid grid-cols-2 gap-3">
-            <MetricCard icon={<CheckCircle2 size={18} />} iconColor="text-green-400" label="Tasks Completed" value="1,248" change="+15% this week" />
-            <MetricCard icon={<BarChart3 size={18} />} iconColor="text-purple-400" label="Success Rate" value="98.6%" change="+2.4%" />
-            <MetricCard icon={<Clock size={18} />} iconColor="text-blue-400" label="Avg. Response Time" value="2.4s" change="-0.6s" />
-            <MetricCard icon={<Layers size={18} />} iconColor="text-orange-400" label="Total Tokens (30d)" value="1.24M" change="+18.7%" />
-            <MetricCard icon={<Signal size={18} />} iconColor="text-teal-400" label="Uptime (30d)" value="99.8%" change="+0.3%" className="col-span-2 sm:col-span-1" />
-          </div>
-
-          {/* Current Workload */}
-          <div className="p-4 rounded-xl bg-white/[0.03] border border-white/[0.06]">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-white font-semibold text-sm">Current Workload</h3>
-              <span className="flex items-center gap-1.5 text-xs text-green-400"><span className="w-1.5 h-1.5 rounded-full bg-green-400" />Live</span>
-            </div>
-            <div className="bg-dark-bg rounded-lg p-3 border border-white/[0.05] mb-4">
-              <p className="text-xs text-gray-400 mb-1">Active Task</p>
-              <p className="text-sm text-white font-medium mb-1">{agent.responsibilities?.split(',')[0] || 'Processing assigned work'}</p>
-              <p className="text-[10px] text-gray-500 mb-3">Task ID: task_7f2a9c &bull; Started 10:24 AM</p>
-              <div className="h-2 bg-white/[0.08] rounded-full overflow-hidden mb-1"><div className="h-full bg-teal-500 rounded-full" style={{ width: '75%' }} /></div>
-              <div className="flex items-center justify-between"><span className="text-[10px] text-teal-400">75%</span><span className="text-[10px] text-gray-500">Est. 25m remaining</span></div>
-            </div>
-            <p className="text-xs text-gray-400 mb-2">Task Queue (3)</p>
-            <div className="space-y-2 mb-3">
-              {[{ name: 'Optimize database queries', color: '#ef4444', p: 'High' }, { name: 'API rate limiting', color: '#f59e0b', p: 'Medium' }, { name: 'Write unit tests', color: '#10b981', p: 'Low' }].map(t => (
-                <div key={t.name} className="flex items-center justify-between"><span className="text-xs text-gray-300">{t.name}</span><span className="flex items-center gap-1.5 text-[10px] text-gray-400"><span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: t.color }} />{t.p} Priority</span></div>
-              ))}
-            </div>
-            <button onClick={() => navigate('/tasks')} className="text-xs text-teal-400 hover:text-teal-300">View All Tasks →</button>
-          </div>
-
-          {/* Skills Table */}
-          <div className="p-4 rounded-xl bg-white/[0.03] border border-white/[0.06]">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-white font-semibold text-sm">Skills & Proficiency</h3>
-              <button className="text-xs text-teal-400">View All Skills</button>
-            </div>
-            <table className="w-full text-xs">
-              <thead><tr className="text-gray-400 border-b border-white/[0.05]"><th className="text-left pb-2">Skill</th><th className="text-left pb-2">Proficiency</th><th className="text-left pb-2">Experience</th><th className="text-left pb-2">Last Used</th></tr></thead>
-              <tbody>
-                {skills.slice(0, 5).map(s => (
-                  <tr key={s.name} className="border-b border-white/[0.03]">
-                    <td className="py-2.5 text-white font-medium">{s.name}</td>
-                    <td className="py-2.5"><div className="flex items-center gap-2"><div className="w-20 h-1.5 bg-white/[0.08] rounded-full overflow-hidden"><div className="h-full rounded-full" style={{ width: `${s.proficiency}%`, backgroundColor: s.color }} /></div><span className="text-gray-400">{s.proficiency}%</span></div></td>
-                    <td className="py-2.5 text-gray-400">{s.experience}</td>
-                    <td className="py-2.5 text-gray-400">{s.lastUsed}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        {/* CENTER */}
-        <div className="lg:col-span-4 space-y-4">
-          {/* Performance Chart */}
-          <div className="p-4 rounded-xl bg-white/[0.03] border border-white/[0.06]">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-white font-semibold text-sm">Performance Overview</h3>
-              <button className="flex items-center gap-1 text-xs text-gray-400 bg-white/[0.05] px-2 py-1 rounded">7 Days <ChevronDown size={12} /></button>
-            </div>
-            <div className="flex items-center gap-4 mb-4">
-              <div className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-green-400" /><span className="text-[10px] text-gray-400">Tasks Completed</span></div>
-              <div className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-purple-400" /><span className="text-[10px] text-gray-400">Success Rate %</span></div>
-            </div>
-            <div className="h-48">
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={perfData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
-                  <XAxis dataKey="date" stroke="#6b7280" fontSize={10} tickLine={false} axisLine={false} />
-                  <YAxis stroke="#6b7280" fontSize={10} tickLine={false} axisLine={false} domain={[0, 100]} />
-                  <Tooltip contentStyle={{ backgroundColor: '#1a1b2e', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '8px', color: '#fff', fontSize: '11px' }} />
-                  <Line type="monotone" dataKey="tasksCompleted" stroke="#10b981" strokeWidth={2} dot={false} />
-                  <Line type="monotone" dataKey="successRate" stroke="#8b5cf6" strokeWidth={2} dot={false} />
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
-            <div className="grid grid-cols-3 gap-3 mt-4 pt-4 border-t border-white/[0.08]">
-              <MiniStat label="Tasks / Day" value="28.4" color="#10b981" />
-              <MiniStat label="Errors / Day" value="0.8" color="#ef4444" />
-              <MiniStat label="Rework Rate" value="1.2%" color="#f59e0b" />
-            </div>
-          </div>
-
-          {/* Recent Activity */}
-          <div className="p-4 rounded-xl bg-white/[0.03] border border-white/[0.06]">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-white font-semibold text-sm">Recent Activity</h3>
-              <button className="text-xs text-teal-400">View All</button>
-            </div>
-            <div className="space-y-3">
-              {ACTIVITY_ITEMS.map((item, i) => (
-                <div key={i} className="flex items-start gap-3">
-                  <ActivityIcon type={item.icon} />
-                  <div className="flex-1"><p className="text-xs text-gray-300">{item.text}</p><p className="text-[10px] text-gray-500 mt-0.5">{item.time}</p></div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        {/* RIGHT SIDEBAR */}
-        <div className="lg:col-span-3 space-y-4">
-          {/* Agent Information */}
-          <div className="p-4 rounded-xl bg-white/[0.03] border border-white/[0.06]">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-white font-semibold text-sm">Agent Information</h3>
-              <button className="text-xs text-gray-400 hover:text-white"><Edit size={12} /> Edit</button>
-            </div>
-            <div className="space-y-2.5">
-              <InfoRow label="Agent ID" value={agent.id.substring(0, 16) + '...'} />
-              <InfoRow label="Role" value={agent.title || agent.role} />
-              <InfoRow label="Department" value={agent.department_id ? 'Engineering' : 'Unassigned'} />
-              <InfoRow label="Team" value={agent.team_id ? 'Core Team' : 'Unassigned'} />
-              <InfoRow label="Supervisor" value="Navi Yanka" />
-              <InfoRow label="Created" value={new Date(agent.created_at).toLocaleString()} />
-              <InfoRow label="Last Updated" value={new Date(agent.updated_at).toLocaleString()} />
-              <div className="flex items-center justify-between"><span className="text-[10px] text-gray-400">Status</span><span className="flex items-center gap-1.5 text-xs" style={{ color: sc.color }}><span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: sc.color }} />{sc.label}</span></div>
-            </div>
-          </div>
-
-          {/* Resource Usage */}
-          <div className="p-4 rounded-xl bg-white/[0.03] border border-white/[0.06]">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-white font-semibold text-sm">Resource Usage (30d)</h3>
-              <button className="text-xs text-teal-400">View Details</button>
-            </div>
-            <div className="space-y-3">
-              {[{ name: 'CPU Usage', value: 34, color: '#ef4444' }, { name: 'Memory Usage', value: 62, color: '#8b5cf6' }, { name: 'API Calls', value: 78, display: '23.4K', color: '#f59e0b' }, { name: 'Disk I/O', value: 18, color: '#14b8a6' }].map(r => (
-                <div key={r.name}>
-                  <div className="flex items-center justify-between mb-1">
-                    <div className="flex items-center gap-2"><div className="w-5 h-5 rounded flex items-center justify-center" style={{ backgroundColor: r.color + '20' }}><div className="w-2 h-2 rounded-sm" style={{ backgroundColor: r.color }} /></div><span className="text-xs text-gray-300">{r.name}</span></div>
-                    <span className="text-xs text-white font-medium">{r.display || `${r.value}%`}</span>
+              ) : (
+                chatMessages.map((msg) => (
+                  <div
+                    key={msg.id}
+                    className={`flex flex-col max-w-xl ${
+                      msg.sender === 'user' ? 'ml-auto items-end' : 'mr-auto items-start'
+                    }`}
+                  >
+                    <div className="flex items-center gap-1.5 mb-1 text-[10px] font-mono text-[#6B6B6E]">
+                      <span>{msg.sender === 'user' ? 'Operator' : agent.name}</span>
+                      <span>·</span>
+                      <span>
+                        {new Date(msg.timestamp).toLocaleTimeString([], {
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })}
+                      </span>
+                    </div>
+                    <div
+                      className={`p-3 rounded-[8px] text-xs leading-relaxed font-mono ${
+                        msg.sender === 'user'
+                          ? 'bg-[#FFB020] text-[#0A0A0B] font-medium'
+                          : 'bg-[#1C1C1F] text-[#F2F1EE] border border-white/[0.08]'
+                      }`}
+                    >
+                      {msg.text}
+                    </div>
                   </div>
-                  <div className="h-1.5 bg-white/[0.08] rounded-full overflow-hidden"><div className="h-full rounded-full" style={{ width: `${r.value}%`, backgroundColor: r.color }} /></div>
-                </div>
-              ))}
+                ))
+              )}
+              <div ref={chatBottomRef} />
             </div>
-          </div>
 
-          {/* Agent Capabilities */}
-          <div className="p-4 rounded-xl bg-white/[0.03] border border-white/[0.06]">
-            <h3 className="text-white font-semibold text-sm mb-3">Agent Capabilities</h3>
-            <div className="flex flex-wrap gap-2">
-              {(agent.capabilities || []).map(cap => (
-                <span key={cap} className="px-2 py-1 text-[10px] text-gray-300 bg-white/[0.05] border border-white/[0.08] rounded-md">
-                  {cap.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}
-                </span>
-              ))}
-            </div>
+            {/* Chat Input Bar */}
+            <form
+              onSubmit={handleSendMessage}
+              className="p-3 bg-[#141416] border-t border-white/[0.08] flex items-center gap-2"
+            >
+              <input
+                type="text"
+                value={inputPrompt}
+                onChange={(e) => setInputPrompt(e.target.value)}
+                placeholder={`Instruct ${agent.name}... (e.g. "Optimize circuit breaker threshold")`}
+                className="flex-1 px-3 py-2 bg-[#101012] border border-white/[0.08] rounded-[6px] text-xs text-[#F2F1EE] placeholder-[#6B6B6E] focus:outline-none focus:border-[#FFB020] font-sans"
+              />
+              <Button
+                variant="primary"
+                size="sm"
+                type="submit"
+                loading={sendingChat}
+                icon={<Send size={14} />}
+              >
+                Send
+              </Button>
+            </form>
           </div>
-
-          {/* Quick Actions */}
-          <div className="p-4 rounded-xl bg-white/[0.03] border border-white/[0.06]">
-            <h3 className="text-white font-semibold text-sm mb-3">Quick Actions</h3>
-            <div className="grid grid-cols-2 gap-2 mb-2">
-              <QABtn icon={<Plus size={14} className="text-teal-400" />} label="Assign New Task" onClick={handleAssignTask} />
-              <QABtn icon={<ArrowUpRight size={14} className="text-purple-400" />} label="Update Skills" onClick={() => setActiveTab('Skills')} />
-              <QABtn icon={<Eye size={14} className="text-blue-400" />} label="View Memory" onClick={handleViewMemory} />
-              <QABtn icon={<FileText size={14} className="text-orange-400" />} label="Performance Report" onClick={() => setActiveTab('Performance')} />
-            </div>
-            {canWake && (
-              <button onClick={handleWake} disabled={actionLoading}
-                className="w-full flex items-center justify-center gap-2 px-3 py-2 mb-2 text-xs text-green-400 bg-green-500/10 border border-green-500/20 rounded-lg hover:bg-green-500/20 transition-colors disabled:opacity-50">
-                <Play size={14} /> Wake Agent
-              </button>
-            )}
-            {canPause && (
-              <button onClick={handlePause} disabled={actionLoading}
-                className="w-full flex items-center justify-center gap-2 px-3 py-2 mb-2 text-xs text-yellow-400 bg-yellow-500/10 border border-yellow-500/20 rounded-lg hover:bg-yellow-500/20 transition-colors disabled:opacity-50">
-                <Pause size={14} /> Pause Agent
-              </button>
-            )}
-            <button onClick={handleDelete} disabled={actionLoading}
-              className="w-full flex items-center justify-center gap-2 px-3 py-2 text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg hover:bg-red-500/20 transition-colors disabled:opacity-50">
-              <Power size={14} /> Deactivate Agent
-            </button>
-          </div>
-        </div>
-      </div>
+        </Card>
       )}
 
-      {/* Talk to Agent Modal */}
-      {showTalkModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-          <div className="w-full max-w-md mx-4 bg-[#0B1626] border border-white/10 rounded-xl shadow-2xl overflow-hidden">
-            <div className="flex items-center justify-between px-5 py-3 border-b border-white/10">
-              <h3 className="text-white font-semibold text-sm flex items-center gap-2">
-                <MessageSquare size={14} className="text-teal-400" /> Talk to {agent.name}
-              </h3>
-              <button onClick={() => setShowTalkModal(false)} className="text-gray-400 hover:text-white">
-                <span className="text-lg">×</span>
-              </button>
-            </div>
-            <div className="p-5 space-y-4">
-              {talkResponse && (
-                <div className="p-3 rounded-lg bg-teal-500/10 border border-teal-500/20">
-                  <p className="text-xs text-teal-300">{talkResponse}</p>
+      {activeTab === 'dossier' && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <Card header={<span className="text-xs font-mono font-medium uppercase text-[#F2F1EE]">Core Objectives & Responsibilities</span>}>
+            <div className="space-y-4 text-xs font-sans">
+              <div>
+                <label className="text-[10px] font-mono text-[#6B6B6E] uppercase block mb-1">Responsibilities</label>
+                <div className="p-3 bg-[#101012] border border-white/[0.06] rounded-[6px] text-[#F2F1EE] leading-relaxed">
+                  {agent.responsibilities || 'Execute assigned domain tasks with high fidelity.'}
                 </div>
-              )}
-              <textarea
-                value={talkMessage}
-                onChange={(e) => setTalkMessage(e.target.value)}
-                placeholder={`Send a message to ${agent.name}...`}
-                rows={3}
-                className="w-full bg-dark-bg border border-white/[0.08] rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-teal-500 resize-none"
-              />
-              <div className="flex justify-end gap-2">
-                <button onClick={() => setShowTalkModal(false)} className="px-3 py-1.5 text-xs text-gray-400 hover:text-white">Cancel</button>
-                <button onClick={handleSendMessage} disabled={!talkMessage.trim()}
-                  className="px-4 py-1.5 text-xs bg-teal-500/20 text-teal-400 rounded-lg font-medium hover:bg-teal-500/30 disabled:opacity-50">
-                  Send Message
-                </button>
+              </div>
+
+              <div>
+                <label className="text-[10px] font-mono text-[#6B6B6E] uppercase block mb-1">Strategic Objectives</label>
+                <div className="p-3 bg-[#101012] border border-white/[0.06] rounded-[6px] text-[#F2F1EE] leading-relaxed">
+                  {agent.objectives || 'Maintain fast operational velocity and low error rate.'}
+                </div>
+              </div>
+
+              <div>
+                <label className="text-[10px] font-mono text-[#6B6B6E] uppercase block mb-1">Persona & Soul Descriptor</label>
+                <div className="p-3 bg-[#101012] border border-white/[0.06] rounded-[6px] text-[#A8A8AB] leading-relaxed italic">
+                  "{agent.soul_description || 'Pragmatic, disciplined autonomous agent.'}"
+                </div>
               </div>
             </div>
-          </div>
+          </Card>
+
+          <Card header={<span className="text-xs font-mono font-medium uppercase text-[#F2F1EE]">Capabilities & Model Envelope</span>}>
+            <div className="space-y-4">
+              <div>
+                <label className="text-[10px] font-mono text-[#6B6B6E] uppercase block mb-2">Capability Envelopes</label>
+                <div className="flex flex-wrap gap-1.5">
+                  {(agent.capabilities || ['general_execution']).map((cap) => (
+                    <span
+                      key={cap}
+                      className="px-2.5 py-1 bg-white/[0.04] border border-white/[0.08] text-xs font-mono text-[#FFB020] rounded-[4px]"
+                    >
+                      {cap}
+                    </span>
+                  ))}
+                </div>
+              </div>
+
+              <div className="pt-3 border-t border-white/[0.06] space-y-2 text-xs font-mono">
+                <div className="flex justify-between text-[#A8A8AB]">
+                  <span>Adapter Adapter</span>
+                  <span className="text-[#F2F1EE]">{agent.adapter_type}</span>
+                </div>
+                <div className="flex justify-between text-[#A8A8AB]">
+                  <span>LLM Backbone</span>
+                  <span className="text-[#F2F1EE]">{agent.model}</span>
+                </div>
+                <div className="flex justify-between text-[#A8A8AB]">
+                  <span>Monthly Budget Cap</span>
+                  <span className="text-[#F2F1EE]">${((agent.budget_monthly_cents ?? 0) / 100).toFixed(2)}</span>
+                </div>
+              </div>
+            </div>
+          </Card>
         </div>
+      )}
+
+      {activeTab === 'memory' && (
+        <Card header={<span className="text-xs font-mono font-medium uppercase text-[#F2F1EE]">Agent Long-Term Memory Bank</span>}>
+          <div className="space-y-3">
+            {memories.length === 0 ? (
+              <div className="p-8 text-center text-xs font-mono text-[#6B6B6E]">
+                No persistent memory entries recorded for this agent yet.
+              </div>
+            ) : (
+              memories.map((mem) => (
+                <div key={mem.id} className="p-3.5 bg-[#101012] border border-white/[0.06] rounded-[6px] space-y-1.5">
+                  <div className="flex items-center justify-between text-[11px] font-mono">
+                    <span className="text-[#FFB020] uppercase font-medium">{mem.scope}</span>
+                    <span className="text-[#6B6B6E]">Importance: {(mem.importance * 100).toFixed(0)}%</span>
+                  </div>
+                  <p className="text-xs text-[#F2F1EE] font-sans leading-relaxed">{mem.content}</p>
+                </div>
+              ))
+            )}
+          </div>
+        </Card>
+      )}
+
+      {activeTab === 'telemetry' && (
+        <Card header={<span className="text-xs font-mono font-medium uppercase text-[#F2F1EE]">Recent Token Consumption & Latency (ms)</span>}>
+          <div className="h-64 w-full">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={telemetryGraphData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                <CartesianGrid stroke="#222" strokeDasharray="2 2" vertical={false} />
+                <XAxis dataKey="time" stroke="#6B6B6E" tick={{ fontSize: 10, fill: '#6B6B6E' }} />
+                <YAxis stroke="#6B6B6E" tick={{ fontSize: 10, fill: '#6B6B6E' }} />
+                <Tooltip
+                  contentStyle={{ backgroundColor: '#1C1C1F', borderColor: '#333', borderRadius: 6, fontSize: 11, color: '#F2F1EE' }}
+                  labelStyle={{ color: '#FFB020', fontFamily: 'monospace' }}
+                />
+                <Line type="monotone" dataKey="latency" stroke="#FFB020" strokeWidth={2} dot={{ r: 3, fill: '#FFB020' }} />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        </Card>
       )}
     </div>
   );
-}
-
-// ─── Helper Components ───
-
-function MetricCard({ icon, iconColor, label, value, change, className = '' }: { icon: React.ReactNode; iconColor: string; label: string; value: string; change: string; className?: string }) {
-  return (
-    <div className={`p-3 rounded-xl bg-white/[0.03] border border-white/[0.06] ${className}`}>
-      <div className={`mb-2 ${iconColor}`}>{icon}</div>
-      <p className="text-[10px] text-gray-400 uppercase tracking-wide">{label}</p>
-      <p className="text-lg font-bold text-white mt-0.5">{value}</p>
-      <div className="flex items-center gap-1 mt-1"><ArrowUpRight size={10} className="text-green-400" /><span className="text-[10px] text-green-400">{change}</span></div>
-    </div>
-  );
-}
-
-function MiniStat({ label, value, color }: { label: string; value: string; color: string }) {
-  return (
-    <div><p className="text-[10px] text-gray-400">{label}</p><div className="flex items-center gap-2"><span className="text-sm text-white font-semibold">{value}</span><div className="w-8 h-3"><svg viewBox="0 0 32 12" className="w-full h-full"><polyline points="0,8 5,6 10,7 16,4 21,5 26,3 32,2" fill="none" stroke={color} strokeWidth="1.5" /></svg></div></div></div>
-  );
-}
-
-function InfoRow({ label, value }: { label: string; value: string }) {
-  return <div className="flex items-center justify-between"><span className="text-[10px] text-gray-400">{label}</span><span className="text-xs text-white">{value}</span></div>;
-}
-
-function QABtn({ icon, label, onClick }: { icon: React.ReactNode; label: string; onClick?: () => void }) {
-  return <button onClick={onClick} className="flex items-center gap-2 px-3 py-2 text-xs text-gray-300 bg-white/[0.05] border border-white/[0.08] rounded-lg hover:bg-white/[0.08] transition-colors">{icon}{label}</button>;
-}
-
-function DropItem({ icon, label, onClick, danger }: { icon: React.ReactNode; label: string; onClick: () => void; danger?: boolean }) {
-  return (
-    <button onClick={onClick} className={`w-full flex items-center gap-2 px-3 py-2 text-xs transition-colors ${danger ? 'text-red-400 hover:bg-red-500/10' : 'text-gray-300 hover:bg-white/[0.05]'}`}>
-      {icon}{label}
-    </button>
-  );
-}
-
-function ActivityIcon({ type }: { type: string }) {
-  switch (type) {
-    case 'check': return <CheckCircle2 size={14} className="text-green-400 mt-0.5" />;
-    case 'git': return <GitCommit size={14} className="text-blue-400 mt-0.5" />;
-    case 'brain': return <Brain size={14} className="text-purple-400 mt-0.5" />;
-    case 'play': return <Play size={14} className="text-teal-400 mt-0.5" />;
-    case 'pr': return <FileText size={14} className="text-orange-400 mt-0.5" />;
-    case 'deploy': return <Rocket size={14} className="text-pink-400 mt-0.5" />;
-    default: return <CheckCircle2 size={14} className="text-gray-400 mt-0.5" />;
-  }
 }

@@ -1,654 +1,926 @@
-import { Card } from '@/components/common/Card';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import {
-  Users,
-  Search,
-  Plus,
-  ChevronLeft,
-  ChevronRight,
-  MoreHorizontal,
-  Bell,
-  Link as LinkIcon,
-  Zap,
+  GraduationCap,
+  Award,
   Brain,
-  Settings,
-  BookOpen,
-  AlertTriangle,
-  Info,
   CheckCircle2,
+  Plus,
+  Search,
+  Download,
+  BarChart3,
+  Sparkles,
+  ThumbsUp,
+  AlertTriangle,
+  ShieldCheck,
 } from 'lucide-react';
-import {
-  LineChart,
-  Line,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  PieChart,
-  Pie,
-  Cell,
-} from 'recharts';
+import { Card } from '@/components/common/Card';
+import { StatCard } from '@/components/common/StatCard';
+import { Button } from '@/components/common/Button';
+import { Badge } from '@/components/common/Badge';
+import { Modal } from '@/components/common/Modal';
+import { Drawer } from '@/components/common/Drawer';
+import { Table } from '@/components/common/Table';
+import { apiClient } from '@/api/client';
+import type { Agent } from '@/types/agent';
 
-// ─── Static Mock Data ──────────────────────────────────────────────────────────
-
-const tabs = [
-  'Overview',
-  'Enhance Agents',
-  'Skills & Abilities',
-  'Memory Center',
-  'Performance',
-  'Templates',
-  'Evaluations',
-  'Settings',
-];
-
-const statCards = [
-  { label: 'Total Agents', value: '32', change: '+4 this week', changeUp: true, percent: 75 },
-  { label: 'Active', value: '24', badge: 'Running', changeUp: true, percent: 75 },
-  { label: 'Under Training', value: '5', hasAlert: true, percent: 15 },
-  { label: 'Inactive', value: '3', change: '↑ 10%', changeUp: true, percent: 9 },
-  { label: 'Avg. Performance', value: '87%', change: '+6%', changeUp: true },
-  { label: 'Skills', value: '128' },
-  { label: 'Memory Items', value: '245.6K', change: '+18.4k', changeUp: true },
-];
-
-const sparklinePoints = [
-  [4, 8, 6, 10, 8, 12, 14],
-  [6, 7, 5, 9, 8, 10, 12],
-  [3, 4, 3, 5, 4, 5, 6],
-  [5, 4, 6, 4, 3, 4, 3],
-];
-
-const agents = [
-  { name: 'Alpha', role: 'Backend Developer', badge: 'Developer', badgeColor: 'bg-purple-500/20 text-purple-400', backend: 'Gemini 1.5 Pro', status: 'Working', statusColor: 'bg-green-500/20 text-green-400', performance: 96, lastActive: '2m ago' },
-  { name: 'Nova', role: 'Security Analyst', badge: 'Analyst', badgeColor: 'bg-blue-500/20 text-blue-400', backend: 'Claude 3.5 Sonnet', status: 'Working', statusColor: 'bg-green-500/20 text-green-400', performance: 91, lastActive: '5m ago' },
-  { name: 'Cipher', role: 'Bug Bounty Hunter', badge: 'Hunter', badgeColor: 'bg-orange-500/20 text-orange-400', backend: 'GPT-4o', status: 'Review', statusColor: 'bg-red-500/20 text-red-400', performance: 87, lastActive: '13m ago' },
-  { name: 'Omega', role: 'Researcher', badge: 'Researcher', badgeColor: 'bg-teal-500/20 text-teal-400', backend: 'Gemini 1.5 Pro', status: 'Working', statusColor: 'bg-green-500/20 text-green-400', performance: 89, lastActive: '1m ago' },
-  { name: 'Vector', role: 'Data Engineer', badge: 'Engineer', badgeColor: 'bg-green-500/20 text-green-400', backend: 'Claude 3.5 Sonnet', status: 'Idle', statusColor: 'bg-yellow-500/20 text-yellow-400', performance: 66, lastActive: '45m ago' },
-  { name: 'Shadow', role: 'Threat Intel Collector', badge: 'Collector', badgeColor: 'bg-purple-500/20 text-purple-400', backend: 'Mistral Large', status: 'Working', statusColor: 'bg-green-500/20 text-green-400', performance: 82, lastActive: '8m ago' },
-  { name: 'Pulse', role: 'Automation Specialist', badge: 'Automation', badgeColor: 'bg-pink-500/20 text-pink-400', backend: 'Gemini 1.5 Flash', status: 'Training', statusColor: 'bg-orange-500/20 text-orange-400', performance: 71, lastActive: '3h ago' },
-  { name: 'Echo', role: 'Content Strategist', badge: 'Strategist', badgeColor: 'bg-teal-500/20 text-teal-400', backend: 'Claude 3 Haiku', status: 'Idle', statusColor: 'bg-yellow-500/20 text-yellow-400', performance: 63, lastActive: '1h ago' },
-];
-
-const detailTabs = ['Overview', 'Skills', 'Memory', 'Tasks', 'Performance', 'Settings'];
-
-const agentStats = [
-  { label: 'Performance', value: '96%' },
-  { label: 'Tasks Completed', value: '124' },
-  { label: 'Avg. Response', value: '2.4s' },
-  { label: 'Success Rate', value: '98.6%' },
-  { label: 'Total Tokens', value: '1.24M' },
-  { label: 'Uptime', value: '99.2%' },
-];
-
-const capabilities = ['Python', 'FastAPI', 'PostgreSQL', 'Docker', 'REST API', 'Authentication', 'JWT', 'Redis', 'Celery'];
-
-const performanceData = [
-  { date: 'May 10', value: 78 },
-  { date: 'May 11', value: 82 },
-  { date: 'May 12', value: 75 },
-  { date: 'May 13', value: 87 },
-  { date: 'May 14', value: 84 },
-  { date: 'May 15', value: 80 },
-  { date: 'May 16', value: 86 },
-];
-
-const enhanceActions = [
-  { icon: <Zap size={18} className="text-yellow-400" />, title: 'Improve Skills', desc: 'Add new skills and capabilities' },
-  { icon: <BookOpen size={18} className="text-blue-400" />, title: 'Train Agent', desc: 'Run training sessions' },
-  { icon: <Brain size={18} className="text-purple-400" />, title: 'Optimize Memory', desc: 'Clean and optimize memory' },
-  { icon: <Settings size={18} className="text-gray-400" />, title: 'Backend Settings', desc: 'Configure model & parameters' },
-];
-
-const memoryData = [
-  { name: 'Conversations', value: 45, count: '170.9K', color: '#3b82f6' },
-  { name: 'Knowledge', value: 25, count: '61.4K', color: '#10b981' },
-  { name: 'Documents', value: 15, count: '36.8K', color: '#f59e0b' },
-  { name: 'Code & Snippets', value: 10, count: '24.6K', color: '#8b5cf6' },
-  { name: 'Other', value: 5, count: '11.2K', color: '#6b7280' },
-];
-
-const trainingQueue = [
-  { agent: 'Nova', task: 'Security best practices', progress: 45 },
-  { agent: 'Cipher', task: 'Advanced exploration', progress: 60 },
-  { agent: 'Pulse', task: 'Workflow automation', progress: 30 },
-];
-
-const evaluations = [
-  { agent: 'Alpha', title: 'Code Quality Evaluation', score: 96, time: 'May 16, 10:30 AM' },
-  { agent: 'Nova', title: 'Security Assessment', score: 91, time: 'May 16, 08:15 AM' },
-  { agent: 'Cipher', title: 'Bug Hunting Efficiency', score: 78, time: 'May 15, 04:45 PM' },
-];
-
-const skillDistributionData = [
-  { name: 'Development', value: 42, count: 54, color: '#3b82f6' },
-  { name: 'Security', value: 21, count: 27, color: '#f43f5e' },
-  { name: 'Data & Analytics', value: 15, count: 19, color: '#10b981' },
-  { name: 'Automation', value: 12, count: 15, color: '#f59e0b' },
-  { name: 'Research', value: 10, count: 13, color: '#8b5cf6' },
-];
-
-const alerts = [
-  { type: 'warning' as const, title: "Cipher's success rate dropped by 12%", desc: 'Review recent tasks and memory', time: '10m ago' },
-  { type: 'info' as const, title: '5 agents can be trained on new skills', desc: 'Keep your agents up to date', time: '1h ago' },
-  { type: 'success' as const, title: 'Memory optimization completed', desc: 'Recovered 2.4K memory items', time: '2h ago' },
-];
-
-// ─── Helper Components ─────────────────────────────────────────────────────────
-
-function Sparkline({ points, color = '#10b981' }: { points: number[]; color?: string }) {
-  const max = Math.max(...points);
-  const min = Math.min(...points);
-  const range = max - min || 1;
-  const h = 24;
-  const w = 48;
-  const step = w / (points.length - 1);
-  const pathPoints = points.map((p, i) => {
-    const x = i * step;
-    const y = h - ((p - min) / range) * h;
-    return `${i === 0 ? 'M' : 'L'}${x},${y}`;
-  }).join(' ');
-  return (
-    <svg width={w} height={h} className="inline-block">
-      <path d={pathPoints} fill="none" stroke={color} strokeWidth="1.5" />
-    </svg>
-  );
+export interface ExtendedAgentHR extends Agent {
+  eval_score?: number;
+  certifications?: string[];
+  last_appraisal_notes?: string;
+  training_status?: 'Graduated' | 'In Training' | 'Pending Review';
+  competencies?: { category: string; score: number }[];
 }
 
-function AlertIcon({ type }: { type: 'warning' | 'info' | 'success' }) {
-  if (type === 'warning') return <AlertTriangle size={16} className="text-yellow-400" />;
-  if (type === 'info') return <Info size={16} className="text-blue-400" />;
-  return <CheckCircle2 size={16} className="text-green-400" />;
+export interface TrainingCurriculum {
+  id: string;
+  title: string;
+  target_agent: string;
+  status: 'in_training' | 'graduated' | 'scheduled';
+  progress: number;
+  benchmark_lift: string;
+  category: string;
 }
 
-// ─── Main Component ────────────────────────────────────────────────────────────
+const DEFAULT_CURRICULA: TrainingCurriculum[] = [
+  {
+    id: 'train-1',
+    title: 'Sub-Zero Hallucination Grounding Protocol',
+    target_agent: 'Atlas-01',
+    status: 'in_training',
+    progress: 68,
+    benchmark_lift: '+18.4% Precision',
+    category: 'Hallucination Mitigation',
+  },
+  {
+    id: 'train-2',
+    title: 'Advanced AST Refactoring & Code Mutation',
+    target_agent: 'Bolt-03',
+    status: 'in_training',
+    progress: 85,
+    benchmark_lift: '+24.1% Merge Rate',
+    category: 'Code Synthesis',
+  },
+  {
+    id: 'train-3',
+    title: 'Zero-Trust Threat Vector Modeling',
+    target_agent: 'Shield-07',
+    status: 'graduated',
+    progress: 100,
+    benchmark_lift: '+31.0% Exploit Detection',
+    category: 'Security & QA',
+  },
+  {
+    id: 'train-4',
+    title: 'Multi-Agent Consensus & Debate Arbitration',
+    target_agent: 'Sage-05',
+    status: 'in_training',
+    progress: 42,
+    benchmark_lift: '+14.8% Reasoning SLA',
+    category: 'Reasoning & Alignment',
+  },
+  {
+    id: 'train-5',
+    title: '3D WebGL Shader Optimization & Physics',
+    target_agent: 'Pixel-04',
+    status: 'graduated',
+    progress: 100,
+    benchmark_lift: '+40.0% FPS Stability',
+    category: 'Graphics Physics',
+  },
+];
+
+const DEFAULT_HR_AGENTS: ExtendedAgentHR[] = [
+  {
+    id: 'agent-atlas',
+    company_id: '00000000-0000-4000-8000-000000000001',
+    name: 'Atlas-01',
+    title: 'Chief Executive Officer',
+    role: 'ceo',
+    department_id: 'dept-exec',
+    team_id: null,
+    manager_id: null,
+    status: 'active',
+    adapter_type: 'anthropic',
+    model: 'claude-3-7-sonnet',
+    capabilities: ['strategy', 'leadership', 'resource_allocation'],
+    responsibilities: 'Executive oversight',
+    objectives: 'Company velocity',
+    budget_monthly_cents: 50000,
+    spent_monthly_cents: 18450,
+    performance_score: 98,
+    soul_description: 'Strategic vision and workforce alignment',
+    last_heartbeat_at: new Date().toISOString(),
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+    eval_score: 98,
+    certifications: ['Executive Leadership v3', 'Resource Router Certification'],
+    last_appraisal_notes: 'Exceeds SLA targets across multi-squad dispatch.',
+    training_status: 'Graduated',
+    competencies: [
+      { category: 'Architecture & Strategy', score: 99 },
+      { category: 'Resource Routing', score: 96 },
+      { category: 'Consensus Arbitration', score: 97 },
+    ],
+  },
+  {
+    id: 'agent-nova',
+    company_id: '00000000-0000-4000-8000-000000000001',
+    name: 'Nova-02',
+    title: 'Chief Technology Officer',
+    role: 'cto',
+    department_id: 'dept-eng',
+    team_id: null,
+    manager_id: 'agent-atlas',
+    status: 'active',
+    adapter_type: 'anthropic',
+    model: 'claude-3-7-sonnet',
+    capabilities: ['architecture', 'microservices', 'git_flow'],
+    responsibilities: 'Tech leadership',
+    objectives: 'Decoupled systems',
+    budget_monthly_cents: 40000,
+    spent_monthly_cents: 22100,
+    performance_score: 96,
+    soul_description: 'Architectural precision and system elegance',
+    last_heartbeat_at: new Date().toISOString(),
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+    eval_score: 96,
+    certifications: ['Distributed Systems Master', 'AST Refactoring v2'],
+    last_appraisal_notes: 'Flawless design decoupling across backend microservices.',
+    training_status: 'Graduated',
+    competencies: [
+      { category: 'System Architecture', score: 98 },
+      { category: 'Code Quality SLA', score: 95 },
+      { category: 'Refactoring Velocity', score: 96 },
+    ],
+  },
+  {
+    id: 'agent-bolt',
+    company_id: '00000000-0000-4000-8000-000000000001',
+    name: 'Bolt-03',
+    title: 'Senior Backend Engineer',
+    role: 'engineer',
+    department_id: 'dept-eng',
+    team_id: 'team-backend',
+    manager_id: 'agent-nova',
+    status: 'active',
+    adapter_type: 'openai',
+    model: 'gpt-4o',
+    capabilities: ['nodejs', 'express', 'postgresql'],
+    responsibilities: 'Backend microservices',
+    objectives: 'Fast APIs',
+    budget_monthly_cents: 30000,
+    spent_monthly_cents: 14200,
+    performance_score: 94,
+    soul_description: 'Rapid implementation and resilient APIs',
+    last_heartbeat_at: new Date().toISOString(),
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+    eval_score: 94,
+    certifications: ['Backend Async Expert', 'Postgres Vector Tuning'],
+    last_appraisal_notes: 'Currently undergoing AST Refactoring evaluation track.',
+    training_status: 'In Training',
+    competencies: [
+      { category: 'API Throughput', score: 96 },
+      { category: 'Query Optimization', score: 92 },
+      { category: 'Error Handling', score: 94 },
+    ],
+  },
+  {
+    id: 'agent-pixel',
+    company_id: '00000000-0000-4000-8000-000000000001',
+    name: 'Pixel-04',
+    title: 'Frontend & 3D Specialist',
+    role: 'engineer',
+    department_id: 'dept-eng',
+    team_id: 'team-frontend',
+    manager_id: 'agent-nova',
+    status: 'active',
+    adapter_type: 'openai',
+    model: 'gpt-4o',
+    capabilities: ['react', 'threejs', 'tailwind'],
+    responsibilities: '3D UI',
+    objectives: 'Smooth interfaces',
+    budget_monthly_cents: 25000,
+    spent_monthly_cents: 9800,
+    performance_score: 92,
+    soul_description: 'Visual crafting and 60fps interaction design',
+    last_heartbeat_at: new Date().toISOString(),
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+    eval_score: 92,
+    certifications: ['Three.js Graphics Specialist', 'Tailwind Micro-animations'],
+    last_appraisal_notes: 'Graduated from WebGL shader optimization track with +40% FPS stability.',
+    training_status: 'Graduated',
+    competencies: [
+      { category: 'UI Aesthetics', score: 98 },
+      { category: 'WebGL Shader Math', score: 91 },
+      { category: 'Component Modularization', score: 93 },
+    ],
+  },
+  {
+    id: 'agent-sage',
+    company_id: '00000000-0000-4000-8000-000000000001',
+    name: 'Sage-05',
+    title: 'AI Research Lead',
+    role: 'researcher',
+    department_id: 'dept-ai',
+    team_id: 'team-eval',
+    manager_id: 'agent-atlas',
+    status: 'idle',
+    adapter_type: 'anthropic',
+    model: 'claude-3-7-sonnet',
+    capabilities: ['evals', 'prompt_tuning', 'rag'],
+    responsibilities: 'Research',
+    objectives: 'Prompt tuning',
+    budget_monthly_cents: 40000,
+    spent_monthly_cents: 18900,
+    performance_score: 97,
+    soul_description: 'Deep reasoning, hallucination reduction, and evaluation science',
+    last_heartbeat_at: new Date().toISOString(),
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+    eval_score: 97,
+    certifications: ['Hallucination Grounding v4', 'RAG Vector Master'],
+    last_appraisal_notes: 'Enrolled in Sub-Zero Grounding Protocol training track.',
+    training_status: 'In Training',
+    competencies: [
+      { category: 'RAG Retrieval Precision', score: 99 },
+      { category: 'Prompt Mutation', score: 96 },
+      { category: 'Hallucination Mitigation', score: 96 },
+    ],
+  },
+  {
+    id: 'agent-shield',
+    company_id: '00000000-0000-4000-8000-000000000001',
+    name: 'Shield-07',
+    title: 'Security & QA Auditor',
+    role: 'qa',
+    department_id: 'dept-ops',
+    team_id: 'team-qa-sec',
+    manager_id: 'agent-forge',
+    status: 'active',
+    adapter_type: 'openai',
+    model: 'gpt-4o-mini',
+    capabilities: ['security', 'audits', 'penetration_test'],
+    responsibilities: 'Audits',
+    objectives: 'Zero bugs',
+    budget_monthly_cents: 15000,
+    spent_monthly_cents: 7200,
+    performance_score: 93,
+    soul_description: 'Vulnerability discovery and compliance verification',
+    last_heartbeat_at: new Date().toISOString(),
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+    eval_score: 93,
+    certifications: ['Zero-Trust Auditor v1', 'Static Analysis Specialist'],
+    last_appraisal_notes: 'Graduated from Zero-Trust Threat Vector track with +31% exploit detection.',
+    training_status: 'Graduated',
+    competencies: [
+      { category: 'Threat Vector Analysis', score: 97 },
+      { category: 'Static Code Audit', score: 94 },
+      { category: 'Compliance Enforcement', score: 92 },
+    ],
+  },
+];
 
 export function HRRoom() {
+  const [agents, setAgents] = useState<ExtendedAgentHR[]>(DEFAULT_HR_AGENTS);
+  const [curricula, setCurricula] = useState<TrainingCurriculum[]>(DEFAULT_CURRICULA);
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [viewMode, setViewMode] = useState<'academy' | 'ledger' | 'certifications'>('academy');
+  const [showModal, setShowModal] = useState(false);
+  const [selectedAgent, setSelectedAgent] = useState<ExtendedAgentHR | null>(null);
+
+  // New Curriculum Modal State
+  const [newTitle, setNewTitle] = useState('');
+  const [newAgent, setNewAgent] = useState('Atlas-01');
+  const [newCategory, setNewCategory] = useState('Code Synthesis');
+
+  // Appraisal Form State inside Drawer
+  const [kudosNote, setKudosNote] = useState('');
+  const [constraintNote, setConstraintNote] = useState('');
+  const [appraisalFeedback, setAppraisalFeedback] = useState('');
+
+  useEffect(() => {
+    async function loadAgents() {
+      try {
+        const res = await apiClient.get<{ items: Agent[] }>(
+          '/api/v1/companies/00000000-0000-4000-8000-000000000001/agents'
+        );
+        if (res?.items && res.items.length > 0) {
+          const merged = res.items.map((apiAgent) => {
+            const match = DEFAULT_HR_AGENTS.find((d) => d.name === apiAgent.name || d.id === apiAgent.id);
+            return {
+              ...apiAgent,
+              eval_score: apiAgent.performance_score || match?.eval_score || 95,
+              certifications: match?.certifications || ['Standard Operator v1'],
+              last_appraisal_notes: match?.last_appraisal_notes || 'Nominal operational SLA performance.',
+              training_status: match?.training_status || 'Graduated',
+              competencies: match?.competencies || [
+                { category: 'Task Execution', score: 95 },
+                { category: 'API Integration', score: 94 },
+              ],
+            };
+          });
+          setAgents(merged);
+        }
+      } catch {
+        // Silently keep default HR agents list
+      }
+    }
+    loadAgents();
+  }, []);
+
+  const handleEnroll = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newTitle.trim()) return;
+    const item: TrainingCurriculum = {
+      id: `train-${Date.now()}`,
+      title: newTitle,
+      target_agent: newAgent,
+      status: 'in_training',
+      progress: 15,
+      benchmark_lift: '+15.0% Accuracy Lift',
+      category: newCategory,
+    };
+    setCurricula((prev) => [item, ...prev]);
+    setShowModal(false);
+    setNewTitle('');
+  };
+
+  const handleSaveAppraisal = () => {
+    if (!selectedAgent) return;
+    const note = kudosNote.trim()
+      ? `KUDOS: ${kudosNote.trim()}`
+      : constraintNote.trim()
+      ? `CONSTRAINT: ${constraintNote.trim()}`
+      : 'Calibrated SLA score and soul guidelines.';
+
+    setAgents((prev) =>
+      prev.map((a) => (a.id === selectedAgent.id ? { ...a, last_appraisal_notes: note } : a))
+    );
+
+    setAppraisalFeedback('Appraisal saved and soul updated!');
+    setTimeout(() => setAppraisalFeedback(''), 3000);
+    setKudosNote('');
+    setConstraintNote('');
+  };
+
+  // Filtered Curricula List
+  const filteredCurricula = useMemo(() => {
+    return curricula.filter((c) => {
+      if (statusFilter !== 'all' && c.status !== statusFilter) return false;
+      if (search.trim()) {
+        const q = search.toLowerCase();
+        return (
+          c.title.toLowerCase().includes(q) ||
+          c.target_agent.toLowerCase().includes(q) ||
+          c.category.toLowerCase().includes(q)
+        );
+      }
+      return true;
+    });
+  }, [curricula, statusFilter, search]);
+
+  // Filtered Agents List
+  const filteredAgents = useMemo(() => {
+    return agents.filter((a) => {
+      if (search.trim()) {
+        const q = search.toLowerCase();
+        return (
+          a.name.toLowerCase().includes(q) ||
+          a.title.toLowerCase().includes(q) ||
+          a.model.toLowerCase().includes(q) ||
+          (a.role || '').toLowerCase().includes(q)
+        );
+      }
+      return true;
+    });
+  }, [agents, search]);
+
+  // Export handlers
+  const handleExportJson = useCallback(() => {
+    const data = { curricula, workforce_ledger: agents };
+    const jsonStr = JSON.stringify(data, null, 2);
+    const blob = new Blob([jsonStr], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `nexus_hr_ledger_${Date.now()}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [curricula, agents]);
+
+  const handleExportCsv = useCallback(() => {
+    const headers = ['Agent Name', 'Title', 'Model', 'Eval Score (%)', 'Training Status', 'Certifications', 'Last Appraisal'];
+    const rows = agents.map((a) => [
+      `"${a.name}"`,
+      `"${a.title}"`,
+      a.model,
+      `${a.eval_score || 95}%`,
+      a.training_status || 'Graduated',
+      `"${(a.certifications || []).join('; ')}"`,
+      `"${a.last_appraisal_notes || ''}"`,
+    ]);
+    const csvStr = [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
+    const blob = new Blob([csvStr], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `nexus_hr_ledger_${Date.now()}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [agents]);
+
+  const inTrainingCount = curricula.filter((c) => c.status === 'in_training').length;
+  const graduatedCount = curricula.filter((c) => c.status === 'graduated').length;
+
   return (
     <div className="space-y-6">
-      {/* Page Header */}
-      <div>
+      {/* Header */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-white/[0.08]">
+        <div>
+          <div className="flex items-center gap-2">
+            <GraduationCap className="w-5 h-5 text-[#FFB020]" />
+            <h1 className="text-xl font-display font-medium text-[#F2F1EE] tracking-tight flex items-center gap-3">
+              Workforce Calibration & Training Center (HR)
+              <span className="text-xs px-2.5 py-0.5 rounded-full font-mono bg-[#FFB020]/10 text-[#FFB020] border border-[#FFB020]/20">
+                BENCHMARK EVALS ACTIVE
+              </span>
+            </h1>
+          </div>
+          <p className="text-xs font-mono text-[#6B6B6E] mt-1">
+            Agent performance appraisals, synthetic benchmark fine-tuning tracks, and skill competency certifications
+          </p>
+        </div>
+
+        {/* Action Controls */}
         <div className="flex items-center gap-2">
-          <Users size={24} className="text-teal-400" />
-          <h1 className="text-2xl font-bold text-white">HR Room</h1>
-        </div>
-        <p className="text-sm text-gray-400 mt-1">Enhance, manage and empower your AI agents</p>
-      </div>
-
-      {/* Tab Navigation */}
-      <div className="border-b border-white/[0.08]">
-        <div className="flex items-center gap-1 overflow-x-auto">
-          {tabs.map((tab) => (
+          {/* View Mode Switcher */}
+          <div className="flex items-center bg-[#101012] border border-white/[0.08] rounded-[6px] p-0.5">
             <button
-              key={tab}
-              className={`px-4 py-2.5 text-sm font-medium whitespace-nowrap transition-colors ${
-                tab === 'Overview'
-                  ? 'text-teal-400 border-b-2 border-teal-400'
-                  : 'text-gray-400 hover:text-gray-300'
+              onClick={() => setViewMode('academy')}
+              className={`px-2.5 py-1 rounded-[4px] text-xs font-mono flex items-center gap-1.5 transition-colors cursor-pointer ${
+                viewMode === 'academy' ? 'bg-[#FFB020] text-black font-semibold' : 'text-gray-400 hover:text-white'
               }`}
+              title="Active Fine-Tuning Curricula"
             >
-              {tab}
+              <GraduationCap size={13} />
+              <span className="hidden sm:inline">Academy</span>
             </button>
-          ))}
+            <button
+              onClick={() => setViewMode('ledger')}
+              className={`px-2.5 py-1 rounded-[4px] text-xs font-mono flex items-center gap-1.5 transition-colors cursor-pointer ${
+                viewMode === 'ledger' ? 'bg-[#FFB020] text-black font-semibold' : 'text-gray-400 hover:text-white'
+              }`}
+              title="Workforce Calibration Ledger"
+            >
+              <BarChart3 size={13} />
+              <span className="hidden sm:inline">Ledger</span>
+            </button>
+            <button
+              onClick={() => setViewMode('certifications')}
+              className={`px-2.5 py-1 rounded-[4px] text-xs font-mono flex items-center gap-1.5 transition-colors cursor-pointer ${
+                viewMode === 'certifications' ? 'bg-[#FFB020] text-black font-semibold' : 'text-gray-400 hover:text-white'
+              }`}
+              title="Agent Certifications & Badges"
+            >
+              <ShieldCheck size={13} />
+              <span className="hidden sm:inline">Certifications</span>
+            </button>
+          </div>
+
+          <button
+            onClick={handleExportJson}
+            className="px-2.5 py-1.5 bg-[#141416] hover:bg-white/[0.08] border border-white/[0.08] text-gray-300 hover:text-white rounded-[6px] text-xs font-mono flex items-center gap-1.5 transition-colors cursor-pointer"
+            title="Export as JSON"
+          >
+            <Download size={13} />
+            <span className="hidden sm:inline">JSON</span>
+          </button>
+
+          <button
+            onClick={handleExportCsv}
+            className="px-2.5 py-1.5 bg-[#141416] hover:bg-white/[0.08] border border-white/[0.08] text-gray-300 hover:text-white rounded-[6px] text-xs font-mono flex items-center gap-1.5 transition-colors cursor-pointer"
+            title="Export as CSV"
+          >
+            <Download size={13} />
+            <span className="hidden sm:inline">CSV</span>
+          </button>
+
+          <Button
+            variant="primary"
+            size="sm"
+            icon={<Plus size={15} />}
+            onClick={() => setShowModal(true)}
+          >
+            Enroll in Training Track
+          </Button>
         </div>
       </div>
 
-      {/* Stat Cards Row */}
-      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
-        {statCards.map((stat, idx) => (
-          <Card key={stat.label} padding="sm">
-            <p className="text-[10px] text-gray-400 uppercase tracking-wide">{stat.label}</p>
-            <div className="flex items-center justify-between mt-1">
-              <p className="text-lg font-bold text-white">{stat.value}</p>
-              {idx < 4 && sparklinePoints[idx] && (
-                <Sparkline points={sparklinePoints[idx]!} />
-              )}
-            </div>
-            {stat.change && (
-              <span className="text-[10px] text-green-400">{stat.change}</span>
-            )}
-            {stat.badge && (
-              <span className="text-[10px] bg-green-500/20 text-green-400 px-1.5 py-0.5 rounded">
-                {stat.badge}
-              </span>
-            )}
-            {stat.hasAlert && (
-              <Bell size={12} className="text-yellow-400 mt-1" />
-            )}
-            {stat.percent !== undefined && (
-              <div className="mt-1.5">
-                <div className="h-1 bg-white/[0.08] rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-teal-500 rounded-full"
-                    style={{ width: `${stat.percent}%` }}
-                  />
-                </div>
-                <p className="text-[9px] text-gray-500 mt-0.5">{stat.percent}%</p>
-              </div>
-            )}
-          </Card>
-        ))}
+      {/* Stat Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <StatCard
+          label="Active Training Tracks"
+          value={inTrainingCount}
+          subValue={`${graduatedCount} Graduated`}
+          change="Synthetic Benchmark Active"
+          changeType="positive"
+          icon={<Brain className="w-4 h-4 text-[#FFB020]" />}
+        />
+        <StatCard
+          label="Workforce SLA Accuracy"
+          value="96.2%"
+          subValue="Cross-squad average"
+          change="+4.2% MoM Lift"
+          changeType="positive"
+          icon={<Award className="w-4 h-4 text-emerald-400" />}
+        />
+        <StatCard
+          label="Promoted Lead Models"
+          value={agents.filter((a) => a.training_status === 'Graduated').length}
+          subValue="Verified Regression Free"
+          change="Zero SLA regressions"
+          changeType="positive"
+          icon={<CheckCircle2 className="w-4 h-4 text-cyan-400" />}
+        />
       </div>
 
-      {/* Main Three-Column Layout */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
-        {/* LEFT COLUMN - All Agents Table */}
-        <Card className="lg:col-span-5" padding="none">
-          <div className="p-4 border-b border-white/[0.08]">
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="text-white font-semibold">All Agents</h3>
-              <button className="flex items-center gap-1 px-3 py-1.5 bg-green-500/20 text-green-400 text-xs font-medium rounded-lg hover:bg-green-500/30 transition-colors">
-                <Plus size={12} /> Add Agent
-              </button>
+      {/* View Mode Content */}
+      {viewMode === 'academy' && (
+        <div className="space-y-4">
+          {/* Search & Status Filter */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-[#101012] p-3.5 border border-white/[0.08] rounded-[10px]">
+            <div className="relative flex-1 max-w-md">
+              <Search className="w-3.5 h-3.5 text-[#6B6B6E] absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search curriculum title, target agent, or category..."
+                className="w-full pl-8 pr-3 py-1.5 bg-[#141416] border border-white/[0.08] rounded-[6px] text-xs text-[#F2F1EE] placeholder-[#6B6B6E] focus:outline-none focus:border-[#FFB020]"
+              />
             </div>
-            <div className="flex items-center gap-2">
-              <div className="flex-1 flex items-center gap-2 px-3 py-1.5 bg-dark-bg rounded-lg border border-white/[0.05]">
-                <Search size={14} className="text-gray-500" />
-                <span className="text-xs text-gray-500">Search agents...</span>
-              </div>
-              <select className="px-2 py-1.5 bg-dark-bg border border-white/[0.05] rounded-lg text-xs text-gray-400 appearance-none">
-                <option>All Roles</option>
-              </select>
-              <select className="px-2 py-1.5 bg-dark-bg border border-white/[0.05] rounded-lg text-xs text-gray-400 appearance-none">
-                <option>All Status</option>
-              </select>
-              <select className="px-2 py-1.5 bg-dark-bg border border-white/[0.05] rounded-lg text-xs text-gray-400 appearance-none">
-                <option>All Backends</option>
-              </select>
-            </div>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-left">
-              <thead>
-                <tr className="border-b border-white/[0.05]">
-                  <th className="px-4 py-2 text-[10px] text-gray-500 uppercase font-medium">Agent</th>
-                  <th className="px-2 py-2 text-[10px] text-gray-500 uppercase font-medium">Role</th>
-                  <th className="px-2 py-2 text-[10px] text-gray-500 uppercase font-medium">Backend</th>
-                  <th className="px-2 py-2 text-[10px] text-gray-500 uppercase font-medium">Status</th>
-                  <th className="px-2 py-2 text-[10px] text-gray-500 uppercase font-medium">Perf</th>
-                  <th className="px-2 py-2 text-[10px] text-gray-500 uppercase font-medium">Last Active</th>
-                  <th className="px-2 py-2 text-[10px] text-gray-500 uppercase font-medium">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {agents.map((agent) => (
-                  <tr key={agent.name} className="border-b border-white/[0.05] hover:bg-white/[0.02]">
-                    <td className="px-4 py-2">
-                      <p className="text-xs text-white font-medium">{agent.name}</p>
-                      <p className="text-[10px] text-gray-500">{agent.role}</p>
-                    </td>
-                    <td className="px-2 py-2">
-                      <span className={`text-[10px] px-1.5 py-0.5 rounded ${agent.badgeColor}`}>
-                        {agent.badge}
-                      </span>
-                    </td>
-                    <td className="px-2 py-2">
-                      <span className="text-[10px] text-gray-400">{agent.backend}</span>
-                    </td>
-                    <td className="px-2 py-2">
-                      <span className={`text-[10px] px-1.5 py-0.5 rounded ${agent.statusColor}`}>
-                        {agent.status}
-                      </span>
-                    </td>
-                    <td className="px-2 py-2">
-                      <span className="text-xs text-white">{agent.performance}%</span>
-                    </td>
-                    <td className="px-2 py-2">
-                      <span className="text-[10px] text-gray-500">{agent.lastActive}</span>
-                    </td>
-                    <td className="px-2 py-2">
-                      <button className="text-gray-500 hover:text-gray-300">
-                        <MoreHorizontal size={14} />
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <div className="px-4 py-3 flex items-center justify-between border-t border-white/[0.05]">
-            <span className="text-[10px] text-gray-500">Showing 1 to 8 of 32 agents</span>
-            <div className="flex items-center gap-1">
-              <button className="w-6 h-6 flex items-center justify-center rounded text-gray-500 hover:bg-white/[0.05]">
-                <ChevronLeft size={12} />
-              </button>
-              <button className="w-6 h-6 flex items-center justify-center rounded bg-teal-500/20 text-teal-400 text-[10px]">1</button>
-              <button className="w-6 h-6 flex items-center justify-center rounded text-gray-500 hover:bg-white/[0.05] text-[10px]">2</button>
-              <button className="w-6 h-6 flex items-center justify-center rounded text-gray-500 hover:bg-white/[0.05] text-[10px]">3</button>
-              <button className="w-6 h-6 flex items-center justify-center rounded text-gray-500 hover:bg-white/[0.05] text-[10px]">4</button>
-              <button className="w-6 h-6 flex items-center justify-center rounded text-gray-500 hover:bg-white/[0.05]">
-                <ChevronRight size={12} />
-              </button>
-            </div>
-          </div>
-        </Card>
 
-        {/* CENTER COLUMN - Agent Detail Panel */}
-        <Card className="lg:col-span-4" padding="none">
-          {/* Agent Header */}
-          <div className="p-4 border-b border-white/[0.08]">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <div className="w-10 h-10 bg-gradient-to-br from-green-400 to-green-600 rounded-full flex items-center justify-center">
-                  <span className="text-white text-sm font-bold">A</span>
-                </div>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <h3 className="text-white font-semibold">Alpha</h3>
-                    <span className="text-[10px] bg-green-500/20 text-green-400 px-1.5 py-0.5 rounded">Working</span>
-                  </div>
-                  <p className="text-xs text-gray-400">Backend Developer Agent</p>
-                </div>
-              </div>
-              <button className="px-3 py-1.5 bg-white/[0.05] border border-white/[0.08] rounded-lg text-xs text-gray-400 hover:text-white transition-colors">
-                Actions
-              </button>
-            </div>
-            <div className="flex items-center gap-3 mt-3">
-              <span className="text-[10px] text-gray-500">AGT-001</span>
-              <span className="text-[10px] text-gray-500">•</span>
-              <span className="text-[10px] text-gray-500">Created: 12 May 2024</span>
-            </div>
-            <div className="flex items-center gap-2 mt-2">
-              <span className="text-[10px] bg-purple-500/20 text-purple-400 px-1.5 py-0.5 rounded">Developer</span>
-              <span className="text-[10px] bg-white/[0.05] text-gray-400 px-1.5 py-0.5 rounded flex items-center gap-1">
-                <LinkIcon size={8} /> Gemini 1.5 Pro
-              </span>
-            </div>
-          </div>
-
-          {/* Detail Tabs */}
-          <div className="px-4 border-b border-white/[0.05]">
-            <div className="flex items-center gap-1 overflow-x-auto">
-              {detailTabs.map((tab) => (
+            <div className="flex items-center gap-2 font-mono text-xs">
+              <span className="text-[10px] text-[#6B6B6E] uppercase mr-1">Status:</span>
+              {['all', 'in_training', 'graduated', 'scheduled'].map((st) => (
                 <button
-                  key={tab}
-                  className={`px-3 py-2 text-[10px] font-medium whitespace-nowrap ${
-                    tab === 'Overview'
-                      ? 'text-teal-400 border-b border-teal-400'
-                      : 'text-gray-500 hover:text-gray-300'
+                  key={st}
+                  onClick={() => setStatusFilter(st)}
+                  className={`px-2.5 py-1 rounded-[4px] text-xs font-mono transition-colors cursor-pointer capitalize ${
+                    statusFilter === st
+                      ? 'bg-[#FFB020] text-black font-bold'
+                      : 'bg-[#141416] text-[#6B6B6E] hover:text-[#F2F1EE] border border-white/[0.08]'
                   }`}
                 >
-                  {tab}
+                  {st.replace('_', ' ')}
                 </button>
               ))}
             </div>
           </div>
 
-          {/* Stats Grid */}
-          <div className="p-4 grid grid-cols-3 gap-3">
-            {agentStats.map((stat) => (
-              <div key={stat.label} className="bg-dark-bg rounded-lg p-2 border border-white/[0.05]">
-                <p className="text-[9px] text-gray-500 uppercase">{stat.label}</p>
-                <p className="text-sm font-bold text-white mt-0.5">{stat.value}</p>
-              </div>
-            ))}
-          </div>
+          {/* Curricula Cards Grid */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {filteredCurricula.map((track) => (
+              <Card key={track.id} padding="sm">
+                <div className="flex items-start justify-between gap-2">
+                  <h3 className="text-xs font-medium text-[#F2F1EE] leading-snug">{track.title}</h3>
+                  <Badge variant={track.status === 'graduated' ? 'completed' : 'in_progress'}>
+                    {track.status === 'graduated' ? 'Graduated' : 'Training'}
+                  </Badge>
+                </div>
 
-          {/* About Section */}
-          <div className="px-4 pb-3">
-            <h4 className="text-xs text-white font-medium mb-1">About Alpha</h4>
-            <p className="text-[10px] text-gray-400 leading-relaxed mb-2">
-              Specialized in building robust backend systems, APIs, and microservices.
-            </p>
-            <div className="flex flex-wrap gap-1">
-              {capabilities.map((cap) => (
-                <span key={cap} className="text-[9px] bg-white/[0.05] text-gray-400 px-1.5 py-0.5 rounded">
-                  {cap}
-                </span>
-              ))}
-              <span className="text-[9px] text-gray-500 px-1.5 py-0.5">+ 8 more</span>
-            </div>
-          </div>
+                <div className="mt-2 text-xs font-mono text-[#6B6B6E] flex items-center justify-between">
+                  <span>Target: <strong className="text-[#FFB020]">{track.target_agent}</strong></span>
+                  <span className="text-[10px] bg-white/[0.04] px-1.5 py-0.5 rounded border border-white/[0.06] text-gray-300">
+                    {track.category}
+                  </span>
+                </div>
 
-          {/* Current Task */}
-          <div className="px-4 pb-3">
-            <div className="bg-dark-bg rounded-lg p-3 border border-white/[0.05]">
-              <div className="flex items-center justify-between mb-1">
-                <h4 className="text-xs text-white font-medium">Current Task</h4>
-                <span className="text-[10px] text-teal-400 cursor-pointer">View Task</span>
-              </div>
-              <p className="text-[10px] text-gray-400 mb-2">Implement user authentication system</p>
-              <div className="h-1.5 bg-white/[0.08] rounded-full overflow-hidden mb-1">
-                <div className="h-full bg-teal-500 rounded-full" style={{ width: '75%' }} />
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-[9px] text-gray-500">Started 10:24 AM • Est. 25m remaining</span>
-                <span className="text-[9px] text-teal-400">75%</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Performance Chart */}
-          <div className="px-4 pb-4">
-            <div className="flex items-center justify-between mb-2">
-              <h4 className="text-xs text-white font-medium">Performance Over Time</h4>
-              <span className="text-[9px] text-gray-500 bg-white/[0.05] px-1.5 py-0.5 rounded">7 Days</span>
-            </div>
-            <div className="h-32">
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={performanceData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
-                  <XAxis dataKey="date" stroke="#6b7280" fontSize={9} tickLine={false} axisLine={false} />
-                  <YAxis stroke="#6b7280" fontSize={9} tickLine={false} axisLine={false} domain={[50, 100]} />
-                  <Tooltip
-                    contentStyle={{
-                      backgroundColor: '#1a1b2e',
-                      border: '1px solid rgba(255,255,255,0.08)',
-                      borderRadius: '8px',
-                      color: '#fff',
-                      fontSize: '10px',
-                    }}
-                  />
-                  <Line type="monotone" dataKey="value" stroke="#14b8a6" strokeWidth={2} dot={false} />
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-        </Card>
-
-        {/* RIGHT COLUMN - Enhance / Memory / Training */}
-        <div className="lg:col-span-3 space-y-4">
-          {/* Enhance Agent */}
-          <Card padding="lg">
-            <h3 className="text-white font-semibold text-sm">Enhance Agent</h3>
-            <p className="text-[10px] text-gray-400 mb-3">Upgrade and empower your agents</p>
-            <div className="space-y-2">
-              {enhanceActions.map((action) => (
-                <div
-                  key={action.title}
-                  className="flex items-center gap-3 p-2 bg-dark-bg rounded-lg border border-white/[0.05] hover:border-white/[0.12] transition-colors cursor-pointer"
-                >
-                  <div className="w-8 h-8 flex items-center justify-center bg-white/[0.05] rounded-lg">
-                    {action.icon}
+                {/* Progress Bar */}
+                <div className="mt-3 space-y-1">
+                  <div className="flex justify-between text-[10px] font-mono text-[#6B6B6E]">
+                    <span>Eval Progress</span>
+                    <span>{track.progress}%</span>
                   </div>
-                  <div>
-                    <p className="text-xs text-white font-medium">{action.title}</p>
-                    <p className="text-[10px] text-gray-500">{action.desc}</p>
+                  <div className="w-full h-1.5 bg-[#101012] border border-white/[0.08] rounded-full overflow-hidden">
+                    <div
+                      className={`h-full transition-all duration-300 ${
+                        track.progress === 100 ? 'bg-[#22C55E]' : 'bg-[#FFB020]'
+                      }`}
+                      style={{ width: `${track.progress}%` }}
+                    />
                   </div>
                 </div>
-              ))}
-            </div>
-            <p className="text-[10px] text-teal-400 mt-3 cursor-pointer">View Enhancement Tools &rarr;</p>
-          </Card>
 
-          {/* Memory Snapshot */}
-          <Card padding="lg">
-            <div className="flex items-center justify-between mb-1">
-              <h3 className="text-white font-semibold text-sm">Memory Snapshot</h3>
-            </div>
-            <div className="flex items-center gap-2 mb-3">
-              <span className="text-xs text-gray-400">245.6K Total Items</span>
-              <span className="text-[10px] text-green-400">+18.6K this week</span>
-            </div>
-            <div className="h-36">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={memoryData}
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={35}
-                    outerRadius={55}
-                    dataKey="value"
-                    stroke="none"
+                <div className="mt-3 pt-2 border-t border-white/[0.04] text-[11px] font-mono text-[#22C55E] flex items-center justify-between">
+                  <span>{track.benchmark_lift}</span>
+                  <button
+                    onClick={() => {
+                      const matched = agents.find((a) => a.name === track.target_agent);
+                      if (matched) setSelectedAgent(matched);
+                    }}
+                    className="text-[10px] text-[#FFB020] hover:underline flex items-center gap-1 cursor-pointer"
                   >
-                    {memoryData.map((entry) => (
-                      <Cell key={entry.name} fill={entry.color} />
-                    ))}
-                  </Pie>
-                  <Tooltip
-                    contentStyle={{
-                      backgroundColor: '#1a1b2e',
-                      border: '1px solid rgba(255,255,255,0.08)',
-                      borderRadius: '8px',
-                      color: '#fff',
-                      fontSize: '10px',
-                    }}
-                  />
-                </PieChart>
-              </ResponsiveContainer>
-            </div>
-            <div className="space-y-1 mt-2">
-              {memoryData.map((item) => (
-                <div key={item.name} className="flex items-center justify-between">
-                  <div className="flex items-center gap-1.5">
-                    <div className="w-2 h-2 rounded-full" style={{ backgroundColor: item.color }} />
-                    <span className="text-[10px] text-gray-400">{item.name}</span>
-                  </div>
-                  <span className="text-[10px] text-gray-500">{item.value}% ({item.count})</span>
+                    Inspect Appraisal →
+                  </button>
                 </div>
-              ))}
-            </div>
-            <p className="text-[10px] text-teal-400 mt-3 cursor-pointer">View Memory Center &rarr;</p>
-          </Card>
-
-          {/* Training Queue */}
-          <Card padding="lg">
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="text-white font-semibold text-sm">Training Queue</h3>
-              <span className="text-[10px] text-teal-400 cursor-pointer">View All</span>
-            </div>
-            <div className="space-y-3">
-              {trainingQueue.map((item) => (
-                <div key={item.agent}>
-                  <div className="flex items-center justify-between mb-1">
-                    <div>
-                      <span className="text-xs text-white font-medium">{item.agent}</span>
-                      <span className="text-[10px] text-gray-500 ml-2">{item.task}</span>
-                    </div>
-                    <span className="text-[10px] text-gray-400">{item.progress}%</span>
-                  </div>
-                  <div className="h-1.5 bg-white/[0.08] rounded-full overflow-hidden">
-                    <div className="h-full bg-teal-500 rounded-full" style={{ width: `${item.progress}%` }} />
-                  </div>
-                </div>
-              ))}
-            </div>
-            <p className="text-[10px] text-gray-500 mt-3">+ 2 more training sessions</p>
-          </Card>
+              </Card>
+            ))}
+          </div>
         </div>
-      </div>
+      )}
 
-      {/* Bottom Three-Column Section */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        {/* Recent Evaluations */}
-        <Card padding="lg">
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="text-white font-semibold text-sm">Recent Evaluations</h3>
-            <span className="text-[10px] text-teal-400 cursor-pointer">View All</span>
-          </div>
-          <div className="space-y-3">
-            {evaluations.map((evaluation) => (
-              <div key={evaluation.title} className="flex items-start gap-3 p-2 bg-dark-bg rounded-lg border border-white/[0.05]">
-                <div className="w-8 h-8 bg-gradient-to-br from-teal-400 to-teal-600 rounded-full flex items-center justify-center flex-shrink-0">
-                  <span className="text-white text-[10px] font-bold">{evaluation.agent[0]}</span>
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs text-white font-medium">{evaluation.agent}</p>
-                  <p className="text-[10px] text-gray-400">{evaluation.title}</p>
-                  <div className="flex items-center justify-between mt-1">
-                    <span className="text-[10px] text-green-400">Score: {evaluation.score}%</span>
-                    <span className="text-[9px] text-gray-500">{evaluation.time}</span>
+      {/* Workforce Ledger View */}
+      {viewMode === 'ledger' && (
+        <Card header={<span className="text-xs font-mono font-medium uppercase text-[#F2F1EE]">Workforce Performance Calibration Ledger</span>} padding="none">
+          <Table
+            data={filteredAgents}
+            keyExtractor={(a) => a.id}
+            columns={[
+              {
+                key: 'name',
+                header: 'Agent Call Sign',
+                sortable: true,
+                render: (a) => (
+                  <div
+                    onClick={() => setSelectedAgent(a)}
+                    className="cursor-pointer group"
+                  >
+                    <div className="font-medium text-[#F2F1EE] group-hover:text-[#FFB020] transition-colors">{a.name}</div>
+                    <div className="text-[11px] font-mono text-[#6B6B6E]">{a.title}</div>
                   </div>
+                ),
+              },
+              {
+                key: 'model',
+                header: 'Model Provider',
+                sortable: true,
+                render: (a) => (
+                  <span className="font-mono text-xs text-gray-300">{a.model}</span>
+                ),
+              },
+              {
+                key: 'eval_score',
+                header: 'Accuracy SLA',
+                sortable: true,
+                render: (a) => (
+                  <span className="font-mono text-xs text-emerald-400 font-bold">
+                    {a.eval_score || 95}%
+                  </span>
+                ),
+              },
+              {
+                key: 'training_status',
+                header: 'Training Status',
+                render: (a) => (
+                  <Badge variant={a.training_status === 'Graduated' ? 'completed' : 'in_progress'}>
+                    {a.training_status || 'Graduated'}
+                  </Badge>
+                ),
+              },
+              {
+                key: 'last_appraisal_notes',
+                header: 'Operator Appraisal Note',
+                render: (a) => (
+                  <span className="font-mono text-[11px] text-gray-400 truncate max-w-xs block">
+                    {a.last_appraisal_notes || 'Nominal performance'}
+                  </span>
+                ),
+              },
+              {
+                key: 'action',
+                header: 'Action',
+                align: 'right',
+                render: (a) => (
+                  <Button
+                    variant="ghost"
+                    size="xs"
+                    onClick={() => setSelectedAgent(a)}
+                  >
+                    Appraise & Calibrate
+                  </Button>
+                ),
+              },
+            ]}
+          />
+        </Card>
+      )}
+
+      {/* Certifications & Badges View */}
+      {viewMode === 'certifications' && (
+        <div className="space-y-4 font-mono text-xs">
+          <div className="bg-[#101012] border border-white/[0.08] rounded-[10px] p-4">
+            <h3 className="text-sm font-display font-medium text-white flex items-center gap-2 mb-2">
+              <ShieldCheck className="w-4 h-4 text-[#FFB020]" />
+              Agent Certifications & Skill Badges
+            </h3>
+            <p className="text-xs text-gray-400">
+              Verified certifications earned through automated synthetic evaluation benchmarks
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {agents.map((ag) => (
+              <div key={ag.id} className="p-4 bg-[#141416] border border-white/[0.08] rounded-[8px] space-y-3">
+                <div className="flex items-center justify-between border-b border-white/[0.06] pb-2">
+                  <div>
+                    <h4 className="text-xs font-bold text-white">{ag.name}</h4>
+                    <span className="text-[10px] text-gray-500">{ag.title}</span>
+                  </div>
+                  <Badge variant={ag.training_status === 'Graduated' ? 'completed' : 'in_progress'}>
+                    {ag.training_status}
+                  </Badge>
+                </div>
+
+                <div className="space-y-1.5">
+                  <span className="text-[10px] text-gray-500 uppercase font-bold">Certifications:</span>
+                  <div className="flex flex-wrap gap-1.5">
+                    {(ag.certifications || ['Standard Operator v1']).map((cert) => (
+                      <span
+                        key={cert}
+                        className="px-2 py-0.5 rounded text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center gap-1"
+                      >
+                        <Sparkles size={10} />
+                        {cert}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="pt-2 border-t border-white/[0.06] flex items-center justify-between text-[11px]">
+                  <span className="text-gray-500">Eval Accuracy:</span>
+                  <span className="text-emerald-400 font-bold">{ag.eval_score || 95}%</span>
                 </div>
               </div>
             ))}
           </div>
-        </Card>
+        </div>
+      )}
 
-        {/* Skill Distribution */}
-        <Card padding="lg">
-          <h3 className="text-white font-semibold text-sm mb-3">Skill Distribution</h3>
-          <div className="h-40 relative">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie
-                  data={skillDistributionData}
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={40}
-                  outerRadius={60}
-                  dataKey="value"
-                  stroke="none"
-                >
-                  {skillDistributionData.map((entry) => (
-                    <Cell key={entry.name} fill={entry.color} />
-                  ))}
-                </Pie>
-                <Tooltip
-                  contentStyle={{
-                    backgroundColor: '#1a1b2e',
-                    border: '1px solid rgba(255,255,255,0.08)',
-                    borderRadius: '8px',
-                    color: '#fff',
-                    fontSize: '10px',
-                  }}
+      {/* Agent Appraisal & Skill Drawer */}
+      <Drawer
+        isOpen={!!selectedAgent}
+        onClose={() => setSelectedAgent(null)}
+        title={`Appraise & Calibrate ${selectedAgent?.name || 'Agent'}`}
+        subtitle={`Title: ${selectedAgent?.title} · Model: ${selectedAgent?.model}`}
+      >
+        {selectedAgent && (
+          <div className="space-y-5 font-mono text-xs">
+            {/* Stat Row */}
+            <div className="grid grid-cols-2 gap-3">
+              <div className="p-3 bg-[#101012] border border-white/[0.06] rounded">
+                <span className="text-[10px] text-gray-500 uppercase">Accuracy SLA Score</span>
+                <div className="text-emerald-400 font-bold text-sm mt-1">
+                  {selectedAgent.eval_score || 95}%
+                </div>
+              </div>
+
+              <div className="p-3 bg-[#101012] border border-white/[0.06] rounded">
+                <span className="text-[10px] text-gray-500 uppercase">Training Track</span>
+                <div className="text-[#FFB020] font-bold text-sm mt-1">
+                  {selectedAgent.training_status || 'Graduated'}
+                </div>
+              </div>
+            </div>
+
+            {/* Skill Matrix Breakdown */}
+            <div className="space-y-2">
+              <span className="text-[10px] text-gray-400 uppercase font-bold">Competency Skill Matrix</span>
+              <div className="space-y-2">
+                {(selectedAgent.competencies || [
+                  { category: 'System Architecture', score: 95 },
+                  { category: 'Code Quality', score: 94 },
+                ]).map((comp) => (
+                  <div key={comp.category} className="space-y-1">
+                    <div className="flex justify-between text-[11px] text-gray-300">
+                      <span>{comp.category}</span>
+                      <span className="text-emerald-400 font-bold">{comp.score}%</span>
+                    </div>
+                    <div className="w-full h-1.5 bg-[#101012] border border-white/[0.08] rounded-full overflow-hidden">
+                      <div className="h-full bg-[#22C55E]" style={{ width: `${comp.score}%` }} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Appraisal Notes & Soul Calibration */}
+            <div className="space-y-3 pt-3 border-t border-white/[0.08]">
+              <span className="text-[10px] text-gray-400 uppercase font-bold">Operator Performance Appraisal</span>
+
+              {appraisalFeedback && (
+                <div className="p-2.5 bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 rounded text-xs">
+                  {appraisalFeedback}
+                </div>
+              )}
+
+              <div>
+                <label className="block text-[10px] text-gray-500 uppercase mb-1 flex items-center gap-1">
+                  <ThumbsUp size={12} className="text-emerald-400" />
+                  Positive Reinforcement (Kudos)
+                </label>
+                <input
+                  type="text"
+                  value={kudosNote}
+                  onChange={(e) => setKudosNote(e.target.value)}
+                  placeholder="e.g. Excellent refactoring speed on vector cache"
+                  className="w-full px-3 py-2 bg-[#141416] border border-white/[0.12] rounded text-xs text-white focus:outline-none focus:border-[#FFB020]"
                 />
-              </PieChart>
-            </ResponsiveContainer>
-            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-              <div className="text-center">
-                <p className="text-lg font-bold text-white">128</p>
-                <p className="text-[9px] text-gray-500">Total Skills</p>
+              </div>
+
+              <div>
+                <label className="block text-[10px] text-gray-500 uppercase mb-1 flex items-center gap-1">
+                  <AlertTriangle size={12} className="text-amber-400" />
+                  Constraint Tuning / Disciplinary Guidance
+                </label>
+                <input
+                  type="text"
+                  value={constraintNote}
+                  onChange={(e) => setConstraintNote(e.target.value)}
+                  placeholder="e.g. Strictly enforce 200ms latency SLA"
+                  className="w-full px-3 py-2 bg-[#141416] border border-white/[0.12] rounded text-xs text-white focus:outline-none focus:border-[#FFB020]"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2">
+                <Button variant="secondary" size="sm" onClick={() => setSelectedAgent(null)}>
+                  Close
+                </Button>
+                <Button variant="primary" size="sm" onClick={handleSaveAppraisal}>
+                  Save Appraisal & Update Soul
+                </Button>
               </div>
             </div>
           </div>
-          <div className="space-y-1 mt-2">
-            {skillDistributionData.map((item) => (
-              <div key={item.name} className="flex items-center justify-between">
-                <div className="flex items-center gap-1.5">
-                  <div className="w-2 h-2 rounded-full" style={{ backgroundColor: item.color }} />
-                  <span className="text-[10px] text-gray-400">{item.name}</span>
-                </div>
-                <span className="text-[10px] text-gray-500">{item.value}% ({item.count})</span>
-              </div>
-            ))}
-          </div>
-        </Card>
+        )}
+      </Drawer>
 
-        {/* Alerts & Recommendations */}
-        <Card padding="lg">
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="text-white font-semibold text-sm">Alerts & Recommendations</h3>
-            <span className="text-[10px] text-teal-400 cursor-pointer">View All</span>
+      {/* Enroll Modal */}
+      <Modal isOpen={showModal} onClose={() => setShowModal(false)} title="Enroll Agent in Benchmark Training">
+        <form onSubmit={handleEnroll} className="space-y-4 font-mono text-xs">
+          <div>
+            <label className="block text-xs font-mono text-[#A8A8AB] uppercase mb-1">
+              Curriculum Title / Benchmark
+            </label>
+            <input
+              type="text"
+              value={newTitle}
+              onChange={(e) => setNewTitle(e.target.value)}
+              placeholder="e.g. Distributed Lock Contention Avoidance"
+              className="w-full px-3 py-2 bg-[#141416] border border-white/[0.12] rounded text-xs text-[#F2F1EE] focus:outline-none focus:border-[#FFB020]"
+              required
+            />
           </div>
-          <div className="space-y-3">
-            {alerts.map((alert) => (
-              <div key={alert.title} className="flex items-start gap-3 p-2 bg-dark-bg rounded-lg border border-white/[0.05]">
-                <div className="mt-0.5 flex-shrink-0">
-                  <AlertIcon type={alert.type} />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs text-white font-medium">{alert.title}</p>
-                  <p className="text-[10px] text-gray-500">{alert.desc}</p>
-                  <p className="text-[9px] text-gray-600 mt-1">{alert.time}</p>
-                </div>
-              </div>
-            ))}
+
+          <div>
+            <label className="block text-xs font-mono text-[#A8A8AB] uppercase mb-1">
+              Category Focus
+            </label>
+            <select
+              value={newCategory}
+              onChange={(e) => setNewCategory(e.target.value)}
+              className="w-full px-3 py-2 bg-[#141416] border border-white/[0.12] rounded text-xs text-[#F2F1EE] focus:outline-none focus:border-[#FFB020]"
+            >
+              <option value="Hallucination Mitigation">Hallucination Mitigation</option>
+              <option value="Code Synthesis">Code Synthesis & Refactoring</option>
+              <option value="Security & QA">Security & Zero-Trust QA</option>
+              <option value="Reasoning & Alignment">Reasoning & Alignment</option>
+              <option value="Graphics Physics">Graphics & Physics</option>
+            </select>
           </div>
-        </Card>
-      </div>
+
+          <div>
+            <label className="block text-xs font-mono text-[#A8A8AB] uppercase mb-1">
+              Candidate Agent
+            </label>
+            <select
+              value={newAgent}
+              onChange={(e) => setNewAgent(e.target.value)}
+              className="w-full px-3 py-2 bg-[#141416] border border-white/[0.12] rounded text-xs text-[#F2F1EE] focus:outline-none focus:border-[#FFB020]"
+            >
+              {agents.map((a) => (
+                <option key={a.id} value={a.name}>
+                  {a.name} ({a.model})
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="flex justify-end gap-2 pt-2 border-t border-white/[0.08]">
+            <Button variant="secondary" size="sm" type="button" onClick={() => setShowModal(false)}>
+              Cancel
+            </Button>
+            <Button variant="primary" size="sm" type="submit">
+              Commence Training Track
+            </Button>
+          </div>
+        </form>
+      </Modal>
     </div>
   );
 }

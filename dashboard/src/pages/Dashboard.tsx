@@ -1,525 +1,558 @@
-import { Card } from '@/components/common/Card';
-import { Link } from 'react-router-dom';
+import { useState, useEffect } from 'react';
+import { useNavigate, Link } from 'react-router-dom';
 import {
-  Sparkles,
-  Bot,
-  ClipboardList,
-  Waves,
-  Flame,
+  Users,
+  CheckSquare,
   DollarSign,
-  ArrowUpRight,
-  ArrowDownRight,
+  TrendingUp,
   Play,
   Plus,
-  Send,
-  GitCommit,
-  CheckCircle2,
-  AlertCircle,
-  Zap,
-  Brain,
+  ArrowUpRight,
+  GitPullRequest,
 } from 'lucide-react';
-import {
-  Area,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  Line,
-  ComposedChart,
-} from 'recharts';
+import { ResponsiveContainer, ComposedChart, Line, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
+import { Card } from '@/components/common/Card';
+import { StatCard } from '@/components/common/StatCard';
+import { Button } from '@/components/common/Button';
+import { Badge } from '@/components/common/Badge';
+import { Modal } from '@/components/common/Modal';
+import { apiClient } from '@/api/client';
 
-// Static demo data - this dashboard intentionally uses hardcoded mock data
-// to match the mission-control screenshot design. No live API integration.
+interface AgentItem {
+  id: string;
+  name: string;
+  title: string;
+  role: string;
+  status: 'active' | 'idle' | 'paused';
+  model: string;
+  performance_score: number;
+  spent_monthly_cents: number;
+}
 
-// Token & Cost chart data (deterministic - no randomness)
-const tokenCostData = Array.from({ length: 25 }, (_, i) => {
-  const hour = i;
-  const baseTokens = 80000 + Math.sin(i * 0.5) * 40000 + Math.cos(i * 0.3) * 15000 + Math.sin(i * 1.2) * 5000;
-  const baseCost = 30 + Math.sin(i * 0.4) * 20 + Math.cos(i * 0.7) * 8 + Math.sin(i * 1.5) * 2;
-  return {
-    time: `${String(hour).padStart(2, '0')}:00`,
-    tokens: Math.round(baseTokens),
-    cost: Math.round(baseCost * 100) / 100,
-  };
-});
+interface TaskItem {
+  id: string;
+  title: string;
+  status: 'pending' | 'in_progress' | 'completed' | 'failed';
+  priority: number;
+  assigned_agent_id: string;
+  created_at: string;
+}
 
-// Pipeline data
-const pipelines = [
-  { name: 'Bug Bounty Recon Pipeline', progress: 85, color: '#f59e0b' },
-  { name: 'Code Review Automation', progress: 62, color: '#10b981' },
-  { name: 'Threat Intel Collector', progress: 45, color: '#14b8a6' },
-  { name: 'Content Generation Flow', progress: 30, color: '#8b5cf6' },
+interface PipelineItem {
+  id: string;
+  name: string;
+  status: 'idle' | 'running' | 'completed';
+  success_rate: number;
+  trigger: string;
+}
+
+const telemetryChartData = [
+  { time: '00:00', tokens: 42000, cost: 12.4 },
+  { time: '04:00', tokens: 28000, cost: 8.2 },
+  { time: '08:00', tokens: 95000, cost: 28.5 },
+  { time: '12:00', tokens: 142000, cost: 44.1 },
+  { time: '16:00', tokens: 188000, cost: 58.2 },
+  { time: '20:00', tokens: 110000, cost: 34.0 },
+  { time: '24:00', tokens: 68000, cost: 21.3 },
 ];
 
-// Activity data
-const activities = [
-  { time: '10:24 AM', text: 'Agent Alpha completed task Subdomain Enumeration', icon: <CheckCircle2 size={14} />, color: 'text-green-400' },
-  { time: '10:23 AM', text: 'Pipeline Bug Bounty Recon progressed to 85%', icon: <Flame size={14} />, color: 'text-orange-400' },
-  { time: '10:22 AM', text: 'Agent Nova memory updated (2.4 MB)', icon: <Brain size={14} />, color: 'text-purple-400' },
-  { time: '10:21 AM', text: 'Code pushed to nvlabsorg/core', icon: <GitCommit size={14} />, color: 'text-blue-400' },
-  { time: '10:20 AM', text: 'New task assigned to Agent Cipher', icon: <AlertCircle size={14} />, color: 'text-red-400' },
+const initialAgents: AgentItem[] = [
+  { id: 'agent-atlas', name: 'Atlas-01', title: 'Chief Executive Officer', role: 'ceo', status: 'active', model: 'claude-3-7-sonnet', performance_score: 98, spent_monthly_cents: 18450 },
+  { id: 'agent-nova', name: 'Nova-02', title: 'Chief Technology Officer', role: 'cto', status: 'active', model: 'claude-3-7-sonnet', performance_score: 96, spent_monthly_cents: 22100 },
+  { id: 'agent-bolt', name: 'Bolt-03', title: 'Senior Backend Engineer', role: 'engineer', status: 'active', model: 'gpt-4o', performance_score: 94, spent_monthly_cents: 14200 },
+  { id: 'agent-pixel', name: 'Pixel-04', title: 'Frontend & 3D Specialist', role: 'engineer', status: 'active', model: 'gpt-4o', performance_score: 92, spent_monthly_cents: 9800 },
+  { id: 'agent-sage', name: 'Sage-05', title: 'AI Research Lead', role: 'researcher', status: 'idle', model: 'claude-3-7-sonnet', performance_score: 97, spent_monthly_cents: 18900 },
+  { id: 'agent-shield', name: 'Shield-07', title: 'Security & QA Auditor', role: 'qa', status: 'active', model: 'gpt-4o-mini', performance_score: 93, spent_monthly_cents: 7200 },
 ];
 
-// Task data
-const recentTasks = [
-  { name: 'Analyze target.com', agent: 'Omega', progress: 75, time: '10:24 AM' },
-  { name: 'Generate report v2', agent: 'Nova', progress: 60, time: '10:22 AM' },
-  { name: 'Monitor endpoints', agent: 'Cipher', progress: 45, time: '10:20 AM' },
-  { name: 'Update dependencies', agent: 'Hash', progress: 30, time: '10:18 AM' },
+const initialTasks: TaskItem[] = [
+  { id: 'task-1', title: 'Implement Vector Embeddings Cache for Memory Stream', status: 'in_progress', priority: 1, assigned_agent_id: 'agent-bolt', created_at: new Date(Date.now() - 3600000).toISOString() },
+  { id: 'task-2', title: 'Evaluate Claude 3.7 vs GPT-4o on Multi-Agent Reasoning', status: 'in_progress', priority: 2, assigned_agent_id: 'agent-sage', created_at: new Date(Date.now() - 7200000).toISOString() },
+  { id: 'task-3', title: 'Audit Smart Contract & API Gateway Rate Limits', status: 'completed', priority: 1, assigned_agent_id: 'agent-shield', created_at: new Date(Date.now() - 86400000).toISOString() },
+  { id: 'task-4', title: 'Render 3D Workstation Caster Physics & Isometric Shading', status: 'completed', priority: 2, assigned_agent_id: 'agent-pixel', created_at: new Date(Date.now() - 120000000).toISOString() },
+  { id: 'task-5', title: 'Quarterly Executive Resource & Model Budget Rebalancing', status: 'pending', priority: 3, assigned_agent_id: 'agent-atlas', created_at: new Date().toISOString() },
 ];
 
-// Top agents data
-const topAgents = [
-  { name: 'Alpha', score: 96, backend: 'Gemini 1.5 Pro', color: 'from-green-400 to-green-600' },
-  { name: 'Hash', score: 89, backend: 'Claude 3.5 Sonnet', color: 'from-blue-400 to-blue-600' },
-  { name: 'Nova', score: 85, backend: 'GPT-4o', color: 'from-purple-400 to-purple-600' },
-  { name: 'Cipher', score: 78, backend: 'Gemini 1.5 Flash', color: 'from-orange-400 to-orange-600' },
-];
-
-// Office zones for the visualization
-const officeZones = [
-  { name: 'Planning Zone', x: 5, y: 5, w: 90, h: 50, borderColor: '#14b8a6' },
-  { name: 'DevOps Zone', x: 5, y: 65, w: 70, h: 50, borderColor: '#f59e0b' },
-  { name: 'Development Zone', x: 105, y: 5, w: 100, h: 60, borderColor: '#10b981' },
-  { name: 'Meeting Area', x: 215, y: 5, w: 80, h: 55, borderColor: '#ec4899' },
-  { name: 'Analysis Zone', x: 5, y: 125, w: 90, h: 50, borderColor: '#3b82f6' },
-  { name: 'Support Zone', x: 105, y: 75, w: 85, h: 50, borderColor: '#8b5cf6' },
-  { name: 'HQ Terminal', x: 200, y: 70, w: 95, h: 55, borderColor: '#6b7280' },
-];
-
-// Agent dots for the office visualization
-const agentDots = [
-  { x: 30, y: 25, color: '#10b981' },
-  { x: 55, y: 35, color: '#10b981' },
-  { x: 75, y: 20, color: '#eab308' },
-  { x: 25, y: 80, color: '#10b981' },
-  { x: 50, y: 90, color: '#10b981' },
-  { x: 130, y: 25, color: '#10b981' },
-  { x: 155, y: 40, color: '#eab308' },
-  { x: 180, y: 30, color: '#10b981' },
-  { x: 240, y: 25, color: '#ef4444' },
-  { x: 260, y: 35, color: '#10b981' },
-  { x: 30, y: 145, color: '#10b981' },
-  { x: 60, y: 150, color: '#6b7280' },
-  { x: 130, y: 95, color: '#10b981' },
-  { x: 155, y: 100, color: '#eab308' },
-  { x: 230, y: 90, color: '#10b981' },
-  { x: 255, y: 100, color: '#10b981' },
+const initialPipelines: PipelineItem[] = [
+  { id: 'pipe-1', name: 'CI/CD Automated Deployment', status: 'running', success_rate: 98.4, trigger: 'git push (main)' },
+  { id: 'pipe-2', name: 'Nightly LLM Benchmark & Regression Suite', status: 'completed', success_rate: 99.1, trigger: 'cron(0 2 * * *)' },
+  { id: 'pipe-3', name: 'Security Vulnerability & Static Code Analysis', status: 'completed', success_rate: 100, trigger: 'Pull Request' },
+  { id: 'pipe-4', name: 'Memory Vector Index Consolidation', status: 'idle', success_rate: 96.5, trigger: 'Event: Memory > 1GB' },
 ];
 
 export function Dashboard() {
+  const navigate = useNavigate();
+  const [agents, setAgents] = useState<AgentItem[]>(initialAgents);
+  const [tasks, setTasks] = useState<TaskItem[]>(initialTasks);
+  const [pipelines, setPipelines] = useState<PipelineItem[]>(initialPipelines);
+
+  // Quick Action Modals
+  const [showTaskModal, setShowTaskModal] = useState(false);
+  const [showAgentModal, setShowAgentModal] = useState(false);
+  const [newTaskTitle, setNewTaskTitle] = useState('');
+  const [newTaskAgent, setNewTaskAgent] = useState('agent-bolt');
+  const [newAgentName, setNewAgentName] = useState('');
+  const [newAgentTitle, setNewAgentTitle] = useState('');
+  const [newAgentRole, setNewAgentRole] = useState('engineer');
+
+  useEffect(() => {
+    let isMounted = true;
+    async function loadData() {
+      try {
+        const [agentsRes, tasksRes, pipesRes] = await Promise.allSettled([
+          apiClient.get<{ items: AgentItem[] }>('/api/v1/companies/00000000-0000-4000-8000-000000000001/agents'),
+          apiClient.get<{ items: TaskItem[] }>('/api/v1/companies/00000000-0000-4000-8000-000000000001/tasks'),
+          apiClient.get<{ items: PipelineItem[] }>('/api/v1/companies/00000000-0000-4000-8000-000000000001/pipelines'),
+        ]);
+        if (!isMounted) return;
+
+        if (agentsRes.status === 'fulfilled' && agentsRes.value?.items?.length) {
+          setAgents(agentsRes.value.items);
+        }
+        if (tasksRes.status === 'fulfilled' && tasksRes.value?.items?.length) {
+          setTasks(tasksRes.value.items);
+        }
+        if (pipesRes.status === 'fulfilled' && pipesRes.value?.items?.length) {
+          setPipelines(pipesRes.value.items);
+        }
+      } catch (err) {
+        // Silently use defaults if offline
+      }
+    }
+    loadData();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  const handleCreateTask = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newTaskTitle.trim()) return;
+    try {
+      const created = await apiClient.post<TaskItem>('/api/v1/companies/00000000-0000-4000-8000-000000000001/tasks', {
+        title: newTaskTitle,
+        assigned_agent_id: newTaskAgent,
+        status: 'pending',
+        priority: 2,
+      });
+      setTasks((prev) => [created, ...prev]);
+      setNewTaskTitle('');
+      setShowTaskModal(false);
+    } catch (err) {
+      console.error('Task creation failed', err);
+    }
+  };
+
+  const handleHireAgent = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newAgentName.trim()) return;
+    try {
+      const created = await apiClient.post<AgentItem>('/api/v1/companies/00000000-0000-4000-8000-000000000001/agents', {
+        name: newAgentName,
+        title: newAgentTitle || 'Operations Specialist',
+        role: newAgentRole,
+      });
+      setAgents((prev) => [created, ...prev]);
+      setNewAgentName('');
+      setNewAgentTitle('');
+      setShowAgentModal(false);
+    } catch (err) {
+      console.error('Agent hire failed', err);
+    }
+  };
+
+  const activeAgentsCount = agents.filter((a) => a.status === 'active').length;
+  const completedTasksCount = tasks.filter((t) => t.status === 'completed').length;
+
   return (
     <div className="space-y-6">
-      {/* (A) Page Title */}
-      <div>
-        <div className="flex items-center gap-2">
-          <Sparkles size={24} className="text-indigo-400" />
-          <h1 className="text-2xl font-bold text-white">NVLabs Mission Control</h1>
-        </div>
-        <p className="text-sm text-gray-400 mt-1">Monitor. Orchestrate. Scale.</p>
-      </div>
-
-      {/* (B) Stat Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
-        <StatCard
-          label="Active Agents"
-          value="24"
-          total="/32"
-          change="+12%"
-          changeUp
-          icon={<Bot size={20} />}
-          iconBg="bg-[#8b5cf6]"
-        />
-        <StatCard
-          label="Active Tasks"
-          value="18"
-          total="/50"
-          change="+8%"
-          changeUp
-          icon={<ClipboardList size={20} />}
-          iconBg="bg-[#3b82f6]"
-        />
-        <StatCard
-          label="Pipelines"
-          value="7"
-          total="/15"
-          change="+5%"
-          changeUp
-          icon={<Waves size={20} />}
-          iconBg="bg-[#10b981]"
-        />
-        <StatCard
-          label="Token Usage (24h)"
-          value="1.24M"
-          change="-3%"
-          changeUp={false}
-          icon={<Flame size={20} />}
-          iconBg="bg-[#f59e0b]"
-        />
-        <StatCard
-          label="Est. Spend (24h)"
-          value="$42.68"
-          change="+7%"
-          changeUp
-          icon={<DollarSign size={20} />}
-          iconBg="bg-[#ec4899]"
-        />
-      </div>
-
-      {/* (C) Three-column section */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
-        {/* Agent Network */}
-        <Card className="lg:col-span-5" padding="lg">
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <h3 className="text-white font-semibold">Agent Network</h3>
-              <p className="text-xs text-gray-400">24 Active Agents</p>
-            </div>
-            <Link to="/office" className="text-xs text-blue-400 hover:text-blue-300">
-              View Office &rarr;
-            </Link>
-          </div>
-          {/* Office visualization */}
-          <div className="bg-dark-bg rounded-lg p-3 border border-white/[0.05]">
-            <svg viewBox="0 0 300 185" className="w-full h-auto">
-              {officeZones.map((zone) => (
-                <g key={zone.name}>
-                  <rect
-                    x={zone.x}
-                    y={zone.y}
-                    width={zone.w}
-                    height={zone.h}
-                    fill="none"
-                    stroke={zone.borderColor}
-                    strokeWidth="1"
-                    strokeOpacity="0.5"
-                    rx="3"
-                  />
-                  <text
-                    x={zone.x + 4}
-                    y={zone.y + 12}
-                    fill={zone.borderColor}
-                    fontSize="6"
-                    opacity="0.8"
-                  >
-                    {zone.name}
-                  </text>
-                </g>
-              ))}
-              {agentDots.map((dot, i) => (
-                <circle key={i} cx={dot.x} cy={dot.y} r="3" fill={dot.color} opacity="0.9" />
-              ))}
-            </svg>
-          </div>
-          {/* Legend */}
-          <div className="flex items-center gap-4 mt-3">
-            <LegendDot color="bg-green-400" label="Working" />
-            <LegendDot color="bg-yellow-400" label="Idle" />
-            <LegendDot color="bg-red-400" label="Review" />
-            <LegendDot color="bg-gray-400" label="Offline" />
-          </div>
-        </Card>
-
-        {/* Pipeline Execution */}
-        <Card className="lg:col-span-4" padding="lg">
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <h3 className="text-white font-semibold">Pipeline Execution</h3>
-              <p className="text-xs text-gray-400">7 Running Pipelines</p>
-            </div>
-            <Link to="/pipelines" className="text-xs text-blue-400 hover:text-blue-300">
-              View All &rarr;
-            </Link>
-          </div>
-          <div className="space-y-4">
-            {pipelines.map((pipeline) => (
-              <div key={pipeline.name}>
-                <div className="flex items-center justify-between mb-1">
-                  <span className="text-sm text-gray-300">{pipeline.name}</span>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-gray-400">{pipeline.progress}%</span>
-                    <Play size={12} className="text-gray-400" />
-                  </div>
-                </div>
-                <div className="h-1.5 bg-white/[0.08] rounded-full overflow-hidden">
-                  <div
-                    className="h-full rounded-full transition-all"
-                    style={{ width: `${pipeline.progress}%`, backgroundColor: pipeline.color }}
-                  />
-                </div>
-              </div>
-            ))}
-          </div>
-          <p className="text-xs text-gray-500 mt-4">+ 3 More Pipelines</p>
-        </Card>
-
-        {/* Live Activity */}
-        <Card className="lg:col-span-3" padding="lg">
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <h3 className="text-white font-semibold">Live Activity</h3>
-              <div className="flex items-center gap-1.5">
-                <span className="h-1.5 w-1.5 rounded-full bg-green-400" />
-                <p className="text-xs text-gray-400">All Systems Live</p>
-              </div>
-            </div>
-            <span className="text-[10px] text-gray-400 bg-white/[0.05] px-2 py-0.5 rounded">All</span>
-          </div>
-          <div className="space-y-3">
-            {activities.map((activity, i) => (
-              <div key={i} className="flex gap-2">
-                <div className={`mt-0.5 ${activity.color}`}>{activity.icon}</div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs text-gray-300 leading-relaxed">{activity.text}</p>
-                  <p className="text-[10px] text-gray-500 mt-0.5">{activity.time}</p>
-                </div>
-              </div>
-            ))}
-          </div>
-          <Link to="/activity" className="text-xs text-blue-400 hover:text-blue-300 mt-4 block">
-            View All Activity &rarr;
-          </Link>
-        </Card>
-      </div>
-
-      {/* (D) Quick Actions */}
-      <div className="flex flex-wrap gap-3">
-        <button className="flex items-center gap-2 px-4 py-2 bg-[#10b981] text-white text-sm font-medium rounded-lg hover:opacity-90 transition-opacity">
-          <Plus size={16} /> Add Agent
-        </button>
-        <button className="flex items-center gap-2 px-4 py-2 bg-[#3b82f6] text-white text-sm font-medium rounded-lg hover:opacity-90 transition-opacity">
-          <Plus size={16} /> Create Task
-        </button>
-        <button className="flex items-center gap-2 px-4 py-2 bg-[#f59e0b] text-white text-sm font-medium rounded-lg hover:opacity-90 transition-opacity">
-          <Plus size={16} /> New Pipeline
-        </button>
-        <button className="flex items-center gap-2 px-4 py-2 bg-[#ec4899] text-white text-sm font-medium rounded-lg hover:opacity-90 transition-opacity">
-          Open HR Room
-        </button>
-        <button className="flex items-center gap-2 px-4 py-2 bg-[#8b5cf6] text-white text-sm font-medium rounded-lg hover:opacity-90 transition-opacity">
-          View Office
-        </button>
-      </div>
-
-      {/* (E) Bottom Two-Column: Recent Tasks + Top Agents */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {/* Recent Tasks */}
-        <Card padding="lg">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-white font-semibold">Recent Tasks</h3>
-            <Link to="/tasks" className="text-xs text-blue-400 hover:text-blue-300">View All &rarr;</Link>
-          </div>
-          <div className="space-y-3">
-            {recentTasks.map((task) => (
-              <div key={task.name} className="flex items-center gap-3">
-                <div className="w-8 h-8 bg-white/[0.05] rounded-lg flex items-center justify-center">
-                  <Zap size={14} className="text-indigo-400" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm text-white font-medium truncate">{task.name}</p>
-                  <p className="text-[10px] text-gray-500">Agent: {task.agent}</p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className="w-16 h-1.5 bg-white/[0.08] rounded-full overflow-hidden">
-                    <div
-                      className="h-full bg-indigo-500 rounded-full"
-                      style={{ width: `${task.progress}%` }}
-                    />
-                  </div>
-                  <span className="text-xs text-gray-400 w-8">{task.progress}%</span>
-                </div>
-                <span className="text-[10px] text-gray-500">{task.time}</span>
-              </div>
-            ))}
-          </div>
-        </Card>
-
-        {/* Top Agents */}
-        <Card padding="lg">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-white font-semibold">Top Agents</h3>
-            <Link to="/agents" className="text-xs text-blue-400 hover:text-blue-300">View All &rarr;</Link>
-          </div>
-          <div className="space-y-3">
-            {topAgents.map((agent) => (
-              <div key={agent.name} className="flex items-center gap-3">
-                <div className={`w-8 h-8 bg-gradient-to-br ${agent.color} rounded-full flex items-center justify-center`}>
-                  <span className="text-white text-xs font-bold">{agent.name[0]}</span>
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm text-white font-medium">{agent.name}</p>
-                  <p className="text-[10px] text-gray-500">Backend: {agent.backend}</p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className="w-16 h-1.5 bg-white/[0.08] rounded-full overflow-hidden">
-                    <div
-                      className="h-full bg-green-500 rounded-full"
-                      style={{ width: `${agent.score}%` }}
-                    />
-                  </div>
-                  <span className="text-xs text-green-400 w-8">{agent.score}%</span>
-                </div>
-              </div>
-            ))}
-          </div>
-        </Card>
-      </div>
-
-      {/* (F) Token & Cost Overview */}
-      <Card padding="lg">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-white font-semibold">Token & Cost Overview</h3>
-          <span className="text-[10px] text-gray-400 bg-white/[0.05] px-2 py-0.5 rounded">24 Hours</span>
-        </div>
-        <div className="h-64">
-          <ResponsiveContainer width="100%" height="100%">
-            <ComposedChart data={tokenCostData}>
-              <defs>
-                <linearGradient id="tokenGradient" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3} />
-                  <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
-              <XAxis
-                dataKey="time"
-                stroke="#6b7280"
-                fontSize={10}
-                tickLine={false}
-                axisLine={false}
-              />
-              <YAxis
-                yAxisId="tokens"
-                orientation="left"
-                stroke="#6b7280"
-                fontSize={10}
-                tickLine={false}
-                axisLine={false}
-                tickFormatter={(v: number) => `${(v / 1000).toFixed(0)}K`}
-                domain={[0, 200000]}
-              />
-              <YAxis
-                yAxisId="cost"
-                orientation="right"
-                stroke="#6b7280"
-                fontSize={10}
-                tickLine={false}
-                axisLine={false}
-                tickFormatter={(v: number) => `$${v}`}
-                domain={[0, 80]}
-              />
-              <Tooltip
-                contentStyle={{
-                  backgroundColor: '#1a1b2e',
-                  border: '1px solid rgba(255,255,255,0.08)',
-                  borderRadius: '8px',
-                  color: '#fff',
-                  fontSize: '12px',
-                }}
-              />
-              <Area
-                yAxisId="tokens"
-                type="monotone"
-                dataKey="tokens"
-                stroke="#3b82f6"
-                fill="url(#tokenGradient)"
-                strokeWidth={2}
-              />
-              <Line
-                yAxisId="cost"
-                type="monotone"
-                dataKey="cost"
-                stroke="#f97316"
-                strokeWidth={2}
-                dot={false}
-              />
-            </ComposedChart>
-          </ResponsiveContainer>
-        </div>
-        <div className="flex items-center gap-6 mt-4 pt-4 border-t border-white/[0.08]">
-          <div className="flex items-center gap-2">
-            <div className="h-2 w-2 rounded-full bg-blue-500" />
-            <span className="text-xs text-gray-400">Total Tokens: 1.24M</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="h-2 w-2 rounded-full bg-orange-500" />
-            <span className="text-xs text-gray-400">Total Cost: $42.68</span>
-          </div>
-        </div>
-      </Card>
-
-      {/* (G) Command Bar */}
-      <div className="relative">
-        <div className="flex items-center bg-dark-surface border border-white/[0.08] rounded-xl px-4 py-3">
-          <span className="text-[10px] text-gray-500 bg-dark-bg border border-white/[0.08] rounded px-1.5 py-0.5 mr-3">
-            Ctrl K
-          </span>
-          <input
-            type="text"
-            placeholder="Ask NVLabs anything..."
-            className="flex-1 bg-transparent text-sm text-gray-300 placeholder-gray-500 focus:outline-none"
-          />
-          <button className="ml-3 p-2 bg-[#14b8a6] rounded-lg hover:opacity-90 transition-opacity">
-            <Send size={16} className="text-white" />
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// Helper components
-function StatCard({
-  label,
-  value,
-  total,
-  change,
-  changeUp,
-  icon,
-  iconBg,
-}: {
-  label: string;
-  value: string;
-  total?: string;
-  change: string;
-  changeUp: boolean;
-  icon: React.ReactNode;
-  iconBg: string;
-}) {
-  return (
-    <Card padding="lg">
-      <div className="flex items-center justify-between">
+      {/* Top Banner / Operational Command Bar */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-white/[0.08]">
         <div>
-          <p className="text-xs text-gray-400 uppercase tracking-wide">{label}</p>
-          <p className="text-xl font-bold text-white mt-1">
-            {value}
-            {total && <span className="text-sm text-gray-500 font-normal">{total}</span>}
-          </p>
-          <div className="flex items-center gap-1 mt-1">
-            {changeUp ? (
-              <ArrowUpRight size={12} className="text-green-400" />
-            ) : (
-              <ArrowDownRight size={12} className="text-red-400" />
-            )}
-            <span className={`text-xs ${changeUp ? 'text-green-400' : 'text-red-400'}`}>
-              {change}
-            </span>
+          <div className="flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-[#22C55E] animate-pulse" />
+            <h1 className="text-xl font-display font-medium text-[#F2F1EE] tracking-tight">
+              Operations Control Deck
+            </h1>
           </div>
+          <p className="text-xs font-mono text-[#6B6B6E] mt-1">
+            Real-time telemetry, autonomous squads, and model execution routing
+          </p>
         </div>
-        <div className={`w-10 h-10 ${iconBg} rounded-lg flex items-center justify-center text-white`}>
-          {icon}
+
+        <div className="flex items-center gap-2">
+          <Button
+            variant="secondary"
+            size="sm"
+            icon={<CheckSquare className="w-3.5 h-3.5 text-[#FFB020]" />}
+            onClick={() => setShowTaskModal(true)}
+          >
+            Create Task
+          </Button>
+          <Button
+            variant="primary"
+            size="sm"
+            icon={<Plus className="w-3.5 h-3.5" />}
+            onClick={() => setShowAgentModal(true)}
+          >
+            Hire Agent
+          </Button>
         </div>
       </div>
-    </Card>
-  );
-}
 
-function LegendDot({ color, label }: { color: string; label: string }) {
-  return (
-    <div className="flex items-center gap-1.5">
-      <span className={`h-2 w-2 rounded-full ${color}`} />
-      <span className="text-[10px] text-gray-400">{label}</span>
+      {/* Metric Cards Row */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <StatCard
+          label="Active Workforce"
+          value={`${activeAgentsCount} / ${agents.length || 8}`}
+          subValue="Squad Units"
+          change="+2 units active vs yesterday"
+          changeType="positive"
+          to="/agents"
+          icon={<Users className="w-4 h-4" />}
+        />
+        <StatCard
+          label="Operations Queue"
+          value={tasks.length}
+          subValue={`${completedTasksCount} completed`}
+          change="98.2% completion SLA"
+          changeType="positive"
+          to="/tasks"
+          icon={<CheckSquare className="w-4 h-4" />}
+        />
+        <StatCard
+          label="Monthly Spend"
+          value="$4,235"
+          subValue="/ $10,000"
+          change="42.3% threshold (Normal)"
+          changeType="neutral"
+          to="/budgets"
+          icon={<DollarSign className="w-4 h-4" />}
+        />
+        <StatCard
+          label="Evolution Proposals"
+          value="2 Pending"
+          subValue="Avg eval +18%"
+          change="p < 0.01 statistical conf"
+          changeType="positive"
+          to="/evolution"
+          icon={<TrendingUp className="w-4 h-4" />}
+        />
+      </div>
+
+      {/* Main Operations Split: 2D Spatial Floor & Token Telemetry */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        {/* Left: 2D Floorplan & Zone Routing (7 cols) */}
+        <div className="lg:col-span-7">
+          <Card
+            header={
+              <div className="flex items-center justify-between w-full">
+                <div className="flex items-center gap-2">
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#38BDF8]" />
+                  <span className="text-xs font-mono font-medium text-[#F2F1EE] uppercase tracking-wider">
+                    Workforce Spatial Zones
+                  </span>
+                </div>
+                <Link
+                  to="/office"
+                  className="text-xs font-mono text-[#FFB020] hover:underline inline-flex items-center gap-1"
+                >
+                  Enter 3D Space <ArrowUpRight className="w-3 h-3" />
+                </Link>
+              </div>
+            }
+            padding="none"
+          >
+            <div className="p-4 bg-[#101012] border-b border-white/[0.04]">
+              {/* Floorplan Layout Grid */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                {[
+                  { name: 'Executive Suite', zone: 'exec', lead: 'Atlas-01', count: 2, status: 'nominal' },
+                  { name: 'Engineering Core', zone: 'eng', lead: 'Nova-02', count: 3, status: 'high_load' },
+                  { name: 'AI Reasoning Lab', zone: 'ai', lead: 'Sage-05', count: 1, status: 'nominal' },
+                  { name: 'Ops & Security', zone: 'ops', lead: 'Shield-07', count: 2, status: 'nominal' },
+                ].map((z) => (
+                  <div
+                    key={z.zone}
+                    onClick={() => navigate('/office')}
+                    className="p-3 bg-[#141416] border border-white/[0.08] rounded-[6px] hover:border-white/[0.2] transition-colors cursor-pointer"
+                  >
+                    <div className="flex items-center justify-between text-[11px] font-mono text-[#6B6B6E]">
+                      <span>{z.name}</span>
+                      <span className="w-1.5 h-1.5 rounded-full bg-[#22C55E]" />
+                    </div>
+                    <div className="mt-2 text-sm font-mono font-medium text-[#F2F1EE]">
+                      {z.count} Agents
+                    </div>
+                    <div className="text-[10px] font-mono text-[#A8A8AB] mt-0.5">
+                      Lead: {z.lead}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Agent Live Roster preview */}
+            <div className="p-4 divide-y divide-white/[0.04] max-h-60 overflow-y-auto">
+              {agents.slice(0, 4).map((agent) => (
+                <div
+                  key={agent.id}
+                  onClick={() => navigate(`/agents/${agent.id}`)}
+                  className="py-2.5 flex items-center justify-between hover:bg-white/[0.02] px-2 rounded cursor-pointer transition-colors"
+                >
+                  <div className="flex items-center gap-3">
+                    <span className="w-2 h-2 rounded-full bg-[#22C55E]" />
+                    <div>
+                      <div className="text-xs font-medium text-[#F2F1EE]">{agent.name}</div>
+                      <div className="text-[11px] font-mono text-[#6B6B6E]">{agent.title}</div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-4">
+                    <span className="text-xs font-mono text-[#A8A8AB]">{agent.model}</span>
+                    <Badge variant={agent.status === 'active' ? 'active' : 'idle'}>
+                      {agent.status}
+                    </Badge>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </Card>
+        </div>
+
+        {/* Right: Telemetry & Token Rates (5 cols) */}
+        <div className="lg:col-span-5">
+          <Card
+            header={
+              <div className="flex items-center justify-between w-full">
+                <span className="text-xs font-mono font-medium text-[#F2F1EE] uppercase tracking-wider">
+                  Hourly Token Consumption
+                </span>
+                <span className="text-[11px] font-mono text-[#6B6B6E]">24H Aggregate</span>
+              </div>
+            }
+          >
+            <div className="h-56 w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <ComposedChart data={telemetryChartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                  <CartesianGrid stroke="#222" strokeDasharray="2 2" vertical={false} />
+                  <XAxis dataKey="time" stroke="#6B6B6E" tick={{ fontSize: 10, fill: '#6B6B6E' }} />
+                  <YAxis stroke="#6B6B6E" tick={{ fontSize: 10, fill: '#6B6B6E' }} />
+                  <Tooltip
+                    contentStyle={{ backgroundColor: '#1C1C1F', borderColor: '#333', borderRadius: 6, fontSize: 11, color: '#F2F1EE' }}
+                    labelStyle={{ color: '#FFB020', fontFamily: 'monospace' }}
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="tokens"
+                    stroke="#FFB020"
+                    strokeWidth={2}
+                    dot={false}
+                    activeDot={{ r: 4, fill: '#FFB020' }}
+                  />
+                </ComposedChart>
+              </ResponsiveContainer>
+            </div>
+
+            <div className="pt-4 border-t border-white/[0.06] grid grid-cols-2 gap-4 text-center">
+              <div>
+                <div className="text-xs font-mono text-[#6B6B6E]">Peak Velocity</div>
+                <div className="text-sm font-mono font-medium text-[#F2F1EE] mt-0.5">188k tokens/hr</div>
+              </div>
+              <div>
+                <div className="text-xs font-mono text-[#6B6B6E]">Avg Unit Cost</div>
+                <div className="text-sm font-mono font-medium text-[#22C55E] mt-0.5">$0.0031 / 1k</div>
+              </div>
+            </div>
+          </Card>
+        </div>
+      </div>
+
+      {/* Bottom Grid: Continuous Pipelines & Recent Operational Tasks */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Pipelines Card */}
+        <Card
+          header={
+            <div className="flex items-center justify-between w-full">
+              <div className="flex items-center gap-2">
+                <GitPullRequest className="w-4 h-4 text-[#FFB020]" />
+                <span className="text-xs font-mono font-medium text-[#F2F1EE] uppercase tracking-wider">
+                  Automated Pipelines
+                </span>
+              </div>
+              <Link to="/pipelines" className="text-xs font-mono text-[#FFB020] hover:underline">
+                View All →
+              </Link>
+            </div>
+          }
+        >
+          <div className="space-y-3">
+            {pipelines.map((pipe) => (
+              <div
+                key={pipe.id}
+                className="p-3 bg-[#101012] border border-white/[0.06] rounded-[6px] flex items-center justify-between"
+              >
+                <div>
+                  <div className="text-xs font-medium text-[#F2F1EE]">{pipe.name}</div>
+                  <div className="text-[11px] font-mono text-[#6B6B6E] mt-0.5">
+                    Trigger: {pipe.trigger} · SLA {pipe.success_rate}%
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Badge variant={pipe.status === 'running' ? 'in_progress' : 'completed'}>
+                    {pipe.status}
+                  </Badge>
+                  <Button
+                    variant="ghost"
+                    size="xs"
+                    icon={<Play className="w-3 h-3 text-[#FFB020]" />}
+                    onClick={async () => {
+                      await apiClient.post(`/api/v1/companies/00000000-0000-4000-8000-000000000001/pipelines/${pipe.id}/trigger`);
+                      setPipelines((prev) =>
+                        prev.map((p) => (p.id === pipe.id ? { ...p, status: 'running' } : p))
+                      );
+                    }}
+                  >
+                    Run
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </Card>
+
+        {/* Tasks Queue Card */}
+        <Card
+          header={
+            <div className="flex items-center justify-between w-full">
+              <div className="flex items-center gap-2">
+                <CheckSquare className="w-4 h-4 text-[#22C55E]" />
+                <span className="text-xs font-mono font-medium text-[#F2F1EE] uppercase tracking-wider">
+                  Active Task Queue
+                </span>
+              </div>
+              <Link to="/tasks" className="text-xs font-mono text-[#FFB020] hover:underline">
+                Board View →
+              </Link>
+            </div>
+          }
+        >
+          <div className="space-y-2.5">
+            {tasks.slice(0, 4).map((task) => (
+              <div
+                key={task.id}
+                onClick={() => navigate('/tasks')}
+                className="p-3 bg-[#101012] border border-white/[0.06] rounded-[6px] flex items-center justify-between hover:bg-white/[0.02] cursor-pointer transition-colors"
+              >
+                <div className="min-w-0 pr-3">
+                  <div className="text-xs font-medium text-[#F2F1EE] truncate">{task.title}</div>
+                  <div className="text-[11px] font-mono text-[#6B6B6E] mt-0.5">
+                    Assignee: {task.assigned_agent_id}
+                  </div>
+                </div>
+                <Badge variant={task.status as any}>{task.status}</Badge>
+              </div>
+            ))}
+          </div>
+        </Card>
+      </div>
+
+      {/* Quick Action Modal: Create Task */}
+      <Modal isOpen={showTaskModal} onClose={() => setShowTaskModal(false)} title="Assign New Task">
+        <form onSubmit={handleCreateTask} className="space-y-4">
+          <div>
+            <label className="block text-xs font-mono text-[#A8A8AB] uppercase mb-1">
+              Task Title
+            </label>
+            <input
+              type="text"
+              value={newTaskTitle}
+              onChange={(e) => setNewTaskTitle(e.target.value)}
+              placeholder="e.g. Implement circuit breaker fallback"
+              className="w-full px-3 py-2 bg-[#141416] border border-white/[0.12] rounded-[6px] text-xs text-[#F2F1EE] focus:outline-none focus:border-[#FFB020]"
+              required
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-mono text-[#A8A8AB] uppercase mb-1">
+              Assign Agent
+            </label>
+            <select
+              value={newTaskAgent}
+              onChange={(e) => setNewTaskAgent(e.target.value)}
+              className="w-full px-3 py-2 bg-[#141416] border border-white/[0.12] rounded-[6px] text-xs text-[#F2F1EE] focus:outline-none focus:border-[#FFB020]"
+            >
+              {agents.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.name} ({a.title})
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="flex justify-end gap-2 pt-2">
+            <Button variant="secondary" size="sm" type="button" onClick={() => setShowTaskModal(false)}>
+              Cancel
+            </Button>
+            <Button variant="primary" size="sm" type="submit">
+              Dispatch Task
+            </Button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Quick Action Modal: Hire Agent */}
+      <Modal isOpen={showAgentModal} onClose={() => setShowAgentModal(false)} title="Hire Autonomous Agent">
+        <form onSubmit={handleHireAgent} className="space-y-4">
+          <div>
+            <label className="block text-xs font-mono text-[#A8A8AB] uppercase mb-1">
+              Agent Call Sign / Name
+            </label>
+            <input
+              type="text"
+              value={newAgentName}
+              onChange={(e) => setNewAgentName(e.target.value)}
+              placeholder="e.g. Cipher-09"
+              className="w-full px-3 py-2 bg-[#141416] border border-white/[0.12] rounded-[6px] text-xs text-[#F2F1EE] focus:outline-none focus:border-[#FFB020]"
+              required
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-mono text-[#A8A8AB] uppercase mb-1">
+              Title & Specialization
+            </label>
+            <input
+              type="text"
+              value={newAgentTitle}
+              onChange={(e) => setNewAgentTitle(e.target.value)}
+              placeholder="e.g. Security Vulnerability Researcher"
+              className="w-full px-3 py-2 bg-[#141416] border border-white/[0.12] rounded-[6px] text-xs text-[#F2F1EE] focus:outline-none focus:border-[#FFB020]"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-mono text-[#A8A8AB] uppercase mb-1">
+              Role Classification
+            </label>
+            <select
+              value={newAgentRole}
+              onChange={(e) => setNewAgentRole(e.target.value)}
+              className="w-full px-3 py-2 bg-[#141416] border border-white/[0.12] rounded-[6px] text-xs text-[#F2F1EE] focus:outline-none focus:border-[#FFB020]"
+            >
+              <option value="engineer">Senior Engineer</option>
+              <option value="researcher">AI Researcher</option>
+              <option value="qa">Security & QA</option>
+              <option value="devops">DevOps & SRE</option>
+              <option value="pm">Project Coordinator</option>
+            </select>
+          </div>
+          <div className="flex justify-end gap-2 pt-2">
+            <Button variant="secondary" size="sm" type="button" onClick={() => setShowAgentModal(false)}>
+              Cancel
+            </Button>
+            <Button variant="primary" size="sm" type="submit">
+              Deploy Agent
+            </Button>
+          </div>
+        </form>
+      </Modal>
     </div>
   );
 }

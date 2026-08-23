@@ -1,0 +1,6 @@
+{
+  "name": "NEXUS Dashboard",
+  "description": "Autonomous AI Company & Multi-Agent Operations Platform with 2D OpenOffice Pixel Simulation, 3D Floor Plan, and GitNexus-inspired Memory & Knowledge Graph Visualization",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

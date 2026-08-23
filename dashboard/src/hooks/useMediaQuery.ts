@@ -1,21 +1,24 @@
 import { useState, useEffect } from 'react';
 
-/**
- * Returns true if the given media query matches.
- * Commonly used for responsive fallbacks (e.g. disabling 3D on small screens).
- */
 export function useMediaQuery(query: string): boolean {
   const [matches, setMatches] = useState(() => {
-    if (typeof window === 'undefined') return false;
-    return window.matchMedia(query).matches;
+    if (typeof window !== 'undefined') {
+      return window.matchMedia(query).matches;
+    }
+    return false;
   });
 
   useEffect(() => {
-    const mql = window.matchMedia(query);
-    const handler = (e: MediaQueryListEvent) => setMatches(e.matches);
+    if (typeof window === 'undefined') return;
+    const mediaQuery = window.matchMedia(query);
+    const handler = (event: MediaQueryListEvent) => setMatches(event.matches);
 
-    mql.addEventListener('change', handler);
-    return () => mql.removeEventListener('change', handler);
+    mediaQuery.addEventListener('change', handler);
+    setMatches(mediaQuery.matches);
+
+    return () => {
+      mediaQuery.removeEventListener('change', handler);
+    };
   }, [query]);
 
   return matches;

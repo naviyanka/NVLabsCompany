@@ -51,3 +51,8 @@ nexus_dev.db
 /blob-report/
 /playwright/.cache/
 /playwright/.auth/
+
+# Secrets / credentials
+**/github_config.json
+**/data/github_config.json
+dashboard/data/

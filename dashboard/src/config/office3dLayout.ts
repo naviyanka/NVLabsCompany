@@ -31,6 +31,7 @@ export interface MockAgent3D {
   capabilities: string[];
   cpu: number;
   memory: number;
+  tokensUsed?: number;
   taskProgress: number;
   currentTask: string;
   sparklineData: number[];

@@ -1,52 +1,26 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { ApiClientError } from '@/api/client';
+import { useState, useEffect, useCallback } from 'react';
 
-export interface UseApiState<T> {
-  data: T | null;
-  loading: boolean;
-  error: string | null;
-}
+export function useApi<T>(apiFunc: () => Promise<T>, deps: any[] = []) {
+  const [data, setData] = useState<T | null>(null);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [error, setError] = useState<Error | null>(null);
 
-export interface UseApiReturn<T> extends UseApiState<T> {
-  refetch: () => void;
-}
-
-export function useApi<T>(
-  fetcher: () => Promise<T>,
-  deps: unknown[] = []
-): UseApiReturn<T> {
-  const [state, setState] = useState<UseApiState<T>>({
-    data: null,
-    loading: true,
-    error: null,
-  });
-
-  // Serialize deps to a stable string to avoid infinite loops when callers
-  // pass object/array literals that create new references each render.
-  const depsKey = JSON.stringify(deps);
-  const fetcherRef = useRef(fetcher);
-  fetcherRef.current = fetcher;
-
-  const fetchData = useCallback(async () => {
-    setState((prev) => ({ ...prev, loading: true, error: null }));
+  const execute = useCallback(async () => {
+    setLoading(true);
+    setError(null);
     try {
-      const data = await fetcherRef.current();
-      setState({ data, loading: false, error: null });
-    } catch (err) {
-      const message =
-        err instanceof ApiClientError
-          ? err.detail
-          : err instanceof Error
-            ? err.message
-            : 'An unexpected error occurred';
-      setState({ data: null, loading: false, error: message });
+      const result = await apiFunc();
+      setData(result);
+    } catch (err: any) {
+      setError(err instanceof Error ? err : new Error(String(err)));
+    } finally {
+      setLoading(false);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [depsKey]);
+  }, deps);
 
   useEffect(() => {
-    void fetchData();
-  }, [fetchData]);
+    execute();
+  }, [execute]);
 
-  return { ...state, refetch: fetchData };
+  return { data, loading, error, refetch: execute };
 }

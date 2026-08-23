@@ -1,121 +1,217 @@
-import { NavLink } from 'react-router-dom';
+import { useState, useEffect } from 'react';
+import { NavLink, useLocation } from 'react-router-dom';
 import {
-  Rocket,
   LayoutDashboard,
-  Building2,
+  Box,
   Users,
-  Bot,
-  ListTodo,
-  GitBranch,
-  Brain,
-  GitFork,
+  CheckSquare,
+  GitPullRequest,
+  Target,
+  Video,
+  Network,
+  Wrench,
+  Shield,
+  UserCheck,
+  DollarSign,
+  TrendingUp,
+  Database,
   BookOpen,
+  GitBranch,
   Activity,
-  Bell,
   Settings,
+  ChevronLeft,
   ChevronRight,
+  Zap,
+  Share2,
 } from 'lucide-react';
 
+import type { LucideIcon } from 'lucide-react';
+
+export interface SidebarProps {
+  isMobileOpen?: boolean;
+  onCloseMobile?: () => void;
+}
+
 interface NavItem {
-  label: string;
-  path: string;
-  icon: React.ReactNode;
-  badge?: string;
-  badgeColor?: string;
-  hasChevron?: boolean;
+  name: string;
+  to: string;
+  icon: LucideIcon;
 }
 
-const navItems: NavItem[] = [
-  { label: 'Overview', path: '/', icon: <LayoutDashboard size={18} /> },
-  { label: 'Office', path: '/office', icon: <Building2 size={18} /> },
-  { label: 'HR Room', path: '/hr-room', icon: <Users size={18} />, badge: 'New', badgeColor: 'bg-green-500' },
-  { label: 'Agents', path: '/agents', icon: <Bot size={18} />, hasChevron: true },
-  { label: 'Tasks', path: '/tasks', icon: <ListTodo size={18} />, hasChevron: true },
-  { label: 'Pipelines', path: '/pipelines', icon: <GitBranch size={18} />, hasChevron: true },
-  { label: 'Memory', path: '/memory', icon: <Brain size={18} /> },
-  { label: 'Git Repos', path: '/git-repos', icon: <GitFork size={18} /> },
-  { label: 'Knowledge Base', path: '/knowledge-base', icon: <BookOpen size={18} /> },
-  { label: 'Activity', path: '/activity', icon: <Activity size={18} /> },
-  { label: 'Notifications', path: '/notifications', icon: <Bell size={18} />, badge: '12', badgeColor: 'bg-red-500' },
-  { label: 'Settings', path: '/settings', icon: <Settings size={18} /> },
-];
-
-interface SystemStatusItem {
+interface NavGroup {
   label: string;
-  status: string;
+  items: NavItem[];
 }
 
-const systemStatus: SystemStatusItem[] = [
-  { label: 'Gateway', status: 'Online' },
-  { label: 'WebSocket', status: 'Connected' },
-  { label: 'Database', status: 'Healthy' },
-  { label: 'Memory Store', status: 'Healthy' },
-  { label: 'Vector DB', status: 'Healthy' },
+const navGroups: NavGroup[] = [
+  {
+    label: 'OPERATIONS',
+    items: [
+      { name: 'Ops Floor', to: '/', icon: LayoutDashboard },
+      { name: '3D Virtual Office', to: '/office', icon: Box },
+      { name: 'Workforce Agents', to: '/agents', icon: Users },
+      { name: 'Task Operations', to: '/tasks', icon: CheckSquare },
+      { name: 'Pipelines', to: '/pipelines', icon: GitPullRequest },
+      { name: 'Workflows', to: '/workflows', icon: Zap },
+    ],
+  },
+  {
+    label: 'ORGANIZATION',
+    items: [
+      { name: 'Strategic Goals', to: '/goals', icon: Target },
+      { name: 'Standups & Syncs', to: '/meetings', icon: Video },
+      { name: 'Org Hierarchy', to: '/organization', icon: Network },
+      { name: 'Skills Matrix', to: '/skills', icon: Shield },
+      { name: 'Tools Access', to: '/tools', icon: Wrench },
+      { name: 'HR & Review', to: '/hr-room', icon: UserCheck },
+    ],
+  },
+  {
+    label: 'GOVERNANCE & DATA',
+    items: [
+      { name: 'Budgets & Limits', to: '/budgets', icon: DollarSign },
+      { name: 'Evolution & Evals', to: '/evolution', icon: TrendingUp },
+      { name: 'Memory Graph', to: '/memory-graph', icon: Share2 },
+      { name: 'Collective Memory', to: '/memory', icon: Database },
+      { name: 'Knowledge Plaza', to: '/knowledge', icon: BookOpen },
+      { name: 'Source Repos', to: '/git-repos', icon: GitBranch },
+      { name: 'Telemetry Audit', to: '/activity', icon: Activity },
+      { name: 'Settings & Control', to: '/settings', icon: Settings },
+    ],
+  },
 ];
 
-export function Sidebar() {
+export function Sidebar({ isMobileOpen = false, onCloseMobile }: SidebarProps) {
+  const [collapsed, setCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem('nexus_sidebar_collapsed') === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  const location = useLocation();
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('nexus_sidebar_collapsed', String(collapsed));
+    } catch {
+      // ignore
+    }
+  }, [collapsed]);
+
+  const toggleCollapsed = () => setCollapsed(!collapsed);
+
   return (
-    <aside className="fixed left-0 top-0 bottom-0 w-64 bg-dark-sidebar flex flex-col z-30">
-      {/* Logo */}
-      <div className="flex items-center gap-3 px-5 py-5 border-b border-white/[0.08]">
-        <div className="h-9 w-9 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-lg flex items-center justify-center">
-          <Rocket size={18} className="text-white" />
-        </div>
-        <div>
-          <span className="text-white font-bold text-lg tracking-wide">NVLABS</span>
-          <p className="text-xs text-gray-500">Mission Control</p>
-        </div>
-      </div>
+    <>
+      {/* Mobile Backdrop */}
+      {isMobileOpen && (
+        <div
+          className="fixed inset-0 bg-[#0A0A0B]/80 z-40 md:hidden"
+          onClick={onCloseMobile}
+          aria-hidden="true"
+        />
+      )}
 
-      {/* Navigation */}
-      <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
-        {navItems.map((item) => (
-          <NavLink
-            key={item.path}
-            to={item.path}
-            end={item.path === '/'}
-            className={({ isActive }) =>
-              `sidebar-link ${isActive ? 'sidebar-link-active' : 'sidebar-link-inactive'}`
-            }
-          >
-            {item.icon}
-            <span className="flex-1">{item.label}</span>
-            {item.badge && (
-              <span className={`${item.badgeColor} text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full`}>
-                {item.badge}
-              </span>
-            )}
-            {item.hasChevron && <ChevronRight size={14} className="text-gray-500" />}
-          </NavLink>
-        ))}
-      </nav>
-
-      {/* System Status */}
-      <div className="px-4 py-3 border-t border-white/[0.08]">
-        <p className="text-[10px] uppercase tracking-wider text-gray-500 font-semibold mb-2">System Status</p>
-        <div className="space-y-1.5">
-          {systemStatus.map((item) => (
-            <div key={item.label} className="flex items-center justify-between">
-              <span className="text-xs text-gray-400">{item.label}</span>
-              <div className="flex items-center gap-1.5">
-                <span className="h-1.5 w-1.5 rounded-full bg-green-400" />
-                <span className="text-[10px] text-green-400">{item.status}</span>
+      {/* Sidebar Container */}
+      <aside
+        className={`fixed md:static inset-y-0 left-0 z-40 bg-[#0E0E10] border-r border-white/[0.08] flex flex-col transition-all duration-200 select-none ${
+          collapsed ? 'w-16' : 'w-60'
+        } ${
+          isMobileOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'
+        }`}
+      >
+        {/* Brand Header */}
+        <div className="h-14 flex items-center justify-between px-4 border-b border-white/[0.08] shrink-0 bg-[#0A0A0B]">
+          <div className="flex items-center gap-2.5 overflow-hidden">
+            {/* Minimalist Nexus Monogram */}
+            <div className="w-7 h-7 rounded-[4px] bg-[#FFB020] flex items-center justify-center text-[#0A0A0B] font-bold font-display text-sm shrink-0">
+              N
+            </div>
+            {!collapsed && (
+              <div className="flex flex-col">
+                <span className="font-display font-bold text-sm tracking-wide text-[#F2F1EE]">
+                  NEXUS
+                </span>
+                <span className="font-mono text-[9px] text-[#6B6B6E] tracking-wider uppercase">
+                  MISSION CONTROL
+                </span>
               </div>
+            )}
+          </div>
+
+          <button
+            onClick={toggleCollapsed}
+            className="hidden md:flex p-1 text-[#6B6B6E] hover:text-[#F2F1EE] hover:bg-white/[0.04] rounded-[4px] transition-colors cursor-pointer"
+            aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          >
+            {collapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
+          </button>
+        </div>
+
+        {/* Navigation Menu Links */}
+        <nav className="flex-1 overflow-y-auto py-3 px-2 space-y-5">
+          {navGroups.map((group) => (
+            <div key={group.label} className="space-y-1">
+              {!collapsed && (
+                <div className="px-3 text-[10px] font-mono font-medium text-[#6B6B6E] uppercase tracking-wider mb-1.5">
+                  {group.label}
+                </div>
+              )}
+              {group.items.map((item) => {
+                const Icon = item.icon;
+                const isActive =
+                  item.to === '/'
+                    ? location.pathname === '/' || location.pathname === '/overview'
+                    : location.pathname.startsWith(item.to);
+
+                return (
+                  <NavLink
+                    key={item.to}
+                    to={item.to}
+                    onClick={onCloseMobile}
+                    className={`sidebar-link flex items-center gap-3 px-3 py-2 text-xs transition-colors rounded-[4px] relative ${
+                      isActive ? 'active' : ''
+                    } ${collapsed ? 'justify-center px-0' : ''}`}
+                    title={collapsed ? item.name : undefined}
+                  >
+                    <Icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-[#FFB020]' : 'text-[#6B6B6E]'}`} />
+                    {!collapsed && (
+                      <span className="truncate font-sans">{item.name}</span>
+                    )}
+                  </NavLink>
+                );
+              })}
             </div>
           ))}
-        </div>
-      </div>
+        </nav>
 
-      {/* User Profile */}
-      <div className="px-4 py-3 border-t border-white/[0.08] flex items-center gap-3">
-        <div className="h-8 w-8 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-full flex items-center justify-center">
-          <span className="text-white text-xs font-bold">NY</span>
+        {/* Bottom Operational Status Card */}
+        <div className="p-3 border-t border-white/[0.08] bg-[#0A0A0B] shrink-0">
+          {!collapsed ? (
+            <div className="p-2.5 bg-[#141416] border border-white/[0.06] rounded-[6px] space-y-2">
+              <div className="flex items-center justify-between text-[11px] font-mono">
+                <span className="text-[#6B6B6E]">OPERATIONAL STATE</span>
+                <span className="flex items-center gap-1 text-[#22C55E]">
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#22C55E] animate-pulse" />
+                  NOMINAL
+                </span>
+              </div>
+              <div className="flex items-center justify-between text-[10px] font-mono text-[#A8A8AB]">
+                <span>Spend MTD</span>
+                <span className="text-[#F2F1EE] font-medium">$4,235 / $10k (42%)</span>
+              </div>
+              <div className="w-full bg-white/[0.06] h-1 rounded-full overflow-hidden">
+                <div className="bg-[#FFB020] h-full" style={{ width: '42%' }} />
+              </div>
+            </div>
+          ) : (
+            <div className="flex justify-center" title="Nominal State · $4.2k Spend">
+              <span className="w-2 h-2 rounded-full bg-[#22C55E] animate-pulse" />
+            </div>
+          )}
         </div>
-        <div>
-          <p className="text-sm text-white font-medium">Navi Yanka</p>
-          <p className="text-[10px] text-gray-500">Administrator</p>
-        </div>
-      </div>
-    </aside>
+      </aside>
+    </>
   );
 }

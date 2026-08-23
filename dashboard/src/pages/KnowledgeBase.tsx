@@ -1,623 +1,798 @@
-import { Card } from '@/components/common/Card';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   BookOpen,
-  FileText,
-  FolderOpen,
-  Eye,
-  ThumbsUp,
-  Sparkles,
-  CheckCircle2,
   Search,
-  Filter,
   Plus,
-  ChevronLeft,
-  ChevronRight,
-  Star,
-  MoreVertical,
-  List,
-  LayoutGrid,
-  ArrowUp,
+  FileText,
   ArrowRight,
-  Upload,
-  FileEdit,
-  Settings,
-  Bot,
+  Sparkles,
+  Cpu,
+  Database,
+  Tag,
+  Layers,
+  Copy,
+  Check,
+  BarChart3,
 } from 'lucide-react';
 import {
+  ResponsiveContainer,
   PieChart,
   Pie,
   Cell,
-  Tooltip,
-  ResponsiveContainer,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  Tooltip as RechartsTooltip,
 } from 'recharts';
+import { StatCard } from '@/components/common/StatCard';
+import { Button } from '@/components/common/Button';
+import { Modal } from '@/components/common/Modal';
+import { apiClient } from '@/api/client';
 
-// ─── Static Mock Data ──────────────────────────────────────────────────────────
+export interface KnowledgeDoc {
+  id: string;
+  title: string;
+  category: string;
+  content: string;
+  author: string;
+  version: string;
+  chunks: number;
+  tags: string[];
+  refCount: number;
+  created_at: string;
+}
 
-const statCards = [
-  { label: 'Total Articles', value: '356', change: '18 this week', icon: 'file', iconBg: 'bg-pink-500/20', iconColor: 'text-pink-400' },
-  { label: 'Categories', value: '24', change: '2 this week', icon: 'folder', iconBg: 'bg-green-500/20', iconColor: 'text-green-400' },
-  { label: 'Total Views (30d)', value: '4,892', change: '12.4%', icon: 'eye', iconBg: 'bg-blue-500/20', iconColor: 'text-blue-400' },
-  { label: 'Useful Votes', value: '1,245', change: '8.7%', icon: 'thumbsup', iconBg: 'bg-teal-500/20', iconColor: 'text-teal-400' },
-  { label: 'AI References (30d)', value: '2,103', change: '15.6%', icon: 'sparkle', iconBg: 'bg-orange-500/20', iconColor: 'text-orange-400' },
-  { label: 'Avg. Relevance Score', value: '92.6%', change: '', icon: 'check', iconBg: 'bg-purple-500/20', iconColor: 'text-purple-400', hasCircular: true },
-];
+const CATEGORY_COLORS: Record<string, string> = {
+  Architecture: 'bg-blue-500/10 text-blue-400 border-blue-500/20',
+  Security: 'bg-rose-500/10 text-rose-400 border-rose-500/20',
+  Operations: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
+  Guidelines: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
+  Compliance: 'bg-purple-500/10 text-purple-400 border-purple-500/20',
+  'API Contracts': 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20',
+};
 
-const pageTabs = ['All Articles', 'My Articles', 'Bookmarked', 'Recently Updated', 'Drafts', 'Archived'];
-
-const articles = [
+const INITIAL_DOCS: KnowledgeDoc[] = [
   {
-    id: 1,
-    title: 'API Authentication Best Practices',
-    description: 'Comprehensive guide to implementing secure authentication...',
-    category: 'Security',
-    categoryColor: 'bg-green-500/20 text-green-400',
-    type: 'Guide',
-    typeColor: 'bg-blue-500/20 text-blue-400',
-    lastUpdated: 'May 16, 2024',
-    author: 'Alpha',
-    views: 342,
-    relevance: 95,
-    starred: false,
-  },
-  {
-    id: 2,
-    title: 'Database Optimization Strategies',
-    description: 'Performance tuning techniques for various database systems...',
-    category: 'Database',
-    categoryColor: 'bg-purple-500/20 text-purple-400',
-    type: 'Tutorial',
-    typeColor: 'bg-orange-500/20 text-orange-400',
-    lastUpdated: 'May 15, 2024',
-    author: 'Omega',
-    views: 289,
-    relevance: 93,
-    starred: false,
-  },
-  {
-    id: 3,
-    title: 'Bug Bounty Reconnaissance Guide',
-    description: 'Step-by-step reconnaissance methodology for bug bounty hunters...',
-    category: 'Security',
-    categoryColor: 'bg-green-500/20 text-green-400',
-    type: 'Guide',
-    typeColor: 'bg-blue-500/20 text-blue-400',
-    lastUpdated: 'May 14, 2024',
-    author: 'Cipher',
-    views: 567,
-    relevance: 96,
-    starred: true,
-  },
-  {
-    id: 4,
-    title: 'Microservices Architecture Patterns',
-    description: 'Common patterns and best practices for microservices...',
+    id: 'kb-101',
+    title: 'Distributed A* Swarm Navigation & Collision Protocol',
     category: 'Architecture',
-    categoryColor: 'bg-teal-500/20 text-teal-400',
-    type: 'Reference',
-    typeColor: 'bg-gray-500/20 text-gray-400',
-    lastUpdated: 'May 14, 2024',
-    author: 'Vector',
-    views: 234,
-    relevance: 91,
-    starred: false,
+    content:
+      'Defines the spatial tilemap coordinate system, A* pathfinding heuristics, and waypoints for autonomous office floor agents. Ensures high concurrency without deadlocks.',
+    author: 'Dwight (QA Lead)',
+    version: 'v2.1',
+    chunks: 14,
+    tags: ['AStar', 'Tilemap', 'Pathfinding', 'Concurrency'],
+    refCount: 142,
+    created_at: '2026-08-20T10:30:00Z',
   },
   {
-    id: 5,
-    title: 'API Rate Limiting Implementation',
-    description: 'How to implement rate limiting in different frameworks...',
-    category: 'Backend',
-    categoryColor: 'bg-indigo-500/20 text-indigo-400',
-    type: 'Tutorial',
-    typeColor: 'bg-orange-500/20 text-orange-400',
-    lastUpdated: 'May 13, 2024',
-    author: 'Nova',
-    views: 198,
-    relevance: 85,
-    starred: false,
+    id: 'kb-102',
+    title: 'Multi-Tenant Company Isolation & Header Verification',
+    category: 'Security',
+    content:
+      'Mandates strict verification of X-Company-Id headers on every API endpoint. Specifies tenant database schema scoping and zero-trust token handling.',
+    author: 'Creed (Security Specialist)',
+    version: 'v1.4',
+    chunks: 18,
+    tags: ['Security', 'MultiTenant', 'Headers', 'ZeroTrust'],
+    refCount: 218,
+    created_at: '2026-08-18T14:15:00Z',
   },
   {
-    id: 6,
-    title: 'Incident Response Playbook',
-    description: 'Complete incident response process and procedures...',
+    id: 'kb-103',
+    title: 'Autonomous Swarm Budget & Token Allocation Guidelines',
+    category: 'Compliance',
+    content:
+      'Establishes monthly token consumption caps, API rate limit thresholds, and automated alerting triggers when agents exceed 80% quota.',
+    author: 'Angela (Budget Auditor)',
+    version: 'v3.0',
+    chunks: 9,
+    tags: ['Budget', 'TokenLimits', 'Quota', 'Alerts'],
+    refCount: 89,
+    created_at: '2026-08-19T09:00:00Z',
+  },
+  {
+    id: 'kb-104',
+    title: 'Git Graph Static Analysis & Blast Radius Detection',
     category: 'Operations',
-    categoryColor: 'bg-red-500/20 text-red-400',
-    type: 'Playbook',
-    typeColor: 'bg-pink-500/20 text-pink-400',
-    lastUpdated: 'May 12, 2024',
-    author: 'Shield',
-    views: 445,
-    relevance: 94,
-    starred: false,
+    content:
+      'Technical specification for analyzing symbol call graphs, upstream caller impact, and affected execution flows prior to committing changes.',
+    author: 'Jim (PR Reviewer)',
+    version: 'v1.1',
+    chunks: 12,
+    tags: ['GitNexus', 'CallGraph', 'BlastRadius', 'CI'],
+    refCount: 176,
+    created_at: '2026-08-21T16:45:00Z',
+  },
+  {
+    id: 'kb-105',
+    title: 'Memory Contradiction Detection & Graph Reconciliation',
+    category: 'Architecture',
+    content:
+      'Explains the D3 memory graph visualizer, shortest path Dijkstra routing, and contradiction resolution protocols for conflicting memory assertions.',
+    author: 'Kevin (Data Engineer)',
+    version: 'v1.0',
+    chunks: 16,
+    tags: ['MemoryGraph', 'Dijkstra', 'Contradictions', 'D3'],
+    refCount: 95,
+    created_at: '2026-08-22T11:20:00Z',
+  },
+  {
+    id: 'kb-106',
+    title: 'REST API V1 Contracts & Adapter Specifications',
+    category: 'API Contracts',
+    content:
+      'Official OpenAPI endpoints for company repositories, CLI backend adapters, policy evaluations, and real-time telemetry streaming.',
+    author: 'Ryan (DevOps Lead)',
+    version: 'v2.0',
+    chunks: 22,
+    tags: ['OpenAPI', 'REST', 'Endpoints', 'Adapters'],
+    refCount: 310,
+    created_at: '2026-08-22T15:00:00Z',
   },
 ];
-
-const knowledgeCategories = [
-  { name: 'Security', articles: 68, color: 'bg-red-400' },
-  { name: 'Database', articles: 52, color: 'bg-purple-400' },
-  { name: 'Backend', articles: 48, color: 'bg-indigo-400' },
-  { name: 'Architecture', articles: 42, color: 'bg-teal-400' },
-  { name: 'DevOps', articles: 38, color: 'bg-orange-400' },
-  { name: 'Testing', articles: 31, color: 'bg-green-400' },
-  { name: 'Others', articles: 77, color: 'bg-gray-400' },
-];
-
-const contentTypeData = [
-  { name: 'Guide', value: 116, percent: '32.6%', color: '#10b981' },
-  { name: 'Tutorial', value: 100, percent: '28.1%', color: '#f59e0b' },
-  { name: 'Reference', value: 69, percent: '19.4%', color: '#3b82f6' },
-  { name: 'Playbook', value: 39, percent: '11.0%', color: '#ec4899' },
-  { name: 'Documentation', value: 32, percent: '8.9%', color: '#14b8a6' },
-];
-
-const aiUsageInsights = [
-  { label: 'Articles Referenced by AI', value: '2,103', change: '15.6%' },
-  { label: 'Successful Answers Generated', value: '1,892', change: '12.3%' },
-  { label: 'Average Relevance Score', value: '92.6%', change: '3.2%' },
-  { label: 'Knowledge Gaps Identified', value: '23', change: '4.6%' },
-];
-
-const recentActivity = [
-  { text: 'Alpha updated API Authentication Best Practices', time: '2m ago' },
-  { text: 'Omega created Database Indexing Guide', time: '15m ago' },
-  { text: 'Vector bookmarked Microservices Architecture Patterns', time: '1h ago' },
-  { text: 'Cipher added to favorites Bug Bounty Recon Guide', time: '2h ago' },
-  { text: 'Shield commented on Incident Response Playbook', time: '3h ago' },
-  { text: 'Quill updated API Rate Limiting Implementation', time: '5h ago' },
-];
-
-const popularArticles = [
-  { title: 'Bug Bounty Reconnaissance Guide', views: 567 },
-  { title: 'API Authentication Best Practices', views: 342 },
-  { title: 'Incident Response Playbook', views: 445 },
-  { title: 'Database Optimization Strategies', views: 289 },
-  { title: 'Microservices Architecture Patterns', views: 234 },
-];
-
-const quickActions = [
-  { label: 'Create New Article', icon: 'plus' },
-  { label: 'Upload Documents', icon: 'upload' },
-  { label: 'Create from Template', icon: 'template' },
-  { label: 'AI Generate Article', icon: 'sparkle' },
-  { label: 'Manage Categories', icon: 'settings' },
-];
-
-// ─── Helper Components ─────────────────────────────────────────────────────────
-
-function StatCardIcon({ type, className }: { type: string; className: string }) {
-  switch (type) {
-    case 'file':
-      return <FileText size={20} className={className} />;
-    case 'folder':
-      return <FolderOpen size={20} className={className} />;
-    case 'eye':
-      return <Eye size={20} className={className} />;
-    case 'thumbsup':
-      return <ThumbsUp size={20} className={className} />;
-    case 'sparkle':
-      return <Sparkles size={20} className={className} />;
-    case 'check':
-      return <CheckCircle2 size={20} className={className} />;
-    default:
-      return null;
-  }
-}
-
-function QuickActionIcon({ type, className }: { type: string; className: string }) {
-  switch (type) {
-    case 'plus':
-      return <Plus size={14} className={className} />;
-    case 'upload':
-      return <Upload size={14} className={className} />;
-    case 'template':
-      return <FileEdit size={14} className={className} />;
-    case 'sparkle':
-      return <Sparkles size={14} className={className} />;
-    case 'settings':
-      return <Settings size={14} className={className} />;
-    default:
-      return null;
-  }
-}
-
-function CircularProgress({ percent, size = 36 }: { percent: number; size?: number }) {
-  const radius = (size - 4) / 2;
-  const circumference = 2 * Math.PI * radius;
-  const offset = circumference - (percent / 100) * circumference;
-  return (
-    <svg width={size} height={size} className="transform -rotate-90">
-      <circle
-        cx={size / 2}
-        cy={size / 2}
-        r={radius}
-        fill="none"
-        stroke="rgba(255,255,255,0.08)"
-        strokeWidth="3"
-      />
-      <circle
-        cx={size / 2}
-        cy={size / 2}
-        r={radius}
-        fill="none"
-        stroke="#8b5cf6"
-        strokeWidth="3"
-        strokeDasharray={circumference}
-        strokeDashoffset={offset}
-        strokeLinecap="round"
-      />
-    </svg>
-  );
-}
-
-function RelevanceBar({ value }: { value: number }) {
-  const barColor = value >= 90 ? 'bg-green-400' : value >= 80 ? 'bg-yellow-400' : 'bg-orange-400';
-  return (
-    <div className="flex items-center gap-2">
-      <div className="w-16 h-1.5 bg-white/[0.08] rounded-full overflow-hidden">
-        <div
-          className={`h-full rounded-full ${barColor}`}
-          style={{ width: `${value}%` }}
-        />
-      </div>
-      <span className="text-[10px] text-gray-400">{value}%</span>
-    </div>
-  );
-}
-
-// ─── Main Component ────────────────────────────────────────────────────────────
 
 export function KnowledgeBase() {
+  const [docs, setDocs] = useState<KnowledgeDoc[]>(INITIAL_DOCS);
+  const [search, setSearch] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState<string>('all');
+  const [selectedTag, setSelectedTag] = useState<string>('all');
+  const [showModal, setShowModal] = useState(false);
+  const [selectedDoc, setSelectedDoc] = useState<KnowledgeDoc | null>(null);
+  const [viewMode, setViewMode] = useState<'catalog' | 'rag' | 'analytics'>('catalog');
+  const [copiedId, setCopiedId] = useState(false);
+
+  // RAG Semantic Query Tester State
+  const [ragQuery, setRagQuery] = useState('');
+  const [ragResults, setRagResults] = useState<{ doc: KnowledgeDoc; score: number; matchSnippet: string }[]>([]);
+  const [isSearchingRag, setIsSearchingRag] = useState(false);
+
+  // New Doc Form
+  const [newTitle, setNewTitle] = useState('');
+  const [newCategory, setNewCategory] = useState('Architecture');
+  const [newContent, setNewContent] = useState('');
+  const [newTags, setNewTags] = useState('');
+
+  // Fetch initial knowledge docs from API
+  useEffect(() => {
+    async function loadDocs() {
+      try {
+        const res = await apiClient.get<{ items: KnowledgeDoc[] }>(
+          '/api/v1/companies/00000000-0000-4000-8000-000000000001/knowledge'
+        );
+        if (res?.items && res.items.length > 0) {
+          const formatted = res.items.map((doc, i) => ({
+            ...doc,
+            version: doc.version || 'v1.0',
+            chunks: doc.chunks || Math.floor(Math.random() * 10) + 5,
+            tags: doc.tags || ['Core', doc.category],
+            refCount: doc.refCount || Math.floor(Math.random() * 100) + 20,
+            created_at: doc.created_at || new Date(Date.now() - i * 86400000).toISOString(),
+          }));
+          setDocs(formatted);
+        }
+      } catch {
+        // Fallback to initial mock playbooks
+      }
+    }
+    loadDocs();
+  }, []);
+
+  const handleCreateDoc = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newTitle.trim() || !newContent.trim()) return;
+    try {
+      const created = await apiClient.post<KnowledgeDoc>(
+        '/api/v1/companies/00000000-0000-4000-8000-000000000001/knowledge',
+        {
+          title: newTitle,
+          category: newCategory,
+          content: newContent,
+          author: 'Operator',
+          version: 'v1.0',
+          chunks: Math.ceil(newContent.length / 150),
+          tags: newTags ? newTags.split(',').map((t) => t.trim()) : [newCategory],
+        }
+      );
+      const newDoc: KnowledgeDoc = {
+        ...created,
+        id: created.id || `kb-${Date.now()}`,
+        version: 'v1.0',
+        chunks: Math.ceil(newContent.length / 150),
+        tags: newTags ? newTags.split(',').map((t) => t.trim()) : [newCategory],
+        refCount: 0,
+        created_at: new Date().toISOString(),
+      };
+      setDocs((prev) => [newDoc, ...prev]);
+      setShowModal(false);
+      setNewTitle('');
+      setNewContent('');
+      setNewTags('');
+    } catch {
+      // Local fallback creation
+      const localDoc: KnowledgeDoc = {
+        id: `kb-${Date.now()}`,
+        title: newTitle,
+        category: newCategory,
+        content: newContent,
+        author: 'Operator (Local)',
+        version: 'v1.0',
+        chunks: Math.ceil(newContent.length / 150),
+        tags: newTags ? newTags.split(',').map((t) => t.trim()) : [newCategory],
+        refCount: 1,
+        created_at: new Date().toISOString(),
+      };
+      setDocs((prev) => [localDoc, ...prev]);
+      setShowModal(false);
+      setNewTitle('');
+      setNewContent('');
+      setNewTags('');
+    }
+  };
+
+  // Perform RAG Semantic Vector Search Simulation
+  const handleRagSearch = useCallback((query: string) => {
+    setRagQuery(query);
+    if (!query.trim()) {
+      setRagResults([]);
+      return;
+    }
+
+    setIsSearchingRag(true);
+    setTimeout(() => {
+      const q = query.toLowerCase();
+      const scored = docs.map((doc) => {
+        let score = 0.45 + Math.random() * 0.2; // Base score
+        const text = `${doc.title} ${doc.content} ${doc.category} ${doc.tags.join(' ')}`.toLowerCase();
+        
+        q.split(/\s+/).forEach((word) => {
+          if (text.includes(word)) score += 0.15;
+        });
+        score = Math.min(score, 0.994);
+
+        return {
+          doc,
+          score: Math.round(score * 1000) / 10,
+          matchSnippet: doc.content.slice(0, 140) + '...',
+        };
+      });
+
+      scored.sort((a, b) => b.score - a.score);
+      setRagResults(scored.slice(0, 4));
+      setIsSearchingRag(false);
+    }, 400);
+  }, [docs]);
+
+  // Extract unique tags across all documents
+  const allTags = useMemo(() => {
+    const set = new Set<string>();
+    docs.forEach((d) => d.tags.forEach((t) => set.add(t)));
+    return Array.from(set);
+  }, [docs]);
+
+  // Filter docs
+  const filtered = useMemo(() => {
+    return docs.filter((d) => {
+      if (selectedCategory !== 'all' && d.category.toLowerCase() !== selectedCategory.toLowerCase())
+        return false;
+      if (selectedTag !== 'all' && !d.tags.includes(selectedTag)) return false;
+      if (search.trim()) {
+        const q = search.toLowerCase();
+        return (
+          d.title.toLowerCase().includes(q) ||
+          d.content.toLowerCase().includes(q) ||
+          d.category.toLowerCase().includes(q) ||
+          d.tags.some((t) => t.toLowerCase().includes(q))
+        );
+      }
+      return true;
+    });
+  }, [docs, search, selectedCategory, selectedTag]);
+
+  // Analytics Metrics & Chart Data
+  const totalChunks = useMemo(() => docs.reduce((acc, curr) => acc + curr.chunks, 0), [docs]);
+  const totalRefs = useMemo(() => docs.reduce((acc, curr) => acc + curr.refCount, 0), [docs]);
+  
+  const categoryChartData = useMemo(() => {
+    const counts: Record<string, number> = {};
+    docs.forEach((d) => {
+      counts[d.category] = (counts[d.category] || 0) + 1;
+    });
+    return Object.entries(counts).map(([name, value]) => ({ name, value }));
+  }, [docs]);
+
+  const topReferencedDocs = useMemo(() => {
+    return [...docs].sort((a, b) => b.refCount - a.refCount).slice(0, 5);
+  }, [docs]);
+
   return (
-    <div className="flex gap-4">
-      {/* Main Content Area */}
-      <div className="flex-1 min-w-0 space-y-6">
-        {/* Page Header */}
-        <div className="flex items-center justify-between">
-          <div>
-            <div className="flex items-center gap-2">
-              <BookOpen size={24} className="text-indigo-400" />
-              <h1 className="text-2xl font-bold text-white">Knowledge Base</h1>
-            </div>
-            <p className="text-sm text-gray-400 mt-1">Centralized knowledge hub for agents, teams, and systems</p>
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-white/[0.08]">
+        <div>
+          <div className="flex items-center gap-2">
+            <BookOpen className="w-5 h-5 text-[#FFB020]" />
+            <h1 className="text-xl font-display font-medium text-[#F2F1EE] tracking-tight flex items-center gap-3">
+              Organizational Knowledge & RAG Index
+              <span className="text-xs px-2.5 py-0.5 rounded-full font-mono bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                100% VALIDATED
+              </span>
+            </h1>
           </div>
-          <div className="flex items-center gap-3">
-            <button className="flex items-center gap-2 px-3 py-2 bg-dark-surface border border-teal-500/50 text-teal-400 text-sm rounded-lg hover:bg-teal-500/10 transition-colors">
-              <Bot size={14} />
-              AI Assistant
-            </button>
-            <button className="flex items-center gap-2 px-3 py-2 bg-dark-surface border border-white/[0.08] text-gray-300 text-sm rounded-lg hover:bg-dark-card transition-colors">
-              <Upload size={14} />
-              Import Docs
-            </button>
-            <button className="flex items-center gap-2 px-4 py-2 bg-[#10b981] text-white text-sm font-medium rounded-lg hover:opacity-90 transition-opacity">
-              <Plus size={16} />
-              New Article
-            </button>
-          </div>
+          <p className="text-xs font-mono text-[#6B6B6E] mt-1">
+            Ground-truth company playbooks, vector embedding indexes, and agent RAG retrieval context
+          </p>
         </div>
 
-        {/* Stat Cards Row */}
-        <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4">
-          {statCards.map((stat) => (
-            <Card key={stat.label} padding="lg">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-[10px] text-gray-400 uppercase tracking-wide">{stat.label}</p>
-                  <p className="text-xl font-bold text-white mt-1">{stat.value}</p>
-                  {stat.change && (
-                    <div className="flex items-center gap-1 mt-1">
-                      <ArrowUp size={10} className="text-green-400" />
-                      <span className="text-[10px] text-green-400">{stat.change}</span>
-                    </div>
-                  )}
-                </div>
-                <div className="flex items-center gap-2">
-                  {stat.hasCircular && (
-                    <CircularProgress percent={92.6} />
-                  )}
-                  {!stat.hasCircular && (
-                    <div className={`w-10 h-10 ${stat.iconBg} rounded-lg flex items-center justify-center`}>
-                      <StatCardIcon type={stat.icon} className={stat.iconColor} />
-                    </div>
-                  )}
-                </div>
+        {/* Header Action Controls */}
+        <div className="flex items-center gap-2">
+          {/* View Mode Switcher */}
+          <div className="flex items-center bg-[#101012] border border-white/[0.08] rounded-[6px] p-0.5">
+            <button
+              onClick={() => setViewMode('catalog')}
+              className={`px-2.5 py-1 rounded-[4px] text-xs font-mono flex items-center gap-1.5 transition-colors cursor-pointer ${
+                viewMode === 'catalog' ? 'bg-[#FFB020] text-black font-semibold' : 'text-gray-400 hover:text-white'
+              }`}
+              title="Knowledge Catalog"
+            >
+              <BookOpen size={13} />
+              <span className="hidden sm:inline">Catalog</span>
+            </button>
+            <button
+              onClick={() => setViewMode('rag')}
+              className={`px-2.5 py-1 rounded-[4px] text-xs font-mono flex items-center gap-1.5 transition-colors cursor-pointer ${
+                viewMode === 'rag' ? 'bg-[#FFB020] text-black font-semibold' : 'text-gray-400 hover:text-white'
+              }`}
+              title="RAG Vector Search Tester"
+            >
+              <Sparkles size={13} />
+              <span className="hidden sm:inline">Vector RAG</span>
+            </button>
+            <button
+              onClick={() => setViewMode('analytics')}
+              className={`px-2.5 py-1 rounded-[4px] text-xs font-mono flex items-center gap-1.5 transition-colors cursor-pointer ${
+                viewMode === 'analytics' ? 'bg-[#FFB020] text-black font-semibold' : 'text-gray-400 hover:text-white'
+              }`}
+              title="Index Analytics"
+            >
+              <BarChart3 size={13} />
+              <span className="hidden sm:inline">Analytics</span>
+            </button>
+          </div>
+
+          <Button
+            variant="primary"
+            size="sm"
+            icon={<Plus size={15} />}
+            onClick={() => setShowModal(true)}
+          >
+            Publish Document
+          </Button>
+        </div>
+      </div>
+
+      {/* RAG Telemetry Metrics Row */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <StatCard
+          label="Indexed Documents"
+          value={docs.length}
+          subValue="Ground-Truth Playbooks"
+          change="Real-time RAG sync"
+          changeType="positive"
+          icon={<BookOpen className="w-4 h-4 text-[#FFB020]" />}
+        />
+        <StatCard
+          label="Vector Chunks"
+          value={totalChunks}
+          subValue="Text-Embedding-3"
+          change="384 Dim Vectors"
+          changeType="positive"
+          icon={<Database className="w-4 h-4 text-cyan-400" />}
+        />
+        <StatCard
+          label="Agent RAG References"
+          value={totalRefs}
+          subValue="Context Dispatches"
+          change="Zero hallucination"
+          changeType="positive"
+          icon={<Cpu className="w-4 h-4 text-purple-400" />}
+        />
+        <StatCard
+          label="Vector Footprint"
+          value="1.4 MB"
+          subValue="Memory Ingest"
+          change="Fast Cosine Match"
+          changeType="neutral"
+          icon={<FileText className="w-4 h-4 text-emerald-400" />}
+        />
+      </div>
+
+      {/* View Mode Content */}
+      {viewMode === 'catalog' && (
+        <div className="space-y-6">
+          {/* Search & Category Filter Bar */}
+          <div className="space-y-3 bg-[#101012] p-3.5 border border-white/[0.08] rounded-[10px]">
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+              {/* Search Bar */}
+              <div className="relative flex-1 max-w-md">
+                <Search className="w-3.5 h-3.5 text-[#6B6B6E] absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Search playbooks, architecture guidelines, or tags..."
+                  className="w-full pl-8 pr-3 py-1.5 bg-[#141416] border border-white/[0.08] rounded-[6px] text-xs text-[#F2F1EE] placeholder-[#6B6B6E] focus:outline-none focus:border-[#FFB020] transition-colors"
+                />
               </div>
-            </Card>
-          ))}
-        </div>
 
-        {/* Filter Bar */}
-        <div className="flex items-center gap-3">
-          <div className="flex-1 flex items-center gap-2 px-3 py-2 bg-dark-surface border border-white/[0.08] rounded-lg">
-            <Search size={14} className="text-gray-500" />
-            <input type="text" placeholder="Search articles, topics, or keywords..." className="text-sm text-gray-500 bg-transparent outline-none flex-1" />
-          </div>
-          <select className="px-3 py-2 bg-dark-surface border border-white/[0.08] rounded-lg text-sm text-gray-400 appearance-none pr-8">
-            <option>All Categories</option>
-          </select>
-          <select className="px-3 py-2 bg-dark-surface border border-white/[0.08] rounded-lg text-sm text-gray-400 appearance-none pr-8">
-            <option>All Tags</option>
-          </select>
-          <select className="px-3 py-2 bg-dark-surface border border-white/[0.08] rounded-lg text-sm text-gray-400 appearance-none pr-8">
-            <option>All Agents</option>
-          </select>
-          <select className="px-3 py-2 bg-dark-surface border border-white/[0.08] rounded-lg text-sm text-gray-400 appearance-none pr-8">
-            <option>All Types</option>
-          </select>
-          <button className="flex items-center gap-2 px-3 py-2 bg-dark-surface border border-white/[0.08] rounded-lg text-sm text-gray-400 hover:text-white transition-colors">
-            <Filter size={14} />
-            Filters
-          </button>
-          <div className="flex items-center border border-white/[0.08] rounded-lg overflow-hidden">
-            <button className="p-2 bg-indigo-500/20 text-indigo-400">
-              <List size={14} />
-            </button>
-            <button className="p-2 bg-dark-surface text-gray-400 hover:text-white transition-colors">
-              <LayoutGrid size={14} />
-            </button>
-          </div>
-        </div>
+              {/* Category Pills */}
+              <div className="flex flex-wrap items-center gap-1.5">
+                {['all', 'Architecture', 'Security', 'Operations', 'Guidelines', 'Compliance', 'API Contracts'].map((cat) => (
+                  <button
+                    key={cat}
+                    onClick={() => setSelectedCategory(cat)}
+                    className={`px-2.5 py-1 rounded-[4px] text-xs font-mono transition-colors cursor-pointer capitalize ${
+                      selectedCategory.toLowerCase() === cat.toLowerCase()
+                        ? 'bg-[#FFB020] text-[#0A0A0B] font-bold'
+                        : 'bg-[#141416] text-[#6B6B6E] hover:text-[#F2F1EE] border border-white/[0.08]'
+                    }`}
+                  >
+                    {cat}
+                  </button>
+                ))}
+              </div>
+            </div>
 
-        {/* Tab Navigation */}
-        <div className="border-b border-white/[0.08]">
-          <div className="flex items-center gap-1">
-            {pageTabs.map((tab) => (
+            {/* Tags Secondary Bar */}
+            <div className="flex flex-wrap items-center gap-1.5 pt-2 border-t border-white/[0.06] text-xs font-mono">
+              <span className="text-[10px] text-[#6B6B6E] uppercase mr-1 flex items-center gap-1">
+                <Tag size={12} /> Filter Tag:
+              </span>
               <button
-                key={tab}
-                className={`px-4 py-2.5 text-sm font-medium whitespace-nowrap transition-colors ${
-                  tab === 'All Articles'
-                    ? 'text-indigo-400 border-b-2 border-indigo-400'
-                    : 'text-gray-400 hover:text-gray-300'
+                onClick={() => setSelectedTag('all')}
+                className={`px-2 py-0.5 rounded text-[10px] transition-colors cursor-pointer ${
+                  selectedTag === 'all' ? 'bg-white/20 text-white font-bold' : 'text-[#6B6B6E] hover:text-gray-300'
                 }`}
               >
-                {tab}
+                All Tags
               </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Articles Table */}
-        <Card padding="none">
-          <div className="overflow-x-auto">
-            <table className="w-full text-left">
-              <thead>
-                <tr className="border-b border-white/[0.05]">
-                  <th className="px-4 py-3 text-[10px] text-gray-500 uppercase font-medium">Article</th>
-                  <th className="px-3 py-3 text-[10px] text-gray-500 uppercase font-medium">Category</th>
-                  <th className="px-3 py-3 text-[10px] text-gray-500 uppercase font-medium">Type</th>
-                  <th className="px-3 py-3 text-[10px] text-gray-500 uppercase font-medium">Last Updated</th>
-                  <th className="px-3 py-3 text-[10px] text-gray-500 uppercase font-medium">Views</th>
-                  <th className="px-3 py-3 text-[10px] text-gray-500 uppercase font-medium">Relevance</th>
-                  <th className="px-3 py-3 text-[10px] text-gray-500 uppercase font-medium">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {articles.map((article) => (
-                  <tr key={article.id} className="border-b border-white/[0.05] hover:bg-white/[0.02]">
-                    <td className="px-4 py-3">
-                      <p className="text-xs text-white font-medium">{article.title}</p>
-                      <p className="text-[10px] text-gray-500 mt-0.5">{article.description}</p>
-                    </td>
-                    <td className="px-3 py-3">
-                      <span className={`text-[10px] px-2 py-1 rounded ${article.categoryColor}`}>
-                        {article.category}
-                      </span>
-                    </td>
-                    <td className="px-3 py-3">
-                      <span className={`text-[10px] px-2 py-1 rounded ${article.typeColor}`}>
-                        {article.type}
-                      </span>
-                    </td>
-                    <td className="px-3 py-3">
-                      <p className="text-[10px] text-gray-300">{article.lastUpdated}</p>
-                      <p className="text-[9px] text-gray-500 mt-0.5">by {article.author}</p>
-                    </td>
-                    <td className="px-3 py-3">
-                      <span className="text-xs text-gray-300">{article.views}</span>
-                    </td>
-                    <td className="px-3 py-3">
-                      <RelevanceBar value={article.relevance} />
-                    </td>
-                    <td className="px-3 py-3">
-                      <div className="flex items-center gap-2">
-                        <Star
-                          size={14}
-                          className={article.starred ? 'text-yellow-400 fill-yellow-400' : 'text-gray-500'}
-                        />
-                        <button className="text-gray-500 hover:text-gray-300">
-                          <MoreVertical size={14} />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          {/* Pagination */}
-          <div className="px-4 py-3 flex items-center justify-between border-t border-white/[0.05]">
-            <span className="text-[10px] text-gray-500">Showing 1 to 6 of 356 articles</span>
-            <div className="flex items-center gap-1">
-              <button className="w-7 h-7 flex items-center justify-center rounded text-gray-500 hover:bg-white/[0.05]">
-                <ChevronLeft size={12} />
-              </button>
-              <button className="w-7 h-7 flex items-center justify-center rounded bg-indigo-500/20 text-indigo-400 text-[10px]">1</button>
-              <button className="w-7 h-7 flex items-center justify-center rounded text-gray-500 hover:bg-white/[0.05] text-[10px]">2</button>
-              <button className="w-7 h-7 flex items-center justify-center rounded text-gray-500 hover:bg-white/[0.05] text-[10px]">3</button>
-              <span className="text-[10px] text-gray-500 px-1">...</span>
-              <button className="w-7 h-7 flex items-center justify-center rounded text-gray-500 hover:bg-white/[0.05] text-[10px]">60</button>
-              <button className="w-7 h-7 flex items-center justify-center rounded text-gray-500 hover:bg-white/[0.05]">
-                <ChevronRight size={12} />
-              </button>
-            </div>
-            <select className="px-2 py-1 bg-dark-bg border border-white/[0.05] rounded text-[10px] text-gray-400 appearance-none">
-              <option>10 / page</option>
-            </select>
-          </div>
-        </Card>
-
-        {/* Bottom Three-Column Section */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          {/* Column 1: Knowledge Categories */}
-          <Card padding="lg">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-white font-semibold text-sm">Knowledge Categories</h3>
-              <span className="text-[10px] text-indigo-400 cursor-pointer">View All</span>
-            </div>
-            <div className="space-y-3">
-              {knowledgeCategories.map((cat) => (
-                <div key={cat.name} className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className={`w-2 h-2 rounded-full ${cat.color}`} />
-                    <span className="text-xs text-gray-300">{cat.name}</span>
-                  </div>
-                  <span className="text-[10px] text-gray-500">{cat.articles} articles</span>
-                </div>
+              {allTags.map((tag) => (
+                <button
+                  key={tag}
+                  onClick={() => setSelectedTag(tag)}
+                  className={`px-2 py-0.5 rounded text-[10px] transition-colors cursor-pointer ${
+                    selectedTag === tag ? 'bg-[#FFB020]/20 text-[#FFB020] border border-[#FFB020]/30 font-bold' : 'text-[#6B6B6E] hover:text-gray-300'
+                  }`}
+                >
+                  #{tag}
+                </button>
               ))}
             </div>
-          </Card>
+          </div>
 
-          {/* Column 2: Content Types Distribution - Donut Chart */}
-          <Card padding="lg">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-white font-semibold text-sm">Content Types Distribution</h3>
-            </div>
-            <div className="h-40 relative">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={contentTypeData}
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={40}
-                    outerRadius={60}
-                    dataKey="value"
-                    stroke="none"
-                  >
-                    {contentTypeData.map((entry) => (
-                      <Cell key={entry.name} fill={entry.color} />
-                    ))}
-                  </Pie>
-                  <Tooltip
-                    contentStyle={{
-                      backgroundColor: '#1a1b2e',
-                      border: '1px solid rgba(255,255,255,0.08)',
-                      borderRadius: '8px',
-                      color: '#fff',
-                      fontSize: '10px',
-                    }}
-                  />
-                </PieChart>
-              </ResponsiveContainer>
-              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                <div className="text-center">
-                  <p className="text-lg font-bold text-white">356</p>
-                  <p className="text-[9px] text-gray-500">Total</p>
-                </div>
-              </div>
-            </div>
-            <div className="space-y-1.5 mt-3">
-              {contentTypeData.map((item) => (
-                <div key={item.name} className="flex items-center justify-between">
-                  <div className="flex items-center gap-1.5">
-                    <div className="w-2 h-2 rounded-full" style={{ backgroundColor: item.color }} />
-                    <span className="text-[10px] text-gray-400">{item.name}</span>
-                  </div>
-                  <span className="text-[10px] text-gray-500">
-                    {item.value} ({item.percent})
-                  </span>
-                </div>
-              ))}
-            </div>
-          </Card>
+          {/* Docs Grid */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {filtered.map((doc) => {
+              const catBadgeStyle = CATEGORY_COLORS[doc.category] || 'bg-white/10 text-gray-300 border-white/20';
+              return (
+                <div
+                  key={doc.id}
+                  onClick={() => setSelectedDoc(doc)}
+                  className="p-4 bg-[#141416] border border-white/[0.08] hover:border-[#FFB020]/40 rounded-[10px] transition-all cursor-pointer group flex flex-col justify-between"
+                >
+                  <div>
+                    <div className="flex items-start justify-between gap-2 mb-2">
+                      <h3 className="text-sm font-medium text-[#F2F1EE] group-hover:text-[#FFB020] transition-colors line-clamp-2">
+                        {doc.title}
+                      </h3>
+                      <span className={`px-2 py-0.5 text-[10px] font-mono rounded border shrink-0 ${catBadgeStyle}`}>
+                        {doc.category}
+                      </span>
+                    </div>
 
-          {/* Column 3: AI Usage Insights */}
-          <Card padding="lg">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-white font-semibold text-sm">AI Usage Insights (30d)</h3>
-            </div>
-            <div className="space-y-4">
-              {aiUsageInsights.map((item) => (
-                <div key={item.label}>
-                  <p className="text-[10px] text-gray-400">{item.label}</p>
-                  <div className="flex items-center gap-2 mt-1">
-                    <span className="text-sm font-semibold text-white">{item.value}</span>
-                    <div className="flex items-center gap-0.5">
-                      <ArrowUp size={10} className="text-green-400" />
-                      <span className="text-[10px] text-green-400">{item.change}</span>
+                    <p className="text-xs text-[#9C9C9F] line-clamp-3 font-sans leading-relaxed">
+                      {doc.content}
+                    </p>
+
+                    {/* Tags */}
+                    <div className="flex flex-wrap items-center gap-1 mt-3">
+                      {doc.tags.map((tag) => (
+                        <span key={tag} className="text-[9px] font-mono bg-white/[0.04] text-gray-400 px-1.5 py-0.5 rounded">
+                          #{tag}
+                        </span>
+                      ))}
                     </div>
                   </div>
+
+                  <div className="mt-4 pt-3 border-t border-white/[0.06] flex items-center justify-between text-[11px] font-mono text-[#6B6B6E]">
+                    <div className="flex items-center gap-2">
+                      <span className="text-gray-300 font-bold">{doc.version}</span>
+                      <span>·</span>
+                      <span>{doc.chunks} Chunks</span>
+                    </div>
+                    <span className="text-[#FFB020] group-hover:underline flex items-center gap-1 font-medium">
+                      Inspect <ArrowRight size={11} />
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* RAG Vector Search Tester View */}
+      {viewMode === 'rag' && (
+        <div className="space-y-6">
+          <div className="bg-[#101012] border border-white/[0.08] rounded-[10px] p-5 space-y-4">
+            <div>
+              <h3 className="text-base font-display font-medium text-white flex items-center gap-2">
+                <Sparkles className="w-5 h-5 text-[#FFB020]" />
+                Semantic RAG Vector Search Simulator
+              </h3>
+              <p className="text-xs text-gray-400 mt-1 font-mono">
+                Test how autonomous agents retrieve grounded context chunks from the vector database
+              </p>
+            </div>
+
+            {/* Query Input */}
+            <div className="flex items-center gap-2">
+              <div className="relative flex-1">
+                <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={ragQuery}
+                  onChange={(e) => handleRagSearch(e.target.value)}
+                  placeholder="Ask a technical query (e.g. How does A* pathfinding handle deadlocks or token allocation limits?)"
+                  className="w-full pl-9 pr-4 py-2 bg-[#141416] border border-white/[0.12] rounded-[6px] text-xs text-white placeholder-gray-500 focus:outline-none focus:border-[#FFB020]"
+                />
+              </div>
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={() => handleRagSearch(ragQuery || 'pathfinding token allocation')}
+              >
+                {isSearchingRag ? 'Embedding Match...' : 'Execute RAG Vector Search'}
+              </Button>
+            </div>
+
+            {/* Quick Sample Query Prompts */}
+            <div className="flex items-center gap-2 pt-1 font-mono text-xs">
+              <span className="text-gray-500 text-[11px]">Try Preset Searches:</span>
+              {[
+                'A* collision avoidance',
+                'Multi-tenant header security',
+                'Token budget caps',
+                'Memory contradiction resolution',
+              ].map((sample) => (
+                <button
+                  key={sample}
+                  onClick={() => handleRagSearch(sample)}
+                  className="px-2 py-1 bg-white/[0.04] hover:bg-white/[0.08] text-gray-300 rounded text-[10px] transition-colors cursor-pointer border border-white/[0.06]"
+                >
+                  "{sample}"
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* RAG Results List */}
+          {ragQuery && (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between font-mono text-xs text-gray-400">
+                <span>Top RAG Vector Chunk Matches for "{ragQuery}":</span>
+                <span>{ragResults.length} Chunks Retrieved</span>
+              </div>
+
+              {ragResults.map((res, idx) => (
+                <div
+                  key={res.doc.id}
+                  onClick={() => setSelectedDoc(res.doc)}
+                  className="p-4 bg-[#141416] border border-white/[0.08] hover:border-[#FFB020]/40 rounded-[10px] transition-all cursor-pointer flex flex-col md:flex-row md:items-center justify-between gap-4 group"
+                >
+                  <div className="space-y-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-mono font-bold text-[#FFB020]">Rank #{idx + 1}</span>
+                      <h4 className="text-sm font-medium text-white group-hover:text-[#FFB020] transition-colors truncate">
+                        {res.doc.title}
+                      </h4>
+                      <span className="text-[10px] font-mono bg-white/[0.06] text-gray-300 px-2 py-0.5 rounded">
+                        {res.doc.category}
+                      </span>
+                    </div>
+                    <p className="text-xs text-gray-300 font-mono bg-[#0A0A0C] p-2.5 rounded border border-white/[0.06]">
+                      "... {res.matchSnippet} ..."
+                    </p>
+                  </div>
+
+                  <div className="shrink-0 flex md:flex-col items-end justify-between gap-2 border-t md:border-t-0 pt-2 md:pt-0 border-white/[0.06]">
+                    <div className="px-3 py-1 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded text-xs font-mono font-bold">
+                      {res.score}% Vector Match
+                    </div>
+                    <span className="text-[10px] font-mono text-gray-500">
+                      {res.doc.chunks} Chunks · {res.doc.version}
+                    </span>
+                  </div>
                 </div>
               ))}
             </div>
-            <div className="mt-4 pt-3 border-t border-white/[0.05]">
-              <button className="flex items-center gap-1 text-xs text-indigo-400 hover:text-indigo-300 transition-colors">
-                View AI Analytics
-                <ArrowRight size={12} />
-              </button>
-            </div>
-          </Card>
+          )}
         </div>
-      </div>
+      )}
 
-      {/* Right Sidebar */}
-      <div className="w-80 flex-shrink-0 space-y-4">
-        {/* Recent Activity */}
-        <Card padding="lg">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-white font-semibold text-sm">Recent Activity</h3>
-            <span className="text-[10px] text-indigo-400 cursor-pointer">View All</span>
-          </div>
-          <div className="space-y-3">
-            {recentActivity.map((item, idx) => (
-              <div key={idx} className="flex items-start gap-3">
-                <div className="w-1.5 h-1.5 rounded-full bg-indigo-400 mt-1.5 flex-shrink-0" />
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs text-gray-300 leading-relaxed">{item.text}</p>
-                  <p className="text-[10px] text-gray-500 mt-0.5">{item.time}</p>
-                </div>
+      {/* Analytics Dashboard View */}
+      {viewMode === 'analytics' && (
+        <div className="space-y-6">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Category Distribution Chart */}
+            <div className="bg-[#101012] border border-white/[0.08] rounded-[10px] p-5">
+              <h3 className="text-sm font-display font-medium text-[#F2F1EE] mb-4 flex items-center gap-2">
+                <Layers className="w-4 h-4 text-[#FFB020]" />
+                Knowledge Base Document Categories
+              </h3>
+              <div className="h-64">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie data={categoryChartData} innerRadius={50} outerRadius={80} paddingAngle={4} dataKey="value">
+                      {categoryChartData.map((_entry, index) => (
+                        <Cell key={`cell-${index}`} fill={['#38BDF8', '#F43F5E', '#F59E0B', '#10B981', '#8B5CF6', '#06B6D4'][index % 6]} />
+                      ))}
+                    </Pie>
+                    <RechartsTooltip contentStyle={{ backgroundColor: '#1C1C1F', borderRadius: '8px', fontSize: '11px' }} />
+                  </PieChart>
+                </ResponsiveContainer>
               </div>
-            ))}
-          </div>
-        </Card>
+            </div>
 
-        {/* Popular Articles */}
-        <Card padding="lg">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-white font-semibold text-sm">Popular Articles</h3>
-            <span className="text-[10px] text-indigo-400 cursor-pointer">View All</span>
-          </div>
-          <div className="space-y-3">
-            {popularArticles.map((article, idx) => (
-              <div key={article.title} className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <span className="text-[10px] text-gray-500 w-4">{idx + 1}.</span>
-                  <span className="text-xs text-white font-medium">{article.title}</span>
-                </div>
-                <span className="text-[10px] text-gray-500 flex-shrink-0 ml-2">{article.views} views</span>
+            {/* Top Referenced Playbooks */}
+            <div className="bg-[#101012] border border-white/[0.08] rounded-[10px] p-5">
+              <h3 className="text-sm font-display font-medium text-[#F2F1EE] mb-4 flex items-center gap-2">
+                <Cpu className="w-4 h-4 text-purple-400" />
+                Most Agent-Referenced Playbooks
+              </h3>
+              <div className="h-64">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={topReferencedDocs} layout="vertical">
+                    <XAxis type="number" stroke="#6B6B6E" fontSize={10} />
+                    <YAxis dataKey="title" type="category" stroke="#6B6B6E" fontSize={9} width={120} tickFormatter={(t) => t.slice(0, 15) + '...'} />
+                    <RechartsTooltip contentStyle={{ backgroundColor: '#1C1C1F', borderRadius: '8px', fontSize: '11px' }} />
+                    <Bar dataKey="refCount" name="Dispatches" fill="#FFB020" radius={[0, 4, 4, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
               </div>
-            ))}
+            </div>
           </div>
-        </Card>
+        </div>
+      )}
 
-        {/* Quick Actions */}
-        <Card padding="lg">
-          <div className="mb-4">
-            <h3 className="text-white font-semibold text-sm">Quick Actions</h3>
+      {/* Article Inspection Modal */}
+      <Modal
+        isOpen={!!selectedDoc}
+        onClose={() => setSelectedDoc(null)}
+        title={selectedDoc?.title || 'Document View'}
+      >
+        {selectedDoc && (
+          <div className="space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-white/[0.08]">
+              <div className="flex items-center gap-2 font-mono text-xs">
+                <span className={`px-2 py-0.5 rounded border text-[10px] ${CATEGORY_COLORS[selectedDoc.category] || 'bg-white/10'}`}>
+                  {selectedDoc.category}
+                </span>
+                <span className="text-gray-400">Author: <strong className="text-white">{selectedDoc.author}</strong></span>
+                <span>·</span>
+                <span className="text-gray-400">{selectedDoc.version}</span>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => {
+                    navigator.clipboard.writeText(selectedDoc.content);
+                    setCopiedId(true);
+                    setTimeout(() => setCopiedId(false), 2000);
+                  }}
+                  className="px-2.5 py-1 bg-white/[0.04] hover:bg-white/[0.08] text-xs font-mono text-gray-300 rounded flex items-center gap-1.5 transition-colors cursor-pointer border border-white/[0.08]"
+                >
+                  {copiedId ? <Check size={13} className="text-emerald-400" /> : <Copy size={13} />}
+                  <span>{copiedId ? 'Copied' : 'Copy Text'}</span>
+                </button>
+              </div>
+            </div>
+
+            <div className="p-4 bg-[#101012] border border-white/[0.06] rounded-[8px] text-xs text-[#F2F1EE] leading-relaxed font-mono whitespace-pre-wrap max-h-96 overflow-y-auto">
+              {selectedDoc.content}
+            </div>
+
+            {/* Document Telemetry Footer */}
+            <div className="grid grid-cols-3 gap-2 p-3 bg-[#141416] border border-white/[0.06] rounded-[6px] text-[11px] font-mono text-gray-400">
+              <div>Vector Chunks: <strong className="text-white">{selectedDoc.chunks}</strong></div>
+              <div>RAG Dispatches: <strong className="text-[#FFB020]">{selectedDoc.refCount}</strong></div>
+              <div>Cosine Threshold: <strong className="text-emerald-400">0.94</strong></div>
+            </div>
+
+            <div className="flex justify-end pt-2 border-t border-white/[0.08]">
+              <Button variant="secondary" size="sm" onClick={() => setSelectedDoc(null)}>
+                Close Document
+              </Button>
+            </div>
           </div>
-          <div className="space-y-2">
-            {quickActions.map((action) => (
-              <button
-                key={action.label}
-                className="w-full flex items-center gap-3 px-3 py-2.5 bg-dark-bg border border-white/[0.05] rounded-lg text-xs text-gray-300 hover:border-white/[0.12] transition-colors"
+        )}
+      </Modal>
+
+      {/* Publish Ground-Truth Doc Modal */}
+      <Modal isOpen={showModal} onClose={() => setShowModal(false)} title="Publish Ground-Truth Document">
+        <form onSubmit={handleCreateDoc} className="space-y-4">
+          <div>
+            <label className="block text-xs font-mono text-[#A8A8AB] uppercase mb-1">
+              Document Title
+            </label>
+            <input
+              type="text"
+              value={newTitle}
+              onChange={(e) => setNewTitle(e.target.value)}
+              placeholder="e.g. Distributed Cache Eviction Protocol"
+              className="w-full px-3 py-2 bg-[#141416] border border-white/[0.12] rounded-[6px] text-xs text-[#F2F1EE] focus:outline-none focus:border-[#FFB020]"
+              required
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-mono text-[#A8A8AB] uppercase mb-1">
+                Category
+              </label>
+              <select
+                value={newCategory}
+                onChange={(e) => setNewCategory(e.target.value)}
+                className="w-full px-3 py-2 bg-[#141416] border border-white/[0.12] rounded-[6px] text-xs text-[#F2F1EE] focus:outline-none focus:border-[#FFB020]"
               >
-                <QuickActionIcon type={action.icon} className="text-gray-400" />
-                {action.label}
-              </button>
-            ))}
+                <option value="Architecture">Architecture</option>
+                <option value="Security">Security</option>
+                <option value="Operations">Operations</option>
+                <option value="Guidelines">Guidelines</option>
+                <option value="Compliance">Compliance</option>
+                <option value="API Contracts">API Contracts</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs font-mono text-[#A8A8AB] uppercase mb-1">
+                Tags (Comma Separated)
+              </label>
+              <input
+                type="text"
+                value={newTags}
+                onChange={(e) => setNewTags(e.target.value)}
+                placeholder="e.g. Redis, Eviction, Cache"
+                className="w-full px-3 py-2 bg-[#141416] border border-white/[0.12] rounded-[6px] text-xs text-[#F2F1EE] focus:outline-none focus:border-[#FFB020]"
+              />
+            </div>
           </div>
-        </Card>
-      </div>
+
+          <div>
+            <label className="block text-xs font-mono text-[#A8A8AB] uppercase mb-1">
+              Document Body / Markdown Content
+            </label>
+            <textarea
+              value={newContent}
+              onChange={(e) => setNewContent(e.target.value)}
+              rows={6}
+              placeholder="Enter authoritative playbook text for agent RAG retrieval..."
+              className="w-full px-3 py-2 bg-[#141416] border border-white/[0.12] rounded-[6px] text-xs text-[#F2F1EE] focus:outline-none focus:border-[#FFB020]"
+              required
+            />
+          </div>
+
+          <div className="flex justify-end gap-2 pt-2 border-t border-white/[0.08]">
+            <Button variant="secondary" size="sm" type="button" onClick={() => setShowModal(false)}>
+              Cancel
+            </Button>
+            <Button variant="primary" size="sm" type="submit">
+              Ingest Ground-Truth Document
+            </Button>
+          </div>
+        </form>
+      </Modal>
     </div>
   );
 }
