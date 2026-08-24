@@ -25,6 +25,7 @@ from nexus.api.routes.company_sim import router as company_sim_router
 from nexus.api.routes.degradation import router as degradation_router
 from nexus.api.routes.events import router as events_router
 from nexus.api.routes.okr import router as okr_router
+from nexus.api.routes.plaza import router as plaza_router
 from nexus.api.routes.evolution import router as evolution_router
 from nexus.api.routes.goals import router as goals_router
 from nexus.api.routes.health import router as health_router
@@ -55,6 +56,8 @@ from nexus.api.routes.audit import router as audit_router
 from nexus.api.routes.memory_global import router as memory_global_router
 from nexus.api.routes.hr import router as hr_router
 from nexus.api.routes.departments import router as departments_router
+from nexus.api.routes.workspaces import router as workspaces_router
+from nexus.api.routes.nodes import router as nodes_router
 from nexus.api.versioning import APIVersionMiddleware
 from nexus.config import settings
 from nexus.logging_config import RequestIDMiddleware, configure_logging
@@ -417,3 +420,6 @@ app.include_router(archetypes_router)
 app.include_router(providers_router)
 app.include_router(hiring_router)
 app.include_router(chat_router)
+app.include_router(plaza_router)
+app.include_router(workspaces_router)
+app.include_router(nodes_router)

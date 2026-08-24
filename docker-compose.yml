@@ -12,9 +12,12 @@ services:
       - REDIS_URL=redis://redis:6379/0
       - AUTH_ENABLED=true
       - CORS_ORIGINS=http://localhost:3000
+      - TEMPORAL_HOST=temporal:7233
+      - USE_TEMPORAL=true
     depends_on:
       - postgres
       - redis
+      - temporal
     volumes:
       - ./src:/app/src
     command: uvicorn nexus.main:app --host 0.0.0.0 --port 8000 --reload
@@ -45,6 +48,45 @@ services:
     image: redis:7-alpine
     ports:
       - "6379:6379"
+
+  temporal:
+    image: temporalio/auto-setup:1.24
+    ports:
+      - "7233:7233"    # gRPC frontend
+      - "8233:8233"    # Web UI
+    environment:
+      - DB=postgresql
+      - DB_PORT=5432
+      - POSTGRES_USER=nexus
+      - POSTGRES_PWD=nexus
+      - POSTGRES_SEEDS=postgres
+      - DYNAMIC_CONFIG_FILE_PATH=config/dynamicconfig/development-sql.yaml
+    depends_on:
+      - postgres
+
+  temporal-ui:
+    image: temporalio/ui:2.31.2
+    ports:
+      - "8088:8080"
+    environment:
+      - TEMPORAL_ADDRESS=temporal:7233
+    depends_on:
+      - temporal
+
+  temporal-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://nexus:nexus@postgres:5432/nexus
+      - REDIS_URL=redis://redis:6379/0
+      - TEMPORAL_HOST=temporal:7233
+      - USE_TEMPORAL=true
+    depends_on:
+      - temporal
+      - postgres
+      - redis
+    command: python -m nexus.temporal.worker
 
 volumes:
   pgdata:

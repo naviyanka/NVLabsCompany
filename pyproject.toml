@@ -28,6 +28,7 @@ dependencies = [
     # sqlalchemy[asyncio]<2.1.0, which is the effective upper bound now.
     "fastapi-users[sqlalchemy]>=15.0.5",
     "jsonschema>=4.20.0",
+    "temporalio>=1.7.0",
 ]
 
 [project.optional-dependencies]

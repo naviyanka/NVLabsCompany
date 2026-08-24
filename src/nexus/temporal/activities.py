@@ -1,0 +1,146 @@
+"""Temporal Activities — the actual work units (retryable, timeout-safe).
+
+Each activity wraps an existing NEXUS function to make it durable.
+Activities are automatically retried by Temporal on failure.
+"""
+
+import uuid
+import logging
+from dataclasses import dataclass
+from typing import Any
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class LLMCallInput:
+    """Input for the call_llm activity."""
+    agent_id: str
+    company_id: str
+    prompt: str
+    system_prompt: str = ""
+
+
+@dataclass
+class LLMCallOutput:
+    """Output from the call_llm activity."""
+    response_text: str
+    model_used: str
+    tokens_used: int
+    success: bool
+    error: str | None = None
+
+
+@dataclass
+class RouteTaskInput:
+    """Input for the route_task activity."""
+    company_id: str
+    task_description: str
+    required_skills: list[str]
+
+
+@dataclass
+class DecomposeTaskInput:
+    """Input for the decompose_task activity."""
+    task_id: str
+    description: str
+    max_subtasks: int = 5
+
+
+async def call_llm_activity(input: LLMCallInput) -> LLMCallOutput:
+    """Activity: Call an LLM adapter for an agent.
+
+    This wraps the existing _call_llm function from chat.py.
+    Temporal will automatically retry this on rate limits or transient failures.
+    """
+    from nexus.database import async_session_factory
+    from nexus.models.agent import Agent
+    from nexus.api.routes.chat import _build_system_prompt, _call_llm, _fetch_agent_memories
+    from sqlalchemy import select
+
+    try:
+        async with async_session_factory() as db:
+            agent_uuid = uuid.UUID(input.agent_id)
+            company_uuid = uuid.UUID(input.company_id)
+
+            stmt = select(Agent).where(Agent.id == agent_uuid)
+            result = await db.execute(stmt)
+            agent = result.scalar_one_or_none()
+
+            if not agent:
+                return LLMCallOutput(response_text="", model_used="", tokens_used=0, success=False, error="Agent not found")
+
+            if not input.system_prompt:
+                memories = await _fetch_agent_memories(db, agent_uuid, company_uuid, limit=5)
+                system_prompt = _build_system_prompt(agent, memories=memories)
+            else:
+                system_prompt = input.system_prompt
+
+            response_text, model_used, tokens_used = await _call_llm(
+                agent, system_prompt, input.prompt, []
+            )
+
+            return LLMCallOutput(
+                response_text=response_text,
+                model_used=model_used,
+                tokens_used=tokens_used,
+                success=True,
+            )
+    except Exception as e:
+        logger.error("LLM activity failed: %s", e)
+        return LLMCallOutput(response_text="", model_used="", tokens_used=0, success=False, error=str(e))
+
+
+async def route_task_activity(input: RouteTaskInput) -> str | None:
+    """Activity: Route a task to the best available agent.
+
+    Returns the agent_id of the selected agent, or None if no agent available.
+    """
+    from nexus.database import async_session_factory
+    from nexus.models.agent import Agent
+    from nexus.orchestration.router import AgentCandidate, AgentRouter
+    from sqlalchemy import select
+
+    try:
+        async with async_session_factory() as db:
+            company_uuid = uuid.UUID(input.company_id)
+            stmt = select(Agent).where(Agent.company_id == company_uuid, Agent.status.in_(["active", "ready"]))
+            result = await db.execute(stmt)
+            agents = list(result.scalars().all())
+
+            if not agents:
+                return None
+
+            candidates = [
+                AgentCandidate(
+                    agent_id=a.id, name=a.name, skills=a.capabilities or [],
+                    current_workload=0, max_concurrent=5,
+                    budget_remaining_cents=a.budget_monthly_cents - a.spent_monthly_cents,
+                    performance_score=(a.performance_score or 50) / 100.0, status=a.status,
+                )
+                for a in agents
+            ]
+
+            router = AgentRouter()
+            decision = await router.route_task(
+                task_description=input.task_description,
+                required_skills=input.required_skills,
+                estimated_cost_cents=100,
+                available_agents=candidates,
+            )
+            return str(decision.agent_id) if decision else None
+    except Exception as e:
+        logger.error("Route task activity failed: %s", e)
+        return None
+
+
+async def decompose_task_activity(input: DecomposeTaskInput) -> list[dict[str, Any]]:
+    """Activity: Decompose a task into subtasks using TaskPlanner."""
+    from nexus.orchestration.planner import TaskPlanner
+
+    planner = TaskPlanner(max_subtasks=input.max_subtasks)
+    subtasks = await planner.decompose_task(
+        task_id=uuid.UUID(input.task_id),
+        description=input.description,
+    )
+    return [{"description": st.description, "dependencies": [str(d) for d in st.dependencies]} for st in subtasks]
