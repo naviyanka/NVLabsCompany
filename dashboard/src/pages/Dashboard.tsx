@@ -57,29 +57,11 @@ const telemetryChartData = [
   { time: '24:00', tokens: 68000, cost: 21.3 },
 ];
 
-const initialAgents: AgentItem[] = [
-  { id: 'agent-atlas', name: 'Atlas-01', title: 'Chief Executive Officer', role: 'ceo', status: 'active', model: 'claude-3-7-sonnet', performance_score: 98, spent_monthly_cents: 18450 },
-  { id: 'agent-nova', name: 'Nova-02', title: 'Chief Technology Officer', role: 'cto', status: 'active', model: 'claude-3-7-sonnet', performance_score: 96, spent_monthly_cents: 22100 },
-  { id: 'agent-bolt', name: 'Bolt-03', title: 'Senior Backend Engineer', role: 'engineer', status: 'active', model: 'gpt-4o', performance_score: 94, spent_monthly_cents: 14200 },
-  { id: 'agent-pixel', name: 'Pixel-04', title: 'Frontend & 3D Specialist', role: 'engineer', status: 'active', model: 'gpt-4o', performance_score: 92, spent_monthly_cents: 9800 },
-  { id: 'agent-sage', name: 'Sage-05', title: 'AI Research Lead', role: 'researcher', status: 'idle', model: 'claude-3-7-sonnet', performance_score: 97, spent_monthly_cents: 18900 },
-  { id: 'agent-shield', name: 'Shield-07', title: 'Security & QA Auditor', role: 'qa', status: 'active', model: 'gpt-4o-mini', performance_score: 93, spent_monthly_cents: 7200 },
-];
+const initialAgents: AgentItem[] = [];
 
-const initialTasks: TaskItem[] = [
-  { id: 'task-1', title: 'Implement Vector Embeddings Cache for Memory Stream', status: 'in_progress', priority: 1, assigned_agent_id: 'agent-bolt', created_at: new Date(Date.now() - 3600000).toISOString() },
-  { id: 'task-2', title: 'Evaluate Claude 3.7 vs GPT-4o on Multi-Agent Reasoning', status: 'in_progress', priority: 2, assigned_agent_id: 'agent-sage', created_at: new Date(Date.now() - 7200000).toISOString() },
-  { id: 'task-3', title: 'Audit Smart Contract & API Gateway Rate Limits', status: 'completed', priority: 1, assigned_agent_id: 'agent-shield', created_at: new Date(Date.now() - 86400000).toISOString() },
-  { id: 'task-4', title: 'Render 3D Workstation Caster Physics & Isometric Shading', status: 'completed', priority: 2, assigned_agent_id: 'agent-pixel', created_at: new Date(Date.now() - 120000000).toISOString() },
-  { id: 'task-5', title: 'Quarterly Executive Resource & Model Budget Rebalancing', status: 'pending', priority: 3, assigned_agent_id: 'agent-atlas', created_at: new Date().toISOString() },
-];
+const initialTasks: TaskItem[] = [];
 
-const initialPipelines: PipelineItem[] = [
-  { id: 'pipe-1', name: 'CI/CD Automated Deployment', status: 'running', success_rate: 98.4, trigger: 'git push (main)' },
-  { id: 'pipe-2', name: 'Nightly LLM Benchmark & Regression Suite', status: 'completed', success_rate: 99.1, trigger: 'cron(0 2 * * *)' },
-  { id: 'pipe-3', name: 'Security Vulnerability & Static Code Analysis', status: 'completed', success_rate: 100, trigger: 'Pull Request' },
-  { id: 'pipe-4', name: 'Memory Vector Index Consolidation', status: 'idle', success_rate: 96.5, trigger: 'Event: Memory > 1GB' },
-];
+const initialPipelines: PipelineItem[] = [];
 
 export function Dashboard() {
   const navigate = useNavigate();
