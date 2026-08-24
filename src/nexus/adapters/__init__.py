@@ -26,6 +26,7 @@ from nexus.adapters.base import BaseAdapter
 from nexus.adapters.bedrock_adapter import BedrockAdapter
 from nexus.adapters.claude_code_adapter import ClaudeCodeAdapter
 from nexus.adapters.google_adapter import GoogleGeminiAdapter
+from nexus.adapters.hermes_adapter import HermesAdapter
 from nexus.adapters.http_adapter import HTTPAdapter
 from nexus.adapters.mcp_adapter import MCPAgentAdapter
 from nexus.adapters.ollama_adapter import OllamaAdapter
@@ -43,6 +44,7 @@ __all__ = [
     "OpenAIAdapter",
     "AnthropicAdapter",
     "OllamaAdapter",
+    "HermesAdapter",
     "ClaudeCodeAdapter",
     "HTTPAdapter",
     "MCPAgentAdapter",

@@ -1,30 +1,30 @@
-import { useState, useEffect, useRef } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
-import {
-  MessageSquare,
-  Cpu,
-  Activity,
-  DollarSign,
-  Send,
-  Play,
-  Pause,
-  Award,
-  ArrowLeft,
-  Database,
-  Trash2,
-} from 'lucide-react';
-import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
-import { Card } from '@/components/common/Card';
-import { StatCard } from '@/components/common/StatCard';
-import { Button } from '@/components/common/Button';
-import { Badge } from '@/components/common/Badge';
-import { Tabs } from '@/components/common/Tabs';
-import { Skeleton } from '@/components/common/Skeleton';
-import { apiClient, unwrapItems } from '@/api/client';
 import { deleteAgent } from '@/api/agents';
+import { apiClient, unwrapItems } from '@/api/client';
 import { FireAgentModal } from '@/components/agents/FireAgentModal';
+import { Badge } from '@/components/common/Badge';
+import { Button } from '@/components/common/Button';
+import { Card } from '@/components/common/Card';
+import { Skeleton } from '@/components/common/Skeleton';
+import { StatCard } from '@/components/common/StatCard';
+import { Tabs } from '@/components/common/Tabs';
 import { getActiveCompanyId } from '@/config';
 import type { Agent } from '@/types/agent';
+import {
+  Activity,
+  ArrowLeft,
+  Award,
+  Cpu,
+  Database,
+  DollarSign,
+  MessageSquare,
+  Pause,
+  Play,
+  Send,
+  Trash2,
+} from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
+import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 
 interface ChatMessage {
   id: string;
@@ -57,7 +57,7 @@ export function AgentDetailPage() {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('chat');
   const [showFireModal, setShowFireModal] = useState(false);
-  
+
   // Chat state
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [inputPrompt, setInputPrompt] = useState('');
@@ -312,9 +312,8 @@ export function AgentDetailPage() {
                 chatMessages.map((msg) => (
                   <div
                     key={msg.id}
-                    className={`flex flex-col max-w-xl ${
-                      msg.sender === 'user' ? 'ml-auto items-end' : 'mr-auto items-start'
-                    }`}
+                    className={`flex flex-col max-w-xl ${msg.sender === 'user' ? 'ml-auto items-end' : 'mr-auto items-start'
+                      }`}
                   >
                     <div className="flex items-center gap-1.5 mb-1 text-[10px] font-mono text-[#6B6B6E]">
                       <span>{msg.sender === 'user' ? 'Operator' : agent.name}</span>
@@ -327,11 +326,10 @@ export function AgentDetailPage() {
                       </span>
                     </div>
                     <div
-                      className={`p-3 rounded-[8px] text-xs leading-relaxed font-mono ${
-                        msg.sender === 'user'
+                      className={`p-3 rounded-[8px] text-xs leading-relaxed font-mono ${msg.sender === 'user'
                           ? 'bg-[#FFB020] text-[#0A0A0B] font-medium'
                           : 'bg-[#1C1C1F] text-[#F2F1EE] border border-white/[0.08]'
-                      }`}
+                        }`}
                     >
                       {msg.text}
                     </div>
@@ -424,7 +422,7 @@ export function AgentDetailPage() {
                     }}
                     className="bg-[#101012] border border-white/[0.1] rounded-[4px] px-2 py-1 text-[#F2F1EE] text-xs focus:outline-none focus:border-[#FFB020] cursor-pointer"
                   >
-                    {['anthropic', 'openai', 'claude', 'codex', 'kiro-cli', 'antigravity', 'aider', 'opencode', 'ollama', 'langchain'].map((p) => (
+                    {['hermes', 'anthropic', 'openai', 'claude', 'codex', 'kiro-cli', 'antigravity', 'aider', 'opencode', 'ollama', 'langchain'].map((p) => (
                       <option key={p} value={p}>{p}</option>
                     ))}
                   </select>

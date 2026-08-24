@@ -43,10 +43,12 @@ class AdapterRegistry:
         from nexus.adapters.mcp_adapter import MCPAgentAdapter
         from nexus.adapters.ollama_adapter import OllamaAdapter
         from nexus.adapters.openai_adapter import OpenAIAdapter
+        from nexus.adapters.hermes_adapter import HermesAdapter
 
         self.register_adapter("openai", OpenAIAdapter)
         self.register_adapter("anthropic", AnthropicAdapter)
         self.register_adapter("ollama", OllamaAdapter)
+        self.register_adapter("hermes", HermesAdapter)
         self.register_adapter("claude_code", ClaudeCodeAdapter)
         self.register_adapter("cli", CLIAdapter)
         self.register_adapter("http", HTTPAdapter)

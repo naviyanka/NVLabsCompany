@@ -2,24 +2,24 @@
  * Enhanced Hire Agent Modal — 3 modes: Manual, From Template, Hire a Team.
  */
 
-import { useState, useEffect } from 'react';
-import { Modal } from '@/components/common/Modal';
-import { Button } from '@/components/common/Button';
-import { ArchetypeGrid } from '@/components/agents/ArchetypeGrid';
-import { TeamHireFlow } from '@/components/agents/TeamHireFlow';
 import {
   createAgent,
   listArchetypes,
-  listProviders,
   listProviderModels,
+  listProviders,
   listSoulTemplates,
   type AgentArchetype,
   type AgentProvider,
   type ProviderModel,
   type SoulTemplate,
 } from '@/api/agents';
-import { UserPlus, LayoutTemplate, Users, ArrowLeft, Circle, FileJson } from 'lucide-react';
+import { ArchetypeGrid } from '@/components/agents/ArchetypeGrid';
 import { ManifestImport } from '@/components/agents/ManifestImport';
+import { TeamHireFlow } from '@/components/agents/TeamHireFlow';
+import { Button } from '@/components/common/Button';
+import { Modal } from '@/components/common/Modal';
+import { ArrowLeft, Circle, FileJson, LayoutTemplate, UserPlus, Users } from 'lucide-react';
+import { useEffect, useState } from 'react';
 
 type HireMode = 'select' | 'manual' | 'template' | 'team' | 'manifest';
 
@@ -50,6 +50,7 @@ const FALLBACK_ARCHETYPES: AgentArchetype[] = [
 
 // Fallback providers when the backend API is unavailable
 const FALLBACK_PROVIDERS: AgentProvider[] = [
+  { id: 'hermes', label: 'Hermes 3 \u00b7 Nous Research', default_command: 'ollama run hermes3', auto_mode_flag: '', supports_model: true, model_flag: '--model', hive_aware: true, can_receive_inbox: true, recommended_model: 'hermes3:8b', resume_flag: null, install_command: 'ollama pull hermes3', docs_url: 'https://nousresearch.com/hermes', installed: true, version: '3.0' },
   { id: 'claude', label: 'Claude Code', default_command: 'claude', auto_mode_flag: '--permission-mode bypassPermissions', supports_model: true, model_flag: '--model', hive_aware: true, can_receive_inbox: true, recommended_model: 'claude-opus-4-8[1m]', resume_flag: '--resume', install_command: 'npm install -g @anthropic-ai/claude-code', docs_url: 'https://docs.claude.com/en/docs/claude-code', installed: false, version: null },
   { id: 'codex', label: 'Codex \u00b7 GPT', default_command: 'codex', auto_mode_flag: '--dangerously-bypass-approvals-and-sandbox', supports_model: true, model_flag: '--model', hive_aware: false, can_receive_inbox: true, recommended_model: 'gpt-5-codex', resume_flag: null, install_command: 'npm install -g @openai/codex', docs_url: 'https://github.com/openai/codex', installed: false, version: null },
   { id: 'grok', label: 'Grok \u00b7 xAI', default_command: 'grok', auto_mode_flag: '--permission-mode bypassPermissions', supports_model: true, model_flag: '--model', hive_aware: false, can_receive_inbox: true, recommended_model: null, resume_flag: '--resume', install_command: null, docs_url: null, installed: false, version: null },
@@ -66,6 +67,12 @@ const FALLBACK_PROVIDERS: AgentProvider[] = [
 
 // Fallback model lists per provider for when API is unavailable
 const FALLBACK_MODELS: Record<string, ProviderModel[]> = {
+  hermes: [
+    { id: 'hermes3:8b', name: 'Hermes 3 8B (local)', tier: 'fast' },
+    { id: 'hermes3:70b', name: 'Hermes 3 70B (local)', tier: 'flagship' },
+    { id: 'nousresearch/hermes-3-llama-3.1-405b', name: 'Hermes 3 405B (OpenRouter)', tier: 'flagship' },
+    { id: 'nousresearch/hermes-3-llama-3.1-8b', name: 'Hermes 3 8B (OpenRouter)', tier: 'balanced' },
+  ],
   claude: [
     { id: 'claude-sonnet-4-20250514', name: 'Claude Sonnet 4', tier: 'flagship' },
     { id: 'claude-opus-4-20250514', name: 'Claude Opus 4', tier: 'flagship' },
@@ -422,11 +429,10 @@ export function HireAgentModal({ isOpen, onClose, onSuccess }: HireAgentModalPro
                           key={p.id}
                           type="button"
                           onClick={() => { setProvider(p.id); setModel(''); setShowProviderMenu(false); }}
-                          className={`w-full px-3 py-2 text-left text-xs flex items-center gap-2.5 transition-colors cursor-pointer ${
-                            provider === p.id
-                              ? 'bg-[#FFB020]/10 text-[#FFB020]'
-                              : 'text-[#F2F1EE] hover:bg-white/[0.06]'
-                          }`}
+                          className={`w-full px-3 py-2 text-left text-xs flex items-center gap-2.5 transition-colors cursor-pointer ${provider === p.id
+                            ? 'bg-[#FFB020]/10 text-[#FFB020]'
+                            : 'text-[#F2F1EE] hover:bg-white/[0.06]'
+                            }`}
                         >
                           <span className={`w-2 h-2 rounded-full shrink-0 ${p.installed ? 'bg-emerald-400 shadow-[0_0_4px_rgba(52,211,153,0.5)]' : 'bg-gray-600 border border-gray-500'}`} />
                           <span className="flex-1">{p.label}</span>
