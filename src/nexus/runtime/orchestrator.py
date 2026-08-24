@@ -22,7 +22,7 @@ Usage:
 import asyncio
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy import select, update
@@ -129,7 +129,7 @@ async def _drive_goal(db: AsyncSession, goal: Any) -> None:
         combined_output = "\n".join(t.title for t in completed_subtasks)
         verdict: JudgeVerdict = await judge.evaluate(
             goal=f"{goal.title}\n{goal.description or ''}",
-            output=combined_output,
+            current_output=combined_output,
             iteration=1,
         )
         if verdict.is_complete:
@@ -313,7 +313,7 @@ async def _auto_evaluate_proposals(db: AsyncSession) -> None:
     """Auto-evaluate evolution proposals that have been in 'proposed' status > 2 minutes."""
     from nexus.models.evolution import EvolutionProposal, EvolutionEvaluation
 
-    cutoff = datetime.now(timezone.utc) - __import__('datetime').timedelta(minutes=2)
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=2)
     stmt = (
         select(EvolutionProposal)
         .where(EvolutionProposal.status == "proposed")

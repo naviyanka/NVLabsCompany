@@ -1,5 +1,6 @@
 """Task Executor - orchestrates task execution with budget checks and retry logic."""
 
+import logging
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -10,6 +11,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from nexus.models.budget import CostEvent
 from nexus.models.task import Task
 from nexus.runtime.adapter import AgentAdapter, AgentSession, TaskResult
+
+logger = logging.getLogger(__name__)
 
 
 class BudgetExceededError(Exception):

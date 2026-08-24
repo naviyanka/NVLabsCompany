@@ -172,6 +172,17 @@ _DEFAULT_BACKENDS: list[CLIBackendInfo] = [
         supports_stdin=True,
         guard_type="none",
     ),
+    CLIBackendInfo(
+        id="cursor",
+        name="Cursor",
+        command="cursor",
+        instruction_path=".cursor/rules/instructions.md",
+        stability="beta",
+        supports_resume=False,
+        supports_agent_type=False,
+        supports_stdin=True,
+        guard_type="none",
+    ),
 ]
 
 

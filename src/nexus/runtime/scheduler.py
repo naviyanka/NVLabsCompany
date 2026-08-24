@@ -94,7 +94,7 @@ async def _tick(session_factory: async_sessionmaker[AsyncSession]) -> None:
             select(Trigger)
             .where(
                 Trigger.is_active == True,  # noqa: E712
-                Trigger.trigger_type.in_(["cron", "on_schedule"]),
+                Trigger.trigger_type.in_(["cron", "on_schedule", "webhook"]),
                 Trigger.next_fire_at <= now,
             )
             .limit(20)  # Process up to 20 per tick to avoid long locks
@@ -117,12 +117,47 @@ async def _tick(session_factory: async_sessionmaker[AsyncSession]) -> None:
 
 
 async def _fire_trigger(db: AsyncSession, trigger: Any, now: datetime) -> None:
-    """Fire a single trigger: call the agent and record execution."""
+    """Fire a single trigger: call the agent, send webhook, or both."""
     from nexus.models.trigger import TriggerExecution
     from nexus.models.agent import Agent
+
+    config = trigger.config or {}
+
+    # Webhook triggers: make outbound HTTP POST
+    if trigger.trigger_type == "webhook":
+        webhook_url = config.get("webhook_url", "")
+        if webhook_url:
+            try:
+                import httpx
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    payload = {
+                        "trigger_id": str(trigger.id),
+                        "trigger_name": trigger.name,
+                        "company_id": str(trigger.company_id),
+                        "fired_at": now.isoformat(),
+                        "config": {k: v for k, v in config.items() if k != "webhook_url"},
+                    }
+                    response = await client.post(webhook_url, json=payload)
+                    execution = TriggerExecution(
+                        trigger_id=trigger.id,
+                        company_id=trigger.company_id,
+                        status="success" if response.status_code < 400 else "failed",
+                    )
+                    db.add(execution)
+            except Exception as e:
+                logger.warning("Webhook delivery failed for trigger %s: %s", trigger.id, e)
+                execution = TriggerExecution(
+                    trigger_id=trigger.id, company_id=trigger.company_id, status="failed",
+                )
+                db.add(execution)
+        trigger.last_fired_at = now
+        trigger.next_fire_at = None  # Webhooks don't auto-repeat
+        db.add(trigger)
+        return
+
+    # Agent-based triggers: load agent and call LLM
     from nexus.api.routes.chat import _build_system_prompt, _call_llm
 
-    # Load the assigned agent
     stmt = select(Agent).where(Agent.id == trigger.agent_id)
     result = await db.execute(stmt)
     agent = result.scalar_one_or_none()
@@ -132,17 +167,10 @@ async def _fire_trigger(db: AsyncSession, trigger: Any, now: datetime) -> None:
         db.add(trigger)
         return
 
-    # Build the prompt from trigger config
-    config = trigger.config or {}
     prompt = config.get("prompt", config.get("message", f"Execute scheduled task: {trigger.name}"))
-
-    # Call the agent
     system_prompt = _build_system_prompt(agent)
-    response_text, model_used, tokens_used = await _call_llm(
-        agent, system_prompt, prompt, []
-    )
+    response_text, model_used, tokens_used = await _call_llm(agent, system_prompt, prompt, [])
 
-    # Record the execution
     execution = TriggerExecution(
         trigger_id=trigger.id,
         company_id=trigger.company_id,
@@ -151,21 +179,16 @@ async def _fire_trigger(db: AsyncSession, trigger: Any, now: datetime) -> None:
     )
     db.add(execution)
 
-    # Update trigger timing
     trigger.last_fired_at = now
     if trigger.trigger_type == "cron":
         cron_expr = config.get("cron_expression", "0 * * * *")
         trigger.next_fire_at = _parse_cron_next_fire(cron_expr, now)
     elif trigger.trigger_type == "on_schedule":
-        # One-shot: deactivate after firing
         trigger.is_active = False
         trigger.next_fire_at = None
 
     db.add(trigger)
-    logger.info(
-        "Fired trigger '%s' → agent %s (%d tokens)",
-        trigger.name, agent.name, tokens_used,
-    )
+    logger.info("Fired trigger '%s' → agent %s (%d tokens)", trigger.name, agent.name, tokens_used)
 
 
 async def _scheduler_loop(session_factory: async_sessionmaker[AsyncSession]) -> None:
