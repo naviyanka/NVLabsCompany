@@ -163,24 +163,6 @@ async def get_goal_stats(company_id: uuid.UUID, db: DbSession) -> dict[str, Any]
     return {"total": total, "by_status": by_status}
 
 
-
-@router.delete("/api/v1/goals/{goal_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_goal(goal_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId) -> None:
-    """Delete a goal."""
-    from sqlalchemy import delete as sa_delete
-    stmt = sa_delete(Goal).where(Goal.id == goal_id, Goal.company_id == company_id)
-    await db.execute(stmt)
-
-
-@router.get("/api/v1/companies/{company_id}/goals/stats")
-async def goal_stats(company_id: uuid.UUID, db: DbSession) -> dict[str, Any]:
-    """Goal statistics by status."""
-    from sqlalchemy import func
-    total = await db.execute(select(func.count(Goal.id)).where(Goal.company_id == company_id))
-    by_status = await db.execute(select(Goal.status, func.count(Goal.id)).where(Goal.company_id == company_id).group_by(Goal.status))
-    return {"total": total.scalar() or 0, "by_status": dict(by_status.all())}
-
-
 @router.post("/api/v1/goals/{goal_id}/execute")
 async def execute_goal(
     goal_id: uuid.UUID,

@@ -380,8 +380,9 @@ class GovernanceMiddleware:
             # Check denied paths
             deny_paths = rules.get("deny_paths", [])
             for pattern in deny_paths:
-                # Simple prefix/glob matching: "*" matches any segment
-                if pattern.replace("*", "") in path or path.startswith(pattern.split("*")[0]):
+                # Use fnmatch-style glob matching for path patterns
+                import fnmatch
+                if fnmatch.fnmatch(path, pattern):
                     return {
                         "allowed": False,
                         "reason": f"Policy '{policy.get('name', 'unnamed')}' denies path: {path}",
