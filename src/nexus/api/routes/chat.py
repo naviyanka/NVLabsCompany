@@ -344,12 +344,38 @@ async def _call_llm(
     # Check if API key is available
     api_key = config.get("api_key", "")
     if registry_key in ("anthropic", "openai", "azure_openai") and not api_key:
-        # No API key configured — return a helpful message
+        # No API key configured — create a Secret Proposal for human approval
+        try:
+            from nexus.database import async_session_factory
+            from nexus.models.governance import Approval
+            async with async_session_factory() as proposal_db:
+                env_var = {"anthropic": "ANTHROPIC_API_KEY", "openai": "OPENAI_API_KEY", "azure_openai": "AZURE_OPENAI_API_KEY"}.get(registry_key, f"{registry_key.upper()}_API_KEY")
+                # Check if a proposal already exists to avoid duplicates
+                from sqlalchemy import func
+                existing = await proposal_db.execute(
+                    select(func.count(Approval.id)).where(
+                        Approval.approval_type == "secret_request",
+                        Approval.status == "pending",
+                    )
+                )
+                if (existing.scalar() or 0) < 3:
+                    approval = Approval(
+                        company_id=agent.company_id if hasattr(agent, 'company_id') else None,
+                        approval_type="secret_request",
+                        title=f"API Key Required: {env_var}",
+                        description=f"Agent {agent.name} ({agent.role}) needs {env_var} to function. Configure this environment variable to enable LLM responses.",
+                        requested_by=str(agent.id),
+                        status="pending",
+                    )
+                    proposal_db.add(approval)
+                    await proposal_db.commit()
+        except Exception:
+            pass  # Best-effort proposal creation
+
         return (
             f"[{agent.name}] I'm configured as a {agent.role} but my "
             f"provider API key ({registry_key}) is not set. "
-            f"Set the appropriate environment variable "
-            f"(ANTHROPIC_API_KEY or OPENAI_API_KEY) to enable real responses.\n\n"
+            f"A secret proposal has been created for operator approval.\n\n"
             f"My capabilities: {', '.join(agent.capabilities or ['general'])}.\n"
             f"My objective: {agent.objectives or 'Execute assigned tasks.'}",
             config.get("model", "none"),

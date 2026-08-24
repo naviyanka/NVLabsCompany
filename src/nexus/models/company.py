@@ -19,6 +19,10 @@ class Company(SQLModel, table=True):
     budget_monthly_cents: int = Field(default=0)
     spent_monthly_cents: int = Field(default=0)
     issue_prefix: Optional[str] = Field(default=None, max_length=10)
+    # Business hours (Corporate Clock from AI-Company)
+    business_hours_start: int = Field(default=9)   # 0-23 UTC hour
+    business_hours_end: int = Field(default=17)    # 0-23 UTC hour
+    business_days: str = Field(default="mon,tue,wed,thu,fri", max_length=50)
     created_at: datetime = Field(default_factory=lambda: datetime.utcnow())
     updated_at: datetime = Field(default_factory=lambda: datetime.utcnow())
 

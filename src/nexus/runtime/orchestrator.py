@@ -315,6 +315,9 @@ async def _execute_subtasks(db: AsyncSession, tasks: list[Any], company_id: uuid
             })
             logger.info("Subtask '%s' completed by %s (%d tokens)", task.title[:40], agent.name, tokens_used)
 
+            # Self-adaptive trigger: parse [SCHEDULE:] patterns from LLM output
+            await _parse_adaptive_triggers(db, agent, response_text, company_id)
+
         except Exception as e:
             task.status = "failed"
             task.updated_at = datetime.now(timezone.utc)
@@ -380,6 +383,66 @@ async def _auto_evaluate_proposals(db: AsyncSession) -> None:
         logger.info("Auto-promoted evaluated proposal %s", prop.id)
 
     if stale_proposals:
+        await db.flush()
+
+
+async def _parse_adaptive_triggers(db: AsyncSession, agent: Any, llm_output: str, company_id: uuid.UUID) -> None:
+    """Parse self-adaptive trigger patterns from LLM output (Clawith "Aware" pattern).
+
+    Supported patterns in LLM output:
+    - [SCHEDULE: */5 * * * *] — create a cron trigger
+    - [POLL: https://example.com/api] — create a polling trigger
+    - [REMIND: 2h] — create a one-shot trigger in N hours
+    """
+    import re
+    from nexus.models.trigger import Trigger
+
+    # Parse [SCHEDULE: cron_expr] patterns
+    schedule_matches = re.findall(r'\[SCHEDULE:\s*([^\]]+)\]', llm_output)
+    for cron_expr in schedule_matches:
+        trigger = Trigger(
+            company_id=company_id,
+            agent_id=agent.id,
+            trigger_type="cron",
+            name=f"Self-scheduled by {agent.name}",
+            config={"cron_expression": cron_expr.strip(), "prompt": f"Follow up on recent work"},
+            is_active=True,
+            next_fire_at=datetime.now(timezone.utc) + timedelta(minutes=5),
+        )
+        db.add(trigger)
+        logger.info("Agent %s self-created cron trigger: %s", agent.name, cron_expr.strip())
+
+    # Parse [POLL: url] patterns
+    poll_matches = re.findall(r'\[POLL:\s*([^\]]+)\]', llm_output)
+    for url in poll_matches:
+        trigger = Trigger(
+            company_id=company_id,
+            agent_id=agent.id,
+            trigger_type="webhook",
+            name=f"Self-polling by {agent.name}",
+            config={"webhook_url": url.strip(), "poll": True},
+            is_active=True,
+        )
+        db.add(trigger)
+        logger.info("Agent %s self-created poll trigger: %s", agent.name, url.strip())
+
+    # Parse [REMIND: Nh] patterns (one-shot)
+    remind_matches = re.findall(r'\[REMIND:\s*(\d+)([hm])\]', llm_output)
+    for value, unit in remind_matches:
+        hours = int(value) if unit == "h" else int(value) / 60
+        trigger = Trigger(
+            company_id=company_id,
+            agent_id=agent.id,
+            trigger_type="on_schedule",
+            name=f"Self-reminder by {agent.name}",
+            config={"prompt": f"Reminder: follow up on previous task"},
+            is_active=True,
+            next_fire_at=datetime.now(timezone.utc) + timedelta(hours=hours),
+        )
+        db.add(trigger)
+        logger.info("Agent %s self-created reminder: %s%s", agent.name, value, unit)
+
+    if schedule_matches or poll_matches or remind_matches:
         await db.flush()
 
 

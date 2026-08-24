@@ -253,3 +253,55 @@ async def delete_tool(tool_id: uuid.UUID, db: DbSession, company_id: CurrentComp
     from sqlalchemy import delete as sa_delete
     stmt = sa_delete(Tool).where(Tool.id == tool_id, Tool.company_id == company_id)
     await db.execute(stmt)
+
+
+@router.get("/api/v1/tools/discover")
+async def discover_tools(
+    query: str = "", db: DbSession = None, company_id: CurrentCompanyId = None
+) -> list[dict[str, Any]]:
+    """Discover available tools from the local catalog and external registries.
+
+    Searches the tool catalog by name/description. In future, can integrate
+    with Smithery/ModelScope for runtime tool installation.
+
+    Args:
+        query: Search query to filter tools.
+    """
+    # Search local tool catalog
+    from nexus.models.tool import ToolCatalogEntry
+
+    if query:
+        stmt = (
+            select(ToolCatalogEntry)
+            .where(ToolCatalogEntry.name.ilike(f"%{query}%"))
+            .limit(20)
+        )
+    else:
+        stmt = select(ToolCatalogEntry).limit(20)
+
+    result = await db.execute(stmt)
+    local_tools = list(result.scalars().all())
+
+    discovered = [
+        {
+            "id": str(t.id),
+            "name": t.name,
+            "description": getattr(t, "description", ""),
+            "source": "local_catalog",
+            "installed": True,
+        }
+        for t in local_tools
+    ]
+
+    # Placeholder for external registry search (Smithery/ModelScope)
+    # In future: call external API to discover installable tools
+    if query and not discovered:
+        discovered.append({
+            "id": f"ext-{query}",
+            "name": query,
+            "description": f"Search external registries for '{query}' tool",
+            "source": "external",
+            "installed": False,
+        })
+
+    return discovered
