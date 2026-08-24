@@ -18,46 +18,7 @@ import type { WorkflowDAGItem } from '@/types/workflow';
 import { LaunchWorkflowModal } from '@/components/workflows/LaunchWorkflowModal';
 import { WorkflowDetailDrawer } from '@/components/workflows/WorkflowDetailDrawer';
 
-const INITIAL_WORKFLOWS: WorkflowDAGItem[] = [
-  {
-    workflow_id: 'wf-9812',
-    title: 'Multi-Model Routing Validation & Benchmarking',
-    objective: 'Multi-Model Routing Validation & Benchmarking',
-    template_type: 'Feature Implementation',
-    status: 'completed',
-    current_step: 'Workflow Execution Complete',
-    total_steps: 4,
-    completed_steps: 4,
-    total_cost_cents: 340,
-    duration_ms: 4230,
-    started_at: new Date(Date.now() - 3600000 * 3).toISOString(),
-    completed_at: new Date(Date.now() - 3600000 * 2).toISOString(),
-    steps: [
-      { step_id: 's1', step_name: '1. Requirement Spec', agent_role: 'Staff Architect', agent_name: 'Atlas-01', action: 'Deconstruct objective into AST milestones & Zod schemas', status: 'completed', duration_ms: 1200, cost_cents: 45, logs: 'Milestones generated cleanly.' },
-      { step_id: 's2', step_name: '2. Impact Analysis', agent_role: 'Principal AI Researcher', agent_name: 'Nova-02', action: 'Run GitNexus impact analysis', status: 'completed', duration_ms: 1800, cost_cents: 120, logs: 'Schema validated with zero breaking changes.' },
-      { step_id: 's3', step_name: '3. Code & Unit Tests', agent_role: 'Senior Systems Engineer', agent_name: 'Bolt-03', action: 'Implement code modules and unit tests', status: 'completed', duration_ms: 1230, cost_cents: 175, logs: '14 test suites passing (100%).' },
-      { step_id: 's4', step_name: '4. Security Gate', agent_role: 'Lead Security Automation', agent_name: 'Sentinel-07', action: 'Run gVisor microVM isolation checks', status: 'completed', duration_ms: 450, cost_cents: 35, logs: 'Passed zero-trust security audit.' },
-    ],
-  },
-  {
-    workflow_id: 'wf-9813',
-    title: 'Autonomous Code Audit & gVisor Security Verification',
-    objective: 'Autonomous Code Audit & gVisor Security Verification',
-    template_type: 'Security Remediation',
-    status: 'running',
-    current_step: '2. Isolate & Patch Code Module',
-    total_steps: 3,
-    completed_steps: 1,
-    total_cost_cents: 180,
-    duration_ms: 2100,
-    started_at: new Date(Date.now() - 600000).toISOString(),
-    steps: [
-      { step_id: 's1', step_name: '1. Fetch CVE Registry', agent_role: 'Lead Security Automation', agent_name: 'Sentinel-07', action: 'Scan external endpoints for SSRF & rate limit risks', status: 'completed', duration_ms: 900, cost_cents: 30, logs: 'CVE vulnerability audit finished clean.' },
-      { step_id: 's2', step_name: '2. Isolate & Patch Code Module', agent_role: 'Senior Systems Engineer', agent_name: 'Bolt-03', action: 'Apply security patch and bind tenant SQL prepared statements', status: 'running', duration_ms: 1200, cost_cents: 150, logs: 'Patching SQL query bindings...' },
-      { step_id: 's3', step_name: '3. Verify Test Suite', agent_role: 'Frontend Engineer', agent_name: 'Kiro-06', action: 'Run end-to-end regression tests', status: 'pending', logs: 'Waiting for upstream patch completion.' },
-    ],
-  },
-];
+const INITIAL_WORKFLOWS: WorkflowDAGItem[] = [];
 
 export function Workflows() {
   const [workflows, setWorkflows] = useState<WorkflowDAGItem[]>(INITIAL_WORKFLOWS);

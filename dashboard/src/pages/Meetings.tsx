@@ -20,64 +20,7 @@ import { getActiveCompanyId } from '@/config';
 import type { MeetingSyncItem } from '@/types/meeting';
 import { LiveHuddleModal } from '@/components/meetings/LiveHuddleModal';
 
-const INITIAL_MEETINGS: MeetingSyncItem[] = [
-  {
-    id: 'meet-1',
-    title: 'Architecture Alignment & API Response Latency',
-    type: 'Architecture Review',
-    status: 'completed',
-    scheduled_at: new Date(Date.now() - 3600000 * 2).toISOString(),
-    duration_minutes: 15,
-    attendees: ['Atlas-01', 'Nova-02', 'Sage-05', 'Sentinel-07'],
-    summary: 'Squad aligned on API latency reduction target. Redis vector indexing verified with sub-20ms p99 query time.',
-    action_items: [
-      'Nova-02 to deploy vector cache warm-up cron job',
-      'Sentinel-07 to audit IAM token TTL policy',
-    ],
-    consensus_score: 99,
-    transcript: [
-      { speaker: 'Atlas-01', role: 'Staff Architect', text: 'Good morning squad. Today our focus is sub-50ms query response across all endpoints.' },
-      { speaker: 'Nova-02', role: 'Principal AI Researcher', text: 'Redis vector indexing is finished. Benchmarking shows 18ms p99 latency.' },
-      { speaker: 'Sentinel-07', role: 'Lead Security Automation', text: 'Security checks passed with zero SSRF or injection vulnerabilities.' },
-    ],
-  },
-  {
-    id: 'meet-2',
-    title: 'Daily Autonomous Engineering Standup',
-    type: 'Daily Operations Standup',
-    status: 'completed',
-    scheduled_at: new Date(Date.now() - 86400000).toISOString(),
-    duration_minutes: 10,
-    attendees: ['Atlas-01', 'Bolt-03', 'Kiro-06'],
-    summary: 'Daily standup completed. 3D Office layout updated and AST linting pipeline verified.',
-    action_items: [
-      'Kiro-06 to polish Three.js camera movement physics',
-      'Bolt-03 to review AST mutation pull requests',
-    ],
-    consensus_score: 100,
-    transcript: [
-      { speaker: 'Atlas-01', role: 'Chief Executive Officer', text: 'Standup status check on 3D office floorplan and AST linting.' },
-      { speaker: 'Kiro-06', role: 'Frontend Engineer', text: '3D scene running smoothly at 60fps with active agent avatars.' },
-      { speaker: 'Bolt-03', role: 'Senior Systems Engineer', text: 'AST linting passed with zero static analysis errors.' },
-    ],
-  },
-  {
-    id: 'meet-3',
-    title: 'Zero-Trust Security Threat Triage',
-    type: 'Incident Triage',
-    status: 'completed',
-    scheduled_at: new Date(Date.now() - 86400000 * 3).toISOString(),
-    duration_minutes: 12,
-    attendees: ['Sentinel-07', 'Atlas-01'],
-    summary: 'Isolated rate-limit spikes on public webhook route. Tenant isolation policies enforced.',
-    action_items: ['Sentinel-07 to add IP subnet rate limiting rule'],
-    consensus_score: 98,
-    transcript: [
-      { speaker: 'Sentinel-07', role: 'Lead Security Automation', text: 'Rate limiter triggered 12 consecutive 429 status codes.' },
-      { speaker: 'Atlas-01', role: 'Staff Architect', text: 'Offending subnets blocked. SLA restored in 45 seconds.' },
-    ],
-  },
-];
+const INITIAL_MEETINGS: MeetingSyncItem[] = [];
 
 export function Meetings() {
   const [meetings, setMeetings] = useState<MeetingSyncItem[]>(INITIAL_MEETINGS);

@@ -21,86 +21,9 @@ import type { Agent } from '@/types/agent';
 import { AddTaskModal } from '@/components/tasks/AddTaskModal';
 import { TaskDetailDrawer } from '@/components/tasks/TaskDetailDrawer';
 
-const MOCK_TASKS: Task[] = [
-  {
-    id: 'task-1',
-    company_id: '00000000-0000-4000-8000-000000000001',
-    project_id: 'proj-core',
-    title: 'Implement High-Throughput Redis Cache for Vector Memory Stream',
-    description: 'Optimize vector search memory lookups with 2-layer LRU cache and Redis serialization.',
-    status: 'in_progress',
-    priority: 1,
-    assigned_agent_id: 'agent-bolt',
-    subtasks: [
-      { id: 'st-1', title: 'Implement Redis LRU caching layer', completed: true },
-      { id: 'st-2', title: 'Benchmark serialization latency under 50ms', completed: false },
-    ],
-    started_at: new Date(Date.now() - 3600000 * 4).toISOString(),
-    created_at: new Date(Date.now() - 3600000 * 4).toISOString(),
-    updated_at: new Date().toISOString(),
-  },
-  {
-    id: 'task-2',
-    company_id: '00000000-0000-4000-8000-000000000001',
-    project_id: 'proj-ai',
-    title: 'Benchmarking Multi-Agent Reasoning Chains (Claude 3.7 vs GPT-4o)',
-    description: 'Execute statistical evaluation matrix across 250 coding and architectural decision scenarios.',
-    status: 'in_progress',
-    priority: 2,
-    assigned_agent_id: 'agent-sage',
-    subtasks: [
-      { id: 'st-3', title: 'Prepare 250 evaluation benchmarks', completed: true },
-      { id: 'st-4', title: 'Aggregate cost and latency stats', completed: false },
-    ],
-    started_at: new Date(Date.now() - 3600000 * 8).toISOString(),
-    created_at: new Date(Date.now() - 3600000 * 8).toISOString(),
-    updated_at: new Date().toISOString(),
-  },
-  {
-    id: 'task-3',
-    company_id: '00000000-0000-4000-8000-000000000001',
-    project_id: 'proj-sec',
-    title: 'Automated Dependency Vulnerability & API Gatekeeper Audit',
-    description: 'Scan npm/pip packages, inspect RBAC permissions, and verify token signing policies.',
-    status: 'completed',
-    priority: 1,
-    assigned_agent_id: 'agent-shield',
-    result: 'Audit completed cleanly. Zero critical vulnerabilities found.',
-    subtasks: [
-      { id: 'st-5', title: 'Audit npm package tree for CVEs', completed: true },
-      { id: 'st-6', title: 'Verify JWT RS256 token signatures', completed: true },
-    ],
-    started_at: new Date(Date.now() - 86400000).toISOString(),
-    completed_at: new Date().toISOString(),
-    created_at: new Date(Date.now() - 86400000).toISOString(),
-    updated_at: new Date().toISOString(),
-  },
-  {
-    id: 'task-4',
-    company_id: '00000000-0000-4000-8000-000000000001',
-    project_id: 'proj-core',
-    title: 'Model Routing Cost Optimization & Tier Rebalancing',
-    description: 'Rebalance tasks between GPT-4o-mini and Claude 3.7 to minimize cost-per-token by 28%.',
-    status: 'pending',
-    priority: 3,
-    assigned_agent_id: 'agent-atlas',
-    subtasks: [
-      { id: 'st-7', title: 'Analyze token usage metrics', completed: false },
-      { id: 'st-8', title: 'Update model routing configuration', completed: false },
-    ],
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  },
-];
+const MOCK_TASKS: Task[] = [];
 
-const MOCK_AGENTS: Agent[] = [
-  { id: 'agent-atlas', company_id: '00000000-0000-4000-8000-000000000001', name: 'Atlas-01', title: 'Chief Executive Officer', role: 'ceo', status: 'active', adapter_type: 'anthropic', model: 'claude-3-7-sonnet', budget_monthly_cents: 50000, spent_monthly_cents: 18450, performance_score: 98 } as any,
-  { id: 'agent-nova', company_id: '00000000-0000-4000-8000-000000000001', name: 'Nova-02', title: 'Chief Technology Officer', role: 'cto', status: 'active', adapter_type: 'anthropic', model: 'claude-3-7-sonnet', budget_monthly_cents: 40000, spent_monthly_cents: 22100, performance_score: 96 } as any,
-  { id: 'agent-bolt', company_id: '00000000-0000-4000-8000-000000000001', name: 'Bolt-03', title: 'Senior Backend Engineer', role: 'engineer', status: 'active', adapter_type: 'openai', model: 'gpt-4o', budget_monthly_cents: 30000, spent_monthly_cents: 14200, performance_score: 94 } as any,
-  { id: 'agent-pixel', company_id: '00000000-0000-4000-8000-000000000001', name: 'Pixel-04', title: 'Frontend Specialist', role: 'engineer', status: 'active', adapter_type: 'openai', model: 'gpt-4o', budget_monthly_cents: 25000, spent_monthly_cents: 9800, performance_score: 92 } as any,
-  { id: 'agent-sage', company_id: '00000000-0000-4000-8000-000000000001', name: 'Sage-05', title: 'AI Research Lead', role: 'researcher', status: 'idle', adapter_type: 'anthropic', model: 'claude-3-7-sonnet', budget_monthly_cents: 40000, spent_monthly_cents: 18900, performance_score: 97 } as any,
-  { id: 'agent-shield', company_id: '00000000-0000-4000-8000-000000000001', name: 'Shield-07', title: 'Security Auditor', role: 'qa', status: 'active', adapter_type: 'openai', model: 'gpt-4o-mini', budget_monthly_cents: 15000, spent_monthly_cents: 7200, performance_score: 93 } as any,
-];
+const MOCK_AGENTS: Agent[] = [];
 
 export function Tasks() {
   const [tasks, setTasks] = useState<Task[]>(MOCK_TASKS);

@@ -18,54 +18,7 @@ import type { GoalItem } from '@/types/goal';
 import { AddGoalModal } from '@/components/goals/AddGoalModal';
 import { GoalDetailDrawer } from '@/components/goals/GoalDetailDrawer';
 
-const INITIAL_GOALS: GoalItem[] = [
-  {
-    id: 'goal-1',
-    title: 'Sub-50ms Global Model Routing & Latency Reduction',
-    description: 'Optimize circuit breaker caching, vector memory indexes, and multi-provider fallbacks.',
-    department_name: 'Engineering & Core Tech',
-    owner_agent_name: 'Nova-02',
-    status: 'in_progress',
-    progress: 78,
-    target_date: '2026-09-30',
-    quarter: 'Q3 2026',
-    key_results: [
-      { id: 'kr-101', title: 'Deploy Redis HNSW vector memory index', target_value: 100, current_value: 100, unit: '%', progress: 100, status: 'completed' },
-      { id: 'kr-102', title: 'Reduce API gateway overhead to <15ms', target_value: 15, current_value: 18, unit: 'ms', progress: 85, status: 'in_progress' },
-      { id: 'kr-103', title: 'Maintain 99.99% model routing SLA uptime', target_value: 99.99, current_value: 99.95, unit: '%', progress: 70, status: 'in_progress' },
-    ],
-  },
-  {
-    id: 'goal-2',
-    title: '100% Automated Security Gate & gVisor Sandbox Enforcement',
-    description: 'Ensure every agent commit passes zero-root syscall filtering, SAST, and IAM token audits.',
-    department_name: 'Infrastructure & Security',
-    owner_agent_name: 'Sentinel-07',
-    status: 'in_progress',
-    progress: 65,
-    target_date: '2026-09-15',
-    quarter: 'Q3 2026',
-    key_results: [
-      { id: 'kr-201', title: 'Audit 100% of external webhooks for SSRF', target_value: 100, current_value: 100, unit: '%', progress: 100, status: 'completed' },
-      { id: 'kr-202', title: 'Enforce gVisor microVM container isolation', target_value: 100, current_value: 65, unit: '%', progress: 65, status: 'in_progress' },
-    ],
-  },
-  {
-    id: 'goal-3',
-    title: 'Continuous Autonomous Evolution & Prompt Mutation Sandbox',
-    description: 'Automate weekly prompt mutation sandboxes with verifiable statistical significance and zero regressions.',
-    department_name: 'AI Research & Reasoning',
-    owner_agent_name: 'Sage-05',
-    status: 'in_progress',
-    progress: 45,
-    target_date: '2026-10-15',
-    quarter: 'Q4 2026',
-    key_results: [
-      { id: 'kr-301', title: 'Run 100 automated prompt mutation rounds', target_value: 100, current_value: 45, unit: 'rounds', progress: 45, status: 'in_progress' },
-      { id: 'kr-302', title: 'Achieve +5.0% reasoning accuracy improvement', target_value: 5.0, current_value: 2.1, unit: '%', progress: 42, status: 'in_progress' },
-    ],
-  },
-];
+const INITIAL_GOALS: GoalItem[] = [];
 
 export function Goals() {
   const [goals, setGoals] = useState<GoalItem[]>(INITIAL_GOALS);

@@ -56,74 +56,7 @@ const SCOPE_COLORS: Record<string, string> = {
   system_rule: 'bg-[#F43F5E]/15 text-[#F43F5E] border-[#F43F5E]/30',
 };
 
-const INITIAL_MEMORIES: MemoryRecord[] = [
-  {
-    id: 'mem-8041',
-    agent_id: 'Dwight (QA Lead)',
-    scope: 'task_context',
-    content: 'Always run static impact analysis before committing changes to avoid high blast radius regressions.',
-    importance: 0.95,
-    decay_rate: 0.02,
-    associated_nodes: ['graph_node_gitnexus', 'rule_blast_radius'],
-    created_at: '2026-08-23T18:40:00Z',
-    raw_embedding: [0.042, -0.128, 0.384, 0.091, -0.215, 0.612, 0.004, -0.088],
-  },
-  {
-    id: 'mem-8040',
-    agent_id: 'Angela (Budget Auditor)',
-    scope: 'guidelines',
-    content: 'Enforce monthly company token spend limit of $800. Trigger warning alert at 80% quota.',
-    importance: 0.90,
-    decay_rate: 0.01,
-    associated_nodes: ['rule_budget_cap', 'agent_angela'],
-    created_at: '2026-08-23T17:15:00Z',
-    raw_embedding: [-0.114, 0.205, -0.048, 0.412, 0.189, -0.092, 0.311, 0.105],
-  },
-  {
-    id: 'mem-8039',
-    agent_id: 'Jim (PR Reviewer)',
-    scope: 'long_term',
-    content: 'Pull request reviews must verify clean TypeScript compilation and zero unused variable lint warnings.',
-    importance: 0.85,
-    decay_rate: 0.03,
-    associated_nodes: ['pr_checker', 'tsc_strict'],
-    created_at: '2026-08-23T16:00:00Z',
-    raw_embedding: [0.298, -0.041, 0.155, -0.320, 0.441, 0.018, -0.190, 0.274],
-  },
-  {
-    id: 'mem-8038',
-    agent_id: 'Creed (Security Specialist)',
-    scope: 'system_rule',
-    content: 'API endpoints require header X-Company-Id: 00000000-0000-4000-8000-000000000001 for multi-tenant isolation.',
-    importance: 0.98,
-    decay_rate: 0.00,
-    associated_nodes: ['auth_tenant_header', 'policy_isolation'],
-    created_at: '2026-08-23T14:30:00Z',
-    raw_embedding: [0.512, 0.119, -0.284, 0.045, -0.178, 0.332, 0.401, -0.055],
-  },
-  {
-    id: 'mem-8037',
-    agent_id: 'Ryan (DevOps Lead)',
-    scope: 'episodic_reflection',
-    content: 'Vite production build completed in 1.4 seconds after bundling external ES modules.',
-    importance: 0.65,
-    decay_rate: 0.08,
-    associated_nodes: ['vite_build_telemetry'],
-    created_at: '2026-08-23T12:00:00Z',
-    raw_embedding: [-0.088, -0.312, 0.144, 0.220, -0.059, 0.198, -0.402, 0.115],
-  },
-  {
-    id: 'mem-8036',
-    agent_id: 'Kevin (Data Engineer)',
-    scope: 'task_context',
-    content: 'D3 Memory Graph visualizer uses Dijkstra shortest path search between entity nodes.',
-    importance: 0.80,
-    decay_rate: 0.04,
-    associated_nodes: ['dijkstra_path', 'd3_canvas'],
-    created_at: '2026-08-23T10:15:00Z',
-    raw_embedding: [0.175, 0.289, -0.102, -0.085, 0.399, -0.240, 0.188, 0.052],
-  },
-];
+const INITIAL_MEMORIES: MemoryRecord[] = [];
 
 export function Memory() {
   const navigate = useNavigate();
