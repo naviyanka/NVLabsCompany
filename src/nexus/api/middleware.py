@@ -16,6 +16,7 @@ streaming/deadlock issues with newer Starlette versions.
 import logging
 import time
 import uuid
+from collections import deque
 from threading import Lock
 from typing import Any
 
@@ -33,6 +34,55 @@ MUTATING_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 # Default rate limit values
 DEFAULT_RATE_LIMIT = 100
 DEFAULT_RATE_WINDOW_SECONDS = 60
+
+
+class _SlidingWindowRateLimiter:
+    """In-memory sliding window rate limiter keyed by company UUID.
+
+    Each company gets a deque of request timestamps. On each check, expired
+    entries (older than the window) are pruned, the current request is recorded,
+    and the remaining quota is returned. Thread-safe via a per-company lock.
+    """
+
+    def __init__(
+        self, limit: int = DEFAULT_RATE_LIMIT, window_seconds: int = DEFAULT_RATE_WINDOW_SECONDS
+    ) -> None:
+        self.limit = limit
+        self.window_seconds = window_seconds
+        self._buckets: dict[uuid.UUID, deque[float]] = {}
+        self._lock = Lock()
+
+    def check(self, company_id: uuid.UUID) -> tuple[int, bool]:
+        """Record a request and return (remaining, allowed).
+
+        Returns:
+            Tuple of (requests remaining in window, whether this request is allowed).
+        """
+        now = time.time()
+        cutoff = now - self.window_seconds
+
+        with self._lock:
+            if company_id not in self._buckets:
+                self._buckets[company_id] = deque()
+
+            bucket = self._buckets[company_id]
+
+            # Prune expired timestamps
+            while bucket and bucket[0] < cutoff:
+                bucket.popleft()
+
+            if len(bucket) >= self.limit:
+                # Over limit — don't record, return 0 remaining
+                return 0, False
+
+            # Record this request
+            bucket.append(now)
+            remaining = self.limit - len(bucket)
+            return remaining, True
+
+
+# Global rate limiter instance
+_rate_limiter = _SlidingWindowRateLimiter()
 
 
 class _KillSwitchRegistry:
@@ -124,6 +174,22 @@ class GovernanceMiddleware:
 
         # 3. Rate limiting check
         rate_limit_remaining = self._get_rate_limit_remaining(company_id)
+        if rate_limit_remaining == 0 and company_id:
+            response = JSONResponse(
+                status_code=429,
+                content={
+                    "detail": "Rate limit exceeded. Try again later.",
+                    "code": "RATE_LIMIT_EXCEEDED",
+                },
+                headers={
+                    "Retry-After": str(DEFAULT_RATE_WINDOW_SECONDS),
+                    "X-RateLimit-Limit": str(DEFAULT_RATE_LIMIT),
+                    "X-RateLimit-Remaining": "0",
+                    "X-RateLimit-Window": str(DEFAULT_RATE_WINDOW_SECONDS),
+                },
+            )
+            await response(scope, receive, send)
+            return
 
         # 4. Policy evaluation
         policy_result = self._evaluate_policy(request, company_id)
@@ -190,9 +256,15 @@ class GovernanceMiddleware:
         await self.app(scope, receive, send_wrapper)
 
     def _get_rate_limit_remaining(self, company_id: uuid.UUID | None) -> int:
-        """Get the remaining rate limit for this company/request."""
-        # TODO: Wire to RateLimiter.check_rate_limit(company_id)
-        return DEFAULT_RATE_LIMIT
+        """Get the remaining rate limit for this company/request.
+
+        Uses the global sliding window rate limiter. Returns the default limit
+        for anonymous requests (no company context).
+        """
+        if company_id is None:
+            return DEFAULT_RATE_LIMIT
+        remaining, _allowed = _rate_limiter.check(company_id)
+        return remaining
 
     def _evaluate_policy(
         self, request: Request, company_id: uuid.UUID | None

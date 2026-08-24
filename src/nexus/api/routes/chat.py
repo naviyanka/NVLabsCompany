@@ -21,6 +21,7 @@ from sqlalchemy import select
 
 from nexus.api.deps import CurrentCompanyId, DbSession
 from nexus.models.agent import Agent
+from nexus.models.memory import MemoryRecord
 
 logger = logging.getLogger(__name__)
 
@@ -91,13 +92,45 @@ def _add_message(agent_id: str, sender: str, text: str) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-def _build_system_prompt(agent: Agent) -> str:
-    """Build a system prompt from the agent's stored configuration.
+async def _fetch_agent_memories(
+    db: "AsyncSession", agent_id: uuid.UUID, company_id: uuid.UUID, limit: int = 10
+) -> list[dict[str, Any]]:
+    """Fetch the most relevant memories for an agent from the database.
 
-    Uses the soul/persona system if soul_description is rich,
-    otherwise constructs a prompt from available fields.
+    Retrieves memories ordered by importance (descending), limited to the top N.
+    Returns them as dicts compatible with Persona.build_working_context().
     """
-    from nexus.identity.soul import Soul, system_prompt_from_soul
+    from sqlalchemy.ext.asyncio import AsyncSession  # noqa: F811
+
+    stmt = (
+        select(MemoryRecord)
+        .where(MemoryRecord.agent_id == agent_id, MemoryRecord.company_id == company_id)
+        .order_by(MemoryRecord.importance.desc(), MemoryRecord.created_at.desc())
+        .limit(limit)
+    )
+    result = await db.execute(stmt)
+    records = list(result.scalars().all())
+
+    return [
+        {
+            "content": r.content,
+            "scope": r.scope,
+            "importance": r.importance,
+            "tier": r.tier,
+            "created_at": r.created_at.isoformat() if r.created_at else "",
+        }
+        for r in records
+    ]
+
+
+def _build_system_prompt(agent: Agent, memories: list[dict[str, Any]] | None = None) -> str:
+    """Build a system prompt from the agent's stored configuration and memory context.
+
+    Uses Persona.build_working_context() to assemble identity, soul, memories,
+    and task objectives under token budget constraints.
+    """
+    from nexus.identity.persona import ContextBudget, Persona
+    from nexus.identity.soul import Soul
 
     # Try to build a proper Soul from agent fields
     soul = Soul(
@@ -139,14 +172,40 @@ def _build_system_prompt(agent: Agent) -> str:
                 if not soul.background:
                     soul.background = line
 
-    # Generate the system prompt
-    prompt = system_prompt_from_soul(soul)
+    # Assemble WorkingContext using Persona token budgeting
+    persona = Persona(agent_id=str(agent.id))
+    budget = ContextBudget(
+        total_tokens=4096,
+        identity_tokens=1500,
+        memory_tokens=1500,
+        task_tokens=1096,
+    )
+    task_context: dict[str, Any] = {}
+    if agent.responsibilities:
+        task_context["responsibilities"] = agent.responsibilities
+    if agent.objectives:
+        task_context["objectives"] = agent.objectives
+
+    working_ctx = persona.build_working_context(
+        soul=soul,
+        memories=memories or [],
+        task=task_context,
+        budget=budget,
+    )
+
+    prompt = working_ctx.system_prompt
 
     # Add role-specific context
     if agent.responsibilities:
         prompt += f"\n\nResponsibilities: {agent.responsibilities}"
     if agent.objectives:
         prompt += f"\n\nObjectives: {agent.objectives}"
+
+    if working_ctx.recent_memories:
+        mem_lines = [
+            f"- {m.get('content', str(m))}" for m in working_ctx.recent_memories
+        ]
+        prompt += f"\n\n--- Relevant Agent Memories ---\n" + "\n".join(mem_lines)
 
     return prompt
 
@@ -361,8 +420,9 @@ async def chat_with_agent(
             detail=f"Agent {agent_id} not found",
         )
 
-    # Build system prompt from agent's soul/persona
-    system_prompt = _build_system_prompt(agent)
+    # Build system prompt from agent's soul/persona and memory context
+    agent_memories = await _fetch_agent_memories(db, agent_id, company_id)
+    system_prompt = _build_system_prompt(agent, memories=agent_memories)
 
     # Get history for context
     history = _get_history(str(agent_id))
@@ -429,8 +489,9 @@ async def chat_with_agent_stream(
             detail=f"Agent {agent_id} not found",
         )
 
-    # Build system prompt from agent's soul/persona
-    system_prompt = _build_system_prompt(agent)
+    # Build system prompt from agent's soul/persona and memory context
+    agent_memories = await _fetch_agent_memories(db, agent_id, company_id)
+    system_prompt = _build_system_prompt(agent, memories=agent_memories)
 
     # Get history for context
     history = _get_history(str(agent_id))

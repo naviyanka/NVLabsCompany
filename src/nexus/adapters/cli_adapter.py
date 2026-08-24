@@ -163,6 +163,17 @@ class CLIAdapter(BaseAdapter):
         # Track files before execution for artifact detection
         pre_files = self._snapshot_workspace(workspace)
 
+        # Write instruction file if backend supports it and a system prompt is available
+        instruction_file_path: str | None = None
+        system_prompt = (
+            payload.get("system_prompt", "")
+            or session.config.get("system_prompt", "")
+        )
+        if backend.instruction_path and system_prompt:
+            instruction_file_path = self._write_instruction_file(
+                workspace, backend, system_prompt, session
+            )
+
         # Prepare environment - strip sensitive vars and backend-specific deletions.
         # Only pass env vars that the backend actually needs. Backends that require
         # specific API keys (e.g., claude needs ANTHROPIC_API_KEY, codex needs
@@ -327,6 +338,9 @@ class CLIAdapter(BaseAdapter):
             )
         finally:
             self._processes.pop(session.session_id, None)
+            # Clean up temporary instruction file
+            if instruction_file_path:
+                self._cleanup_instruction_file(instruction_file_path)
 
     async def send_message(self, session_id: str, message: str) -> str:
         """Send a message to the stdin of a running interactive process.
@@ -482,6 +496,69 @@ class CLIAdapter(BaseAdapter):
             List of command-line arguments ready for subprocess exec.
         """
         return backend.build_args(prompt, extra_args)
+
+    def _write_instruction_file(
+        self,
+        workspace: str,
+        backend: CLIBackendInfo,
+        system_prompt: str,
+        session: AgentSession,
+    ) -> str | None:
+        """Write a temporary instruction file that the CLI backend reads automatically.
+
+        Each CLI backend has a designated instruction path (e.g., `.claude/CLAUDE.md`,
+        `AGENTS.md`, `.kiro/steering/main.md`). This method writes the agent's system
+        prompt to that path in the workspace so the CLI picks it up natively.
+
+        Returns the absolute path of the written file (for cleanup), or None if skipped.
+        """
+        if not backend.instruction_path:
+            return None
+
+        instruction_path = Path(workspace) / backend.instruction_path
+        try:
+            # Create parent directories if needed
+            instruction_path.parent.mkdir(parents=True, exist_ok=True)
+
+            # Don't overwrite existing instruction files the user has set up
+            if instruction_path.exists():
+                self._add_log(
+                    session.session_id,
+                    f"Instruction file already exists at {instruction_path}, skipping write",
+                )
+                return None
+
+            # Write the system prompt as the instruction file
+            agent_name = session.config.get("agent_name", "Agent")
+            content = (
+                f"# {agent_name} — System Instructions\n\n"
+                f"{system_prompt}\n"
+            )
+            instruction_path.write_text(content, encoding="utf-8")
+            self._add_log(
+                session.session_id,
+                f"Wrote instruction file: {instruction_path}",
+            )
+            return str(instruction_path)
+        except OSError as e:
+            self._add_log(
+                session.session_id,
+                f"Failed to write instruction file: {e}",
+            )
+            return None
+
+    def _cleanup_instruction_file(self, path: str) -> None:
+        """Remove a temporary instruction file created for a CLI execution."""
+        try:
+            file_path = Path(path)
+            if file_path.exists():
+                file_path.unlink()
+                # Remove parent dir if it's empty and was created by us
+                parent = file_path.parent
+                if parent.exists() and not any(parent.iterdir()):
+                    parent.rmdir()
+        except OSError:
+            pass  # Best effort cleanup
 
     def _snapshot_workspace(self, workspace: str) -> dict[str, float]:
         """Take a snapshot of files in the workspace with modification times.
