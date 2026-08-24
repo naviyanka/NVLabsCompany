@@ -67,6 +67,12 @@ class Agent(SQLModel, table=True):
     spent_monthly_cents: int = Field(default=0)
     performance_score: Optional[float] = Field(default=None)
 
+    # Focus Items (Clawith "Aware" pattern) — agent's self-managed task focus
+    # Structure: [{"text": "...", "status": "pending|in_progress|done", "created_at": "..."}]
+    focus_items: Optional[list[dict[str, Any]]] = Field(
+        default=None, sa_column=Column(JSON)
+    )
+
     # Memory
     memory_namespace: Optional[str] = Field(default=None, max_length=255)
 

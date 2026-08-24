@@ -971,4 +971,190 @@ Market positioning and differentiation vs NvLabsOrg.
 
 ---
 
+## Priority 17: Proactive Agent Intelligence — from Clawith (Phase 11)
+
+Transforms agents from reactive (wait for tasks) to proactive (self-manage focus and triggers).
+
+### 17.1 Focus Items on Agent Model
+- **Status:** TODO
+- **Source:** Clawith "Aware Framework"
+- **Problem:** Agents have no concept of their own task focus. They only execute what's assigned.
+- **Fix:** Add `focus_items: JSON` field to Agent model. Structure: `[{"text": "...", "status": "pending|in_progress|done"}]`. Orchestrator reads/updates focus during execution.
+- **Files:** `src/nexus/models/agent.py`, `src/nexus/runtime/orchestrator.py`
+- **Effort:** Medium (2 hours)
+
+### 17.2 Self-Adaptive Trigger Creation
+- **Status:** TODO
+- **Source:** Clawith "Self-Adaptive Triggers"
+- **Problem:** Only humans/API can create triggers. Agents can't self-schedule follow-up work.
+- **Fix:** During task execution, if agent output contains `[SCHEDULE: */5 * * * *]` or `[POLL: url]` patterns, auto-create a Trigger for the agent. Parse patterns from LLM output.
+- **Files:** `src/nexus/runtime/orchestrator.py`, `src/nexus/models/trigger.py`
+- **Effort:** Medium (3 hours)
+
+### 17.3 The Plaza — Agent Social Knowledge Feed
+- **Status:** TODO
+- **Source:** Clawith "The Plaza"
+- **Problem:** Agent communication is point-to-point (inbox). No shared broadcast feed where agents passively absorb organizational context.
+- **Fix:** Create `PlazaPost` model (agent_id, content, type, reactions). API: `GET/POST /api/v1/companies/{id}/plaza`. Frontend: `PlazaFeed.tsx` showing a timeline of agent discoveries, completions, and observations.
+- **Files:** `src/nexus/models/plaza.py` (new), `src/nexus/api/routes/plaza.py` (new), `dashboard/src/pages/Plaza.tsx` (new)
+- **Effort:** High (5 hours)
+
+### 17.4 Auto-Post to Plaza on Task Completion
+- **Status:** TODO
+- **Source:** Clawith
+- **Problem:** Agents don't share what they learn. Knowledge stays siloed.
+- **Fix:** When orchestrator marks a subtask complete, auto-create a PlazaPost with a summary of what was accomplished.
+- **Files:** `src/nexus/runtime/orchestrator.py`
+- **Effort:** Low (1 hour)
+
+---
+
+## Priority 18: Engineering Quality — from MetaGPT & Paperclip (Phase 12)
+
+Structured artifact generation and governance patterns.
+
+### 18.1 SOP Artifact Pipeline Engine
+- **Status:** TODO
+- **Source:** MetaGPT "Software Company SOP"
+- **Problem:** Our task decomposition is flat text. MetaGPT generates structured engineering artifacts: PRD → Architecture → Sequence Diagram → Code → Tests.
+- **Fix:** Create `src/nexus/agents/sop_engine.py` with templates for each stage. The `/tasks/{id}/decompose` endpoint uses SOP templates when task type is "engineering".
+- **Files:** `src/nexus/agents/sop_engine.py` (new), `src/nexus/api/routes/tasks.py`
+- **Effort:** High (6 hours)
+
+### 18.2 PRD Template Generator
+- **Status:** TODO
+- **Source:** MetaGPT
+- **Problem:** No standardized product requirement document format for agent tasks.
+- **Fix:** Create a PRD prompt template that the SOP engine uses as stage 1. Agent fills in: Problem Statement, User Stories, Success Metrics, Technical Requirements.
+- **Files:** `src/nexus/agents/templates/prd.md` (new)
+- **Effort:** Low (1 hour)
+
+### 18.3 Architecture Diagram Generator (Mermaid)
+- **Status:** TODO
+- **Source:** MetaGPT
+- **Problem:** No visual architecture output from planning stages.
+- **Fix:** SOP stage 2 template prompts agent to generate Mermaid diagram syntax. Store as artifact on the task.
+- **Files:** `src/nexus/agents/templates/architecture.md` (new)
+- **Effort:** Low (1 hour)
+
+### 18.4 Secret Proposals — Agent Requests for New API Keys
+- **Status:** TODO
+- **Source:** Paperclip "Company Secret Proposals"
+- **Problem:** Agents can't request new tools/integrations that need API keys. They fail silently when keys are missing.
+- **Fix:** When an adapter detects a missing API key, create an Approval record with type "secret_request" describing what key is needed and why. Human reviews in Approvals page.
+- **Files:** `src/nexus/api/routes/chat.py`, `src/nexus/models/governance.py`
+- **Effort:** Medium (2 hours)
+
+### 18.5 Universal API Schema Translation Layer (UASTL)
+- **Status:** TODO
+- **Source:** OpenCompany
+- **Problem:** `_resolve_adapter_type()` in chat.py is a hardcoded dict mapping. Adding new providers requires code changes.
+- **Fix:** Create `src/nexus/adapters/uastl.py` — a config-driven provider resolution layer. Providers defined in a YAML/JSON file with model mappings, env vars, and default parameters.
+- **Files:** `src/nexus/adapters/uastl.py` (new), `src/nexus/api/routes/chat.py`
+- **Effort:** Medium (4 hours)
+
+---
+
+## Priority 19: Social & Collaborative Intelligence — from AI-Company & Clawith (Phase 13)
+
+Multi-agent collaboration patterns.
+
+### 19.1 Virtual Meeting Rooms
+- **Status:** TODO
+- **Source:** AI-Company
+- **Problem:** Agents collaborate asynchronously (messages). No synchronous debate/consensus mechanism.
+- **Fix:** Create a `Meeting` execution mode: agents are gathered in a "room", each gets the same prompt + prior responses, they iterate until consensus or max rounds.
+- **Files:** `src/nexus/orchestration/meeting.py` (new), `src/nexus/api/routes/meetings.py`
+- **Effort:** High (6 hours)
+
+### 19.2 Corporate Clock / Business Hours
+- **Status:** TODO
+- **Source:** AI-Company
+- **Problem:** Scheduler fires based on absolute time. No concept of "business hours" or "virtual day".
+- **Fix:** Add `business_hours_start` / `business_hours_end` to Company model. Scheduler only fires non-urgent triggers during business hours.
+- **Files:** `src/nexus/runtime/scheduler.py`, `src/nexus/models/company.py`
+- **Effort:** Low (2 hours)
+
+### 19.3 Dynamic MCP Tool Discovery
+- **Status:** TODO
+- **Source:** Clawith (Smithery/ModelScope integration)
+- **Problem:** MCPAgentAdapter exists but agents can't discover new tools at runtime.
+- **Fix:** Create a tool discovery endpoint: `GET /api/v1/tools/discover?query=...` that searches a tool registry (local catalog + optional Smithery API). Agents can request tools via chat.
+- **Files:** `src/nexus/api/routes/tools.py`, `src/nexus/adapters/mcp_adapter.py`
+- **Effort:** Medium (4 hours)
+
+### 19.4 Agent Heartbeat & Wakeup Engine
+- **Status:** TODO
+- **Source:** Paperclip
+- **Problem:** Idle agents stay idle forever unless explicitly woken. No autonomous wakeup based on pending work.
+- **Fix:** In the orchestrator tick, if an agent has pending tasks but is "idle", auto-wake it. If an agent has been active with no work for 10+ minutes, auto-pause.
+- **Files:** `src/nexus/runtime/orchestrator.py`
+- **Effort:** Low (2 hours)
+
+### 19.5 Multi-Agent Debate & Consensus
+- **Status:** TODO
+- **Source:** AI-Company "Virtual Meeting Rooms"
+- **Problem:** When multiple agents work on related tasks, they don't coordinate perspectives.
+- **Fix:** Before executing a high-priority goal, the orchestrator gathers 2-3 relevant agents' opinions (via _call_llm for each with the goal), synthesizes a plan from their responses, then executes.
+- **Files:** `src/nexus/runtime/orchestrator.py`
+- **Effort:** Medium (4 hours)
+
+---
+
+## Completion Tracking
+
+| Priority | Total | Done | Remaining |
+|----------|-------|------|-----------|
+| P1 (Wiring Gaps) | 7 | 7 | 0 |
+| P2 (Governance) | 3 | 3 | 0 |
+| P3 (Feature Gaps) | 5 | 5 | 0 |
+| P4 (Polish) | 4 | 4 | 0 |
+| P5 (Remaining Gaps) | 8 | 8 | 0 |
+| P6 (Autonomy & Completion) | 10 | 10 | 0 |
+| P7 (Production Hardening) | 6 | 6 | 0 |
+| P8 (Frontend Completion) | 5 | 5 | 0 |
+| P9 (Autonomous Intelligence) | 6 | 6 | 0 |
+| P10 (Platform Features) | 7 | 7 | 0 |
+| P11 (Integration & Polish) | 8 | 8 | 0 |
+| P12 (Quality & Production) | 8 | 8 | 0 |
+| P13 (Agent Intelligence) | 8 | 8 | 0 |
+| P14 (Observability) | 6 | 6 | 0 |
+| P15 (Developer Experience) | 6 | 6 | 0 |
+| P16 (Competitive Features) | 6 | 6 | 0 |
+| P17 (Proactive Intelligence) | 4 | 0 | 4 |
+| P18 (Engineering Quality) | 5 | 0 | 5 |
+| P19 (Social & Collaborative) | 5 | 0 | 5 |
+| **Total** | **117** | **103** | **14** |
+
+---
+
+## Phase Execution Plan (Benchmark Features)
+
+```
+Phase 11 — Proactive Intelligence (P17)       ~11 hours
+  From Clawith "Aware Framework":
+  ├── 17.1 Focus Items on Agent Model
+  ├── 17.2 Self-Adaptive Trigger Creation
+  ├── 17.3 The Plaza Knowledge Feed (model + API + UI)
+  └── 17.4 Auto-Post to Plaza on Completion
+
+Phase 12 — Engineering Quality (P18)          ~14 hours
+  From MetaGPT & Paperclip & OpenCompany:
+  ├── 18.1 SOP Artifact Pipeline Engine
+  ├── 18.2 PRD Template Generator
+  ├── 18.3 Architecture Diagram Generator (Mermaid)
+  ├── 18.4 Secret Proposals (agent requests API keys)
+  └── 18.5 Universal API Schema Translation Layer
+
+Phase 13 — Social & Collaborative (P19)      ~18 hours
+  From AI-Company & Clawith & Paperclip:
+  ├── 19.1 Virtual Meeting Rooms
+  ├── 19.2 Corporate Clock / Business Hours
+  ├── 19.3 Dynamic MCP Tool Discovery
+  ├── 19.4 Agent Heartbeat & Wakeup Engine
+  └── 19.5 Multi-Agent Debate & Consensus
+```
+
+---
+
 *Last updated: 2026-08-24 by Kiro agent session*

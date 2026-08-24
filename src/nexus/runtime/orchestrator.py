@@ -95,6 +95,12 @@ async def _tick(session_factory: async_sessionmaker[AsyncSession]) -> None:
         except Exception as e:
             logger.debug("Memory maintenance error: %s", e)
 
+        # Agent heartbeat & wakeup: wake idle agents with pending work
+        try:
+            await _agent_heartbeat_wakeup(db)
+        except Exception as e:
+            logger.debug("Heartbeat wakeup error: %s", e)
+
         await db.commit()
 
 
@@ -375,6 +381,41 @@ async def _auto_evaluate_proposals(db: AsyncSession) -> None:
 
     if stale_proposals:
         await db.flush()
+
+
+async def _agent_heartbeat_wakeup(db: AsyncSession) -> None:
+    """Auto-wake idle agents with pending tasks, auto-pause active agents with no work."""
+    from nexus.models.agent import Agent
+    from nexus.models.task import Task
+    from sqlalchemy import func, update as sa_update
+
+    # Wake idle agents that have pending tasks
+    idle_with_work = await db.execute(
+        select(Agent.id).where(
+            Agent.status == "idle",
+            Agent.id.in_(
+                select(Task.assigned_agent_id).where(Task.status == "pending").distinct()
+            ),
+        ).limit(5)
+    )
+    for (agent_id,) in idle_with_work.all():
+        await db.execute(sa_update(Agent).where(Agent.id == agent_id).values(status="active"))
+        logger.info("Auto-woke idle agent %s (has pending tasks)", agent_id)
+
+    # Auto-pause active agents with zero pending/running tasks (idle for too long)
+    active_no_work = await db.execute(
+        select(Agent.id).where(
+            Agent.status == "active",
+            ~Agent.id.in_(
+                select(Task.assigned_agent_id).where(Task.status.in_(["pending", "in_progress", "running"])).distinct()
+            ),
+        ).limit(5)
+    )
+    for (agent_id,) in active_no_work.all():
+        await db.execute(sa_update(Agent).where(Agent.id == agent_id).values(status="idle"))
+        logger.debug("Auto-idled agent %s (no pending work)", agent_id)
+
+    await db.flush()
 
 
 async def _memory_maintenance(db: AsyncSession) -> None:
