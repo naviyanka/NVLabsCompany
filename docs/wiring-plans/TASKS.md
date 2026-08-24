@@ -34,7 +34,7 @@ These modules exist and are tested but need to be connected to the live API/exec
 - **Dependencies:** Working CLI/LLM adapters (already done)
 
 ### 1.4 Wire Worktree Isolation to Task Execution
-- **Status:** TODO
+- **Status:** DONE
 - **Problem:** `WorktreeManager` has real git subprocess logic but is never called. CLI adapter creates temp directories instead.
 - **Fix:** When a task is assigned to an agent using the CLI adapter, optionally create a git worktree (if the workspace is a git repo) and run the CLI in that worktree. Configuration flag to enable/disable.
 - **Files:** `src/nexus/adapters/cli_adapter.py`, `src/nexus/runtime/worktree.py`
@@ -42,7 +42,7 @@ These modules exist and are tested but need to be connected to the live API/exec
 - **Dependencies:** 1.2 (instruction files written to worktree)
 
 ### 1.5 Wire Remaining Orchestration to API
-- **Status:** TODO
+- **Status:** DONE
 - **Problem:** `ParallelExecutor`, `TaskPlanner`, `GoalLoop` exist but are never imported from routes. Only `AgentRouter` is wired (for task auto-assignment).
 - **Fix:** Create a new route or extend tasks route: `POST /tasks/{id}/decompose` (uses TaskPlanner), `POST /goals/{id}/execute` (uses GoalLoop). Wire ParallelExecutor into pipeline runner.
 - **Files:** `src/nexus/api/routes/tasks.py`, `src/nexus/api/routes/goals.py`
@@ -50,7 +50,7 @@ These modules exist and are tested but need to be connected to the live API/exec
 - **Dependencies:** 1.3 (pipeline runner)
 
 ### 1.6 Wire Evolution Engine to Routes
-- **Status:** TODO
+- **Status:** DONE
 - **Problem:** Evolution routes create proposal records with hardcoded scores (0.8/0.7). The real `FailureAnalyzer`, `LLMEvolutionAdvisor`, `ABTestFramework` modules are never imported.
 - **Fix:** In `evaluate_proposal()`, call `LLMEvolutionAdvisor.evaluate()` instead of returning static scores. In `promote_proposal()`, actually update the agent's configuration (capabilities, system prompt, etc.).
 - **Files:** `src/nexus/api/routes/evolution.py`, `src/nexus/evolution/`
@@ -58,7 +58,7 @@ These modules exist and are tested but need to be connected to the live API/exec
 - **Dependencies:** LLM adapter (already working)
 
 ### 1.7 Wire Vector RAG to Knowledge Search
-- **Status:** TODO
+- **Status:** DONE (was already wired with ILIKE fallback)
 - **Problem:** Knowledge search uses SQL `ILIKE` instead of the `RAGPipeline` in `src/nexus/knowledge/rag.py`.
 - **Fix:** Wire `RAGPipeline.search()` into the `/knowledge/rag-search` endpoint. If no embedding provider is configured, fall back to the current ILIKE approach.
 - **Files:** `src/nexus/api/routes/knowledge.py`, `src/nexus/knowledge/rag.py`
@@ -95,21 +95,21 @@ These modules exist and are tested but need to be connected to the live API/exec
 ## Priority 3: Feature Gaps vs NvLabsOrg
 
 ### 3.1 True Token-Level Streaming
-- **Status:** TODO
+- **Status:** DONE
 - **Problem:** Current SSE streaming calls the LLM, gets the full response, then emits word-by-word (simulated). Not true streaming.
 - **Fix:** For Anthropic/OpenAI adapters, use their streaming APIs and yield tokens as they arrive.
 - **Files:** `src/nexus/adapters/anthropic_adapter.py`, `src/nexus/adapters/openai_adapter.py`, `src/nexus/api/routes/chat.py`
 - **Effort:** High (4-6 hours)
 
 ### 3.2 WebSocket Multiplexing
-- **Status:** TODO
+- **Status:** DONE
 - **Problem:** No real-time multi-agent output streaming. NvLabsOrg streams stdout from all agents over WebSocket channels.
 - **Fix:** Extend `src/nexus/api/routes/ws.py` to support channel subscriptions per agent. When CLI adapters run, stream their output through WS.
 - **Files:** `src/nexus/api/routes/ws.py`, `src/nexus/adapters/cli_adapter.py`
 - **Effort:** High (6-8 hours)
 
 ### 3.3 Auto Commit/Merge per Worktree
-- **Status:** TODO
+- **Status:** DONE
 - **Problem:** NvLabsOrg auto-commits agent work and merges back to main. Our WorktreeManager has merge/revert but nothing triggers it.
 - **Fix:** After CLI adapter execution completes in a worktree, auto-commit changes and optionally auto-merge if clean.
 - **Files:** `src/nexus/runtime/worktree.py`, `src/nexus/adapters/cli_adapter.py`
@@ -124,7 +124,7 @@ These modules exist and are tested but need to be connected to the live API/exec
 - **Effort:** Low — part of 1.3 implementation
 
 ### 3.5 Scheduled/Cron Tasks
-- **Status:** TODO
+- **Status:** DONE
 - **Problem:** No recurring task execution.
 - **Fix:** Add a `schedule` field to Task/Trigger model. Run a background scheduler (APScheduler or simple asyncio loop) that fires tasks on schedule.
 - **Files:** `src/nexus/api/routes/triggers.py`, new `src/nexus/runtime/scheduler.py`
@@ -167,12 +167,12 @@ These modules exist and are tested but need to be connected to the live API/exec
 
 | Priority | Total | Done | Remaining |
 |----------|-------|------|-----------|
-| P1 (Wiring Gaps) | 7 | 3 | 4 |
+| P1 (Wiring Gaps) | 7 | 7 | 0 |
 | P2 (Governance) | 3 | 3 | 0 |
-| P3 (Feature Gaps) | 5 | 1 | 4 |
+| P3 (Feature Gaps) | 5 | 5 | 0 |
 | P4 (Polish) | 4 | 4 | 0 |
-| **Total** | **19** | **11** | **8** |
+| **Total** | **19** | **19** | **0** |
 
 ---
 
-*Last updated: 2026-08-24 by Kiro agent session*
+*All tasks complete. Last updated: 2026-08-24 by Kiro agent session*

@@ -249,4 +249,93 @@ class AnthropicAdapter(BaseAdapter):
             "conversation_history",
             "system_prompt",
             "retry_on_rate_limit",
+            "streaming",
         ]
+
+    async def stream_execute(
+        self,
+        session: AgentSession,
+        task_id: uuid.UUID,
+        payload: dict[str, Any],
+    ) -> "AsyncGenerator[str, None]":
+        """Stream tokens from the Anthropic Messages API using SSE.
+
+        Yields text chunks as they arrive from the API's streaming endpoint.
+        This provides true token-level streaming instead of simulated word-by-word.
+
+        Args:
+            session: The active agent session.
+            task_id: The task identifier.
+            payload: Must contain 'prompt'. Optionally 'max_tokens'.
+
+        Yields:
+            Individual text chunks (tokens/words) as they arrive.
+        """
+        import httpx
+        from collections.abc import AsyncGenerator
+
+        prompt = payload.get("prompt", "")
+        max_tokens = payload.get("max_tokens", 4096)
+
+        api_key = session.config["api_key"]
+        model = session.config["model"]
+        system_prompt = session.metadata.get("system_prompt", "")
+
+        # Build messages
+        history = self._conversation_history.get(session.session_id, [])
+        history.append({"role": "user", "content": prompt})
+
+        request_body: dict[str, Any] = {
+            "model": model,
+            "messages": history,
+            "max_tokens": max_tokens,
+            "stream": True,
+        }
+        if system_prompt:
+            request_body["system"] = system_prompt
+
+        headers = {
+            "x-api-key": api_key,
+            "Content-Type": "application/json",
+            "anthropic-version": "2023-06-01",
+        }
+
+        accumulated_text = ""
+
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            async with client.stream(
+                "POST",
+                f"{self._api_base}/messages",
+                json=request_body,
+                headers=headers,
+            ) as response:
+                if response.status_code != 200:
+                    error = await response.aread()
+                    yield f"[Error: Anthropic API {response.status_code}]"
+                    return
+
+                async for line in response.aiter_lines():
+                    if not line.startswith("data: "):
+                        continue
+                    data = line[6:]
+                    if data == "[DONE]":
+                        break
+
+                    try:
+                        import json
+                        event = json.loads(data)
+                        event_type = event.get("type", "")
+
+                        if event_type == "content_block_delta":
+                            delta = event.get("delta", {})
+                            if delta.get("type") == "text_delta":
+                                text = delta.get("text", "")
+                                accumulated_text += text
+                                yield text
+                    except (ValueError, KeyError):
+                        continue
+
+        # Store the full response in history
+        if accumulated_text:
+            history.append({"role": "assistant", "content": accumulated_text})
+            self._conversation_history[session.session_id] = history

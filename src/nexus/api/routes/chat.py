@@ -508,33 +508,83 @@ async def chat_with_agent_stream(
     _add_message(str(agent_id), "user", body.prompt)
 
     async def event_generator():
-        """Generate SSE events — call LLM and emit word-by-word for streaming UX."""
+        """Generate SSE events — uses true token streaming when adapter supports it."""
         try:
-            response_text, model_used, tokens_used = await _call_llm(
-                agent, system_prompt, body.prompt, history
+            from nexus.adapters.registry import AdapterRegistry
+
+            registry_key, config = _resolve_adapter_type(agent)
+            api_key = config.get("api_key", "")
+
+            # Try true token-level streaming for Anthropic/OpenAI adapters
+            use_true_streaming = (
+                registry_key in ("anthropic", "openai")
+                and api_key  # API key must be configured
             )
 
-            # Simulate streaming by emitting chunks (word-by-word)
-            words = response_text.split(" ")
-            for i, word in enumerate(words):
-                chunk = word if i == 0 else " " + word
-                event = json.dumps({"type": "chunk", "text": chunk})
-                yield f"data: {event}\n\n"
-                # Small delay for streaming effect
-                await asyncio.sleep(0.02)
+            if use_true_streaming:
+                # True streaming: yield tokens as they arrive from the API
+                adapter_registry = AdapterRegistry()
+                adapter = adapter_registry.create_adapter(registry_key)
 
-            # Store the full response in history
-            agent_msg = _add_message(str(agent_id), "agent", response_text)
+                session_config = {**config, "system_prompt": system_prompt}
+                session = await adapter.create_session(agent.id, session_config)
 
-            # Emit done event with the full message
-            done_event = json.dumps({
-                "type": "done",
-                "message": agent_msg,
-                "model_used": model_used,
-                "tokens_used": tokens_used,
-            })
-            yield f"data: {done_event}\n\n"
-            yield "data: [DONE]\n\n"
+                task_id = uuid.uuid4()
+                payload = {"prompt": body.prompt, "max_tokens": 4096}
+                accumulated = ""
+
+                try:
+                    if hasattr(adapter, "stream_execute"):
+                        async for chunk in adapter.stream_execute(session, task_id, payload):
+                            accumulated += chunk
+                            event = json.dumps({"type": "chunk", "text": chunk})
+                            yield f"data: {event}\n\n"
+                    else:
+                        # Fallback for adapters without stream_execute
+                        result = await adapter.execute_task(session, task_id, payload)
+                        accumulated = str(result.output) if result.output else ""
+                        # Emit word-by-word
+                        for i, word in enumerate(accumulated.split(" ")):
+                            chunk = word if i == 0 else " " + word
+                            event = json.dumps({"type": "chunk", "text": chunk})
+                            yield f"data: {event}\n\n"
+                            await asyncio.sleep(0.01)
+                finally:
+                    await adapter.terminate(session)
+
+                # Store response and emit done
+                agent_msg = _add_message(str(agent_id), "agent", accumulated)
+                tokens_used = len(accumulated.split()) * 2  # Rough estimate
+                done_event = json.dumps({
+                    "type": "done",
+                    "message": agent_msg,
+                    "model_used": config.get("model", "unknown"),
+                    "tokens_used": tokens_used,
+                })
+                yield f"data: {done_event}\n\n"
+                yield "data: [DONE]\n\n"
+            else:
+                # Fallback: call LLM, then emit word-by-word (simulated streaming)
+                response_text, model_used, tokens_used = await _call_llm(
+                    agent, system_prompt, body.prompt, history
+                )
+
+                words = response_text.split(" ")
+                for i, word in enumerate(words):
+                    chunk = word if i == 0 else " " + word
+                    event = json.dumps({"type": "chunk", "text": chunk})
+                    yield f"data: {event}\n\n"
+                    await asyncio.sleep(0.02)
+
+                agent_msg = _add_message(str(agent_id), "agent", response_text)
+                done_event = json.dumps({
+                    "type": "done",
+                    "message": agent_msg,
+                    "model_used": model_used,
+                    "tokens_used": tokens_used,
+                })
+                yield f"data: {done_event}\n\n"
+                yield "data: [DONE]\n\n"
 
         except Exception as e:
             logger.error("Streaming chat error for agent %s: %s", agent_id, e)

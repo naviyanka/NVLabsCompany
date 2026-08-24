@@ -67,14 +67,62 @@ class TaskResponse(BaseModel):
 async def create_task(
     company_id: uuid.UUID, body: TaskCreate, db: DbSession
 ) -> Any:
-    """Create a new task in a company."""
+    """Create a new task in a company.
+
+    If assigned_agent_id is not specified, uses AgentRouter to evaluate available
+    agents in the company and auto-assign the highest-scoring candidate.
+    """
+    assigned_id = body.assigned_agent_id
+
+    if assigned_id is None:
+        try:
+            from nexus.models.agent import Agent
+            from nexus.orchestration.router import AgentCandidate, AgentRouter
+
+            stmt = select(Agent).where(
+                Agent.company_id == company_id, Agent.status == "active"
+            )
+            res = await db.execute(stmt)
+            agents = list(res.scalars().all())
+
+            if agents:
+                candidates = [
+                    AgentCandidate(
+                        agent_id=a.id,
+                        name=a.name,
+                        skills=a.capabilities or [],
+                        current_workload=0,
+                        max_concurrent=5,
+                        budget_remaining_cents=(
+                            a.budget_monthly_cents - a.spent_monthly_cents
+                        ),
+                        performance_score=(
+                            (a.performance_score or 50) / 100.0
+                        ),
+                        status=a.status,
+                    )
+                    for a in agents
+                ]
+
+                router_engine = AgentRouter()
+                decision = await router_engine.route_task(
+                    task_description=f"{body.title}\n{body.description or ''}",
+                    required_skills=[],
+                    estimated_cost_cents=100,
+                    available_agents=candidates,
+                )
+                if decision:
+                    assigned_id = decision.agent_id
+        except Exception:
+            pass  # Fall back to unassigned if routing scoring fails
+
     task = Task(
         company_id=company_id,
         title=body.title,
         description=body.description,
         priority=body.priority,
         project_id=body.project_id,
-        assigned_agent_id=body.assigned_agent_id,
+        assigned_agent_id=assigned_id,
         parent_task_id=body.parent_task_id,
     )
     db.add(task)
@@ -386,3 +434,56 @@ async def cancel_task(task_id: uuid.UUID, db: DbSession, company_id: CurrentComp
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     return task
+
+
+@router.post("/api/v1/tasks/{task_id}/decompose")
+async def decompose_task(
+    task_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId
+) -> dict[str, Any]:
+    """Decompose a task into subtasks using the TaskPlanner orchestration module.
+
+    Uses the orchestration layer to analyze the task description and generate
+    a set of ordered subtasks with dependencies. Creates subtask records in DB.
+    """
+    from nexus.orchestration.planner import TaskPlanner
+
+    stmt = select(Task).where(Task.id == task_id, Task.company_id == company_id)
+    result = await db.execute(stmt)
+    task = result.scalar_one_or_none()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    planner = TaskPlanner(max_subtasks=10)
+    subtasks = await planner.decompose_task(
+        task_id=task.id,
+        description=f"{task.title}\n{task.description or ''}",
+        context={"priority": task.priority, "status": task.status},
+    )
+
+    # Create subtask records in DB
+    created = []
+    for st in subtasks:
+        subtask_record = Task(
+            company_id=company_id,
+            title=st.description[:500],
+            description=f"Subtask of {task.title}",
+            priority=task.priority,
+            parent_id=task.id,
+            status="pending",
+        )
+        db.add(subtask_record)
+        await db.flush()
+        created.append({
+            "id": str(subtask_record.id),
+            "title": subtask_record.title,
+            "status": subtask_record.status,
+            "dependencies": [str(d) for d in st.dependencies],
+        })
+
+    await db.commit()
+
+    return {
+        "task_id": str(task_id),
+        "subtasks_created": len(created),
+        "subtasks": created,
+    }

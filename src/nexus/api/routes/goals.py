@@ -179,3 +179,83 @@ async def goal_stats(company_id: uuid.UUID, db: DbSession) -> dict[str, Any]:
     total = await db.execute(select(func.count(Goal.id)).where(Goal.company_id == company_id))
     by_status = await db.execute(select(Goal.status, func.count(Goal.id)).where(Goal.company_id == company_id).group_by(Goal.status))
     return {"total": total.scalar() or 0, "by_status": dict(by_status.all())}
+
+
+@router.post("/api/v1/goals/{goal_id}/execute")
+async def execute_goal(
+    goal_id: uuid.UUID,
+    db: DbSession,
+    company_id: CurrentCompanyId,
+) -> dict[str, Any]:
+    """Execute a goal using the GoalLoop orchestration module.
+
+    Autonomously iterates: calls the assigned agent, evaluates progress
+    against the goal using a heuristic judge, and repeats until the goal
+    is achieved or safety limits are hit (max iterations, budget).
+    """
+    from nexus.models.agent import Agent
+    from nexus.orchestration.goal_loop import GoalLoop, GoalResult, HeuristicGoalJudge
+    from nexus.api.routes.chat import _build_system_prompt, _call_llm
+
+    stmt = select(Goal).where(Goal.id == goal_id, Goal.company_id == company_id)
+    result = await db.execute(stmt)
+    goal = result.scalar_one_or_none()
+    if not goal:
+        raise HTTPException(status_code=404, detail="Goal not found")
+
+    # Find the owner agent or any active agent
+    agent = None
+    if goal.owner_agent_id:
+        a_stmt = select(Agent).where(Agent.id == goal.owner_agent_id, Agent.company_id == company_id)
+        a_res = await db.execute(a_stmt)
+        agent = a_res.scalar_one_or_none()
+
+    if not agent:
+        a_stmt = select(Agent).where(Agent.company_id == company_id, Agent.status.in_(["active", "ready"])).limit(1)
+        a_res = await db.execute(a_stmt)
+        agent = a_res.scalar_one_or_none()
+
+    if not agent:
+        raise HTTPException(status_code=409, detail="No available agent to execute this goal")
+
+    # Build execution function for the GoalLoop
+    system_prompt = _build_system_prompt(agent)
+    goal_description = f"{goal.title}\n{goal.description or ''}"
+
+    async def execute_fn() -> tuple[str, int]:
+        """Call the agent to work toward the goal."""
+        response_text, _model, tokens = await _call_llm(
+            agent, system_prompt, goal_description, []
+        )
+        # Cost in cents: ~1 cent per 500 tokens
+        cost_cents = max(1, tokens // 500)
+        return response_text, cost_cents
+
+    # Run the goal loop with safety limits
+    judge = HeuristicGoalJudge(
+        completion_keywords=["complete", "done", "achieved", "finished", "accomplished"],
+    )
+    loop = GoalLoop(judge=judge, max_iterations=5, budget_limit_cents=2500)
+    goal_result: GoalResult = await loop.run(
+        task_id=goal.id,
+        goal=goal_description,
+        execute_fn=execute_fn,
+    )
+
+    # Update goal status based on result
+    from sqlalchemy import update as sa_update
+    new_status = "completed" if goal_result.success else "active"
+    await db.execute(
+        sa_update(Goal).where(Goal.id == goal_id).values(status=new_status, updated_at=datetime.utcnow())
+    )
+    await db.commit()
+
+    return {
+        "goal_id": str(goal_id),
+        "success": goal_result.success,
+        "iterations_used": goal_result.iterations_used,
+        "total_cost_cents": goal_result.total_cost_cents,
+        "stop_reason": goal_result.stop_reason,
+        "final_output": str(goal_result.final_output)[:2000] if goal_result.final_output else None,
+        "new_status": new_status,
+    }

@@ -185,9 +185,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     from nexus.config_validator import validate_config
     await validate_config()
 
+    # Start the background scheduler for cron/schedule triggers
+    from nexus.runtime.scheduler import start_scheduler, stop_scheduler
+    await start_scheduler(async_session_factory)
+
     yield
 
-    # Shutdown: persist state, close connections
+    # Shutdown: stop scheduler, persist state, close connections
+    await stop_scheduler()
     import logging
     shutdown_logger = logging.getLogger(__name__)
     shutdown_logger.info("NEXUS shutdown initiated - persisting state...")

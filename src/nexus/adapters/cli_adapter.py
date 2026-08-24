@@ -101,20 +101,45 @@ class CLIAdapter(BaseAdapter):
         in the session for use during execution. Sets the is_interactive
         and awaiting_input flags based on config.
 
+        Supports optional git worktree isolation: if `use_worktree=True` is set
+        in the session config and the workspace is a git repo, a dedicated
+        worktree is created for the agent to work in.
+
         Args:
             session: The newly created session.
         """
         workspace = session.config.get("workspace", None)
-        if workspace:
+        use_worktree = session.config.get("use_worktree", False)
+
+        if workspace and use_worktree:
+            # Try to create a git worktree for isolated execution
+            worktree_info = await self._try_create_worktree(
+                workspace, session.agent_id, session.config.get("agent_name", "agent")
+            )
+            if worktree_info:
+                workspace_path = worktree_info.worktree_path
+                session.metadata["_temp_workspace"] = False
+                session.metadata["_worktree"] = True
+                session.metadata["_worktree_branch"] = worktree_info.branch
+                session.metadata["_worktree_repo"] = workspace
+            else:
+                # Worktree creation failed — fall back to using workspace directly
+                workspace_path = workspace
+                os.makedirs(workspace_path, exist_ok=True)
+                session.metadata["_temp_workspace"] = False
+                session.metadata["_worktree"] = False
+        elif workspace:
             workspace_path = workspace
             os.makedirs(workspace_path, exist_ok=True)
             session.metadata["_temp_workspace"] = False
+            session.metadata["_worktree"] = False
         else:
             backend_id = session.config.get("backend", "cli")
             workspace_path = tempfile.mkdtemp(
                 prefix=f"nexus_cli_{backend_id}_{session.session_id[:8]}_"
             )
             session.metadata["_temp_workspace"] = True
+            session.metadata["_worktree"] = False
 
         self._workspaces[session.session_id] = workspace_path
         session.metadata["workspace"] = workspace_path
@@ -395,10 +420,11 @@ class CLIAdapter(BaseAdapter):
     async def _stream_output(
         self, process: asyncio.subprocess.Process, session_id: str
     ) -> None:
-        """Read stdout from a process line-by-line and append to session logs.
+        """Read stdout from a process line-by-line, log it, and publish to WebSocket.
 
         Reads incrementally from the process stdout pipe until EOF. Each
-        line is decoded with errors='replace' and added to session logs.
+        line is decoded with errors='replace', added to session logs, and
+        broadcast to the agent's WebSocket channel for real-time UI streaming.
 
         Args:
             process: The asyncio subprocess to read from.
@@ -413,6 +439,16 @@ class CLIAdapter(BaseAdapter):
                 break
             line = line_bytes.decode("utf-8", errors="replace").rstrip("\n")
             self._add_log(session_id, f"[stdout] {line}")
+
+            # Publish to WebSocket channel for real-time streaming
+            try:
+                from nexus.api.routes.ws import manager as ws_manager
+                await ws_manager.broadcast_to_channel(
+                    f"agent:{session_id[:8]}",
+                    {"type": "agent_output", "session_id": session_id, "line": line},
+                )
+            except Exception:
+                pass  # WebSocket delivery is best-effort
 
     async def _do_heartbeat(self, session: AgentSession) -> bool:
         """Check if the CLI process is still running.
@@ -431,6 +467,9 @@ class CLIAdapter(BaseAdapter):
     async def _do_terminate(self, session: AgentSession) -> None:
         """Terminate the CLI subprocess and clean up workspace.
 
+        If the session used a git worktree, auto-commits any changes and
+        optionally merges back to the main branch before removing it.
+
         Args:
             session: The session being terminated.
         """
@@ -448,12 +487,104 @@ class CLIAdapter(BaseAdapter):
 
         self._conversation_history.pop(session.session_id, None)
 
-        # Clean up temp workspace directory if it was auto-created
+        # Handle worktree cleanup with auto-commit/merge
         workspace_path = self._workspaces.pop(session.session_id, None)
-        if workspace_path and session.metadata.get("_temp_workspace", False):
+        if workspace_path and session.metadata.get("_worktree", False):
+            await self._cleanup_worktree(session, workspace_path)
+        elif workspace_path and session.metadata.get("_temp_workspace", False):
             try:
                 shutil.rmtree(workspace_path, ignore_errors=True)
             except OSError:
+                pass
+
+    async def _try_create_worktree(
+        self, repo_path: str, agent_id: uuid.UUID, agent_name: str
+    ) -> "WorktreeInfo | None":
+        """Attempt to create a git worktree for the agent.
+
+        Returns WorktreeInfo on success, None if the workspace isn't a git repo
+        or worktree creation fails.
+        """
+        from nexus.runtime.worktree import WorktreeManager
+
+        # Verify it's a git repo
+        git_dir = Path(repo_path) / ".git"
+        if not git_dir.exists():
+            return None
+
+        try:
+            manager = WorktreeManager()
+            info = await manager.create_worktree(repo_path, agent_id, agent_name)
+            self._add_log(
+                str(agent_id)[:8],
+                f"Created worktree at {info.worktree_path} (branch: {info.branch})",
+            )
+            return info
+        except Exception as e:
+            self._add_log(
+                str(agent_id)[:8],
+                f"Worktree creation failed, using workspace directly: {e}",
+            )
+            return None
+
+    async def _cleanup_worktree(self, session: AgentSession, workspace_path: str) -> None:
+        """Auto-commit changes in a worktree, merge to main, and remove it.
+
+        Flow:
+        1. Check for pending changes in the worktree
+        2. If changes exist, auto-commit them
+        3. Attempt to merge the worktree branch into main
+        4. Remove the worktree and delete the branch
+        """
+        from nexus.runtime.worktree import WorktreeManager
+
+        branch = session.metadata.get("_worktree_branch", "")
+        repo_path = session.metadata.get("_worktree_repo", "")
+        if not branch or not repo_path:
+            return
+
+        manager = WorktreeManager()
+        auto_merge = session.config.get("auto_merge", True)
+
+        try:
+            # Auto-commit any pending changes
+            has_changes = await manager.has_pending_changes(repo_path, workspace_path)
+            if has_changes:
+                # Stage all changes and commit
+                await manager._run_git(workspace_path, "add", "-A")
+                agent_name = session.config.get("agent_name", "agent")
+                commit_msg = f"[{agent_name}] Auto-commit from agent execution"
+                await manager._run_git(workspace_path, "commit", "-m", commit_msg)
+                self._add_log(
+                    session.session_id,
+                    f"Auto-committed changes in worktree ({branch})",
+                )
+
+                # Attempt merge back to main if configured
+                if auto_merge:
+                    result = await manager.merge_worktree(repo_path, workspace_path, branch)
+                    if result.success:
+                        self._add_log(
+                            session.session_id,
+                            f"Merged {branch} into main (commit: {result.merge_commit})",
+                        )
+                    else:
+                        self._add_log(
+                            session.session_id,
+                            f"Merge conflicts in {branch}: {result.conflicts}. Manual resolution needed.",
+                        )
+
+            # Remove the worktree and branch
+            await manager.remove_worktree(workspace_path, branch, repo_path)
+        except Exception as e:
+            self._add_log(
+                session.session_id,
+                f"Worktree cleanup error: {e}",
+            )
+            # Best-effort: try to remove the worktree even if other steps failed
+            try:
+                await manager.remove_worktree(workspace_path, branch, repo_path)
+            except Exception:
                 pass
 
     def _get_capabilities(self) -> list[str]:
