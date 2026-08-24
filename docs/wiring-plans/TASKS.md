@@ -349,8 +349,8 @@ These are the final features needed to make the system fully autonomous rather t
 | P3 (Feature Gaps) | 5 | 5 | 0 |
 | P4 (Polish) | 4 | 4 | 0 |
 | P5 (Remaining Gaps) | 8 | 8 | 0 |
-| P6 (Autonomy & Completion) | 10 | 0 | 10 |
-| **Total** | **37** | **27** | **10** |
+| P6 (Autonomy & Completion) | 10 | 7 | 3 |
+| **Total** | **37** | **34** | **3** |
 
 ---
 
