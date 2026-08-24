@@ -26,7 +26,7 @@ These modules exist and are tested but need to be connected to the live API/exec
 - **Dependencies:** None
 
 ### 1.3 Wire Pipeline Stage Execution
-- **Status:** TODO
+- **Status:** DONE
 - **Problem:** `POST /pipelines/{id}/run` creates a `PipelineRun` DB record but never executes stages. No background worker exists.
 - **Fix:** After creating the PipelineRun, spawn an asyncio background task that iterates through `pipeline.stages`, calls the appropriate adapter for each stage, passes output of stage N as input to stage N+1, and updates the run status.
 - **Files:** `src/nexus/api/routes/pipelines.py`, new file `src/nexus/runtime/pipeline_runner.py`
@@ -77,14 +77,14 @@ These modules exist and are tested but need to be connected to the live API/exec
 - **Effort:** Low (1 hour)
 
 ### 2.2 Real Budget Enforcement
-- **Status:** TODO
+- **Status:** DONE
 - **Problem:** `_check_budget()` always returns True and `_estimate_request_cost()` returns 0.
 - **Fix:** Query the company's budget model and compare estimated cost. For LLM calls, estimate tokens from prompt length.
 - **Files:** `src/nexus/api/middleware.py`, `src/nexus/models/budget.py`
 - **Effort:** Medium (2 hours)
 
 ### 2.3 Policy Engine
-- **Status:** TODO
+- **Status:** DONE
 - **Problem:** `_evaluate_policy()` always returns `{"allowed": True}`.
 - **Fix:** Load active policies from DB and evaluate request against them (path patterns, method restrictions, time-based rules).
 - **Files:** `src/nexus/api/middleware.py`, `src/nexus/api/routes/policies.py`
@@ -117,7 +117,7 @@ These modules exist and are tested but need to be connected to the live API/exec
 - **Dependencies:** 1.4 (worktree wired)
 
 ### 3.4 Context Injection Between Pipeline Steps
-- **Status:** TODO
+- **Status:** DONE (implemented as part of 1.3)
 - **Problem:** No mechanism to pass output of step N as input to step N+1.
 - **Fix:** Pipeline runner should store each step's output and include it in the next step's prompt/payload.
 - **Files:** `src/nexus/runtime/pipeline_runner.py` (from 1.3)
@@ -135,13 +135,13 @@ These modules exist and are tested but need to be connected to the live API/exec
 ## Priority 4: Polish & UX
 
 ### 4.1 More Slash Commands
-- **Status:** TODO
-- **Commands to add:** `/cancel` (abort current task), `/hire` (quick hire from chat), `/broadcast` (message all agents), `/budget` (show remaining budget)
+- **Status:** DONE
+- **Commands added:** `/cancel` (abort current task), `/hire` (quick hire from chat), `/broadcast` (message all agents), `/budget` (show remaining budget)
 - **Files:** `dashboard/src/components/agents/AgentChatDrawer.tsx`
 - **Effort:** Low (1-2 hours)
 
 ### 4.2 Agent Backend Switching
-- **Status:** TODO
+- **Status:** DONE
 - **Problem:** Changing an agent's CLI provider requires editing via API. No UI for quick switch.
 - **Fix:** Add a dropdown in AgentDetailPage to change `adapter_type` and `model` with a PUT call.
 - **Files:** `dashboard/src/pages/AgentDetailPage.tsx`
@@ -155,7 +155,7 @@ These modules exist and are tested but need to be connected to the live API/exec
 - **Effort:** Low (30 min)
 
 ### 4.4 Fix Disk Persistence Count in Docs
-- **Status:** TODO
+- **Status:** DONE
 - **Problem:** Doc says 15 stores, actual count is 19.
 - **Fix:** Update the comparison document.
 - **Files:** `docs/wiring-plans/nvlabsorg-comparison.md`
@@ -167,11 +167,11 @@ These modules exist and are tested but need to be connected to the live API/exec
 
 | Priority | Total | Done | Remaining |
 |----------|-------|------|-----------|
-| P1 (Wiring Gaps) | 7 | 2 | 5 |
-| P2 (Governance) | 3 | 1 | 2 |
-| P3 (Feature Gaps) | 5 | 0 | 5 |
-| P4 (Polish) | 4 | 1 | 3 |
-| **Total** | **19** | **4** | **15** |
+| P1 (Wiring Gaps) | 7 | 3 | 4 |
+| P2 (Governance) | 3 | 3 | 0 |
+| P3 (Feature Gaps) | 5 | 1 | 4 |
+| P4 (Polish) | 4 | 4 | 0 |
+| **Total** | **19** | **11** | **8** |
 
 ---
 

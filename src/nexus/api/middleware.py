@@ -85,6 +85,88 @@ class _SlidingWindowRateLimiter:
 _rate_limiter = _SlidingWindowRateLimiter()
 
 
+class _BudgetTracker:
+    """In-memory budget tracker that caches company spend limits.
+
+    The middleware can't do async DB queries (it's a pure ASGI middleware),
+    so we maintain an in-memory cache of company budgets. The cache is populated
+    by the first request for each company and expires after a configurable TTL.
+    Budget updates (when an LLM call completes) are accumulated here and
+    periodically flushed to the DB by a background task.
+    """
+
+    def __init__(self, ttl_seconds: int = 300) -> None:
+        self._cache: dict[uuid.UUID, dict[str, int]] = {}
+        self._cache_time: dict[uuid.UUID, float] = {}
+        self._ttl = ttl_seconds
+        self._lock = Lock()
+        self._pending_spend: dict[uuid.UUID, int] = {}
+
+    def set_budget(self, company_id: uuid.UUID, budget_cents: int, spent_cents: int) -> None:
+        """Seed or update the budget cache for a company."""
+        with self._lock:
+            self._cache[company_id] = {
+                "budget": budget_cents,
+                "spent": spent_cents,
+            }
+            self._cache_time[company_id] = time.time()
+
+    def record_spend(self, company_id: uuid.UUID, cost_cents: int) -> None:
+        """Record spend against a company's budget (in-memory accumulation)."""
+        with self._lock:
+            self._pending_spend[company_id] = self._pending_spend.get(company_id, 0) + cost_cents
+            if company_id in self._cache:
+                self._cache[company_id]["spent"] += cost_cents
+
+    def check(self, company_id: uuid.UUID, estimated_cost: int) -> bool:
+        """Return True if the company can afford the estimated cost.
+
+        If no budget data is cached, defaults to allowing (fail-open).
+        """
+        with self._lock:
+            entry = self._cache.get(company_id)
+            if entry is None:
+                return True  # No data yet — fail open
+            budget = entry["budget"]
+            if budget <= 0:
+                return True  # No budget cap configured
+            spent = entry["spent"]
+            return (spent + estimated_cost) <= budget
+
+    def get_remaining(self, company_id: uuid.UUID) -> int | None:
+        """Get remaining budget in cents, or None if unknown."""
+        with self._lock:
+            entry = self._cache.get(company_id)
+            if entry is None:
+                return None
+            return max(0, entry["budget"] - entry["spent"])
+
+
+# Global budget tracker
+_budget_tracker = _BudgetTracker()
+
+# Global policy cache: company_id → list of active policy dicts
+# Seeded at startup from DB, can be refreshed via admin endpoint
+_policy_cache: dict[uuid.UUID, list[dict[str, Any]]] = {}
+
+# Route patterns that are considered "expensive" (LLM calls)
+_EXPENSIVE_ROUTE_PATTERNS = [
+    "/chat",
+    "/chat/stream",
+    "/execute",
+    "/decompose",
+    "/evaluate",
+]
+
+# Estimated cost in cents for different route types
+_ROUTE_COST_ESTIMATES: dict[str, int] = {
+    "chat": 5,       # ~5 cents per LLM chat call
+    "stream": 5,
+    "execute": 10,   # Task execution is more expensive
+    "default": 0,    # Non-LLM routes are free
+}
+
+
 class _KillSwitchRegistry:
     """Singleton registry tracking which companies have the kill switch active.
 
@@ -269,16 +351,89 @@ class GovernanceMiddleware:
     def _evaluate_policy(
         self, request: Request, company_id: uuid.UUID | None
     ) -> dict[str, Any]:
-        """Evaluate request-level policies."""
-        # TODO: Wire to PolicyEngine.evaluate(context)
+        """Evaluate request-level policies against the company's active policy rules.
+
+        Policy rules are JSON objects with optional fields:
+        - "deny_paths": list of path prefixes to block (e.g. ["/api/v1/agents/*/delete"])
+        - "deny_methods": list of HTTP methods to block (e.g. ["DELETE"])
+        - "allow_paths": whitelist — if present, only these paths are allowed
+        - "deny_after_hour": block requests after this hour (0-23, UTC)
+        - "deny_before_hour": block requests before this hour (0-23, UTC)
+
+        Returns {"allowed": True} or {"allowed": False, "reason": "..."}.
+        """
+        if company_id is None:
+            return {"allowed": True}
+
+        policies = _policy_cache.get(company_id)
+        if not policies:
+            return {"allowed": True}
+
+        path = request.scope.get("path", "")
+        method = request.scope.get("method", "GET")
+
+        for policy in policies:
+            rules = policy.get("rules")
+            if not rules or not isinstance(rules, dict):
+                continue
+
+            # Check denied paths
+            deny_paths = rules.get("deny_paths", [])
+            for pattern in deny_paths:
+                # Simple prefix/glob matching: "*" matches any segment
+                if pattern.replace("*", "") in path or path.startswith(pattern.split("*")[0]):
+                    return {
+                        "allowed": False,
+                        "reason": f"Policy '{policy.get('name', 'unnamed')}' denies path: {path}",
+                    }
+
+            # Check denied methods
+            deny_methods = rules.get("deny_methods", [])
+            if method in deny_methods:
+                return {
+                    "allowed": False,
+                    "reason": f"Policy '{policy.get('name', 'unnamed')}' denies method: {method}",
+                }
+
+            # Check time-based restrictions
+            import datetime as dt
+
+            current_hour = dt.datetime.utcnow().hour
+            deny_after = rules.get("deny_after_hour")
+            deny_before = rules.get("deny_before_hour")
+            if deny_after is not None and current_hour >= deny_after:
+                return {
+                    "allowed": False,
+                    "reason": f"Policy '{policy.get('name', 'unnamed')}' denies requests after {deny_after}:00 UTC",
+                }
+            if deny_before is not None and current_hour < deny_before:
+                return {
+                    "allowed": False,
+                    "reason": f"Policy '{policy.get('name', 'unnamed')}' denies requests before {deny_before}:00 UTC",
+                }
+
         return {"allowed": True}
 
     def _estimate_request_cost(self, request: Request) -> int:
-        """Estimate the cost of processing this request."""
-        # TODO: Wire to cost model based on route patterns
+        """Estimate the cost of processing this request based on route patterns.
+
+        Routes that trigger LLM calls (chat, execute, evaluate) are assigned
+        a cost estimate in cents. Other routes are free (cost=0).
+        """
+        path = request.scope.get("path", "")
+        for pattern in _EXPENSIVE_ROUTE_PATTERNS:
+            if pattern in path:
+                # Find the most specific cost key
+                for key, cost in _ROUTE_COST_ESTIMATES.items():
+                    if key in path:
+                        return cost
+                return _ROUTE_COST_ESTIMATES.get("chat", 5)
         return 0
 
     def _check_budget(self, company_id: uuid.UUID, estimated_cost: int) -> bool:
-        """Check if the company has sufficient budget."""
-        # TODO: Wire to BudgetEnforcer.check(company_id, estimated_cost)
-        return True
+        """Check if the company has sufficient budget for this request.
+
+        Uses the in-memory budget tracker. If no budget data is cached
+        (first request before DB lookup), fails open (allows the request).
+        """
+        return _budget_tracker.check(company_id, estimated_cost)

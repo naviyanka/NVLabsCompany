@@ -438,6 +438,14 @@ async def chat_with_agent(
     # Store agent response
     agent_msg = _add_message(str(agent_id), "agent", response_text)
 
+    # Record spend against company budget
+    if tokens_used > 0:
+        from nexus.api.middleware import _budget_tracker
+        # Rough cost estimate: ~$0.003 per 1K input tokens, ~$0.015 per 1K output tokens
+        # Simplified: ~1 cent per 500 tokens
+        estimated_cost_cents = max(1, tokens_used // 500)
+        _budget_tracker.record_spend(company_id, estimated_cost_cents)
+
     return ChatResponse(
         message=ChatMessage(**agent_msg),
         history=[ChatMessage(**m) for m in _get_history(str(agent_id))],

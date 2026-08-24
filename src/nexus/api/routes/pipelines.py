@@ -105,9 +105,160 @@ async def delete_pipeline(pipeline_id: uuid.UUID, db: DbSession, company_id: Cur
     await db.execute(stmt)
 
 
+from fastapi import BackgroundTasks
+
+
+async def _execute_pipeline_bg(run_id: uuid.UUID, pipeline_id: uuid.UUID, company_id: uuid.UUID) -> None:
+    """Background task to execute pipeline stages sequentially.
+
+    Each stage is a dict with:
+    - name: stage name
+    - prompt: the instruction/prompt for this stage (required)
+    - agent_id: optional specific agent to use (falls back to any active agent)
+    - adapter_type: optional override (e.g., "anthropic", "cli")
+    - model: optional model override
+
+    Output from stage N is injected into stage N+1's prompt as context.
+    """
+    import logging
+    from nexus.database import async_session_factory
+    from nexus.models.agent import Agent
+
+    logger = logging.getLogger(__name__)
+
+    async with async_session_factory() as db:
+        # Load the run
+        stmt = select(PipelineRun).where(PipelineRun.id == run_id)
+        result = await db.execute(stmt)
+        run = result.scalar_one_or_none()
+        if not run:
+            return
+
+        # Load the pipeline definition
+        pipeline_stmt = select(Pipeline).where(Pipeline.id == pipeline_id)
+        p_res = await db.execute(pipeline_stmt)
+        pipeline = p_res.scalar_one_or_none()
+        if not pipeline or not pipeline.stages:
+            run.status = "completed"
+            run.completed_at = datetime.utcnow()
+            db.add(run)
+            await db.commit()
+            return
+
+        stage_results: list[dict[str, Any]] = []
+        previous_output = ""
+
+        for i, stage in enumerate(pipeline.stages):
+            # Check if run was cancelled/paused externally
+            await db.refresh(run)
+            if run.status in ("cancelled", "paused"):
+                break
+
+            stage_name = stage.get("name", f"Stage-{i+1}")
+            stage_prompt = stage.get("prompt", stage.get("instruction", ""))
+            stage_agent_id = stage.get("agent_id")
+
+            # Update current stage progress
+            run.current_stage = i
+            db.add(run)
+            await db.commit()
+
+            # Inject previous stage output as context
+            full_prompt = stage_prompt
+            if previous_output and i > 0:
+                full_prompt = (
+                    f"Previous stage output:\n---\n{previous_output}\n---\n\n"
+                    f"Current task:\n{stage_prompt}"
+                )
+
+            # Find the agent to use for this stage
+            agent = None
+            if stage_agent_id:
+                agent_stmt = select(Agent).where(
+                    Agent.id == uuid.UUID(stage_agent_id) if isinstance(stage_agent_id, str) else Agent.id == stage_agent_id,
+                    Agent.company_id == company_id,
+                )
+                a_res = await db.execute(agent_stmt)
+                agent = a_res.scalar_one_or_none()
+
+            if not agent:
+                # Fallback: pick any active agent in the company
+                agent_stmt = select(Agent).where(
+                    Agent.company_id == company_id,
+                    Agent.status.in_(["active", "ready"]),
+                ).limit(1)
+                a_res = await db.execute(agent_stmt)
+                agent = a_res.scalar_one_or_none()
+
+            if not agent:
+                stage_results.append({
+                    "stage": stage_name,
+                    "stage_index": i,
+                    "status": "failed",
+                    "error": "No available agent to execute this stage",
+                    "completed_at": datetime.utcnow().isoformat(),
+                })
+                run.status = "failed"
+                run.error = f"Stage '{stage_name}': No agent available"
+                break
+
+            # Execute the stage via the chat/adapter system
+            try:
+                from nexus.api.routes.chat import _build_system_prompt, _call_llm, _fetch_agent_memories
+
+                # Build context with agent's soul + memories
+                memories = await _fetch_agent_memories(db, agent.id, company_id, limit=5)
+                system_prompt = _build_system_prompt(agent, memories=memories)
+
+                # Call the LLM adapter
+                response_text, model_used, tokens_used = await _call_llm(
+                    agent, system_prompt, full_prompt, []
+                )
+
+                previous_output = response_text
+
+                stage_results.append({
+                    "stage": stage_name,
+                    "stage_index": i,
+                    "status": "success",
+                    "output": response_text[:5000],  # Truncate for storage
+                    "agent_id": str(agent.id),
+                    "agent_name": agent.name,
+                    "model_used": model_used,
+                    "tokens_used": tokens_used,
+                    "completed_at": datetime.utcnow().isoformat(),
+                })
+
+            except Exception as e:
+                logger.error("Pipeline stage %d failed: %s", i, e)
+                stage_results.append({
+                    "stage": stage_name,
+                    "stage_index": i,
+                    "status": "failed",
+                    "error": f"{type(e).__name__}: {e}",
+                    "completed_at": datetime.utcnow().isoformat(),
+                })
+                run.status = "failed"
+                run.error = f"Stage '{stage_name}' failed: {e}"
+                break
+
+        # Finalize run
+        if run.status == "running":
+            run.status = "completed"
+        run.results = stage_results
+        run.completed_at = datetime.utcnow()
+        db.add(run)
+        await db.commit()
+
+
 @router.post("/api/v1/pipelines/{pipeline_id}/run", status_code=status.HTTP_201_CREATED, response_model=PipelineRunResponse)
-async def run_pipeline(pipeline_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId) -> Any:
-    """Trigger a pipeline execution."""
+async def run_pipeline(
+    pipeline_id: uuid.UUID,
+    background_tasks: BackgroundTasks,
+    db: DbSession,
+    company_id: CurrentCompanyId,
+) -> Any:
+    """Trigger a pipeline execution with background stage runner."""
     stmt = select(Pipeline).where(Pipeline.id == pipeline_id, Pipeline.company_id == company_id)
     result = await db.execute(stmt)
     pipeline = result.scalar_one_or_none()
@@ -117,6 +268,9 @@ async def run_pipeline(pipeline_id: uuid.UUID, db: DbSession, company_id: Curren
     run = PipelineRun(pipeline_id=pipeline_id, company_id=company_id, status="running")
     db.add(run)
     await db.flush()
+
+    # Schedule background execution worker
+    background_tasks.add_task(_execute_pipeline_bg, run.id, pipeline_id, company_id)
     return run
 
 

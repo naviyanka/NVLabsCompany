@@ -28,6 +28,10 @@ const SLASH_COMMANDS = [
   { cmd: '/clear', desc: 'Clear chat history' },
   { cmd: '/export', desc: 'Download chat transcript as Markdown' },
   { cmd: '/model', desc: 'Show current model & provider' },
+  { cmd: '/budget', desc: 'Show remaining budget & session spend' },
+  { cmd: '/cancel', desc: 'Cancel current running task' },
+  { cmd: '/hire', desc: 'Quick-hire a new agent' },
+  { cmd: '/broadcast', desc: 'Send message to all agents' },
 ];
 
 export function AgentChatDrawer({ agent, isOpen, onClose }: AgentChatDrawerProps) {
@@ -171,11 +175,92 @@ export function AgentChatDrawer({ agent, isOpen, onClose }: AgentChatDrawerProps
               `• \`/status\` — Show agent status, role & capabilities\n` +
               `• \`/clear\` — Clear chat history\n` +
               `• \`/export\` — Download conversation transcript as Markdown\n` +
-              `• \`/model\` — Show current model & provider\n\n` +
+              `• \`/model\` — Show current model & provider\n` +
+              `• \`/budget\` — Show remaining budget & session spend\n` +
+              `• \`/cancel\` — Cancel current running task\n` +
+              `• \`/hire\` — Quick-hire a new agent (opens modal)\n` +
+              `• \`/broadcast <msg>\` — Send message to all agents\n\n` +
               `Type anything else to converse directly with ${agent.name}.`,
             timestamp: new Date().toISOString(),
           }]);
           return;
+
+        case '/budget':
+          setMessages((prev) => [...prev, {
+            id: `sys-${Date.now()}`,
+            sender: 'agent',
+            text: `**Budget & Spend**\n` +
+              `• Monthly Budget: $${((agent.budget_monthly_cents || 0) / 100).toFixed(2)}\n` +
+              `• Monthly Spent: $${((agent.spent_monthly_cents || 0) / 100).toFixed(2)}\n` +
+              `• Remaining: $${(((agent.budget_monthly_cents || 0) - (agent.spent_monthly_cents || 0)) / 100).toFixed(2)}\n` +
+              `• Session Tokens Used: ${sessionTokens.toLocaleString()}\n` +
+              `• Estimated Session Cost: ~$${(sessionTokens / 500 / 100).toFixed(4)}`,
+            timestamp: new Date().toISOString(),
+          }]);
+          return;
+
+        case '/cancel':
+          if (sending) {
+            setSending(false);
+            setMessages((prev) => [...prev, {
+              id: `sys-${Date.now()}`,
+              sender: 'agent',
+              text: `Task execution cancelled. The agent is now idle.`,
+              timestamp: new Date().toISOString(),
+            }]);
+          } else {
+            setMessages((prev) => [...prev, {
+              id: `sys-${Date.now()}`,
+              sender: 'agent',
+              text: `No active task to cancel. ${agent.name} is idle.`,
+              timestamp: new Date().toISOString(),
+            }]);
+          }
+          return;
+
+        case '/hire':
+          setMessages((prev) => [...prev, {
+            id: `sys-${Date.now()}`,
+            sender: 'agent',
+            text: `Opening the Hire Agent modal... Use the UI to configure and deploy a new agent.`,
+            timestamp: new Date().toISOString(),
+          }]);
+          // Dispatch a custom event that the parent page can listen to
+          window.dispatchEvent(new CustomEvent('nexus:open-hire-modal'));
+          return;
+
+        case '/broadcast': {
+          const broadcastMsg = userText.slice('/broadcast'.length).trim();
+          if (!broadcastMsg) {
+            setMessages((prev) => [...prev, {
+              id: `sys-${Date.now()}`,
+              sender: 'agent',
+              text: `Usage: \`/broadcast <message>\`\nSends a message to all active agents.`,
+              timestamp: new Date().toISOString(),
+            }]);
+            return;
+          }
+          // Send broadcast via API
+          apiClient.post('/api/v1/communication/broadcast', {
+            message: broadcastMsg,
+            sender_agent_id: agent.id,
+          }).then(() => {
+            setMessages((prev) => [...prev, {
+              id: `sys-${Date.now()}`,
+              sender: 'agent',
+              text: `Broadcast sent to all active agents: "${broadcastMsg}"`,
+              timestamp: new Date().toISOString(),
+            }]);
+          }).catch(() => {
+            setMessages((prev) => [...prev, {
+              id: `sys-${Date.now()}`,
+              sender: 'agent',
+              text: `Failed to broadcast. Communication service may be unavailable.`,
+              timestamp: new Date().toISOString(),
+            }]);
+          });
+          return;
+        }
 
         default:
           setMessages((prev) => [...prev, {

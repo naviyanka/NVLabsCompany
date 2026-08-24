@@ -11,6 +11,7 @@ import {
   Award,
   ArrowLeft,
   Database,
+  Trash2,
 } from 'lucide-react';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
 import { Card } from '@/components/common/Card';
@@ -20,6 +21,8 @@ import { Badge } from '@/components/common/Badge';
 import { Tabs } from '@/components/common/Tabs';
 import { Skeleton } from '@/components/common/Skeleton';
 import { apiClient, unwrapItems } from '@/api/client';
+import { deleteAgent } from '@/api/agents';
+import { FireAgentModal } from '@/components/agents/FireAgentModal';
 import { getActiveCompanyId } from '@/config';
 import type { Agent } from '@/types/agent';
 
@@ -53,6 +56,7 @@ export function AgentDetailPage() {
   const [agent, setAgent] = useState<Agent | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('chat');
+  const [showFireModal, setShowFireModal] = useState(false);
   
   // Chat state
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
@@ -231,8 +235,28 @@ export function AgentDetailPage() {
           >
             Train (+Score)
           </Button>
+
+          <Button
+            variant="primary"
+            size="sm"
+            icon={<Trash2 size={14} />}
+            onClick={() => setShowFireModal(true)}
+            className="bg-red-600 hover:bg-red-500 text-white border-red-500"
+          >
+            Fire Agent
+          </Button>
         </div>
       </div>
+
+      <FireAgentModal
+        agent={agent}
+        isOpen={showFireModal}
+        onClose={() => setShowFireModal(false)}
+        onConfirm={async (ag) => {
+          await deleteAgent(ag.id);
+          navigate('/agents');
+        }}
+      />
 
       {/* Metrics Row */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -386,14 +410,43 @@ export function AgentDetailPage() {
                 </div>
               </div>
 
-              <div className="pt-3 border-t border-white/[0.06] space-y-2 text-xs font-mono">
-                <div className="flex justify-between text-[#A8A8AB]">
-                  <span>Adapter Adapter</span>
-                  <span className="text-[#F2F1EE]">{agent.adapter_type}</span>
+              <div className="pt-3 border-t border-white/[0.06] space-y-3 text-xs font-mono">
+                <div className="flex items-center justify-between text-[#A8A8AB]">
+                  <span>Provider Backend</span>
+                  <select
+                    value={agent.adapter_type}
+                    onChange={async (e) => {
+                      const newAdapter = e.target.value;
+                      try {
+                        await apiClient.put(`/api/v1/agents/${id}`, { adapter_type: newAdapter });
+                        setAgent((prev) => prev ? { ...prev, adapter_type: newAdapter } : prev);
+                      } catch { /* silent */ }
+                    }}
+                    className="bg-[#101012] border border-white/[0.1] rounded-[4px] px-2 py-1 text-[#F2F1EE] text-xs focus:outline-none focus:border-[#FFB020] cursor-pointer"
+                  >
+                    {['anthropic', 'openai', 'claude', 'codex', 'kiro-cli', 'antigravity', 'aider', 'opencode', 'ollama', 'langchain'].map((p) => (
+                      <option key={p} value={p}>{p}</option>
+                    ))}
+                  </select>
                 </div>
-                <div className="flex justify-between text-[#A8A8AB]">
-                  <span>LLM Backbone</span>
-                  <span className="text-[#F2F1EE]">{agent.model}</span>
+                <div className="flex items-center justify-between text-[#A8A8AB]">
+                  <span>LLM Model</span>
+                  <input
+                    type="text"
+                    defaultValue={agent.model || ''}
+                    onBlur={async (e) => {
+                      const newModel = e.target.value.trim();
+                      if (newModel && newModel !== agent.model) {
+                        try {
+                          await apiClient.put(`/api/v1/agents/${id}`, { model: newModel });
+                          setAgent((prev) => prev ? { ...prev, model: newModel } : prev);
+                        } catch { /* silent */ }
+                      }
+                    }}
+                    onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+                    className="bg-[#101012] border border-white/[0.1] rounded-[4px] px-2 py-1 text-[#F2F1EE] text-xs w-44 text-right focus:outline-none focus:border-[#FFB020]"
+                    placeholder="e.g. claude-sonnet-4"
+                  />
                 </div>
                 <div className="flex justify-between text-[#A8A8AB]">
                   <span>Monthly Budget Cap</span>

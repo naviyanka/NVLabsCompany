@@ -115,6 +115,41 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Load governance state from DB (kill switches, circuit breakers)
     import logging
     _logger = logging.getLogger(__name__)
+
+    # Seed budget tracker with company budget data
+    try:
+        from nexus.api.middleware import _budget_tracker, _policy_cache
+        from nexus.models.company import Company as CompanyModel
+        from nexus.models.policy import Policy as PolicyModel
+
+        async with async_session_factory() as session:
+            from sqlalchemy import select as sa_select
+            result = await session.execute(sa_select(CompanyModel))
+            for company in result.scalars().all():
+                _budget_tracker.set_budget(
+                    company.id,
+                    company.budget_monthly_cents,
+                    company.spent_monthly_cents,
+                )
+
+            # Load active policies into cache
+            policy_result = await session.execute(
+                sa_select(PolicyModel).where(PolicyModel.enabled == True)  # noqa: E712
+            )
+            for policy in policy_result.scalars().all():
+                if policy.company_id not in _policy_cache:
+                    _policy_cache[policy.company_id] = []
+                _policy_cache[policy.company_id].append({
+                    "name": policy.name,
+                    "rules": policy.rules,
+                    "priority": policy.priority,
+                })
+
+        _logger.info("Budget tracker and policy cache seeded from DB")
+    except Exception as exc:
+        _logger = logging.getLogger(__name__)
+        _logger.warning("Could not seed budget/policy data: %s", exc)
+
     try:
         from nexus.governance.persistent_circuit_breaker import PersistentCircuitBreaker
         from nexus.governance.persistent_kill_switch import PersistentKillSwitch
