@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowUpRight } from 'lucide-react';
 import { apiClient } from '../../api/client';
+import { getActiveCompanyId } from '../../config';
 
 export interface PulseEvent {
   id: string;
@@ -25,7 +26,7 @@ export function PulseLine() {
     // Initial fetch of recent telemetry events
     const fetchPulse = async () => {
       try {
-        const res = await apiClient.get<PulseEvent[]>('/api/v1/companies/00000000-0000-4000-8000-000000000001/pulse');
+        const res = await apiClient.get<PulseEvent[]>(`/api/v1/companies/${getActiveCompanyId()}/pulse`);
         if (Array.isArray(res)) {
           setEvents(res);
         }
@@ -38,7 +39,7 @@ export function PulseLine() {
     // SSE connection for live updates
     let eventSource: EventSource | null = null;
     try {
-      eventSource = new EventSource('/api/v1/companies/00000000-0000-4000-8000-000000000001/activity/stream');
+      eventSource = new EventSource(`/api/v1/companies/${getActiveCompanyId()}/activity/stream`);
       eventSource.onopen = () => setIsConnected(true);
       eventSource.onmessage = (e) => {
         try {

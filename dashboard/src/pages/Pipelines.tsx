@@ -23,36 +23,7 @@ import { AddPipelineModal } from '@/components/pipelines/AddPipelineModal';
 import { PipelineDetailDrawer } from '@/components/pipelines/PipelineDetailDrawer';
 import { PipelineBuilderCanvas } from '@/components/pipelines/PipelineBuilderCanvas';
 
-const INITIAL_PIPELINES: PipelineItem[] = [
-  {
-    id: 'pipe-release',
-    name: 'Production Continuous Delivery & Automated PR Gateway',
-    description: 'Automated code review, AST impact analysis, security fuzzing, gVisor microVM evaluation, and canary rollout.',
-    status: 'completed',
-    success_rate: 98.4,
-    trigger: 'Webhook / Git Push',
-    last_run: new Date(Date.now() - 1800000).toISOString(),
-    stages: [
-      { id: 'node-1', name: '1. Event Ingest & AST Analysis', assignedAgent: 'Atlas-01', status: 'completed', duration_ms: 450, logs: 'AST parse tree built clean.' },
-      { id: 'node-2', name: '2. Code Review & Impact Check', assignedAgent: 'Nova-02', status: 'completed', duration_ms: 1200, logs: 'GitNexus impact analysis verified zero breaking changes.' },
-      { id: 'node-3', name: '3. Security Gate Audit', assignedAgent: 'Sentinel-07', status: 'completed', duration_ms: 850, logs: 'gVisor microVM syscall filtering clean.' },
-      { id: 'node-4', name: '4. Unit & Integration Testing', assignedAgent: 'Bolt-03', status: 'completed', duration_ms: 1400, logs: 'PASS 18 test suites.' },
-    ],
-  },
-  {
-    id: 'pipe-idx',
-    name: 'Zero-Trust Threat Intelligence & Webhook Auto-Indexer',
-    description: 'Extract semantic embeddings, audit public webhooks for SSRF risks, and store graph relations.',
-    status: 'idle',
-    success_rate: 100.0,
-    trigger: 'Cron Schedule (Hourly)',
-    last_run: new Date(Date.now() - 7200000).toISOString(),
-    stages: [
-      { id: 'node-k1', name: '1. Webhook Vulnerability Audit', assignedAgent: 'Sentinel-07', status: 'completed', duration_ms: 600, logs: 'Audit finished clean.' },
-      { id: 'node-k2', name: '2. Extract Vector Embeddings', assignedAgent: 'Sage-05', status: 'completed', duration_ms: 950, logs: 'pgvector memory bank indexed.' },
-    ],
-  },
-];
+const INITIAL_PIPELINES: PipelineItem[] = [];
 
 export function Pipelines() {
   const [pipelines, setPipelines] = useState<PipelineItem[]>(INITIAL_PIPELINES);

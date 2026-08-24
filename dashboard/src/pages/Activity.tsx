@@ -68,8 +68,6 @@ const SEVERITY_COLORS: Record<ActivitySeverity, { bg: string; text: string; bord
 
 const INITIAL_LOGS: ActivityLog[] = [];
 
-const MOCK_SAMPLE_EVENTS: Partial<ActivityLog>[] = [];
-
 export function Activity() {
   const [logs, setLogs] = useState<ActivityLog[]>(INITIAL_LOGS);
   const [search, setSearch] = useState('');
@@ -105,36 +103,24 @@ export function Activity() {
     loadActivity();
   }, []);
 
-  // Simulate real-time streaming incoming logs
+  // Real-time activity feed — poll API every 10s when live mode is enabled
   useEffect(() => {
     if (!isLive) return;
 
-    const interval = setInterval(() => {
-      const sample = MOCK_SAMPLE_EVENTS[Math.floor(Math.random() * MOCK_SAMPLE_EVENTS.length)];
-      if (!sample) return;
-
-      const newId = `evt-${Math.floor(Math.random() * 9000) + 1000}`;
-      const newLog: ActivityLog = {
-        id: newId,
-        event: sample.event || 'Telemetry Event',
-        type: (sample.type as ActivityCategory) || 'System',
-        description: sample.description || 'Automated background execution trace',
-        agent: sample.agent || 'System Service',
-        time: 'Just now',
-        timestamp: Date.now(),
-        status: (sample.severity === 'error' || sample.severity === 'critical') ? 'failed' : 'success',
-        severity: (sample.severity as ActivitySeverity) || 'info',
-        latency_ms: Math.floor(Math.random() * 250) + 30,
-        raw_payload: {
-          event_id: newId,
-          simulated: true,
-          cpu_load: `${(Math.random() * 15 + 10).toFixed(1)}%`,
-          thread_id: `worker-${Math.floor(Math.random() * 8) + 1}`,
-        },
-      };
-
-      setLogs((prev) => [newLog, ...prev.slice(0, 49)]);
-    }, 4000);
+    const interval = setInterval(async () => {
+      try {
+        const companyId = getActiveCompanyId();
+        const res = await apiClient.get<ActivityLog[] | { items: ActivityLog[] }>(
+          `/api/v1/companies/${companyId}/activity`
+        );
+        const items = unwrapItems(res);
+        if (items.length > 0) {
+          setLogs(items.slice(0, 50));
+        }
+      } catch {
+        // Silent retry on next interval
+      }
+    }, 10000);
 
     return () => clearInterval(interval);
   }, [isLive]);

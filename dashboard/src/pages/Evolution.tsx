@@ -29,7 +29,8 @@ import { StatCard } from '@/components/common/StatCard';
 import { Button } from '@/components/common/Button';
 import { Badge } from '@/components/common/Badge';
 import { Modal } from '@/components/common/Modal';
-import { apiClient } from '@/api/client';
+import { apiClient, unwrapItems } from '@/api/client';
+import { getActiveCompanyId } from '@/config';
 
 export type MutationCategory = 'Prompt Refinement' | 'Formatting Constraint' | 'Safety Guardrail' | 'Context Optimization';
 
@@ -84,11 +85,12 @@ export function Evolution() {
   useEffect(() => {
     async function loadProposals() {
       try {
-        const res = await apiClient.get<{ items: EvolutionProposal[] }>(
-          '/api/v1/companies/00000000-0000-4000-8000-000000000001/evolution/proposals'
+        const res = await apiClient.get<EvolutionProposal[] | { items: EvolutionProposal[] }>(
+          `/api/v1/companies/${getActiveCompanyId()}/evolution/proposals`
         );
-        if (res?.items && res.items.length > 0) {
-          const formatted = res.items.map((prop) => ({
+        const items = unwrapItems(res);
+        if (items.length > 0) {
+          const formatted = items.map((prop) => ({
             ...prop,
             category: prop.category || 'Prompt Refinement',
             original_prompt: prop.original_prompt || 'Execute task instructions with default reasoning.',
@@ -114,7 +116,7 @@ export function Evolution() {
   const handleDecision = async (proposalId: string, status: 'approved' | 'rejected') => {
     try {
       await apiClient.patch(
-        `/api/v1/companies/00000000-0000-4000-8000-000000000001/evolution/proposals/${proposalId}`,
+        `/api/v1/companies/${getActiveCompanyId()}/evolution/proposals/${proposalId}`,
         { status }
       );
     } catch {

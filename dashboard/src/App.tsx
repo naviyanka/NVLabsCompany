@@ -25,6 +25,7 @@ import { Notifications } from '@/pages/Notifications';
 import { MemoryGraph } from '@/pages/MemoryGraph';
 import { AuthProvider } from '@/contexts/AuthContext';
 import { RequireAuth } from '@/components/auth/RequireAuth';
+import { AgentTerminalPanel } from '@/components/terminal/AgentTerminalPanel';
 import { Login } from '@/pages/Login';
 import { Setup } from '@/pages/Setup';
 import { AcceptInvite } from '@/pages/AcceptInvite';
@@ -79,6 +80,7 @@ export default function App() {
               <Route path="/meetings" element={<Meetings />} />
               <Route path="/activity" element={<Activity />} />
               <Route path="/notifications" element={<Notifications />} />
+              <Route path="/terminal" element={<AgentTerminalPanel />} />
               <Route path="/settings" element={<Settings />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Route>
