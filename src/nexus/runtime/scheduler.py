@@ -31,6 +31,7 @@ logger = logging.getLogger(__name__)
 
 _scheduler_task: asyncio.Task[None] | None = None
 _running = False
+_instance_id = f"scheduler-{uuid.uuid4().hex[:8]}"
 
 # Default tick interval in seconds
 TICK_INTERVAL = 60
@@ -79,6 +80,11 @@ async def _tick(session_factory: async_sessionmaker[AsyncSession]) -> None:
     """Single scheduler tick: find and fire due triggers."""
     from nexus.models.trigger import Trigger, TriggerExecution
     from nexus.models.agent import Agent
+    from nexus.runtime.redis_utils import try_acquire_leader
+
+    # Leader election: only the leader instance processes triggers
+    if not await try_acquire_leader("scheduler", _instance_id):
+        return
 
     now = datetime.now(timezone.utc)
 

@@ -6,6 +6,7 @@ All models are imported here so Alembic can discover them for migration autogene
 from nexus.models.agent import Agent
 from nexus.models.auth import Invite
 from nexus.models.budget import BudgetPolicy, CostEvent
+from nexus.models.chat import ChatMessage
 from nexus.models.communication import Event, Group, GroupMember, Message
 from nexus.models.company import Company, CompanyMembership, Department, Team
 from nexus.models.evolution import (

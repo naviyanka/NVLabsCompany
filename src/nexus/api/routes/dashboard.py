@@ -127,69 +127,6 @@ async def get_daily_metrics(company_id: uuid.UUID, db: DbSession, days: int = 7)
     return metrics
 
 
-@router.get("/api/v1/companies/{company_id}/dashboard/pipelines-summary")
-async def get_pipelines_summary(company_id: uuid.UUID, db: DbSession) -> list[dict[str, Any]]:
-    """Top 5 active pipelines with progress and latest run status."""
-    from nexus.models.pipeline import Pipeline, PipelineRun
-
-    stmt = (
-        select(Pipeline)
-        .where(Pipeline.company_id == company_id, Pipeline.is_active == True)
-        .order_by(Pipeline.updated_at.desc())
-        .limit(5)
-    )
-    result = await db.execute(stmt)
-    pipelines = list(result.scalars().all())
-
-    summaries = []
-    for p in pipelines:
-        total_stages = len(p.stages) if p.stages else 0
-        # Get latest run
-        run_stmt = (
-            select(PipelineRun)
-            .where(PipelineRun.pipeline_id == p.id, PipelineRun.company_id == company_id)
-            .order_by(PipelineRun.started_at.desc())
-            .limit(1)
-        )
-        run_result = await db.execute(run_stmt)
-        latest_run = run_result.scalar_one_or_none()
-
-        summaries.append({
-            "id": str(p.id),
-            "name": p.name,
-            "current_stage": latest_run.current_stage if latest_run else 0,
-            "total_stages": total_stages,
-            "status": latest_run.status if latest_run else "idle",
-        })
-
-    return summaries
-
-
-@router.get("/api/v1/companies/{company_id}/dashboard/top-agents")
-async def get_top_agents(company_id: uuid.UUID, db: DbSession) -> list[dict[str, Any]]:
-    """Top 5 agents by performance score."""
-    stmt = (
-        select(Agent)
-        .where(Agent.company_id == company_id, Agent.performance_score.isnot(None))
-        .order_by(Agent.performance_score.desc())
-        .limit(5)
-    )
-    result = await db.execute(stmt)
-    agents = list(result.scalars().all())
-
-    return [
-        {
-            "id": str(a.id),
-            "name": a.name,
-            "role": a.role,
-            "model": a.model,
-            "performance_score": a.performance_score,
-            "status": a.status,
-        }
-        for a in agents
-    ]
-
-
 @router.get("/api/v1/companies/{company_id}/dashboard/token-usage")
 async def get_token_usage(company_id: uuid.UUID, db: DbSession) -> list[dict[str, Any]]:
     """Hourly token usage for the last 24 hours."""

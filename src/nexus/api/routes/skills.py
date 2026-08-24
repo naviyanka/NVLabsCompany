@@ -138,49 +138,6 @@ class SkillUpdate(BaseModel):
     schema_def: dict[str, Any] | None = None
 
 
-@router.get("/api/v1/skills/{skill_id}", response_model=SkillResponse)
-async def get_skill(skill_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId) -> Any:
-    """Get a skill by ID with company_id check."""
-    stmt = select(Skill).where(Skill.id == skill_id, Skill.company_id == company_id)
-    result = await db.execute(stmt)
-    skill = result.scalar_one_or_none()
-    if skill is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Skill {skill_id} not found",
-        )
-    return skill
-
-
-@router.patch("/api/v1/skills/{skill_id}", response_model=SkillResponse)
-async def update_skill(
-    skill_id: uuid.UUID, body: SkillUpdate, db: DbSession, company_id: CurrentCompanyId
-) -> Any:
-    """Update a skill."""
-    stmt = select(Skill).where(Skill.id == skill_id, Skill.company_id == company_id)
-    result = await db.execute(stmt)
-    skill = result.scalar_one_or_none()
-    if skill is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Skill {skill_id} not found",
-        )
-    updates = body.model_dump(exclude_unset=True)
-    for key, value in updates.items():
-        setattr(skill, key, value)
-    await db.flush()
-    return skill
-
-
-@router.delete("/api/v1/skills/{skill_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_skill(skill_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId) -> None:
-    """Delete a skill with company_id check."""
-    from sqlalchemy import delete as sa_delete
-
-    stmt = sa_delete(Skill).where(Skill.id == skill_id, Skill.company_id == company_id)
-    await db.execute(stmt)
-
-
 
 @router.get("/api/v1/skills/{skill_id}", response_model=SkillResponse)
 async def get_skill(skill_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId) -> Any:

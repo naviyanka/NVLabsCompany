@@ -489,51 +489,6 @@ async def list_pipeline_templates(company_id: uuid.UUID) -> list[dict[str, Any]]
     ]
 
 
-@router.post("/api/v1/pipelines/{pipeline_id}/pause")
-async def pause_pipeline(pipeline_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId) -> dict[str, Any]:
-    """Pause the latest running pipeline run."""
-    stmt = (
-        select(PipelineRun)
-        .where(
-            PipelineRun.pipeline_id == pipeline_id,
-            PipelineRun.company_id == company_id,
-            PipelineRun.status == "running",
-        )
-        .order_by(PipelineRun.started_at.desc())
-        .limit(1)
-    )
-    result = await db.execute(stmt)
-    run = result.scalar_one_or_none()
-    if not run:
-        raise HTTPException(status_code=404, detail="No running pipeline run found")
-    run.status = "paused"
-    await db.flush()
-    return {"pipeline_id": str(pipeline_id), "run_id": str(run.id), "status": "paused"}
-
-
-@router.post("/api/v1/pipelines/{pipeline_id}/stop")
-async def stop_pipeline(pipeline_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId) -> dict[str, Any]:
-    """Stop (cancel) the latest running pipeline run."""
-    stmt = (
-        select(PipelineRun)
-        .where(
-            PipelineRun.pipeline_id == pipeline_id,
-            PipelineRun.company_id == company_id,
-            PipelineRun.status == "running",
-        )
-        .order_by(PipelineRun.started_at.desc())
-        .limit(1)
-    )
-    result = await db.execute(stmt)
-    run = result.scalar_one_or_none()
-    if not run:
-        raise HTTPException(status_code=404, detail="No running pipeline run found")
-    run.status = "cancelled"
-    run.completed_at = datetime.utcnow()
-    await db.flush()
-    return {"pipeline_id": str(pipeline_id), "run_id": str(run.id), "status": "cancelled"}
-
-
 class PipelineImportBody(BaseModel):
     """Request body for importing a pipeline."""
 
@@ -547,18 +502,6 @@ class PipelineImportBody(BaseModel):
     status_code=status.HTTP_201_CREATED,
     response_model=PipelineResponse,
 )
-async def import_pipeline(company_id: uuid.UUID, body: PipelineImportBody, db: DbSession) -> Any:
-    """Import a pipeline definition."""
-    pipeline = Pipeline(
-        company_id=company_id,
-        name=body.name,
-        description=body.description,
-        stages=body.stages,
-        trigger_type="manual",
-    )
-    db.add(pipeline)
-    await db.flush()
-    return pipeline
 
 
 

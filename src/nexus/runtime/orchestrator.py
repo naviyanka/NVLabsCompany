@@ -32,6 +32,7 @@ logger = logging.getLogger(__name__)
 
 _orchestrator_task: asyncio.Task[None] | None = None
 _running = False
+_instance_id = f"orchestrator-{uuid.uuid4().hex[:8]}"
 
 # How often to scan for active goals (seconds)
 ORCHESTRATION_TICK_INTERVAL = 120  # 2 minutes
@@ -47,6 +48,11 @@ async def _tick(session_factory: async_sessionmaker[AsyncSession]) -> None:
     """Single orchestration tick: find active goals and drive progress."""
     from nexus.models.task import Goal, Task
     from nexus.models.agent import Agent
+    from nexus.runtime.redis_utils import try_acquire_leader
+
+    # Leader election: only the leader instance runs orchestration
+    if not await try_acquire_leader("orchestrator", _instance_id):
+        return
 
     async with session_factory() as db:
         # Find active goals that have an owner agent

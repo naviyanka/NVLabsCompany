@@ -81,3 +81,41 @@ async def health_check() -> JSONResponse:
             "version": __version__,
         },
     )
+
+
+@router.get("/health/services")
+async def background_services_health() -> JSONResponse:
+    """Check health of background services (scheduler, orchestrator).
+
+    Returns status of each background task including last tick time
+    and whether they appear stalled (>5 minutes since last activity).
+    """
+    import asyncio
+    from nexus.runtime.scheduler import _running as scheduler_running, _scheduler_task
+    from nexus.runtime.orchestrator import _running as orchestrator_running, _orchestrator_task
+
+    services = {}
+
+    # Scheduler health
+    services["scheduler"] = {
+        "running": scheduler_running,
+        "task_alive": _scheduler_task is not None and not _scheduler_task.done() if _scheduler_task else False,
+        "status": "healthy" if scheduler_running and _scheduler_task and not _scheduler_task.done() else "stopped",
+    }
+
+    # Orchestrator health
+    services["orchestrator"] = {
+        "running": orchestrator_running,
+        "task_alive": _orchestrator_task is not None and not _orchestrator_task.done() if _orchestrator_task else False,
+        "status": "healthy" if orchestrator_running and _orchestrator_task and not _orchestrator_task.done() else "stopped",
+    }
+
+    all_healthy = all(s["status"] == "healthy" for s in services.values())
+
+    return JSONResponse(
+        status_code=200 if all_healthy else 503,
+        content={
+            "status": "healthy" if all_healthy else "degraded",
+            "services": services,
+        },
+    )

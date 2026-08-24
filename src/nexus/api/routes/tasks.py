@@ -238,60 +238,6 @@ class ReassignBody(BaseModel):
     agent_id: uuid.UUID
 
 
-@router.get("/api/v1/companies/{company_id}/tasks/stats")
-async def get_task_stats(company_id: uuid.UUID, db: DbSession) -> dict[str, Any]:
-    """Aggregated task statistics for a company."""
-    from sqlalchemy import func
-    from nexus.models.agent import Agent
-
-    # Total
-    total_result = await db.execute(
-        select(func.count(Task.id)).where(Task.company_id == company_id)
-    )
-    total = total_result.scalar() or 0
-
-    # By status
-    status_result = await db.execute(
-        select(Task.status, func.count(Task.id))
-        .where(Task.company_id == company_id)
-        .group_by(Task.status)
-    )
-    by_status = dict(status_result.all())
-
-    # By priority
-    priority_result = await db.execute(
-        select(Task.priority, func.count(Task.id))
-        .where(Task.company_id == company_id)
-        .group_by(Task.priority)
-    )
-    by_priority = {str(k): v for k, v in priority_result.all()}
-
-    # Top agents by task count
-    top_agents_result = await db.execute(
-        select(Task.assigned_agent_id, func.count(Task.id).label("count"))
-        .where(Task.company_id == company_id, Task.assigned_agent_id.isnot(None))
-        .group_by(Task.assigned_agent_id)
-        .order_by(func.count(Task.id).desc())
-        .limit(5)
-    )
-    top_agents_rows = top_agents_result.all()
-
-    top_agents = []
-    for agent_id_val, count in top_agents_rows:
-        agent_result = await db.execute(
-            select(Agent.name).where(Agent.id == agent_id_val)
-        )
-        name = agent_result.scalar() or "Unknown"
-        top_agents.append({"agent_id": str(agent_id_val), "name": name, "count": count})
-
-    return {
-        "total": total,
-        "by_status": by_status,
-        "by_priority": by_priority,
-        "top_agents": top_agents,
-    }
-
-
 @router.get("/api/v1/tasks/{task_id}/subtasks", response_model=list[TaskResponse])
 async def list_subtasks(task_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId) -> Any:
     """List subtasks for a given task."""
@@ -309,75 +255,6 @@ async def list_subtasks(task_id: uuid.UUID, db: DbSession, company_id: CurrentCo
     status_code=status.HTTP_201_CREATED,
     response_model=TaskResponse,
 )
-async def create_subtask(
-    task_id: uuid.UUID, body: SubtaskCreate, db: DbSession, company_id: CurrentCompanyId
-) -> Any:
-    """Create a subtask under an existing task."""
-    # Verify parent task exists and belongs to company
-    parent_stmt = select(Task).where(Task.id == task_id, Task.company_id == company_id)
-    parent_result = await db.execute(parent_stmt)
-    parent = parent_result.scalar_one_or_none()
-    if parent is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Parent task {task_id} not found",
-        )
-
-    subtask = Task(
-        company_id=parent.company_id,
-        title=body.title,
-        description=body.description,
-        priority=body.priority,
-        assigned_agent_id=body.assigned_agent_id,
-        parent_task_id=task_id,
-    )
-    db.add(subtask)
-    await db.flush()
-    return subtask
-
-
-@router.post("/api/v1/tasks/{task_id}/reassign", response_model=TaskResponse)
-async def reassign_task(
-    task_id: uuid.UUID, body: ReassignBody, db: DbSession, company_id: CurrentCompanyId
-) -> Any:
-    """Reassign a task to a different agent."""
-    stmt = (
-        update(Task)
-        .where(Task.id == task_id, Task.company_id == company_id)
-        .values(assigned_agent_id=body.agent_id, updated_at=datetime.utcnow())
-    )
-    await db.execute(stmt)
-
-    result = await db.execute(select(Task).where(Task.id == task_id, Task.company_id == company_id))
-    task = result.scalar_one_or_none()
-    if task is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Task {task_id} not found",
-        )
-    return task
-
-
-@router.post("/api/v1/tasks/{task_id}/cancel", response_model=TaskResponse)
-async def cancel_task(
-    task_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId
-) -> Any:
-    """Cancel a task."""
-    stmt = (
-        update(Task)
-        .where(Task.id == task_id, Task.company_id == company_id)
-        .values(status="cancelled", completed_at=datetime.utcnow(), updated_at=datetime.utcnow())
-    )
-    await db.execute(stmt)
-
-    result = await db.execute(select(Task).where(Task.id == task_id, Task.company_id == company_id))
-    task = result.scalar_one_or_none()
-    if task is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Task {task_id} not found",
-        )
-    return task
 
 
 
