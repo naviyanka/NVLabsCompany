@@ -260,6 +260,7 @@ async def _build_me(db: AsyncSession, principal: Principal) -> MeResponse:
     """Assemble the identity payload the dashboard renders its header from."""
     user_summary: UserSummary | None = None
     memberships: list[MembershipSummary] = []
+    display_name = principal.display_name
 
     if principal.user_id is not None:
         user = await db.get(UserProfile, principal.user_id)
@@ -276,6 +277,12 @@ async def _build_me(db: AsyncSession, principal: Principal) -> MeResponse:
                 two_factor_enabled=user.two_factor_enabled,
                 is_superuser=user.is_superuser,
             )
+            # Principal.display_name is the audit label, which is the email on
+            # purpose. The header wants the person's name when there is one.
+            full_name = " ".join(
+                part for part in (user.first_name, user.last_name) if part
+            ).strip()
+            display_name = full_name or user.email
 
         for membership in await list_memberships(db, principal.user_id):
             memberships.append(
@@ -292,7 +299,7 @@ async def _build_me(db: AsyncSession, principal: Principal) -> MeResponse:
         role=principal.role,
         company_id=principal.company_id,
         company_name=await _company_name(db, principal.company_id),
-        display_name=principal.display_name,
+        display_name=display_name,
         user=user_summary,
         memberships=memberships,
     )

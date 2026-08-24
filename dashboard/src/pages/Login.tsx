@@ -15,8 +15,8 @@ export function Login() {
   const { status, login } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
-  const [email, setEmail] = useState('admin@nvlabs.dev');
-  const [password, setPassword] = useState('bypass');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
@@ -34,14 +34,16 @@ export function Login() {
     return <Navigate to={target} replace />;
   }
 
-  const handleBypassSubmit = async (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
     setSubmitting(true);
     setError('');
     try {
-      await login(email.trim() || 'admin@nvlabs.dev', password || 'bypass');
+      await login(email.trim(), password);
       navigate((location.state as LocationState | null)?.from || '/', { replace: true });
     } catch (err) {
+      // The API answers an unknown email and a wrong password identically, so
+      // whatever it says is safe to show verbatim.
       setError(
         err instanceof ApiClientError
           ? err.detail
@@ -66,18 +68,17 @@ export function Login() {
           <p className="text-xs font-mono text-[#6B6B6E] mt-1.5">
             Authenticate to reach the autonomous workforce
           </p>
-
-          <div className="mt-3 px-3 py-1.5 bg-[#FFB020]/10 border border-[#FFB020]/30 rounded-md text-[11px] font-mono text-[#FFB020] inline-block">
-            ⚡ Dev Mode: Auth Bypass Active
-          </div>
         </div>
 
         <form
-          onSubmit={handleBypassSubmit}
+          onSubmit={handleSubmit}
           className="bg-[#101012] border border-white/[0.08] rounded-[10px] p-6 space-y-4 shadow-xl"
         >
           {error && (
-            <div className="flex items-start gap-2 p-3 bg-[#EF4444]/10 border border-[#EF4444]/25 rounded-[6px]">
+            <div
+              role="alert"
+              className="flex items-start gap-2 p-3 bg-[#EF4444]/10 border border-[#EF4444]/25 rounded-[6px]"
+            >
               <AlertTriangle className="w-3.5 h-3.5 text-[#EF4444] mt-0.5 shrink-0" />
               <p className="text-xs text-[#F2F1EE] leading-relaxed">{error}</p>
             </div>
@@ -97,7 +98,7 @@ export function Login() {
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="admin@nvlabs.dev"
+                placeholder="you@company.com"
                 autoComplete="username"
                 autoFocus
                 required
@@ -141,21 +142,10 @@ export function Login() {
             ) : (
               <>
                 <LogIn className="w-4 h-4" />
-                Sign in as Operator (Dev Bypass)
+                Sign in
               </>
             )}
           </button>
-
-          <div className="pt-2 border-t border-white/[0.06] text-center">
-            <button
-              type="button"
-              onClick={() => handleBypassSubmit()}
-              disabled={submitting}
-              className="w-full py-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded text-xs font-mono font-medium transition-colors cursor-pointer"
-            >
-              ⚡ 1-Click Fast Bypass Sign-In
-            </button>
-          </div>
 
           <p className="text-[11px] font-mono text-[#6B6B6E] text-center leading-relaxed pt-1">
             Been invited?{' '}
@@ -166,7 +156,9 @@ export function Login() {
         </form>
 
         <p className="text-[10px] font-mono text-[#6B6B6E] text-center mt-6 leading-relaxed">
-          Development bypass mode allows instant access while backend authentication API is under construction.
+          Accounts are created by invitation. Locked out? An administrator can
+          issue a new invite, or the server operator can run{' '}
+          <span className="text-[#A8A8AB]">python -m nexus.auth.bootstrap</span>.
         </p>
       </div>
     </div>

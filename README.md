@@ -105,6 +105,34 @@ docs/                  # Architecture documentation (DO NOT DELETE)
 
 ## Key Concepts
 
+### Authentication
+
+Every endpoint except `/health`, `/metrics`, the docs and `/api/v1/auth/*`
+requires an authenticated caller. `AuthenticationMiddleware` resolves the
+credential once per request into a `Principal` (company + role) and rejects the
+request before any route runs, so a router cannot forget to ask. Two credentials
+are accepted:
+
+- **Session cookie** — `POST /api/v1/auth/login` sets an httpOnly `nv_session`
+  cookie plus a readable `nv_csrf` cookie. Browser clients echo the CSRF value
+  in the `X-CSRF-Token` header on every state-changing request; without it the
+  request is a 403. Sessions are rows in `user_sessions`, so revoking one takes
+  effect immediately.
+- **API key** — `Authorization: Bearer nv_...`. Issued for one company with its
+  own role, and exempt from CSRF because a browser will not attach it to a
+  cross-site request on its own.
+
+The caller's company comes from the credential, never from a header:
+`X-Company-Id` is ignored unless the server runs with `AUTH_ENABLED=false`, and a
+URL naming another tenant (`/api/v1/companies/{id}/...`) is a 403.
+
+**First run.** The user table starts empty, and while it is empty
+`POST /api/v1/auth/setup` creates the first administrator — the dashboard offers
+this at `/setup`. Once an account exists that endpoint is closed and further
+accounts arrive by invitation (`POST /api/v1/auth/invites`, redeemed at
+`/invite`). To recover from the server instead, run
+`python -m nexus.auth.bootstrap`.
+
 ### Multi-Tenancy
 
 Every record belongs to a `company_id`. All queries are scoped to the current tenant. Companies are fully isolated.

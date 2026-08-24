@@ -87,13 +87,36 @@ dashboard/
 
 ## Configuration
 
+Copy `.env.example` to `.env.local` for the full list; the settings that matter
+most are below.
+
+### Authentication
+
+The dashboard signs in against the API and keeps the session in an httpOnly
+cookie, so every request goes out with `credentials: 'include'` and mutations
+carry the `X-CSRF-Token` header read back from the `nv_csrf` cookie. Routes are
+wrapped in `RequireAuth`, which sends signed-out visitors to `/login` — or to
+`/setup` on a fresh install, where the first administrator is created.
+
+`VITE_AUTH_ENABLED=false` switches the client back to sending an `X-Company-Id`
+header instead of relying on a session. It only works against an API started with
+`AUTH_ENABLED=false`, and is for offline UI work — never for a deployment.
+
 ### API Base URL
 
-The API base URL defaults to `http://localhost:8000`. It can be configured via environment variable:
+`VITE_API_BASE_URL` empty (the default) means same-origin: requests go to this
+dev server, which serves the mock API and proxies `/api/v1/auth/*` to
+`NEXUS_API_URL` (default `http://localhost:8000`). Set `PROXY_API=true` to
+forward *every* `/api/*` call to the real backend and disable the mock.
+
+Pointing `VITE_API_BASE_URL` straight at the API bypasses the proxy:
 
 ```bash
 VITE_API_BASE_URL=http://your-api-host:8000 npm run dev
 ```
+
+That origin must then appear in the backend's `cors_origins` allowlist, because
+cookies only travel cross-origin with credentials plus an explicit allow.
 
 ### Polling
 
@@ -103,6 +126,9 @@ The dashboard auto-refreshes every 30 seconds. This is configurable in the Setti
 
 | Route | Page | Description |
 |-------|------|-------------|
+| `/login` | Login | Email + password sign-in |
+| `/setup` | First-run setup | Creates the first administrator while no account exists |
+| `/invite` | Accept invite | Redeems an invite token |
 | `/` | Dashboard | Overview with stats, charts, activity |
 | `/agents` | Agents | Agent management with grid/list views |
 | `/agents/:id` | Agent Detail | Detailed agent view with tabs |

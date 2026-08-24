@@ -8,13 +8,25 @@ those gates would still be deciding based on a client-supplied header — a call
 could pick which company's kill switch and budget they are measured against.
 Resolving identity further out fixes all four at once.
 
-The middleware never rejects an anonymous request. It resolves what credentials
-are present, puts the result in ``scope["state"]["principal"]``, and lets the
-route decide: ``nexus.api.deps.get_principal`` returns 401 for routes that need a
-caller, while ``/health`` and the login endpoints do not ask. Two things it does
-reject, because neither has a meaningful route-level equivalent: a mutating
+Resolving identity is only half the job. The middleware also decides whether the
+request may continue at all, against :data:`PUBLIC_PATH_PREFIXES`: an HTTP
+request to anything else without a credential is a 401, and a request whose URL
+names a company other than the caller's is a 403.
+
+Enforcing that here rather than per route is deliberate. The first cut left it to
+``nexus.api.deps.get_principal``, which meant every router had to opt in — and
+roughly twenty of them never did, so ``/api/v1/companies/{id}/agents`` answered
+anonymous callers and accepted any company id in the path. A route that forgets
+to ask about identity is the normal failure, so the default has to be denial.
+Routes still declare what they need: ``CurrentPrincipal`` for a caller,
+``PathCompanyId`` for the tenant check, ``require_permission`` for a role. Those
+now narrow an already-authenticated request instead of being the only thing
+standing in front of it.
+
+Two further rejections have no route-level equivalent: a mutating
 cookie-authenticated request without a matching CSRF token, and a WebSocket
-handshake from an unlisted origin.
+handshake from an unlisted origin. WebSocket authentication stays at the route,
+which can close the socket with a status code a browser will actually surface.
 
 That last one matters more than it looks. The CORS middleware does not police
 WebSockets — the browser sends no preflight for them — so without this check any
@@ -23,6 +35,7 @@ cookie and read the tenant's event stream.
 """
 
 import logging
+import re
 import uuid
 from typing import Any
 
@@ -47,6 +60,77 @@ logger = logging.getLogger(__name__)
 # threshold every authenticated request would issue an UPDATE.
 _TOUCH_INTERVAL_SECONDS = 60
 
+# Paths that answer without a credential. `/api/v1/auth/` is listed whole rather
+# than endpoint by endpoint because the endpoints inside it that do need a caller
+# (`/me`, `/logout`, `/sessions`, `/invites`) already declare it as a dependency,
+# and an allowlist of individual login routes drifts out of date the moment one
+# is added.
+PUBLIC_PATH_PREFIXES = (
+    "/health",
+    "/metrics",
+    "/docs",
+    "/redoc",
+    "/openapi.json",
+    "/api/v1/auth/",
+)
+
+# Exact paths, for the two cases a prefix would over-match.
+PUBLIC_PATHS = frozenset({"/api/v1/auth", "/favicon.ico"})
+
+# ``/api/v1/companies/{company_id}/...`` — a large share of the API is shaped
+# this way, and the company in the URL has to be the one the caller proved
+# membership of.
+_COMPANY_PATH_RE = re.compile(r"^/api/v1/companies/([0-9a-fA-F-]{36})(?:/|$)")
+
+
+def is_public_path(path: str) -> bool:
+    """Whether ``path`` is reachable without a credential."""
+    return path in PUBLIC_PATHS or path.startswith(PUBLIC_PATH_PREFIXES)
+
+
+def rejection_for(path: str, principal: Principal | None) -> JSONResponse | None:
+    """The response an HTTP request gets instead of reaching its route.
+
+    ``None`` means the request continues. Split out as a plain function so the
+    policy can be tested without an ASGI round trip.
+    """
+    if is_public_path(path):
+        return None
+
+    if principal is None:
+        if not settings.auth_enabled:
+            # Legacy mode: no credential and no ``X-Company-Id`` either. Let the
+            # route answer as it did before auth existed.
+            return None
+        return JSONResponse(
+            status_code=401,
+            content={"detail": "Authentication required", "code": "UNAUTHENTICATED"},
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    match = _COMPANY_PATH_RE.match(path)
+    if match is None:
+        return None
+
+    try:
+        requested_company_id = uuid.UUID(match.group(1))
+    except ValueError:
+        # Not a company id at all; let routing produce its own 404 or 422.
+        return None
+
+    if requested_company_id != principal.company_id:
+        # 403 rather than 404: the caller is authenticated and the company
+        # probably exists, they simply have no standing in it.
+        return JSONResponse(
+            status_code=403,
+            content={
+                "detail": "You do not have access to that company",
+                "code": "TENANT_MISMATCH",
+            },
+        )
+
+    return None
+
 
 def get_principal_from_scope(scope: Scope) -> Principal | None:
     """Read the principal the middleware resolved for this connection."""
@@ -61,7 +145,7 @@ def allowed_origins() -> set[str]:
 
 
 class AuthenticationMiddleware:
-    """Resolves the caller's identity before governance runs."""
+    """Resolves the caller's identity before governance runs, and enforces it."""
 
     def __init__(self, app: ASGIApp) -> None:
         self.app = app
@@ -85,6 +169,14 @@ class AuthenticationMiddleware:
 
         if principal is None and not settings.auth_enabled:
             principal = self._legacy_header_principal(headers)
+
+        if scope["type"] == "http":
+            # CORS sits outside this middleware, so a browser preflight has
+            # already been answered and never reaches here.
+            rejection = rejection_for(scope.get("path", ""), principal)
+            if rejection is not None:
+                await rejection(scope, receive, send)
+                return
 
         if scope["type"] == "http" and requires_csrf(
             scope.get("method", "GET"), cookie_authenticated=cookie_authenticated
