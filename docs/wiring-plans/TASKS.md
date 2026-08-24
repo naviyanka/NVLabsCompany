@@ -354,4 +354,254 @@ These are the final features needed to make the system fully autonomous rather t
 
 ---
 
+## Priority 7: Production Hardening (Phase 1)
+
+Critical fixes for multi-worker deployment and data integrity.
+
+### 7.1 Alembic Migration for New Models
+- **Status:** TODO
+- **Problem:** `ChatMessage` model (6.2) has no migration. SQLite auto-creates tables but PostgreSQL requires explicit migrations.
+- **Fix:** Run `alembic revision --autogenerate -m "add chat_messages table"` and verify migration applies cleanly.
+- **Files:** `alembic/versions/`, `src/nexus/models/__init__.py` (add ChatMessage import)
+- **Effort:** Low (30 min)
+
+### 7.2 Redis-Backed Rate Limiter
+- **Status:** TODO
+- **Problem:** `_SlidingWindowRateLimiter` is in-memory. Lost on restart, broken with multiple workers.
+- **Fix:** Add optional Redis backend using `redis.asyncio`. If `REDIS_URL` env var is set, use Redis sorted sets for sliding window; otherwise fall back to in-memory.
+- **Files:** `src/nexus/api/middleware.py`, `src/nexus/config.py`
+- **Effort:** Medium (2 hours)
+
+### 7.3 Redis-Backed Budget Tracker
+- **Status:** TODO
+- **Problem:** `_BudgetTracker` accumulates spend in-memory. Lost on restart, inconsistent across workers.
+- **Fix:** Use Redis INCRBY for spend tracking with periodic DB flush. Load from DB on cold start.
+- **Files:** `src/nexus/api/middleware.py`
+- **Effort:** Medium (2 hours)
+- **Dependencies:** 7.2 (Redis connection)
+
+### 7.4 Leader Election for Background Services
+- **Status:** TODO
+- **Problem:** Scheduler and orchestrator run in every worker process. With `uvicorn --workers N`, triggers fire N times.
+- **Fix:** Use Redis-based leader election (SET NX with TTL) or file-lock. Only the leader runs scheduler + orchestrator ticks.
+- **Files:** `src/nexus/runtime/scheduler.py`, `src/nexus/runtime/orchestrator.py`
+- **Effort:** Medium (2 hours)
+- **Dependencies:** 7.2 (Redis connection)
+
+### 7.5 Background Service Health Monitoring
+- **Status:** TODO
+- **Problem:** Scheduler and orchestrator can silently crash without detection.
+- **Fix:** Add a heartbeat mechanism — each background task writes its last tick timestamp. Health endpoint checks staleness (>5 min = unhealthy).
+- **Files:** `src/nexus/api/routes/health.py`, `src/nexus/runtime/scheduler.py`, `src/nexus/runtime/orchestrator.py`
+- **Effort:** Low (1 hour)
+
+### 7.6 Remove Duplicate Route Definitions
+- **Status:** TODO
+- **Problem:** 5 route files (tasks, pipelines, knowledge, dashboard, skills) have duplicate function definitions. FastAPI registers the last one; earlier ones are dead code.
+- **Fix:** Identify and remove duplicate definitions. Run `tsc --noEmit` equivalent for Python (import all routers, check route count).
+- **Files:** `src/nexus/api/routes/tasks.py`, `pipelines.py`, `knowledge.py`, `dashboard.py`, `skills.py`
+- **Effort:** Low (30 min)
+
+---
+
+## Priority 8: Frontend Completion (Phase 2)
+
+Wire remaining unmocked pages and integrate existing components.
+
+### 8.1 Evolution Page — Wire to Real Backend
+- **Status:** TODO
+- **Problem:** Evolution.tsx exists but makes no API calls. Shows empty state.
+- **Fix:** Add `useEffect` that fetches proposals from `GET /api/v1/companies/{id}/evolution/proposals`, evaluations from `GET /api/v1/companies/{id}/evolution/evaluations`, and skill versions. Display in a tabbed UI.
+- **Files:** `dashboard/src/pages/Evolution.tsx`
+- **Effort:** Medium (2 hours)
+
+### 8.2 Terminal Page Route
+- **Status:** TODO
+- **Problem:** `AgentTerminalPanel` component exists but has no route. Users can't navigate to it.
+- **Fix:** Add `/terminal` route in `App.tsx` rendering `AgentTerminalPanel`. Add nav link.
+- **Files:** `dashboard/src/App.tsx`, `dashboard/src/components/layout/Sidebar.tsx`
+- **Effort:** Low (15 min)
+
+### 8.3 Embed PipelineBuilder in Pipelines Page
+- **Status:** TODO
+- **Problem:** `PipelineBuilder` component exists but isn't used anywhere in the Pipelines page.
+- **Fix:** Add a "Builder" tab or mode in Pipelines.tsx that renders `PipelineBuilder` with `onSave` wired to `POST /pipelines` and `onRun` to `POST /pipelines/{id}/run`.
+- **Files:** `dashboard/src/pages/Pipelines.tsx`
+- **Effort:** Low (30 min)
+
+### 8.4 Fix PulseLine SSE Hardcoded UUID
+- **Status:** TODO
+- **Problem:** `components/layout/PulseLine.tsx` uses hardcoded company UUID for the SSE activity stream URL.
+- **Fix:** Replace with `getActiveCompanyId()`.
+- **Files:** `dashboard/src/components/layout/PulseLine.tsx`
+- **Effort:** Low (5 min)
+
+### 8.5 Remove Fake setInterval from Activity.tsx
+- **Status:** TODO
+- **Problem:** When "live mode" is enabled, Activity.tsx generates random fake events via `setInterval`. Real API is wired but the mock polling still runs.
+- **Fix:** Remove the `setInterval` block entirely. Optionally replace with WebSocket subscription for real-time activity.
+- **Files:** `dashboard/src/pages/Activity.tsx`
+- **Effort:** Low (15 min)
+
+---
+
+## Priority 9: Autonomous Intelligence (Phase 3)
+
+Make the orchestration coordinator truly autonomous with self-healing and iterative refinement.
+
+### 9.1 GoalLoop Integration in Orchestrator
+- **Status:** TODO
+- **Problem:** Orchestrator decomposes and executes linearly. Doesn't iterate on goals using GoalLoop's judge-based completion detection.
+- **Fix:** After all subtasks complete, run GoalLoop with the goal description + combined subtask outputs to determine if the goal is truly complete or needs another iteration.
+- **Files:** `src/nexus/runtime/orchestrator.py`
+- **Effort:** Medium (2-3 hours)
+
+### 9.2 SmartRetry REASSIGN Action
+- **Status:** TODO
+- **Problem:** When SmartRetry diagnoses REASSIGN (agent mismatch), the task just fails with a log message. No actual re-routing happens.
+- **Fix:** In TaskExecutor, when escalation is REASSIGN, call AgentRouter to find a different agent and retry with the new assignment.
+- **Files:** `src/nexus/runtime/executor.py`
+- **Effort:** Medium (2 hours)
+
+### 9.3 SmartRetry DECOMPOSE Action
+- **Status:** TODO
+- **Problem:** When SmartRetry diagnoses DECOMPOSE (task too complex), nothing decomposes. Just logged.
+- **Fix:** On DECOMPOSE escalation, call TaskPlanner.decompose_task() on the failed task, create subtasks, and re-attempt execution on the smaller pieces.
+- **Files:** `src/nexus/runtime/executor.py`
+- **Effort:** Medium (2 hours)
+
+### 9.4 Auto-Evaluate Evolution Proposals
+- **Status:** TODO
+- **Problem:** Event bridge creates proposals but nobody evaluates them. They sit in "proposed" status.
+- **Fix:** In the orchestrator tick, find proposals in "proposed" status older than 5 minutes and auto-trigger evaluation (call the evaluate endpoint logic).
+- **Files:** `src/nexus/runtime/orchestrator.py`
+- **Effort:** Low (1 hour)
+
+### 9.5 Worktree Isolation from Orchestrator
+- **Status:** TODO
+- **Problem:** Orchestrator executes tasks in the default process workspace. Agents don't get file-system isolation.
+- **Fix:** Pass `use_worktree: true` and `workspace: repo_path` in the session config when orchestrator calls `_call_llm` for CLI-backed agents.
+- **Files:** `src/nexus/runtime/orchestrator.py`
+- **Effort:** Low (1 hour)
+
+### 9.6 WebSocket Broadcast from Orchestrator
+- **Status:** TODO
+- **Problem:** Orchestrator executes silently (only logs). No real-time visibility in the UI.
+- **Fix:** After each subtask completes/fails, broadcast a status event via `ws_manager.broadcast_to_channel("orchestrator", {...})`.
+- **Files:** `src/nexus/runtime/orchestrator.py`
+- **Effort:** Low (1 hour)
+
+---
+
+## Priority 10: Platform Features (Phase 4)
+
+Features from the NvLabsOrg comparison that expand the platform's capability.
+
+### 10.1 Cursor CLI Backend
+- **Status:** TODO
+- **Problem:** NvLabsOrg supports Cursor CLI agent. We don't have it registered.
+- **Fix:** Add a `CursorBackendInfo` to `cli_registry.py` with `command="cursor"`, appropriate flags.
+- **Files:** `src/nexus/adapters/cli_registry.py`
+- **Effort:** Low (30 min)
+
+### 10.2 Webhook Outbound Delivery
+- **Status:** TODO
+- **Problem:** Trigger type "webhook" exists in the model but no outbound HTTP request is made when a webhook trigger fires.
+- **Fix:** In `scheduler.py._fire_trigger()`, if `trigger_type == "webhook"`, make an HTTP POST to `config.webhook_url` with the trigger payload.
+- **Files:** `src/nexus/runtime/scheduler.py`
+- **Effort:** Low (1 hour)
+
+### 10.3 Multi-Workspace Project Switching
+- **Status:** TODO
+- **Problem:** The platform operates on a single workspace/repo. No way to switch between projects.
+- **Fix:** Add a `Workspace` model (path, name, active). API endpoints to list/switch. CLI adapter uses the active workspace path.
+- **Files:** `src/nexus/models/workspace.py` (new), `src/nexus/api/routes/workspaces.py` (new)
+- **Effort:** High (6-8 hours)
+
+### 10.4 Theme System
+- **Status:** TODO
+- **Problem:** Single dark theme. NvLabsOrg has 18 themes.
+- **Fix:** Create a CSS variables system with theme presets. Add theme selector in Settings.
+- **Files:** `dashboard/src/styles/themes/`, `dashboard/src/components/settings/tabs/ThemeTab.tsx`
+- **Effort:** Medium (4-6 hours)
+
+### 10.5 Mobile PWA Support
+- **Status:** TODO
+- **Problem:** No offline support, no "Add to Home Screen" capability.
+- **Fix:** Add `manifest.json`, service worker for caching, responsive tweaks for small screens.
+- **Files:** `dashboard/public/manifest.json`, `dashboard/public/sw.js`
+- **Effort:** Medium (3-4 hours)
+
+### 10.6 File Explorer Panel
+- **Status:** TODO
+- **Problem:** No way to browse project files from the dashboard.
+- **Fix:** Add a file tree component that calls a new `GET /api/v1/repos/{id}/tree` endpoint. Display in a drawer or dedicated page.
+- **Files:** `dashboard/src/components/files/FileExplorer.tsx`, `src/nexus/api/routes/repositories.py`
+- **Effort:** High (6-8 hours)
+
+### 10.7 Git Diff/Merge Viewer
+- **Status:** TODO
+- **Problem:** Worktree changes can't be reviewed before merge. No diff visualization.
+- **Fix:** Add `GET /api/v1/repos/{id}/diff` endpoint that runs `git diff`. Render with a diff viewer component (monaco-diff or react-diff-viewer).
+- **Files:** `dashboard/src/components/git/DiffViewer.tsx`, `src/nexus/api/routes/repositories.py`
+- **Effort:** High (8 hours)
+
+---
+
+## Completion Tracking
+
+| Priority | Total | Done | Remaining |
+|----------|-------|------|-----------|
+| P1 (Wiring Gaps) | 7 | 7 | 0 |
+| P2 (Governance) | 3 | 3 | 0 |
+| P3 (Feature Gaps) | 5 | 5 | 0 |
+| P4 (Polish) | 4 | 4 | 0 |
+| P5 (Remaining Gaps) | 8 | 8 | 0 |
+| P6 (Autonomy & Completion) | 10 | 7 | 3 |
+| P7 (Production Hardening) | 6 | 0 | 6 |
+| P8 (Frontend Completion) | 5 | 0 | 5 |
+| P9 (Autonomous Intelligence) | 6 | 0 | 6 |
+| P10 (Platform Features) | 7 | 0 | 7 |
+| **Total** | **61** | **34** | **27** |
+
+---
+
+## Phase Execution Plan
+
+```
+Phase 1 — Production Hardening (P7)          ~8 hours
+  ├── 7.1 Alembic migrations
+  ├── 7.2 Redis rate limiter
+  ├── 7.3 Redis budget tracker
+  ├── 7.4 Leader election
+  ├── 7.5 Health monitoring
+  └── 7.6 Duplicate route cleanup
+
+Phase 2 — Frontend Completion (P8)           ~4 hours
+  ├── 8.1 Evolution page wiring
+  ├── 8.2 Terminal page route
+  ├── 8.3 PipelineBuilder integration
+  ├── 8.4 PulseLine UUID fix
+  └── 8.5 Activity fake polling removal
+
+Phase 3 — Autonomous Intelligence (P9)      ~10 hours
+  ├── 9.1 GoalLoop in orchestrator
+  ├── 9.2 SmartRetry REASSIGN action
+  ├── 9.3 SmartRetry DECOMPOSE action
+  ├── 9.4 Auto-evaluate proposals
+  ├── 9.5 Worktree from orchestrator
+  └── 9.6 WebSocket broadcast
+
+Phase 4 — Platform Features (P10)           ~30 hours
+  ├── 10.1 Cursor CLI backend
+  ├── 10.2 Webhook delivery
+  ├── 10.3 Multi-workspace
+  ├── 10.4 Theme system
+  ├── 10.5 Mobile PWA
+  ├── 10.6 File explorer
+  └── 10.7 Git diff viewer
+```
+
+---
+
 *Last updated: 2026-08-24 by Kiro agent session*
