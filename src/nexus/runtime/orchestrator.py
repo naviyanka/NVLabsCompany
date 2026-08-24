@@ -71,16 +71,29 @@ async def _tick(session_factory: async_sessionmaker[AsyncSession]) -> None:
         logger.info("Orchestrator tick: %d active goals to process", len(active_goals))
 
         for goal in active_goals:
-            try:
-                await _drive_goal(db, goal)
-            except Exception as e:
-                logger.error("Orchestrator: goal %s processing failed: %s", goal.id, e)
+            # Multi-turn: try up to 3 iterations per goal per tick
+            for _iteration in range(3):
+                try:
+                    prev_status = goal.status
+                    await _drive_goal(db, goal)
+                    # If goal didn't change status, stop iterating
+                    if goal.status == prev_status:
+                        break
+                except Exception as e:
+                    logger.error("Orchestrator: goal %s processing failed: %s", goal.id, e)
+                    break
 
         # Auto-evaluate stale evolution proposals (older than 2 minutes in "proposed" status)
         try:
             await _auto_evaluate_proposals(db)
         except Exception as e:
             logger.debug("Auto-evaluate proposals error: %s", e)
+
+        # Memory maintenance: decay old memories + promote high-value ones to L3
+        try:
+            await _memory_maintenance(db)
+        except Exception as e:
+            logger.debug("Memory maintenance error: %s", e)
 
         await db.commit()
 
@@ -340,8 +353,70 @@ async def _auto_evaluate_proposals(db: AsyncSession) -> None:
         db.add(evaluation)
         logger.info("Auto-evaluated proposal %s (confidence: %s)", proposal.id, proposal.confidence)
 
+        # Auto-promote if confidence >= 0.8 (skip human approval for high-confidence)
+        if (proposal.confidence or 0) >= 0.8 and evaluation.passed:
+            proposal.status = "promoted"
+            logger.info("Auto-promoted high-confidence proposal %s (confidence: %s)", proposal.id, proposal.confidence)
+
+    # Also check for evaluated proposals ready for auto-promotion
+    eval_cutoff = datetime.now(timezone.utc) - timedelta(minutes=1)
+    eval_stmt = (
+        select(EvolutionProposal)
+        .where(EvolutionProposal.status == "evaluating")
+        .where(EvolutionProposal.updated_at <= eval_cutoff)
+        .where(EvolutionProposal.confidence >= 0.8)
+        .limit(3)
+    )
+    eval_result = await db.execute(eval_stmt)
+    for prop in eval_result.scalars().all():
+        prop.status = "promoted"
+        prop.updated_at = datetime.now(timezone.utc)
+        logger.info("Auto-promoted evaluated proposal %s", prop.id)
+
     if stale_proposals:
         await db.flush()
+
+
+async def _memory_maintenance(db: AsyncSession) -> None:
+    """Periodic memory maintenance: decay old memories and promote high-value ones.
+
+    - Decay: reduce importance of memories not accessed in 7+ days by 5%
+    - L3 Promotion: memories with importance >= 0.9 and scope='agent' get promoted to scope='company'
+    """
+    from nexus.models.memory import MemoryRecord
+    from sqlalchemy import update as sa_update
+
+    now = datetime.now(timezone.utc)
+    decay_cutoff = now - timedelta(days=7)
+
+    # Decay old memories (reduce importance by 5%, minimum 0.1)
+    await db.execute(
+        sa_update(MemoryRecord)
+        .where(
+            MemoryRecord.last_accessed_at != None,  # noqa: E711
+            MemoryRecord.last_accessed_at < decay_cutoff,
+            MemoryRecord.importance > 0.1,
+        )
+        .values(importance=MemoryRecord.importance * 0.95)
+    )
+
+    # L3 Promotion: high-importance agent memories → company scope
+    high_value_stmt = (
+        select(MemoryRecord)
+        .where(
+            MemoryRecord.scope == "agent",
+            MemoryRecord.importance >= 0.9,
+            MemoryRecord.tier == "warm",
+        )
+        .limit(5)
+    )
+    result = await db.execute(high_value_stmt)
+    for mem in result.scalars().all():
+        mem.scope = "company"
+        mem.tier = "hot"
+        db.add(mem)
+
+    await db.flush()
 
 
 async def _broadcast_orchestrator_event(event_type: str, data: dict[str, Any]) -> None:

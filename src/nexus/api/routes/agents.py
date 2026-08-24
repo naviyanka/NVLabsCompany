@@ -309,3 +309,102 @@ async def delete_agent(agent_id: uuid.UUID, db: DbSession, company_id: CurrentCo
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Agent {agent_id} not found",
         )
+
+
+@router.post("/api/v1/agents/{agent_id}/clone", status_code=status.HTTP_201_CREATED, response_model=AgentResponse)
+async def clone_agent(agent_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId) -> Any:
+    """Clone an agent — creates a copy with all config, soul, and capabilities.
+
+    The new agent gets a "-clone" suffix on its name and starts in "idle" status.
+    """
+    stmt = select(Agent).where(Agent.id == agent_id, Agent.company_id == company_id)
+    result = await db.execute(stmt)
+    source = result.scalar_one_or_none()
+    if source is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Agent {agent_id} not found")
+
+    clone = Agent(
+        company_id=company_id,
+        name=f"{source.name}-clone",
+        role=source.role,
+        title=source.title,
+        department_id=source.department_id,
+        team_id=source.team_id,
+        adapter_type=source.adapter_type,
+        adapter_config=source.adapter_config,
+        model=source.model,
+        capabilities=list(source.capabilities) if source.capabilities else None,
+        responsibilities=source.responsibilities,
+        objectives=source.objectives,
+        soul_description=source.soul_description,
+        budget_monthly_cents=source.budget_monthly_cents,
+    )
+    db.add(clone)
+    await db.flush()
+    return clone
+
+
+class DelegateTaskRequest(BaseModel):
+    """Request body for delegating a task to another agent."""
+
+    target_agent_id: uuid.UUID
+    title: str
+    description: str | None = None
+    priority: int = 1
+
+
+@router.post("/api/v1/agents/{agent_id}/delegate", status_code=status.HTTP_201_CREATED)
+async def delegate_task(
+    agent_id: uuid.UUID, body: DelegateTaskRequest, db: DbSession, company_id: CurrentCompanyId
+) -> dict[str, Any]:
+    """Delegate a task from one agent to another.
+
+    Creates a task assigned to the target agent and sends a notification
+    via the communication inbox. The source agent is recorded as the requestor.
+    """
+    from nexus.models.task import Task
+    from nexus.models.communication import Message
+
+    # Verify both agents exist
+    source = await db.execute(select(Agent).where(Agent.id == agent_id, Agent.company_id == company_id))
+    source_agent = source.scalar_one_or_none()
+    if not source_agent:
+        raise HTTPException(status_code=404, detail="Source agent not found")
+
+    target = await db.execute(select(Agent).where(Agent.id == body.target_agent_id, Agent.company_id == company_id))
+    target_agent = target.scalar_one_or_none()
+    if not target_agent:
+        raise HTTPException(status_code=404, detail="Target agent not found")
+
+    # Create the delegated task
+    task = Task(
+        company_id=company_id,
+        title=body.title,
+        description=body.description or f"Delegated from {source_agent.name}",
+        priority=body.priority,
+        assigned_agent_id=body.target_agent_id,
+        status="pending",
+    )
+    db.add(task)
+    await db.flush()
+
+    # Send delegation message to target agent's inbox
+    msg = Message(
+        company_id=company_id,
+        sender_agent_id=agent_id,
+        recipient_agent_id=body.target_agent_id,
+        message_type="delegation",
+        content=f"Task delegated: {body.title}",
+        priority="normal",
+        delivery_route="direct",
+    )
+    db.add(msg)
+    await db.flush()
+
+    return {
+        "task_id": str(task.id),
+        "delegated_by": str(agent_id),
+        "delegated_to": str(body.target_agent_id),
+        "title": body.title,
+        "status": "pending",
+    }

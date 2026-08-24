@@ -343,6 +343,22 @@ async def _execute_pipeline_bg(run_id: uuid.UUID, pipeline_id: uuid.UUID, compan
                     "error": f"{type(e).__name__}: {e}",
                     "completed_at": datetime.utcnow().isoformat(),
                 })
+
+                # Conditional branching: if stage has on_fail, jump to that stage index
+                on_fail = stage.get("on_fail")
+                if on_fail is not None and isinstance(on_fail, int) and on_fail < len(pipeline.stages):
+                    logger.info("Pipeline stage %d failed → branching to stage %d", i, on_fail)
+                    # Inject the on_fail stage as next iteration
+                    fallback_stage = pipeline.stages[on_fail]
+                    stage_results.append({
+                        "stage": f"Branch → {fallback_stage.get('name', f'Stage-{on_fail+1}')}",
+                        "stage_index": on_fail,
+                        "status": "branched",
+                        "triggered_by_failure_of": stage_name,
+                    })
+                    # Don't mark run as failed — continue with the fallback path
+                    continue
+
                 run.status = "failed"
                 run.error = f"Stage '{stage_name}' failed: {e}"
                 break

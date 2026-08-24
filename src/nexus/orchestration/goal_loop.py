@@ -312,3 +312,54 @@ class GoalLoop:
             total_cost_cents=total_cost,
             stopped_reason="max_iterations",
         )
+
+
+class LLMGoalJudge:
+    """Goal judge that uses an LLM to evaluate whether a goal is achieved.
+
+    Falls back to HeuristicGoalJudge on any LLM failure.
+
+    Args:
+        llm_callable: Async function that takes a prompt string and returns a response.
+        fallback: Optional heuristic judge to use on failure.
+    """
+
+    def __init__(
+        self,
+        llm_callable: "Callable[[str], Awaitable[str]] | None" = None,
+        fallback: "GoalJudge | None" = None,
+    ) -> None:
+        self._llm_callable = llm_callable
+        self._fallback = fallback or HeuristicGoalJudge()
+
+    async def evaluate(
+        self, goal: str, current_output: Any, iteration: int
+    ) -> JudgeVerdict:
+        """Evaluate goal completion using LLM reasoning.
+
+        Prompts the LLM with the goal and current output, asks whether
+        the goal is achieved. Parses yes/no from the response.
+        """
+        if self._llm_callable is None:
+            return await self._fallback.evaluate(goal, current_output, iteration)
+
+        try:
+            prompt = (
+                f"You are evaluating whether a goal has been achieved.\n\n"
+                f"GOAL: {goal}\n\n"
+                f"CURRENT OUTPUT (iteration {iteration}):\n{str(current_output)[:3000]}\n\n"
+                f"Has this goal been achieved? Answer ONLY with 'YES' or 'NO' followed by a brief reason."
+            )
+            response = await self._llm_callable(prompt)
+            response_lower = response.strip().lower()
+
+            is_complete = response_lower.startswith("yes")
+            confidence = 0.9 if is_complete else 0.4
+
+            return JudgeVerdict(
+                is_complete=is_complete,
+                confidence=confidence,
+                reasoning=response.strip()[:200],
+            )
+        except Exception:
+            return await self._fallback.evaluate(goal, current_output, iteration)
