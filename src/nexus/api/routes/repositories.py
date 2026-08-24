@@ -295,3 +295,110 @@ async def repo_contributors(repo_id: uuid.UUID, db: DbSession, company_id: Curre
         {"name": "agent-bolt", "commits_count": 38, "avatar_url": None},
         {"name": "agent-nova", "commits_count": 25, "avatar_url": None},
     ]
+
+
+@router.get("/api/v1/repos/{repo_id}/tree")
+async def get_repo_file_tree(
+    repo_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId,
+    path: str = "", depth: int = 3
+) -> dict[str, Any]:
+    """Get the file tree of a repository for the file explorer.
+
+    Reads the actual filesystem at the repo's local_path and returns
+    a nested tree structure up to the specified depth.
+    """
+    from nexus.models.repository import Repository
+    from pathlib import Path as FsPath
+
+    stmt = select(Repository).where(Repository.id == repo_id, Repository.company_id == company_id)
+    result = await db.execute(stmt)
+    repo = result.scalar_one_or_none()
+    if not repo:
+        raise HTTPException(status_code=404, detail="Repository not found")
+
+    base_path = FsPath(repo.local_path) if hasattr(repo, "local_path") and repo.local_path else FsPath(".")
+    target = base_path / path if path else base_path
+
+    if not target.exists():
+        return {"path": path, "entries": [], "error": "Path not found"}
+
+    def _scan_dir(dir_path: FsPath, current_depth: int) -> list[dict[str, Any]]:
+        if current_depth > depth:
+            return []
+        entries = []
+        try:
+            for item in sorted(dir_path.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower())):
+                if item.name.startswith(".") and item.name not in (".github", ".kiro"):
+                    continue
+                if item.name in ("node_modules", "__pycache__", ".git", "venv", ".venv", "dist"):
+                    continue
+                entry: dict[str, Any] = {
+                    "name": item.name,
+                    "type": "directory" if item.is_dir() else "file",
+                    "path": str(item.relative_to(base_path)),
+                }
+                if item.is_file():
+                    entry["size"] = item.stat().st_size
+                    entry["extension"] = item.suffix
+                elif item.is_dir() and current_depth < depth:
+                    entry["children"] = _scan_dir(item, current_depth + 1)
+                entries.append(entry)
+        except PermissionError:
+            pass
+        return entries
+
+    tree = _scan_dir(target, 1)
+    return {"path": path, "repo_id": str(repo_id), "entries": tree}
+
+
+@router.get("/api/v1/repos/{repo_id}/diff")
+async def get_repo_diff(
+    repo_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId,
+    base: str = "HEAD~1", target: str = "HEAD"
+) -> dict[str, Any]:
+    """Get git diff between two refs for the diff viewer.
+
+    Runs `git diff base..target` on the repository's local path.
+    """
+    import asyncio
+    from nexus.models.repository import Repository
+    from pathlib import Path as FsPath
+
+    stmt = select(Repository).where(Repository.id == repo_id, Repository.company_id == company_id)
+    result = await db.execute(stmt)
+    repo = result.scalar_one_or_none()
+    if not repo:
+        raise HTTPException(status_code=404, detail="Repository not found")
+
+    repo_path = repo.local_path if hasattr(repo, "local_path") and repo.local_path else "."
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "git", "diff", f"{base}..{target}", "--stat",
+            cwd=repo_path,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await proc.communicate()
+
+        # Also get the full diff (limited to 50KB)
+        proc_full = await asyncio.create_subprocess_exec(
+            "git", "diff", f"{base}..{target}",
+            cwd=repo_path,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        full_stdout, _ = await proc_full.communicate()
+
+        return {
+            "repo_id": str(repo_id),
+            "base": base,
+            "target": target,
+            "stat": stdout.decode("utf-8", errors="replace")[:5000],
+            "diff": full_stdout.decode("utf-8", errors="replace")[:50000],
+            "truncated": len(full_stdout) > 50000,
+        }
+    except FileNotFoundError:
+        return {"error": "git not found on PATH", "base": base, "target": target}
+    except Exception as e:
+        return {"error": str(e), "base": base, "target": target}
