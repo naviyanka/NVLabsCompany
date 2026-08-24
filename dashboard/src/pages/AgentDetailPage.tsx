@@ -19,7 +19,7 @@ import { Button } from '@/components/common/Button';
 import { Badge } from '@/components/common/Badge';
 import { Tabs } from '@/components/common/Tabs';
 import { Skeleton } from '@/components/common/Skeleton';
-import { apiClient } from '@/api/client';
+import { apiClient, unwrapItems } from '@/api/client';
 import { getActiveCompanyId } from '@/config';
 import type { Agent } from '@/types/agent';
 
@@ -73,7 +73,7 @@ export function AgentDetailPage() {
         const [agentData, chatData, memoryData] = await Promise.allSettled([
           apiClient.get<Agent>(`/api/v1/companies/${companyId}/agents/${id}`),
           apiClient.get<ChatMessage[]>(`/api/v1/agents/${id}/chat`),
-          apiClient.get<{ items: AgentMemory[] }>(`/api/v1/agents/${id}/memory`),
+          apiClient.get<AgentMemory[] | { items: AgentMemory[] }>(`/api/v1/agents/${id}/memory`),
         ]);
         if (!isMounted) return;
         if (agentData.status === 'fulfilled' && agentData.value) {
@@ -82,8 +82,9 @@ export function AgentDetailPage() {
         if (chatData.status === 'fulfilled' && Array.isArray(chatData.value) && chatData.value.length > 0) {
           setChatMessages(chatData.value);
         }
-        if (memoryData.status === 'fulfilled' && memoryData.value?.items?.length) {
-          setMemories(memoryData.value.items);
+        if (memoryData.status === 'fulfilled') {
+          const memItems = unwrapItems(memoryData.value);
+          if (memItems.length) setMemories(memItems);
         }
       } catch (err) {
         // Agent not found — handled by render
@@ -152,7 +153,7 @@ export function AgentDetailPage() {
     if (!id || !agent) return;
     const nextStatus = agent.status === 'active' ? 'idle' : 'active';
     try {
-      await apiClient.patch(`/api/v1/companies/00000000-0000-4000-8000-000000000001/agents/${id}`, {
+      await apiClient.put(`/api/v1/agents/${id}`, {
         status: nextStatus,
       });
       setAgent((prev) => (prev ? { ...prev, status: nextStatus } : prev));

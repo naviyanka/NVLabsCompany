@@ -135,11 +135,66 @@ async def get_agent(agent_id: uuid.UUID, db: DbSession, company_id: CurrentCompa
     return agent
 
 
+@router.get(
+    "/api/v1/companies/{company_id}/agents/{agent_id}",
+    response_model=AgentResponse,
+)
+async def get_agent_company_scoped(
+    company_id: uuid.UUID, agent_id: uuid.UUID, db: DbSession
+) -> Any:
+    """Get an agent by ID (company-scoped path for dashboard compat)."""
+    stmt = select(Agent).where(Agent.id == agent_id, Agent.company_id == company_id)
+    result = await db.execute(stmt)
+    agent = result.scalar_one_or_none()
+    if agent is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Agent {agent_id} not found",
+        )
+    return agent
+
+
 @router.put("/api/v1/agents/{agent_id}", response_model=AgentResponse)
 async def update_agent(
     agent_id: uuid.UUID, body: AgentUpdate, db: DbSession, company_id: CurrentCompanyId
 ) -> Any:
     """Update an agent."""
+    updates = body.model_dump(exclude_unset=True)
+    if not updates:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No fields to update",
+        )
+    updates["updated_at"] = datetime.utcnow()
+    stmt = update(Agent).where(Agent.id == agent_id, Agent.company_id == company_id).values(**updates)
+    await db.execute(stmt)
+
+    result = await db.execute(select(Agent).where(Agent.id == agent_id, Agent.company_id == company_id))
+    agent = result.scalar_one_or_none()
+    if agent is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Agent {agent_id} not found",
+        )
+    return agent
+
+
+@router.patch("/api/v1/agents/{agent_id}", response_model=AgentResponse)
+async def patch_agent(
+    agent_id: uuid.UUID, body: AgentUpdate, db: DbSession, company_id: CurrentCompanyId
+) -> Any:
+    """Partial update an agent (PATCH semantics, same logic as PUT)."""
+    return await update_agent(agent_id, body, db, company_id)
+
+
+@router.patch(
+    "/api/v1/companies/{company_id}/agents/{agent_id}",
+    response_model=AgentResponse,
+)
+async def patch_agent_company_scoped(
+    company_id: uuid.UUID, agent_id: uuid.UUID, body: AgentUpdate, db: DbSession
+) -> Any:
+    """Partial update via company-scoped path (dashboard compat)."""
     updates = body.model_dump(exclude_unset=True)
     if not updates:
         raise HTTPException(

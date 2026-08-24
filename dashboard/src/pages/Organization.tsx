@@ -13,9 +13,10 @@ import {
 import { Card } from '@/components/common/Card';
 import { Button } from '@/components/common/Button';
 import { Badge } from '@/components/common/Badge';
-import { apiClient } from '@/api/client';
+import { apiClient, unwrapItems } from '@/api/client';
 import type { Department, Squad } from '@/types/organization';
 import type { Agent } from '@/types/agent';
+import { getActiveCompanyId } from '@/config';
 import { AddDepartmentModal } from '@/components/org/AddDepartmentModal';
 import { AddSquadModal } from '@/components/org/AddSquadModal';
 import { OrgTreeGraph } from '@/components/org/OrgTreeGraph';
@@ -38,20 +39,26 @@ export function Organization() {
   useEffect(() => {
     async function loadOrgData() {
       try {
-        const deptsRes = await apiClient.get<{ items: Department[] }>(
-          '/api/v1/companies/00000000-0000-4000-8000-000000000001/departments'
+        const companyId = getActiveCompanyId();
+        const deptsRes = await apiClient.get<Department[] | { items: Department[] }>(
+          `/api/v1/companies/${companyId}/departments`
         );
-        if (deptsRes?.items) setDepartments(deptsRes.items);
+        const deptsItems = unwrapItems(deptsRes);
+        if (deptsItems.length) setDepartments(deptsItems);
 
-        const squadsRes = await apiClient.get<{ items: Squad[] }>(
-          '/api/v1/companies/00000000-0000-4000-8000-000000000001/squads'
+        const squadsRes = await apiClient.get<Squad[] | { items: Squad[] }>(
+          `/api/v1/companies/${companyId}/squads`
         ).catch(() => null);
-        if (squadsRes?.items) setSquads(squadsRes.items);
+        if (squadsRes) {
+          const squadsItems = unwrapItems(squadsRes);
+          if (squadsItems.length) setSquads(squadsItems);
+        }
 
-        const agentsRes = await apiClient.get<{ items: Agent[] }>(
-          '/api/v1/companies/00000000-0000-4000-8000-000000000001/agents'
+        const agentsRes = await apiClient.get<Agent[] | { items: Agent[] }>(
+          `/api/v1/companies/${companyId}/agents`
         );
-        if (agentsRes?.items) setAgents(agentsRes.items);
+        const agentsItems = unwrapItems(agentsRes);
+        if (agentsItems.length) setAgents(agentsItems);
       } catch (err) {
         console.error('Failed to load org hierarchy', err);
       }

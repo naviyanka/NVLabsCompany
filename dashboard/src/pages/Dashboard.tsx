@@ -16,7 +16,8 @@ import { StatCard } from '@/components/common/StatCard';
 import { Button } from '@/components/common/Button';
 import { Badge } from '@/components/common/Badge';
 import { Modal } from '@/components/common/Modal';
-import { apiClient } from '@/api/client';
+import { apiClient, unwrapItems } from '@/api/client';
+import { getActiveCompanyId } from '@/config';
 
 interface AgentItem {
   id: string;
@@ -99,21 +100,25 @@ export function Dashboard() {
     let isMounted = true;
     async function loadData() {
       try {
+        const companyId = getActiveCompanyId();
         const [agentsRes, tasksRes, pipesRes] = await Promise.allSettled([
-          apiClient.get<{ items: AgentItem[] }>('/api/v1/companies/00000000-0000-4000-8000-000000000001/agents'),
-          apiClient.get<{ items: TaskItem[] }>('/api/v1/companies/00000000-0000-4000-8000-000000000001/tasks'),
-          apiClient.get<{ items: PipelineItem[] }>('/api/v1/companies/00000000-0000-4000-8000-000000000001/pipelines'),
+          apiClient.get<AgentItem[] | { items: AgentItem[] }>(`/api/v1/companies/${companyId}/agents`),
+          apiClient.get<TaskItem[] | { items: TaskItem[] }>(`/api/v1/companies/${companyId}/tasks`),
+          apiClient.get<PipelineItem[] | { items: PipelineItem[] }>(`/api/v1/companies/${companyId}/pipelines`),
         ]);
         if (!isMounted) return;
 
-        if (agentsRes.status === 'fulfilled' && agentsRes.value?.items?.length) {
-          setAgents(agentsRes.value.items);
+        if (agentsRes.status === 'fulfilled') {
+          const items = unwrapItems(agentsRes.value);
+          if (items.length) setAgents(items);
         }
-        if (tasksRes.status === 'fulfilled' && tasksRes.value?.items?.length) {
-          setTasks(tasksRes.value.items);
+        if (tasksRes.status === 'fulfilled') {
+          const items = unwrapItems(tasksRes.value);
+          if (items.length) setTasks(items);
         }
-        if (pipesRes.status === 'fulfilled' && pipesRes.value?.items?.length) {
-          setPipelines(pipesRes.value.items);
+        if (pipesRes.status === 'fulfilled') {
+          const items = unwrapItems(pipesRes.value);
+          if (items.length) setPipelines(items);
         }
       } catch (err) {
         // Silently use defaults if offline
@@ -129,7 +134,7 @@ export function Dashboard() {
     e.preventDefault();
     if (!newTaskTitle.trim()) return;
     try {
-      const created = await apiClient.post<TaskItem>('/api/v1/companies/00000000-0000-4000-8000-000000000001/tasks', {
+      const created = await apiClient.post<TaskItem>(`/api/v1/companies/${getActiveCompanyId()}/tasks`, {
         title: newTaskTitle,
         assigned_agent_id: newTaskAgent,
         status: 'pending',
@@ -147,7 +152,7 @@ export function Dashboard() {
     e.preventDefault();
     if (!newAgentName.trim()) return;
     try {
-      const created = await apiClient.post<AgentItem>('/api/v1/companies/00000000-0000-4000-8000-000000000001/agents', {
+      const created = await apiClient.post<AgentItem>(`/api/v1/companies/${getActiveCompanyId()}/agents`, {
         name: newAgentName,
         title: newAgentTitle || 'Operations Specialist',
         role: newAgentRole,

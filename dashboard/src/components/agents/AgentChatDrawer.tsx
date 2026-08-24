@@ -5,7 +5,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Drawer } from '@/components/common/Drawer';
 import { Button } from '@/components/common/Button';
-import { apiClient } from '@/api/client';
+import { apiClient, legacyCompanyHeaders } from '@/api/client';
 import type { Agent } from '@/types/agent';
 import { Send, Bot, User } from 'lucide-react';
 
@@ -177,7 +177,7 @@ export function AgentChatDrawer({ agent, isOpen, onClose }: AgentChatDrawerProps
     try {
       const response = await fetch(`/api/v1/agents/${agent.id}/chat/stream`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...legacyCompanyHeaders() },
         credentials: 'include',
         body: JSON.stringify({ prompt: userText }),
       });

@@ -7,12 +7,15 @@ capabilities, and conversation history.
 
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
 import uuid
 from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, status
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
@@ -380,4 +383,105 @@ async def chat_with_agent(
         history=[ChatMessage(**m) for m in _get_history(str(agent_id))],
         model_used=model_used,
         tokens_used=tokens_used,
+    )
+
+
+@router.delete("/api/v1/agents/{agent_id}/chat", status_code=status.HTTP_204_NO_CONTENT)
+async def clear_chat_history(
+    agent_id: uuid.UUID,
+    db: DbSession,
+    company_id: CurrentCompanyId,
+) -> None:
+    """Clear all conversation history for an agent."""
+    # Verify agent exists
+    stmt = select(Agent).where(Agent.id == agent_id, Agent.company_id == company_id)
+    result = await db.execute(stmt)
+    agent = result.scalar_one_or_none()
+    if agent is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Agent {agent_id} not found",
+        )
+    _conversations.pop(str(agent_id), None)
+
+
+@router.post("/api/v1/agents/{agent_id}/chat/stream")
+async def chat_with_agent_stream(
+    agent_id: uuid.UUID,
+    body: ChatRequest,
+    db: DbSession,
+    company_id: CurrentCompanyId,
+) -> StreamingResponse:
+    """Send a message to an agent and stream the response via SSE.
+
+    The frontend expects Server-Sent Events with JSON payloads:
+      data: {"type": "chunk", "text": "partial..."}
+      data: {"type": "done", "message": {...}}
+      data: [DONE]
+    """
+    # Load agent
+    stmt = select(Agent).where(Agent.id == agent_id, Agent.company_id == company_id)
+    result = await db.execute(stmt)
+    agent = result.scalar_one_or_none()
+    if agent is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Agent {agent_id} not found",
+        )
+
+    # Build system prompt from agent's soul/persona
+    system_prompt = _build_system_prompt(agent)
+
+    # Get history for context
+    history = _get_history(str(agent_id))
+
+    # Store user message
+    _add_message(str(agent_id), "user", body.prompt)
+
+    async def event_generator():
+        """Generate SSE events — call LLM and emit word-by-word for streaming UX."""
+        try:
+            response_text, model_used, tokens_used = await _call_llm(
+                agent, system_prompt, body.prompt, history
+            )
+
+            # Simulate streaming by emitting chunks (word-by-word)
+            words = response_text.split(" ")
+            for i, word in enumerate(words):
+                chunk = word if i == 0 else " " + word
+                event = json.dumps({"type": "chunk", "text": chunk})
+                yield f"data: {event}\n\n"
+                # Small delay for streaming effect
+                await asyncio.sleep(0.02)
+
+            # Store the full response in history
+            agent_msg = _add_message(str(agent_id), "agent", response_text)
+
+            # Emit done event with the full message
+            done_event = json.dumps({
+                "type": "done",
+                "message": agent_msg,
+                "model_used": model_used,
+                "tokens_used": tokens_used,
+            })
+            yield f"data: {done_event}\n\n"
+            yield "data: [DONE]\n\n"
+
+        except Exception as e:
+            logger.error("Streaming chat error for agent %s: %s", agent_id, e)
+            error_event = json.dumps({
+                "type": "error",
+                "text": f"Chat error: {type(e).__name__}: {e}",
+            })
+            yield f"data: {error_event}\n\n"
+            yield "data: [DONE]\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
     )
