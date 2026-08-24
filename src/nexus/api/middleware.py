@@ -84,6 +84,9 @@ class _SlidingWindowRateLimiter:
 # Global rate limiter instance
 _rate_limiter = _SlidingWindowRateLimiter()
 
+# Per-agent rate limiter (stricter: 30 req/60s per agent)
+_agent_rate_limiter = _SlidingWindowRateLimiter(limit=30, window_seconds=60)
+
 
 class _BudgetTracker:
     """In-memory budget tracker that caches company spend limits.
@@ -254,7 +257,7 @@ class GovernanceMiddleware:
         if company_id:
             scope.setdefault("state", {})["company_id"] = company_id
 
-        # 3. Rate limiting check
+        # 3. Rate limiting check (company-level)
         rate_limit_remaining = self._get_rate_limit_remaining(company_id)
         if rate_limit_remaining == 0 and company_id:
             response = JSONResponse(
@@ -272,6 +275,27 @@ class GovernanceMiddleware:
             )
             await response(scope, receive, send)
             return
+
+        # 3b. Per-agent rate limiting for chat paths (prevent single agent from starving others)
+        path = request.scope.get("path", "")
+        if company_id and "/agents/" in path and "/chat" in path:
+            # Extract agent_id from path: /api/v1/agents/{agent_id}/chat
+            parts = path.split("/agents/")
+            if len(parts) > 1:
+                agent_segment = parts[1].split("/")[0]
+                try:
+                    agent_key = uuid.UUID(agent_segment)
+                    # Per-agent limit: 30 req/60s (stricter than company-wide 100)
+                    agent_remaining, agent_allowed = _agent_rate_limiter.check(agent_key)
+                    if not agent_allowed:
+                        response = JSONResponse(
+                            status_code=429,
+                            content={"detail": "Agent rate limit exceeded.", "code": "AGENT_RATE_LIMITED"},
+                        )
+                        await response(scope, receive, send)
+                        return
+                except (ValueError, IndexError):
+                    pass
 
         # 4. Policy evaluation
         policy_result = self._evaluate_policy(request, company_id)

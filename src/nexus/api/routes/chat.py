@@ -438,12 +438,11 @@ async def get_chat_history(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Agent {agent_id} not found",
         )
-    # Load from in-memory cache first, seed from DB if empty
-    history = _get_history(str(agent_id))
-    if not history:
-        history = await _load_history_from_db(db, agent_id, company_id)
-        if history:
-            _conversations[str(agent_id)] = history
+    # Always load from DB (authoritative source for multi-worker consistency)
+    history = await _load_history_from_db(db, agent_id, company_id)
+    # Update in-memory cache for fast access during streaming
+    if history:
+        _conversations[str(agent_id)] = history
     return history
 
 

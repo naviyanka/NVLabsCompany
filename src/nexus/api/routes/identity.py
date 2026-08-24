@@ -79,10 +79,33 @@ class WorkingContextResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# In-memory state for demo purposes
+# Persistent state backing for agent souls
 # ---------------------------------------------------------------------------
 
-_agent_souls: dict[str, dict[str, Any]] = {}
+import json
+from pathlib import Path
+
+_SOULS_FILE = Path("data/agent_souls_database.json")
+
+
+def _load_souls() -> dict[str, dict[str, Any]]:
+    if _SOULS_FILE.exists():
+        try:
+            return json.loads(_SOULS_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    return {}
+
+
+def _save_souls() -> None:
+    try:
+        _SOULS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        _SOULS_FILE.write_text(json.dumps(_agent_souls, indent=2), encoding="utf-8")
+    except Exception:
+        pass
+
+
+_agent_souls: dict[str, dict[str, Any]] = _load_souls()
 
 
 # ---------------------------------------------------------------------------
@@ -160,6 +183,32 @@ async def update_agent_soul(
     existing.setdefault("tone", "professional")
 
     _agent_souls[agent_id_str] = existing
+    _save_souls()
+
+    # Also persist to the Agent model in DB for durability
+    try:
+        import json as _json
+        from nexus.database import async_session_factory
+        from nexus.models.agent import Agent
+        from sqlalchemy import update as sa_update
+        import asyncio
+
+        structured_soul = (
+            f"Personality: {', '.join(existing.get('personality_traits', []))}\n\n"
+            f"Communication: {existing.get('communication_style', '')}\n\n"
+            f"Values: {', '.join(existing.get('values', []))}\n\n"
+            f"Constraints:\n" + "\n".join(existing.get("constraints", [])) + "\n\n"
+            f"Tone: {existing.get('tone', 'professional')}\n\n"
+            f"{existing.get('background', '')}"
+        ).strip()
+
+        async with async_session_factory() as db:
+            await db.execute(
+                sa_update(Agent).where(Agent.id == agent_id).values(soul_description=structured_soul)
+            )
+            await db.commit()
+    except Exception:
+        pass  # Best-effort DB persistence
 
     return {
         "agent_id": agent_id_str,
