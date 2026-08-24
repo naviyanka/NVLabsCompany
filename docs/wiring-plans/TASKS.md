@@ -557,50 +557,417 @@ Features from the NvLabsOrg comparison that expand the platform's capability.
 | P3 (Feature Gaps) | 5 | 5 | 0 |
 | P4 (Polish) | 4 | 4 | 0 |
 | P5 (Remaining Gaps) | 8 | 8 | 0 |
-| P6 (Autonomy & Completion) | 10 | 7 | 3 |
-| P7 (Production Hardening) | 6 | 0 | 6 |
-| P8 (Frontend Completion) | 5 | 0 | 5 |
-| P9 (Autonomous Intelligence) | 6 | 0 | 6 |
-| P10 (Platform Features) | 7 | 0 | 7 |
-| **Total** | **61** | **34** | **27** |
+| P6 (Autonomy & Completion) | 10 | 10 | 0 |
+| P7 (Production Hardening) | 6 | 6 | 0 |
+| P8 (Frontend Completion) | 5 | 5 | 0 |
+| P9 (Autonomous Intelligence) | 6 | 6 | 0 |
+| P10 (Platform Features) | 7 | 7 | 0 |
+| P11 (Integration & Polish) | 8 | 0 | 8 |
+| P12 (Quality & Production) | 8 | 0 | 8 |
+| P13 (Agent Intelligence) | 8 | 0 | 8 |
+| P14 (Observability) | 6 | 0 | 6 |
+| P15 (Developer Experience) | 6 | 0 | 6 |
+| P16 (Competitive Features) | 6 | 0 | 6 |
+| **Total** | **103** | **61** | **42** |
 
 ---
 
 ## Phase Execution Plan
 
 ```
-Phase 1 — Production Hardening (P7)          ~8 hours
-  ├── 7.1 Alembic migrations
-  ├── 7.2 Redis rate limiter
-  ├── 7.3 Redis budget tracker
-  ├── 7.4 Leader election
-  ├── 7.5 Health monitoring
-  └── 7.6 Duplicate route cleanup
+COMPLETED PHASES (P1-P10):
+  P1-P6:  Core wiring, governance, features, polish, autonomy      ✅ 37/37
+  P7:     Production hardening (migrations, Redis, health)          ✅  6/6
+  P8:     Frontend completion (Evolution, terminal, Activity)       ✅  5/5
+  P9:     Autonomous intelligence (GoalLoop, SmartRetry, broadcast) ✅  6/6
+  P10:    Platform features (Cursor, webhook, themes, PWA, files)   ✅  7/7
 
-Phase 2 — Frontend Completion (P8)           ~4 hours
-  ├── 8.1 Evolution page wiring
-  ├── 8.2 Terminal page route
-  ├── 8.3 PipelineBuilder integration
-  ├── 8.4 PulseLine UUID fix
-  └── 8.5 Activity fake polling removal
+UPCOMING PHASES (P11-P16):
 
-Phase 3 — Autonomous Intelligence (P9)      ~10 hours
-  ├── 9.1 GoalLoop in orchestrator
-  ├── 9.2 SmartRetry REASSIGN action
-  ├── 9.3 SmartRetry DECOMPOSE action
-  ├── 9.4 Auto-evaluate proposals
-  ├── 9.5 Worktree from orchestrator
-  └── 9.6 WebSocket broadcast
+Phase 5 — Integration & Polish (P11)          ~5 hours
+  ├── 11.1 Route FileExplorer + DiffViewer into pages
+  ├── 11.2 Theme selector UI in Settings
+  ├── 11.3 Workspace CRUD API routes
+  ├── 11.4 Terminal nav link in sidebar
+  ├── 11.5 PWA service worker for offline caching
+  ├── 11.6 ChatMessage in __all__ export
+  ├── 11.7 Fix duplicate routes in repositories.py
+  └── 11.8 API docs link in dashboard
 
-Phase 4 — Platform Features (P10)           ~30 hours
-  ├── 10.1 Cursor CLI backend
-  ├── 10.2 Webhook delivery
-  ├── 10.3 Multi-workspace
-  ├── 10.4 Theme system
-  ├── 10.5 Mobile PWA
-  ├── 10.6 File explorer
-  └── 10.7 Git diff viewer
+Phase 6 — Quality & Production (P12)         ~19 hours
+  ├── 12.1 Proper OKR model (replace JSON-in-description hack)
+  ├── 12.2 Persist Identity/Soul properly on save
+  ├── 12.3 Chat cache cross-worker sync (Redis pub/sub)
+  ├── 12.4 PipelineBuilder save to real API
+  ├── 12.5 Evolution page — evaluate/promote buttons
+  ├── 12.6 CI test integration
+  ├── 12.7 Error boundaries per panel
+  └── 12.8 Per-agent rate limiting
+
+Phase 7 — Agent Intelligence (P13)           ~20 hours
+  ├── 13.1 Multi-turn GoalLoop (multiple iterations per tick)
+  ├── 13.2 LLM-based GoalJudge
+  ├── 13.3 Inter-agent task delegation
+  ├── 13.4 Auto-promote proposals above confidence threshold
+  ├── 13.5 Memory importance decay over time
+  ├── 13.6 Cross-agent L3 memory promotion
+  ├── 13.7 Agent cloning/forking endpoint
+  └── 13.8 Pipeline conditional branching
+
+Phase 8 — Observability (P14)                ~11 hours
+  ├── 14.1 Correlation ID in all structured logs
+  ├── 14.2 Prometheus /metrics endpoint verification
+  ├── 14.3 Agent execution timeline UI
+  ├── 14.4 Budget alerts/notifications
+  ├── 14.5 Audit log page wired to real backend
+  └── 14.6 Kill switch admin UI
+
+Phase 9 — Developer Experience (P15)         ~14 hours
+  ├── 15.1 Docker Compose (backend + frontend + Redis + PostgreSQL)
+  ├── 15.2 Environment variable documentation
+  ├── 15.3 Link to /docs (FastAPI auto-docs) from dashboard
+  ├── 15.4 Seed data CLI command
+  ├── 15.5 Alembic migrations for all new models
+  └── 15.6 End-to-end Playwright test suite
+
+Phase 10 — Competitive Features (P16)       ~36 hours
+  ├── 16.1 Telegram bot remote control
+  ├── 16.2 Desktop Tauri app wrapper
+  ├── 16.3 Enhanced 2D/3D office scene
+  ├── 16.4 Terminal input (slash commands)
+  ├── 16.5 Agent context menu (right-click actions)
+  └── 16.6 Drag-and-drop organization chart
 ```
+
+---
+
+## Priority 11: Integration & Polish (Phase 5)
+
+Connect existing components that are built but not integrated into the UI.
+
+### 11.1 Route FileExplorer + DiffViewer into Pages
+- **Status:** TODO
+- **Problem:** FileExplorer and DiffViewer components exist but aren't embedded in any page.
+- **Fix:** Add FileExplorer as a tab in GitRepos page. Add DiffViewer as a drawer/modal triggered from repo detail.
+- **Files:** `dashboard/src/pages/GitRepos.tsx`
+- **Effort:** Low (30 min)
+
+### 11.2 Theme Selector UI in Settings
+- **Status:** TODO
+- **Problem:** Theme system (`themes.ts`) with 5 themes exists but no UI to switch between them.
+- **Fix:** Add a ThemeTab in Settings that lists themes with preview swatches and calls `applyTheme()` on selection.
+- **Files:** `dashboard/src/components/settings/tabs/ThemeTab.tsx` (new), `dashboard/src/pages/Settings.tsx`
+- **Effort:** Low (30 min)
+
+### 11.3 Workspace CRUD API Routes
+- **Status:** TODO
+- **Problem:** Workspace model exists but no REST endpoints.
+- **Fix:** Create `src/nexus/api/routes/workspaces.py` with list, create, switch (set active), delete. Register in main.py.
+- **Files:** `src/nexus/api/routes/workspaces.py` (new), `src/nexus/main.py`
+- **Effort:** Medium (2 hours)
+
+### 11.4 Terminal Nav Link in Sidebar
+- **Status:** TODO
+- **Problem:** `/terminal` route exists but no navigation link to reach it.
+- **Fix:** Add Terminal icon + link in the sidebar/nav component.
+- **Files:** `dashboard/src/components/layout/Sidebar.tsx`
+- **Effort:** Low (5 min)
+
+### 11.5 PWA Service Worker
+- **Status:** TODO
+- **Problem:** manifest.json exists but no service worker for offline caching.
+- **Fix:** Create `dashboard/public/sw.js` with cache-first strategy for static assets, network-first for API.
+- **Files:** `dashboard/public/sw.js` (new), `dashboard/index.html` (register SW)
+- **Effort:** Medium (1 hour)
+
+### 11.6 ChatMessage in __all__ Export
+- **Status:** TODO
+- **Problem:** ChatMessage imported in models/__init__.py but not listed in `__all__`.
+- **Fix:** Add `"ChatMessage"` to the `__all__` list.
+- **Files:** `src/nexus/models/__init__.py`
+- **Effort:** Trivial (1 min)
+
+### 11.7 Fix Duplicate Routes in repositories.py
+- **Status:** TODO
+- **Problem:** repositories.py has duplicate stat/commits/PRs/contributors endpoints.
+- **Fix:** Remove the shorter duplicate definitions (keep the detailed ones).
+- **Files:** `src/nexus/api/routes/repositories.py`
+- **Effort:** Low (20 min)
+
+### 11.8 API Docs Link in Dashboard
+- **Status:** TODO
+- **Problem:** FastAPI auto-generates `/docs` (Swagger) but no link from the dashboard.
+- **Fix:** Add an "API Docs" link in Settings or sidebar that opens `/docs` in a new tab.
+- **Files:** `dashboard/src/components/layout/Sidebar.tsx`
+- **Effort:** Trivial (5 min)
+
+---
+
+## Priority 12: Quality & Production (Phase 6)
+
+Make existing features production-grade and multi-worker safe.
+
+### 12.1 Proper OKR Model
+- **Status:** TODO
+- **Problem:** OKR data is persisted as Goal records with JSON in the description field. No proper FK relationships.
+- **Fix:** Create `Objective` and `KeyResult` SQLModel tables with proper relationships. Migrate OKR routes to use them.
+- **Files:** `src/nexus/models/okr.py` (new), `src/nexus/api/routes/okr.py`
+- **Effort:** Medium (4 hours)
+
+### 12.2 Persist Identity/Soul Properly
+- **Status:** TODO
+- **Problem:** identity.py stores agent souls in an in-memory dict. Lost on restart.
+- **Fix:** On soul save, write structured data to `Agent.soul_description`. On load, parse from that field. Remove in-memory `_agent_souls` dict.
+- **Files:** `src/nexus/api/routes/identity.py`
+- **Effort:** Medium (2 hours)
+
+### 12.3 Chat Cache Cross-Worker Sync
+- **Status:** TODO
+- **Problem:** In-memory `_conversations` dict isn't shared across workers. Same agent shows different history depending on which worker handles the request.
+- **Fix:** Use Redis pub/sub to invalidate/update cache across workers. Or always read from DB (remove cache).
+- **Files:** `src/nexus/api/routes/chat.py`
+- **Effort:** Medium (2 hours)
+
+### 12.4 PipelineBuilder Save to Real API
+- **Status:** TODO
+- **Problem:** PipelineBuilderCanvas saves are partially wired — creates/patches but may not include all stage metadata.
+- **Fix:** Ensure all PipelineStage fields (parallel, quality_gate, sub_prompts, agent_id) are included in the API payload.
+- **Files:** `dashboard/src/pages/Pipelines.tsx`
+- **Effort:** Low (1 hour)
+
+### 12.5 Evolution Page — Evaluate/Promote Buttons
+- **Status:** TODO
+- **Problem:** Evolution.tsx shows proposals but can only approve/reject. Can't trigger evaluation or promotion.
+- **Fix:** Add "Evaluate" button that calls `POST /evolution/proposals/{id}/evaluate` and "Promote" button for approved proposals.
+- **Files:** `dashboard/src/pages/Evolution.tsx`
+- **Effort:** Medium (2 hours)
+
+### 12.6 CI Test Integration
+- **Status:** TODO
+- **Problem:** 20+ test files exist but no CI pipeline runs them.
+- **Fix:** Add `.github/workflows/test.yml` that runs `pytest` and `tsc --noEmit`.
+- **Files:** `.github/workflows/test.yml` (new)
+- **Effort:** Medium (3 hours)
+
+### 12.7 Error Boundaries Per Panel
+- **Status:** TODO
+- **Problem:** A crash in one component white-screens the entire app.
+- **Fix:** Add React ErrorBoundary wrapper around each major page section (sidebar, main content, drawers).
+- **Files:** `dashboard/src/components/common/ErrorBoundary.tsx` (new)
+- **Effort:** Medium (2 hours)
+
+### 12.8 Per-Agent Rate Limiting
+- **Status:** TODO
+- **Problem:** Rate limiter is per-company only. A single noisy agent can consume all quota.
+- **Fix:** Add optional per-agent rate limiting in the middleware (keyed by `company_id:agent_id` in chat paths).
+- **Files:** `src/nexus/api/middleware.py`
+- **Effort:** Low (1 hour)
+
+---
+
+## Priority 13: Agent Intelligence (Phase 7)
+
+Deepen the autonomous capabilities.
+
+### 13.1 Multi-Turn GoalLoop
+- **Status:** TODO
+- **Problem:** Orchestrator runs 1 iteration per tick. Fast goals waste 2-minute wait between iterations.
+- **Fix:** After a subtask completes, immediately check if more work is needed (up to 3 iterations per tick).
+- **Files:** `src/nexus/runtime/orchestrator.py`
+- **Effort:** Medium (3 hours)
+
+### 13.2 LLM-Based GoalJudge
+- **Status:** TODO
+- **Problem:** HeuristicGoalJudge only does keyword matching. Misses nuanced completion.
+- **Fix:** Create `LLMGoalJudge` that prompts an LLM with the goal + output and asks "is this goal achieved?" Falls back to heuristic.
+- **Files:** `src/nexus/orchestration/goal_loop.py`
+- **Effort:** Medium (2 hours)
+
+### 13.3 Inter-Agent Task Delegation
+- **Status:** TODO
+- **Problem:** Agents can't assign work to each other during execution.
+- **Fix:** Add a `/agents/{id}/delegate` endpoint that creates a task assigned to another agent and notifies via inbox. The delegating agent can await the result.
+- **Files:** `src/nexus/api/routes/agents.py`, `src/nexus/api/routes/communication.py`
+- **Effort:** Medium (4 hours)
+
+### 13.4 Auto-Promote Above Confidence Threshold
+- **Status:** TODO
+- **Problem:** Auto-evaluate creates evaluations but proposals sit in "evaluating" forever. No auto-promotion.
+- **Fix:** If `evaluation.passed == True` and `proposal.confidence >= 0.8`, auto-promote (skip human approval for high-confidence proposals).
+- **Files:** `src/nexus/runtime/orchestrator.py`
+- **Effort:** Low (1 hour)
+
+### 13.5 Memory Importance Decay
+- **Status:** TODO
+- **Problem:** MemoryRecord.importance never decreases. Old irrelevant memories dominate context.
+- **Fix:** Add a decay function: on each orchestrator tick, reduce importance of memories not accessed in 7+ days by 5%.
+- **Files:** `src/nexus/runtime/orchestrator.py`
+- **Effort:** Medium (2 hours)
+
+### 13.6 Cross-Agent L3 Memory Promotion
+- **Status:** TODO
+- **Problem:** When one agent discovers something useful, it stays in their L2 memory. Not shared.
+- **Fix:** After task completion, if output contains "discovery" or "learned" patterns, promote key facts to L3 shared memory with `scope="company"`.
+- **Files:** `src/nexus/runtime/orchestrator.py`, `src/nexus/api/routes/memory.py`
+- **Effort:** Medium (3 hours)
+
+### 13.7 Agent Cloning/Forking Endpoint
+- **Status:** TODO
+- **Problem:** No way to duplicate an agent's config + soul as a starting point for a new agent.
+- **Fix:** Add `POST /agents/{id}/clone` that copies all fields (name suffixed "-clone"), creates a new agent record.
+- **Files:** `src/nexus/api/routes/agents.py`
+- **Effort:** Low (1 hour)
+
+### 13.8 Pipeline Conditional Branching
+- **Status:** TODO
+- **Problem:** Pipelines are linear chains. Can't handle "if quality gate fails, run alternative path."
+- **Fix:** Add `on_fail` field to stage definition (stage ID to jump to on failure). Pipeline runner checks and branches.
+- **Files:** `src/nexus/api/routes/pipelines.py`
+- **Effort:** Medium (4 hours)
+
+---
+
+## Priority 14: Observability (Phase 8)
+
+Production monitoring and visibility.
+
+### 14.1 Correlation ID in Structured Logs
+- **Status:** TODO
+- **Problem:** RequestIDMiddleware generates IDs but not all log calls include them.
+- **Fix:** Add a context variable for request_id and inject into the logging format/filter.
+- **Files:** `src/nexus/logging_config.py`
+- **Effort:** Medium (2 hours)
+
+### 14.2 Prometheus /metrics Verification
+- **Status:** TODO
+- **Problem:** MetricsMiddleware exists but the `/metrics` endpoint may not be serving proper Prometheus format.
+- **Fix:** Verify the metrics endpoint returns text/plain with proper histogram/counter formatting. Add custom business metrics (active_agents, total_tokens_today).
+- **Files:** `src/nexus/telemetry.py`
+- **Effort:** Low (1 hour)
+
+### 14.3 Agent Execution Timeline UI
+- **Status:** TODO
+- **Problem:** No visual timeline showing agent execution history (when, what, cost).
+- **Fix:** Create a timeline component that fetches from `/agents/{id}/activity` or `/agent-logs` and displays as a chronological feed.
+- **Files:** `dashboard/src/components/agents/AgentTimeline.tsx` (new)
+- **Effort:** Medium (4 hours)
+
+### 14.4 Budget Alerts/Notifications
+- **Status:** TODO
+- **Problem:** Budget enforcement blocks at 100%. No warning before limit.
+- **Fix:** When spend reaches 80%/90%, create a notification and optionally emit a WebSocket event.
+- **Files:** `src/nexus/api/middleware.py`, `src/nexus/runtime/event_bridge.py`
+- **Effort:** Low (1 hour)
+
+### 14.5 Audit Log Page Wired to Backend
+- **Status:** TODO
+- **Problem:** AuditLogsTab in Settings uses static mock data.
+- **Fix:** Wire to `GET /api/v1/companies/{id}/audit-logs` endpoint with real data from the DB.
+- **Files:** `dashboard/src/components/settings/tabs/AuditLogsTab.tsx`
+- **Effort:** Low (1 hour)
+
+### 14.6 Kill Switch Admin UI
+- **Status:** TODO
+- **Problem:** GovernanceMiddleware kill switch works but no UI to activate/deactivate it.
+- **Fix:** Add a "Governance" section in Settings with toggle for kill switch + confirmation modal.
+- **Files:** `dashboard/src/components/settings/tabs/GovernanceTab.tsx` (new)
+- **Effort:** Medium (2 hours)
+
+---
+
+## Priority 15: Developer Experience (Phase 9)
+
+Make the project easy to set up, develop, and deploy.
+
+### 15.1 Docker Compose
+- **Status:** TODO
+- **Problem:** No containerization. Developers must manually install Python, Node, set up DB.
+- **Fix:** Create `docker-compose.yml` with services: backend (uvicorn), frontend (node), postgres, redis. Include `.env.example`.
+- **Files:** `docker-compose.yml` (new), `.env.example` (new), `Dockerfile` (new)
+- **Effort:** Medium (3 hours)
+
+### 15.2 Environment Variable Documentation
+- **Status:** TODO
+- **Problem:** 15+ env vars across the system with no central reference.
+- **Fix:** Create `docs/ENVIRONMENT.md` listing all env vars, their purpose, defaults, and examples.
+- **Files:** `docs/ENVIRONMENT.md` (new)
+- **Effort:** Low (1 hour)
+
+### 15.3 API Docs Link from Dashboard
+- **Status:** TODO
+- **Problem:** FastAPI serves interactive docs at `/docs` but users don't know about it.
+- **Fix:** Add "API Reference" link in the sidebar footer that opens `/docs` in new tab.
+- **Files:** `dashboard/src/components/layout/Sidebar.tsx`
+- **Effort:** Trivial (5 min)
+
+### 15.4 Seed Data CLI Command
+- **Status:** TODO
+- **Problem:** Demo data is seeded at startup only. Can't re-seed without restarting.
+- **Fix:** Add a CLI command: `python -m nexus.demo.seed --reset` that drops and re-creates demo data.
+- **Files:** `src/nexus/demo/seed.py` (add __main__ support)
+- **Effort:** Low (1 hour)
+
+### 15.5 Alembic Migrations for All Models
+- **Status:** TODO
+- **Problem:** Only ChatMessage has an explicit migration. Workspace and other schema changes need migrations.
+- **Fix:** Run `alembic revision --autogenerate` to detect Workspace and any other unmigrated models.
+- **Files:** `alembic/versions/`
+- **Effort:** Low (1 hour)
+
+### 15.6 End-to-End Playwright Test Suite
+- **Status:** TODO
+- **Problem:** No browser-level tests for critical flows (login, hire, chat, stream).
+- **Fix:** Set up Playwright with 5 core test scenarios. Add to CI.
+- **Files:** `tests/e2e/` (new directory), `playwright.config.ts` (new)
+- **Effort:** High (8 hours)
+
+---
+
+## Priority 16: Competitive Features (Phase 10)
+
+Market positioning and differentiation vs NvLabsOrg.
+
+### 16.1 Telegram Bot Remote Control
+- **Status:** TODO
+- **Problem:** Can only control agents from the web dashboard.
+- **Fix:** Create a Telegram bot that accepts commands (/chat, /status, /hire, /kill) and proxies to the API.
+- **Files:** `src/nexus/integrations/telegram_bot.py` (new)
+- **Effort:** High (8 hours)
+
+### 16.2 Desktop Tauri App
+- **Status:** TODO
+- **Problem:** No native desktop app. NvLabsOrg has Tauri v2 wrapper.
+- **Fix:** Add `apps/desktop/` with Tauri config wrapping the web dashboard. System tray for notifications.
+- **Files:** `apps/desktop/` (new Tauri project)
+- **Effort:** High (10+ hours)
+
+### 16.3 Enhanced Office Scene
+- **Status:** TODO
+- **Problem:** Basic 2D office exists. NvLabsOrg has richer PixiJS scene with agent animations.
+- **Fix:** Add agent status indicators, walking animations, and interaction bubbles to the office canvas.
+- **Files:** `dashboard/src/components/office2d/OpenOfficeCanvas.tsx`
+- **Effort:** High (8 hours)
+
+### 16.4 Terminal Input (Slash Commands)
+- **Status:** TODO
+- **Problem:** AgentTerminalPanel is view-only. Can't send commands.
+- **Fix:** Add an input field that sends WebSocket messages to agents or executes slash commands.
+- **Files:** `dashboard/src/components/terminal/AgentTerminalPanel.tsx`
+- **Effort:** Medium (2 hours)
+
+### 16.5 Agent Context Menu
+- **Status:** TODO
+- **Problem:** Agent cards only have click-to-detail and chat button. No quick actions.
+- **Fix:** Add right-click context menu on agent cards: Wake, Pause, Chat, Clone, Fire, View Logs.
+- **Files:** `dashboard/src/components/agents/AgentCard.tsx`
+- **Effort:** Medium (2 hours)
+
+### 16.6 Drag-and-Drop Organization Chart
+- **Status:** TODO
+- **Problem:** Organization page shows static department/squad structure.
+- **Fix:** Add drag-and-drop to move agents between departments/squads. Save via PATCH API.
+- **Files:** `dashboard/src/pages/Organization.tsx`
+- **Effort:** High (6 hours)
 
 ---
 
