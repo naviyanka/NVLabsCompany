@@ -1,14 +1,16 @@
 import type { Agent } from '@/types/agent';
 import { Card } from '@/components/common/Card';
 import { Badge } from '@/components/common/Badge';
-import { Cpu, Activity } from 'lucide-react';
+import { Cpu, Activity, MessageSquare, Trash2 } from 'lucide-react';
 
 export interface AgentCardProps {
   agent: Agent;
   onClick?: (agent: Agent) => void;
+  onChat?: (agent: Agent) => void;
+  onFire?: (agent: Agent) => void;
 }
 
-export function AgentCard({ agent, onClick }: AgentCardProps) {
+export function AgentCard({ agent, onClick, onChat, onFire }: AgentCardProps) {
   const badgeVariant =
     agent.status === 'active'
       ? 'active'
@@ -37,7 +39,27 @@ export function AgentCard({ agent, onClick }: AgentCardProps) {
           </div>
         </div>
 
-        <Badge variant={badgeVariant as any}>{agent.status}</Badge>
+        <div className="flex items-center gap-1.5">
+          {onChat && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onChat(agent); }}
+              className="p-1.5 rounded-[4px] text-[#6B6B6E] hover:text-[#FFB020] hover:bg-[#FFB020]/10 transition-all cursor-pointer opacity-0 group-hover:opacity-100"
+              title={`Chat with ${agent.name}`}
+            >
+              <MessageSquare size={14} />
+            </button>
+          )}
+          {onFire && (
+            <button
+              onClick={(e) => { e.stopPropagation(); if (confirm(`Fire ${agent.name}? This will permanently remove this agent.`)) onFire(agent); }}
+              className="p-1.5 rounded-[4px] text-[#6B6B6E] hover:text-red-400 hover:bg-red-400/10 transition-all cursor-pointer opacity-0 group-hover:opacity-100"
+              title={`Fire ${agent.name}`}
+            >
+              <Trash2 size={14} />
+            </button>
+          )}
+          <Badge variant={badgeVariant as any}>{agent.status}</Badge>
+        </div>
       </div>
 
       <div className="mt-4 pt-3 border-t border-white/[0.06] grid grid-cols-2 gap-2 text-[11px] font-mono text-[#6B6B6E]">

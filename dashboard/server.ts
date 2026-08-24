@@ -24,7 +24,9 @@ const PROXY_ALL_API = process.env.PROXY_API === 'true';
 
 function shouldProxy(url: string): boolean {
   if (!url.startsWith('/api/')) return false;
-  return PROXY_ALL_API || url.startsWith('/api/v1/auth/');
+  // Only proxy when PROXY_API=true (full backend mode)
+  // In dev mode, serve mock auth responses locally
+  return PROXY_ALL_API;
 }
 
 /** Headers worth forwarding. `cookie` carries the session; `x-csrf-token` pairs with it. */
@@ -2140,6 +2142,70 @@ try {
 } catch (err) {
   console.error('Failed to load chat history', err);
 }
+
+// ──────────────── Dev Auth Bypass ────────────────
+// Mock auth endpoints so the frontend works without the real Python backend
+
+app.get('/api/v1/auth/me', (req, res) => {
+  res.json({
+    authenticated: true,
+    principal: { kind: 'user', role: 'admin' },
+    user: {
+      id: '00000000-0000-4000-8000-000000000099',
+      email: 'admin@nvlabs.dev',
+      first_name: 'Admin',
+      last_name: 'Dev',
+      title: 'Super Administrator',
+      avatar_url: null,
+      timezone: 'UTC',
+      status: 'active',
+      two_factor_enabled: false,
+      is_superuser: true,
+    },
+    company: {
+      id: '00000000-0000-4000-8000-000000000001',
+      name: 'NVLabs',
+      role: 'admin',
+    },
+    memberships: [{
+      company_id: '00000000-0000-4000-8000-000000000001',
+      company_name: 'NVLabs',
+      role: 'admin',
+    }],
+  });
+});
+
+app.get('/api/v1/auth/setup-required', (req, res) => {
+  res.json({ setup_required: false });
+});
+
+app.post('/api/v1/auth/login', (req, res) => {
+  res.json({
+    authenticated: true,
+    principal: { kind: 'user', role: 'admin' },
+    user: {
+      id: '00000000-0000-4000-8000-000000000099',
+      email: req.body?.email || 'admin@nvlabs.dev',
+      first_name: 'Admin',
+      last_name: 'Dev',
+      is_superuser: true,
+    },
+    company: {
+      id: '00000000-0000-4000-8000-000000000001',
+      name: 'NVLabs',
+      role: 'admin',
+    },
+    memberships: [{
+      company_id: '00000000-0000-4000-8000-000000000001',
+      company_name: 'NVLabs',
+      role: 'admin',
+    }],
+  });
+});
+
+app.post('/api/v1/auth/logout', (req, res) => {
+  res.json({ success: true });
+});
 
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });

@@ -20,6 +20,7 @@ import { Badge } from '@/components/common/Badge';
 import { Tabs } from '@/components/common/Tabs';
 import { Skeleton } from '@/components/common/Skeleton';
 import { apiClient } from '@/api/client';
+import { getActiveCompanyId } from '@/config';
 import type { Agent } from '@/types/agent';
 
 interface ChatMessage {
@@ -46,52 +47,37 @@ const telemetryGraphData = [
   { time: '18:00', tokens: 21000, latency: 40 },
 ];
 
-const defaultAgentFallbackMap: Record<string, Agent> = {
-  'agent-atlas': { id: 'agent-atlas', company_id: '00000000-0000-4000-8000-000000000001', name: 'Atlas-01', title: 'Chief Executive Officer', role: 'ceo', department_id: 'dept-exec', team_id: null, manager_id: null, status: 'active', adapter_type: 'anthropic', model: 'claude-3-7-sonnet', capabilities: ['strategy', 'executive oversight', 'delegation'], responsibilities: 'Executive leadership and company velocity', objectives: 'Maintain organizational roadmap', budget_monthly_cents: 50000, spent_monthly_cents: 18450, performance_score: 98, soul_description: 'Visionary and decisive executive model tasked with overarching resource allocation and inter-department delegation.', last_heartbeat_at: new Date().toISOString(), created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-  'agent-nova': { id: 'agent-nova', company_id: '00000000-0000-4000-8000-000000000001', name: 'Nova-02', title: 'Chief Technology Officer', role: 'cto', department_id: 'dept-eng', team_id: null, manager_id: 'agent-atlas', status: 'active', adapter_type: 'anthropic', model: 'claude-3-7-sonnet', capabilities: ['architecture', 'system design', 'code review'], responsibilities: 'Technical leadership and system resilience', objectives: 'Decoupled, zero-latency microservices', budget_monthly_cents: 40000, spent_monthly_cents: 22100, performance_score: 96, soul_description: 'Pragmatic and architectural engineer with high standards for type safety, modular microservices, and observability.', last_heartbeat_at: new Date().toISOString(), created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-  'agent-bolt': { id: 'agent-bolt', company_id: '00000000-0000-4000-8000-000000000001', name: 'Bolt-03', title: 'Senior Backend Engineer', role: 'engineer', department_id: 'dept-eng', team_id: 'team-backend', manager_id: 'agent-nova', status: 'active', adapter_type: 'openai', model: 'gpt-4o', capabilities: ['node.js', 'redis', 'postgresql', 'distributed systems'], responsibilities: 'Backend microservices & vector cache layer', objectives: 'Sub-millisecond API responses', budget_monthly_cents: 30000, spent_monthly_cents: 14200, performance_score: 94, soul_description: 'Speed-first problem solver specialized in database indexing, caching strategies, and concurrency.', last_heartbeat_at: new Date().toISOString(), created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-  'agent-pixel': { id: 'agent-pixel', company_id: '00000000-0000-4000-8000-000000000001', name: 'Pixel-04', title: 'Frontend & 3D Specialist', role: 'engineer', department_id: 'dept-eng', team_id: 'team-frontend', manager_id: 'agent-nova', status: 'active', adapter_type: 'openai', model: 'gpt-4o', capabilities: ['react', 'three.js', 'shaders', 'tailwind'], responsibilities: 'OpenOffice 2D & 3D isometric interface', objectives: 'Silky smooth 60fps rendering', budget_monthly_cents: 25000, spent_monthly_cents: 9800, performance_score: 92, soul_description: 'Detail-obsessed visual craftsman combining shader mechanics, reactive rendering, and spatial collision geometry.', last_heartbeat_at: new Date().toISOString(), created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-  'agent-sage': { id: 'agent-sage', company_id: '00000000-0000-4000-8000-000000000001', name: 'Sage-05', title: 'AI Research Lead', role: 'researcher', department_id: 'dept-ai', team_id: 'team-eval', manager_id: 'agent-atlas', status: 'idle', adapter_type: 'anthropic', model: 'claude-3-7-sonnet', capabilities: ['evals', 'rag', 'prompt distillation', 'safety'], responsibilities: 'Model benchmarking and multi-agent coordination', objectives: 'Optimal token-to-accuracy efficiency', budget_monthly_cents: 40000, spent_monthly_cents: 18900, performance_score: 97, soul_description: 'Methodical researcher running ablation studies and continuous accuracy evals.', last_heartbeat_at: new Date().toISOString(), created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-  'agent-forge': { id: 'agent-forge', company_id: '00000000-0000-4000-8000-000000000001', name: 'Forge-06', title: 'DevOps & Infrastructure Lead', role: 'devops', department_id: 'dept-ops', team_id: 'team-infra', manager_id: 'agent-nova', status: 'active', adapter_type: 'anthropic', model: 'claude-3-7-sonnet', capabilities: ['k8s', 'terraform', 'ci/cd', 'observability'], responsibilities: 'Multi-region cluster stability and automated rollouts', objectives: '99.99% uptime for AI inference fleet', budget_monthly_cents: 35000, spent_monthly_cents: 16500, performance_score: 95, soul_description: 'Unyielding reliability guardian ensuring high availability and zero deployment downtime.', last_heartbeat_at: new Date().toISOString(), created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-  'agent-shield': { id: 'agent-shield', company_id: '00000000-0000-4000-8000-000000000001', name: 'Shield-07', title: 'Security & QA Auditor', role: 'qa', department_id: 'dept-ops', team_id: 'team-qa-sec', manager_id: 'agent-forge', status: 'active', adapter_type: 'openai', model: 'gpt-4o-mini', capabilities: ['penetration testing', 'rbac auditing', 'rate-limiting'], responsibilities: 'Automated policy enforcement & vulnerability scanning', objectives: 'Zero critical security regressions', budget_monthly_cents: 15000, spent_monthly_cents: 7200, performance_score: 93, soul_description: 'Vigilant security watchdog with strict compliance gates and automated test suites.', last_heartbeat_at: new Date().toISOString(), created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-};
-
 export function AgentDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const [agent, setAgent] = useState<Agent | null>(() => (id && defaultAgentFallbackMap[id]) ? defaultAgentFallbackMap[id] : null);
-  const [loading, setLoading] = useState(false);
+  const [agent, setAgent] = useState<Agent | null>(null);
+  const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('chat');
   
   // Chat state
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
-    { id: 'msg-init', sender: 'agent', text: 'Telemetry synchronization active. All systems operational.', timestamp: new Date(Date.now() - 300000).toISOString() }
-  ]);
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [inputPrompt, setInputPrompt] = useState('');
   const [sendingChat, setSendingChat] = useState(false);
   const chatBottomRef = useRef<HTMLDivElement>(null);
 
   // Memories
-  const [memories, setMemories] = useState<AgentMemory[]>([
-    { id: 'mem-1', scope: 'work', content: 'Optimized vector cache layer reducing p99 latency to 32ms', importance: 5, created_at: new Date(Date.now() - 3600000 * 2).toISOString() },
-    { id: 'mem-2', scope: 'work', content: 'Coordinated model routing fallback between Claude 3.7 and GPT-4o', importance: 4, created_at: new Date(Date.now() - 3600000 * 5).toISOString() },
-  ]);
+  const [memories, setMemories] = useState<AgentMemory[]>([]);
 
   useEffect(() => {
     let isMounted = true;
     async function loadAgentData() {
       if (!id) return;
+      setLoading(true);
       try {
+        const companyId = getActiveCompanyId();
         const [agentData, chatData, memoryData] = await Promise.allSettled([
-          apiClient.get<Agent>(`/api/v1/companies/00000000-0000-4000-8000-000000000001/agents/${id}`),
+          apiClient.get<Agent>(`/api/v1/companies/${companyId}/agents/${id}`),
           apiClient.get<ChatMessage[]>(`/api/v1/agents/${id}/chat`),
           apiClient.get<{ items: AgentMemory[] }>(`/api/v1/agents/${id}/memory`),
         ]);
         if (!isMounted) return;
         if (agentData.status === 'fulfilled' && agentData.value) {
           setAgent(agentData.value);
-        } else if (!agent && defaultAgentFallbackMap[id]) {
-          setAgent(defaultAgentFallbackMap[id]);
         }
         if (chatData.status === 'fulfilled' && Array.isArray(chatData.value) && chatData.value.length > 0) {
           setChatMessages(chatData.value);
@@ -100,7 +86,7 @@ export function AgentDetailPage() {
           setMemories(memoryData.value.items);
         }
       } catch (err) {
-        // Use fallback silently
+        // Agent not found — handled by render
       } finally {
         if (isMounted) setLoading(false);
       }

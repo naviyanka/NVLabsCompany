@@ -13,12 +13,14 @@ export interface AgentListProps {
   loading: boolean;
   error: string | null;
   onAgentClick?: (agent: Agent) => void;
+  onAgentChat?: (agent: Agent) => void;
+  onAgentFire?: (agent: Agent) => void;
   onHireAgent?: () => void;
 }
 
 type ViewMode = 'grid' | 'list';
 
-export function AgentList({ agents, loading, error, onAgentClick, onHireAgent }: AgentListProps) {
+export function AgentList({ agents, loading, error, onAgentClick, onAgentChat, onAgentFire, onHireAgent }: AgentListProps) {
   const [viewMode, setViewMode] = useState<ViewMode>('grid');
   const [statusFilter, setStatusFilter] = useState<AgentStatus | 'all'>('all');
   const [searchQuery, setSearchQuery] = useState('');
@@ -114,7 +116,7 @@ export function AgentList({ agents, loading, error, onAgentClick, onHireAgent }:
       ) : viewMode === 'grid' ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {filteredAgents.map((agent) => (
-            <AgentCard key={agent.id} agent={agent} onClick={onAgentClick} />
+            <AgentCard key={agent.id} agent={agent} onClick={onAgentClick} onChat={onAgentChat} onFire={onAgentFire} />
           ))}
         </div>
       ) : (

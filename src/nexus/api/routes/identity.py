@@ -196,6 +196,37 @@ async def list_soul_templates() -> list[dict[str, Any]]:
     return templates
 
 
+@router.get("/api/v1/soul-templates")
+async def list_soul_templates_full() -> list[dict[str, Any]]:
+    """List all soul templates with full personality configuration.
+
+    Returns the complete Soul data including personality traits,
+    communication style, values, constraints, background, and tone.
+    Used by the hire modal to pre-fill agent persona configuration.
+    """
+    from nexus.identity.soul import SOUL_TEMPLATES
+
+    results = []
+    for template_id, template in SOUL_TEMPLATES.items():
+        soul = template.base_soul
+        results.append({
+            "template_id": template_id,
+            "name": template.name,
+            "description": template.description,
+            "soul": {
+                "role": soul.role,
+                "personality_traits": list(soul.personality_traits),
+                "communication_style": soul.communication_style,
+                "expertise": list(soul.expertise),
+                "values": list(soul.values),
+                "constraints": list(soul.constraints),
+                "background": soul.background,
+                "tone": soul.tone,
+            },
+        })
+    return results
+
+
 @router.post(
     "/api/v1/agents/{agent_id}/context",
     response_model=WorkingContextResponse,

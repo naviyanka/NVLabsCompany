@@ -11,6 +11,10 @@ from nexus import __version__
 from nexus.api.middleware import GovernanceMiddleware
 from nexus.auth.middleware import AuthenticationMiddleware
 from nexus.api.routes.adapters import router as adapters_router
+from nexus.api.routes.archetypes import router as archetypes_router
+from nexus.api.routes.chat import router as chat_router
+from nexus.api.routes.hiring import router as hiring_router
+from nexus.api.routes.providers import router as providers_router
 from nexus.api.routes.agents import router as agents_router
 from nexus.api.routes.approvals import router as approvals_router
 from nexus.api.routes.auth import router as auth_router
@@ -334,3 +338,7 @@ app.include_router(hr_router)
 app.include_router(departments_router)
 app.include_router(events_router)
 app.include_router(okr_router)
+app.include_router(archetypes_router)
+app.include_router(providers_router)
+app.include_router(hiring_router)
+app.include_router(chat_router)
