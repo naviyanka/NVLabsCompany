@@ -1,5 +1,3 @@
-version: '3.9'
-
 services:
   backend:
     build:
@@ -40,7 +38,7 @@ services:
       POSTGRES_USER: nexus
       POSTGRES_PASSWORD: nexus
     ports:
-      - "5432:5432"
+      - "5433:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
 
@@ -55,12 +53,11 @@ services:
       - "7233:7233"    # gRPC frontend
       - "8233:8233"    # Web UI
     environment:
-      - DB=postgresql
+      - DB=postgres12
       - DB_PORT=5432
       - POSTGRES_USER=nexus
       - POSTGRES_PWD=nexus
       - POSTGRES_SEEDS=postgres
-      - DYNAMIC_CONFIG_FILE_PATH=config/dynamicconfig/development-sql.yaml
     depends_on:
       - postgres
 

@@ -1,4 +1,4 @@
-"""Trigger models for proactive agent behavior (Aware system)."""
+﻿"""Trigger models for proactive agent behavior (Aware system)."""
 
 import uuid
 from datetime import timezone, datetime
@@ -32,7 +32,7 @@ class Trigger(SQLModel, table=True):
     is_active: bool = Field(default=True)
     last_fired_at: Optional[datetime] = Field(default=None)
     next_fire_at: Optional[datetime] = Field(default=None)
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
 
 
 class TriggerExecution(SQLModel, table=True):
@@ -46,5 +46,5 @@ class TriggerExecution(SQLModel, table=True):
     status: str = Field(default="running", max_length=50)
     result: Optional[dict[str, Any]] = Field(default=None, sa_column=Column(JSON))
     error: Optional[str] = Field(default=None)
-    started_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    started_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
     completed_at: Optional[datetime] = Field(default=None)

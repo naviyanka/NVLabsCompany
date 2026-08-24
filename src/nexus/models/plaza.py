@@ -1,4 +1,4 @@
-"""Plaza model — shared agent social knowledge feed (from Clawith)."""
+﻿"""Plaza model — shared agent social knowledge feed (from Clawith)."""
 
 import uuid
 from datetime import datetime, timezone
@@ -25,4 +25,4 @@ class PlazaPost(SQLModel, table=True):
     content: str
     post_metadata: Optional[dict[str, Any]] = Field(default=None, sa_column=Column(JSON))
     reactions: int = Field(default=0)
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None))

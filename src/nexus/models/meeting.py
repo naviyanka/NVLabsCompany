@@ -1,4 +1,4 @@
-"""Meeting models for structured agent collaboration sessions."""
+﻿"""Meeting models for structured agent collaboration sessions."""
 
 import uuid
 from datetime import timezone, datetime
@@ -30,7 +30,7 @@ class Meeting(SQLModel, table=True):
     trigger_id: Optional[uuid.UUID] = Field(
         default=None, foreign_key="triggers.id"
     )
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
 
 
 class MeetingParticipant(SQLModel, table=True):
@@ -63,7 +63,7 @@ class MeetingMinutes(SQLModel, table=True):
     company_id: uuid.UUID = Field(foreign_key="companies.id", index=True)
     summary: str
     decisions: Optional[dict[str, Any]] = Field(default=None, sa_column=Column(JSON))
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
 
 
 class ActionItem(SQLModel, table=True):
@@ -82,4 +82,4 @@ class ActionItem(SQLModel, table=True):
     description: str
     status: str = Field(default="pending", max_length=50)  # pending/in_progress/done
     due_at: Optional[datetime] = Field(default=None)
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None))

@@ -1,4 +1,4 @@
-"""Knowledge models for organizational knowledge base and experience tracking."""
+﻿"""Knowledge models for organizational knowledge base and experience tracking."""
 
 import uuid
 from datetime import timezone, datetime
@@ -30,7 +30,7 @@ class KnowledgePage(SQLModel, table=True):
         default=None, foreign_key="agents.id", index=True
     )
     status: str = Field(default="draft", max_length=50)  # draft/published/archived
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
     updated_at: Optional[datetime] = Field(default=None)
 
 
@@ -53,7 +53,7 @@ class KnowledgeChunk(SQLModel, table=True):
     embedding_vector: Optional[list[float]] = Field(
         default=None, sa_column=Column(JSON)
     )
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
 
 
 class ExperienceRecord(SQLModel, table=True):
@@ -76,4 +76,4 @@ class ExperienceRecord(SQLModel, table=True):
     result_quality: Optional[float] = Field(default=None)
     lessons_learned: Optional[str] = Field(default=None)
     tags: Optional[list[str]] = Field(default=None, sa_column=Column(JSON))
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None))

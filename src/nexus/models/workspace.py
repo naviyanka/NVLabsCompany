@@ -1,4 +1,4 @@
-"""Workspace model for multi-project switching."""
+﻿"""Workspace model for multi-project switching."""
 
 import uuid
 from datetime import timezone, datetime
@@ -20,5 +20,5 @@ class Workspace(SQLModel, table=True):
     is_active: bool = Field(default=False)
     is_git_repo: bool = Field(default=False)
     default_branch: Optional[str] = Field(default="main", max_length=100)
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
     last_accessed_at: Optional[datetime] = Field(default=None)

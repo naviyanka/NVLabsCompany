@@ -1,4 +1,4 @@
-"""Company settings and user preferences models."""
+﻿"""Company settings and user preferences models."""
 
 import uuid
 from datetime import timezone, datetime
@@ -35,4 +35,4 @@ class CompanySettings(SQLModel, table=True):
     standup_time: str = Field(default="09:00", max_length=5)
     sprint_duration_days: int = Field(default=14)
     settings_json: Optional[dict[str, Any]] = Field(default=None, sa_column=Column(JSON))
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None))

@@ -1,4 +1,4 @@
-"""Evolution models for continuous improvement and self-optimization.
+﻿"""Evolution models for continuous improvement and self-optimization.
 
 The evolution system enables agents to propose improvements, evaluate them
 through A/B testing, and track versioned configurations. All promotions
@@ -40,7 +40,7 @@ class EvolutionProposal(SQLModel, table=True):
     approval_id: Optional[uuid.UUID] = Field(
         default=None, foreign_key="approvals.id"
     )
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
     updated_at: Optional[datetime] = Field(default=None)
 
 
@@ -63,7 +63,7 @@ class EvolutionEvaluation(SQLModel, table=True):
     statistical_significance: float
     dimensions: Optional[dict[str, Any]] = Field(default=None, sa_column=Column(JSON))
     passed: bool = Field(default=False)
-    evaluated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    evaluated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
 
 
 class SkillVersion(SQLModel, table=True):
@@ -82,7 +82,7 @@ class SkillVersion(SQLModel, table=True):
     prompt_template: str
     performance_score: Optional[float] = Field(default=None)
     is_active: bool = Field(default=False)
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
 
 
 class AgentVersion(SQLModel, table=True):
@@ -103,4 +103,4 @@ class AgentVersion(SQLModel, table=True):
     )
     performance_score: Optional[float] = Field(default=None)
     is_active: bool = Field(default=False)
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None))

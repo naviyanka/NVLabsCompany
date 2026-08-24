@@ -2,7 +2,6 @@
 
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from datetime import UTC
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -75,16 +74,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     from nexus.config import settings
     from nexus.database import async_session_factory, engine
 
-    # Startup: create tables if using SQLite (for local dev convenience)
-    if settings.database_url.startswith("sqlite"):
-        from sqlmodel import SQLModel
-
-        import nexus.models  # noqa: F401 - register all models
-        async with engine.begin() as conn:
-            await conn.run_sync(SQLModel.metadata.create_all)
+    # Startup: create tables if not using production migrations
+    from sqlmodel import SQLModel
+    import nexus.models  # noqa: F401 - register all models
+    async with engine.begin() as conn:
+        await conn.run_sync(SQLModel.metadata.create_all)
 
     # Seed default company for the dashboard
-    from datetime import datetime
+    from nexus.models._time import utcnow
 
     from sqlalchemy import select
 
@@ -95,7 +92,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             select(Company).where(Company.id == default_company_id)
         )
         if result.scalar_one_or_none() is None:
-            now = datetime.now(UTC)
+            now = utcnow()
             company = Company(
                 id=default_company_id,
                 name="NVLabs",

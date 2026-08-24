@@ -1,4 +1,4 @@
-"""Heartbeat run model with rich process and liveness tracking."""
+﻿"""Heartbeat run model with rich process and liveness tracking."""
 
 import uuid
 from datetime import timezone, datetime
@@ -43,7 +43,7 @@ class HeartbeatRun(SQLModel, table=True):
     continuation_attempt: int = Field(default=0)
     context_snapshot: dict | None = Field(default=None, sa_column=Column(JSON))
     invocation_source: str = Field(default="on_demand")
-    started_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    started_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
     finished_at: datetime | None = None
     last_output_at: datetime | None = None
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None))

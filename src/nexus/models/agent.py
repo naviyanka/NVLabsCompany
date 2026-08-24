@@ -1,4 +1,4 @@
-"""Agent model - the core autonomous employee entity."""
+﻿"""Agent model - the core autonomous employee entity."""
 
 import uuid
 from datetime import timezone, datetime
@@ -80,5 +80,5 @@ class Agent(SQLModel, table=True):
     last_heartbeat_at: Optional[datetime] = Field(default=None)
 
     # Timestamps
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None))

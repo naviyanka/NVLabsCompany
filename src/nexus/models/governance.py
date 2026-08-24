@@ -1,4 +1,4 @@
-"""Governance models: approvals, decisions, decision queues, and audit log."""
+﻿"""Governance models: approvals, decisions, decision queues, and audit log."""
 
 import uuid
 from datetime import timezone, datetime
@@ -25,8 +25,8 @@ class Approval(SQLModel, table=True):
     decided_by: Optional[str] = Field(default=None, max_length=255)
     decided_at: Optional[datetime] = Field(default=None)
     expires_at: Optional[datetime] = Field(default=None)
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
 
 
 class Decision(SQLModel, table=True):
@@ -48,7 +48,7 @@ class Decision(SQLModel, table=True):
     )
     decided_by: Optional[str] = Field(default=None, max_length=255)
     decided_at: Optional[datetime] = Field(default=None)
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
 
 
 class DecisionQueue(SQLModel, table=True):
@@ -63,7 +63,7 @@ class DecisionQueue(SQLModel, table=True):
     auto_approve_policy: Optional[dict[str, Any]] = Field(
         default=None, sa_column=Column(JSON)
     )
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
 
 
 class AuditLog(SQLModel, table=True):
@@ -80,4 +80,4 @@ class AuditLog(SQLModel, table=True):
     resource_id: Optional[str] = Field(default=None, max_length=255)
     details: Optional[dict[str, Any]] = Field(default=None, sa_column=Column(JSON))
     ip_address: Optional[str] = Field(default=None, max_length=45)
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None))

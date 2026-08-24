@@ -1,4 +1,4 @@
-"""Pipeline models for multi-step automated workflows."""
+﻿"""Pipeline models for multi-step automated workflows."""
 
 import uuid
 from datetime import timezone, datetime
@@ -20,8 +20,8 @@ class Pipeline(SQLModel, table=True):
     stages: Optional[list[dict[str, Any]]] = Field(default=None, sa_column=Column(JSON))
     is_active: bool = Field(default=True)
     trigger_type: str = Field(default="manual", max_length=50)  # manual/schedule/webhook
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
 
 
 class PipelineRun(SQLModel, table=True):
@@ -36,5 +36,5 @@ class PipelineRun(SQLModel, table=True):
     current_stage: int = Field(default=0)
     results: Optional[list[dict[str, Any]]] = Field(default=None, sa_column=Column(JSON))
     error: Optional[str] = Field(default=None)
-    started_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    started_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
     completed_at: Optional[datetime] = Field(default=None)

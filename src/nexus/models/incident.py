@@ -1,4 +1,4 @@
-"""Incident models: incidents, events, and actions."""
+﻿"""Incident models: incidents, events, and actions."""
 
 import uuid
 from datetime import timezone, datetime
@@ -17,7 +17,7 @@ class Incident(SQLModel, table=True):
     title: str = Field(max_length=500)
     severity: str = Field(default="medium", max_length=50)
     status: str = Field(default="open", max_length=50)
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
     resolved_at: Optional[datetime] = Field(default=None)
     rca: Optional[str] = Field(default=None)
 
@@ -31,7 +31,7 @@ class IncidentEvent(SQLModel, table=True):
     incident_id: uuid.UUID = Field(foreign_key="incidents.id", index=True)
     event_type: str = Field(max_length=100)
     description: Optional[str] = Field(default=None)
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
     actor: Optional[str] = Field(default=None, max_length=255)
 
 
@@ -44,5 +44,5 @@ class IncidentAction(SQLModel, table=True):
     incident_id: uuid.UUID = Field(foreign_key="incidents.id", index=True)
     action_type: str = Field(max_length=100)
     target: Optional[str] = Field(default=None, max_length=255)
-    executed_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    executed_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
     result: Optional[str] = Field(default=None)
