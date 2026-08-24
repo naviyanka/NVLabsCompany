@@ -293,7 +293,7 @@ class AuthenticationMiddleware:
             return None
 
         if key.last_used_at is None or (
-            (utcnow() - key.last_used_at).total_seconds() > _TOUCH_INTERVAL_SECONDS
+            (now(timezone.utc) - key.last_used_at).total_seconds() > _TOUCH_INTERVAL_SECONDS
         ):
             await touch_api_key(db, key.id)
 
@@ -324,7 +324,7 @@ class AuthenticationMiddleware:
             return None
 
         if session.last_active_at is None or (
-            (utcnow() - session.last_active_at).total_seconds() > _TOUCH_INTERVAL_SECONDS
+            (now(timezone.utc) - session.last_active_at).total_seconds() > _TOUCH_INTERVAL_SECONDS
         ):
             await touch_session(db, session.id)
 

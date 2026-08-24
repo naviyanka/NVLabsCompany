@@ -1,7 +1,7 @@
 """Incident management API endpoints."""
 
 import uuid
-from datetime import datetime
+from datetime import timezone, datetime
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, status
@@ -143,7 +143,7 @@ async def resolve_incident(
     company_id: CurrentCompanyId,
 ) -> Any:
     """Resolve an open incident."""
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     stmt = (
         update(Incident)
         .where(

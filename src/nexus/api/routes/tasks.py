@@ -1,7 +1,7 @@
 """Task API endpoints - CRUD, assignment, and status management."""
 
 import uuid
-from datetime import datetime
+from datetime import timezone, datetime
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, status
@@ -174,7 +174,7 @@ async def assign_task(
         .where(Task.id == task_id, Task.company_id == company_id)
         .values(
             assigned_agent_id=body.agent_id,
-            updated_at=datetime.utcnow(),
+            updated_at=datetime.now(timezone.utc),
         )
     )
     await db.execute(stmt)
@@ -196,16 +196,16 @@ async def update_task_status(
     """Update the status of a task."""
     values: dict[str, Any] = {
         "status": body.status,
-        "updated_at": datetime.utcnow(),
+        "updated_at": datetime.now(timezone.utc),
     }
     if body.status == "running":
-        values["started_at"] = datetime.utcnow()
+        values["started_at"] = datetime.now(timezone.utc)
     elif body.status == "completed":
-        values["completed_at"] = datetime.utcnow()
+        values["completed_at"] = datetime.now(timezone.utc)
         if body.result:
             values["result"] = body.result
     elif body.status == "failed":
-        values["completed_at"] = datetime.utcnow()
+        values["completed_at"] = datetime.now(timezone.utc)
         if body.error:
             values["error"] = body.error
 
@@ -284,7 +284,7 @@ async def create_subtask(task_id: uuid.UUID, body: TaskCreate, db: DbSession, co
 @router.post("/api/v1/tasks/{task_id}/reassign", response_model=TaskResponse)
 async def reassign_task(task_id: uuid.UUID, body: TaskAssign, db: DbSession, company_id: CurrentCompanyId) -> Any:
     """Reassign task to a different agent."""
-    stmt = update(Task).where(Task.id == task_id, Task.company_id == company_id).values(assigned_agent_id=body.agent_id, updated_at=datetime.utcnow())
+    stmt = update(Task).where(Task.id == task_id, Task.company_id == company_id).values(assigned_agent_id=body.agent_id, updated_at=datetime.now(timezone.utc))
     await db.execute(stmt)
     result = await db.execute(select(Task).where(Task.id == task_id, Task.company_id == company_id))
     task = result.scalar_one_or_none()
@@ -296,7 +296,7 @@ async def reassign_task(task_id: uuid.UUID, body: TaskAssign, db: DbSession, com
 @router.post("/api/v1/tasks/{task_id}/cancel", response_model=TaskResponse)
 async def cancel_task(task_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId) -> Any:
     """Cancel a task."""
-    stmt = update(Task).where(Task.id == task_id, Task.company_id == company_id).values(status="cancelled", completed_at=datetime.utcnow(), updated_at=datetime.utcnow())
+    stmt = update(Task).where(Task.id == task_id, Task.company_id == company_id).values(status="cancelled", completed_at=datetime.now(timezone.utc), updated_at=datetime.now(timezone.utc))
     await db.execute(stmt)
     result = await db.execute(select(Task).where(Task.id == task_id, Task.company_id == company_id))
     task = result.scalar_one_or_none()

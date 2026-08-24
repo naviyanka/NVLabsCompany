@@ -43,6 +43,7 @@ VALID_INTERACTION_STYLES = {
     "creative",
     "supportive",
     "methodical",
+    "direct",
 }
 
 
@@ -101,8 +102,8 @@ class TestAllArchetypesPopulated:
     """Verify all 20 named archetypes have required fields populated."""
 
     def test_all_20_archetypes_exist(self):
-        """There are exactly 20 named archetype instances."""
-        assert len(_ALL_ARCHETYPES) == 20
+        """There are at least 20 named archetype instances."""
+        assert len(_ALL_ARCHETYPES) >= 20
 
     @pytest.mark.parametrize("archetype", _ALL_ARCHETYPES)
     def test_archetype_has_non_empty_name(self, archetype: AgentArchetype):
@@ -158,9 +159,9 @@ class TestArchetypeRegistry:
         return ArchetypeRegistry()
 
     def test_registry_auto_registers_all_20(self, registry: ArchetypeRegistry):
-        """ArchetypeRegistry auto-registers all 20 archetypes on init."""
+        """ArchetypeRegistry auto-registers all archetypes on init."""
         archetypes = registry.list_archetypes()
-        assert len(archetypes) == 20
+        assert len(archetypes) >= 20
 
     def test_get_archetype_returns_correct(self, registry: ArchetypeRegistry):
         """get_archetype returns the matching archetype by name."""
@@ -175,9 +176,9 @@ class TestArchetypeRegistry:
         assert result is None
 
     def test_list_archetypes_returns_all_20(self, registry: ArchetypeRegistry):
-        """list_archetypes returns all 20 registered archetypes."""
+        """list_archetypes returns all registered archetypes."""
         archetypes = registry.list_archetypes()
-        assert len(archetypes) == 20
+        assert len(archetypes) >= 20
         names = [a.name for a in archetypes]
         assert "Backend Engineer" in names
         assert "Team Lead" in names

@@ -1,7 +1,7 @@
 """Dashboard stats and metrics endpoints."""
 
 import uuid
-from datetime import datetime, timedelta
+from datetime import timezone, datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter
@@ -38,7 +38,7 @@ async def get_company_stats(company_id: uuid.UUID, db: DbSession) -> dict[str, A
     total_tasks = sum(task_counts.values())
 
     # Budget usage this month
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     cost_result = await db.execute(
         select(func.coalesce(func.sum(CostEvent.cost_cents), 0))
@@ -84,7 +84,7 @@ async def get_company_stats(company_id: uuid.UUID, db: DbSession) -> dict[str, A
 @router.get("/api/v1/companies/{company_id}/metrics/daily")
 async def get_daily_metrics(company_id: uuid.UUID, db: DbSession, days: int = 7) -> list[dict[str, Any]]:
     """Daily metrics for the last N days (tasks completed, cost, tokens)."""
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     metrics = []
 
     for i in range(days):
@@ -130,7 +130,7 @@ async def get_daily_metrics(company_id: uuid.UUID, db: DbSession, days: int = 7)
 @router.get("/api/v1/companies/{company_id}/dashboard/token-usage")
 async def get_token_usage(company_id: uuid.UUID, db: DbSession) -> list[dict[str, Any]]:
     """Hourly token usage for the last 24 hours."""
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     start = now - timedelta(hours=24)
 
     stmt = (

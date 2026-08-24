@@ -1,7 +1,7 @@
 """Company and organizational structure models."""
 
 import uuid
-from datetime import datetime
+from datetime import timezone, datetime
 from typing import Optional
 
 from sqlmodel import Field, SQLModel
@@ -23,8 +23,8 @@ class Company(SQLModel, table=True):
     business_hours_start: int = Field(default=9)   # 0-23 UTC hour
     business_hours_end: int = Field(default=17)    # 0-23 UTC hour
     business_days: str = Field(default="mon,tue,wed,thu,fri", max_length=50)
-    created_at: datetime = Field(default_factory=lambda: datetime.utcnow())
-    updated_at: datetime = Field(default_factory=lambda: datetime.utcnow())
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class CompanyMembership(SQLModel, table=True):
@@ -36,7 +36,7 @@ class CompanyMembership(SQLModel, table=True):
     company_id: uuid.UUID = Field(foreign_key="companies.id", index=True)
     user_id: uuid.UUID = Field(index=True)
     role: str = Field(default="member", max_length=50)
-    joined_at: datetime = Field(default_factory=lambda: datetime.utcnow())
+    joined_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class Department(SQLModel, table=True):
@@ -53,7 +53,7 @@ class Department(SQLModel, table=True):
     parent_department_id: Optional[uuid.UUID] = Field(
         default=None, foreign_key="departments.id"
     )
-    created_at: datetime = Field(default_factory=lambda: datetime.utcnow())
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class Team(SQLModel, table=True):
@@ -66,4 +66,4 @@ class Team(SQLModel, table=True):
     department_id: uuid.UUID = Field(foreign_key="departments.id", index=True)
     name: str = Field(max_length=255)
     description: Optional[str] = Field(default=None)
-    created_at: datetime = Field(default_factory=lambda: datetime.utcnow())
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

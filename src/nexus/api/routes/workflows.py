@@ -5,7 +5,7 @@ and single task flows, including status tracking and execution traces.
 """
 
 import uuid
-from datetime import datetime
+from datetime import timezone, datetime
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, status
@@ -115,7 +115,7 @@ async def start_company_flow(body: StartCompanyFlowRequest) -> dict[str, Any]:
     Returns:
         A WorkflowStartedResponse with the workflow_id and initial status.
     """
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     workflow_id = str(uuid.uuid4())
     company_id = body.company_id or str(uuid.uuid4())
 
@@ -171,7 +171,7 @@ async def start_task_flow(body: StartTaskFlowRequest) -> dict[str, Any]:
     Returns:
         A WorkflowStartedResponse with the workflow_id and initial status.
     """
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     workflow_id = str(uuid.uuid4())
     task_id = body.task_id or str(uuid.uuid4())
 
@@ -329,7 +329,7 @@ async def cancel_workflow(workflow_id: str) -> dict[str, Any]:
             detail=f"Workflow {workflow_id} not found",
         )
     workflow["status"] = "cancelled"
-    workflow["completed_at"] = datetime.utcnow().isoformat()
+    workflow["completed_at"] = datetime.now(timezone.utc).isoformat()
     return {
         "workflow_id": workflow_id,
         "status": "cancelled",

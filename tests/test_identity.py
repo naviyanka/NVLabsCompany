@@ -158,8 +158,8 @@ class TestSoul:
         assert "casual" in prompt
 
     def test_soul_templates_has_all_five(self):
-        """SOUL_TEMPLATES contains all 5 expected templates."""
-        expected_keys = {"engineer", "researcher", "manager", "qa_engineer", "architect"}
+        """SOUL_TEMPLATES contains all expected templates."""
+        expected_keys = {"engineer", "researcher", "manager", "qa_engineer", "architect", "ceo_orchestrator"}
 
         assert set(SOUL_TEMPLATES.keys()) == expected_keys
 

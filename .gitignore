@@ -56,3 +56,6 @@ nexus_dev.db
 **/github_config.json
 **/data/github_config.json
 dashboard/data/
+
+# Reference repos (cloned for analysis, not part of this project)
+temp_repos/

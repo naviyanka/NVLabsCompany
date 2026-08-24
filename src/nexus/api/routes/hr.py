@@ -1,7 +1,7 @@
 """HR Room endpoints — performance summary, training, enhancements, evaluations."""
 
 import uuid
-from datetime import datetime
+from datetime import timezone, datetime
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
@@ -36,7 +36,7 @@ async def train_agent(agent_id: uuid.UUID, body: TrainRequest, db: DbSession, co
     agent = result.scalar_one_or_none()
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
-    return {"agent_id": str(agent_id), "agent_name": agent.name, "training_started": True, "skill": body.skill, "duration_minutes": body.duration_minutes, "estimated_completion": (datetime.utcnow()).isoformat()}
+    return {"agent_id": str(agent_id), "agent_name": agent.name, "training_started": True, "skill": body.skill, "duration_minutes": body.duration_minutes, "estimated_completion": (datetime.now(timezone.utc)).isoformat()}
 
 
 class EnhanceRequest(BaseModel):

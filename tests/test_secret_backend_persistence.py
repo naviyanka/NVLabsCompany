@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import stat
+import sys
 from pathlib import Path
 from unittest.mock import patch
 
@@ -102,6 +103,7 @@ class TestAtomicWrite:
 class TestFilePermissions:
     """Tests for file permission enforcement."""
 
+    @pytest.mark.skipif(sys.platform == "win32", reason="POSIX permissions check not applicable on Windows")
     def test_file_permissions_are_0o600(
         self, secret_key: str, persist_file: Path
     ) -> None:

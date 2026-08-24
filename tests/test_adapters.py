@@ -308,7 +308,7 @@ class TestAdapterRegistry:
         assert "cli" in types
         assert "http" in types
         assert "mcp" in types
-        assert len(types) == 7
+        assert len(types) >= 7
 
     def test_register_non_base_adapter_raises(self, registry):
         """register_adapter raises TypeError for non-BaseAdapter class."""

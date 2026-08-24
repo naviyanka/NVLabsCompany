@@ -5,7 +5,7 @@ and session lifecycle operations (pause, resume, terminate).
 """
 
 import uuid
-from datetime import datetime
+from datetime import timezone, datetime
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, status
@@ -176,7 +176,7 @@ async def execute_task(agent_id: uuid.UUID, body: ExecuteTaskRequest) -> dict[st
     Returns:
         A TaskResultResponse with the initial execution state.
     """
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     task_id = str(uuid.uuid4())
 
     # Create a task execution record
@@ -266,7 +266,7 @@ async def pause_session(agent_id: uuid.UUID, session_id: uuid.UUID) -> dict[str,
             detail=f"Session cannot be paused from status '{session['status']}'",
         )
 
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     session["status"] = "paused"
     session["last_activity_at"] = now.isoformat()
 
@@ -311,7 +311,7 @@ async def resume_session(agent_id: uuid.UUID, session_id: uuid.UUID) -> dict[str
             detail=f"Session cannot be resumed from status '{session['status']}'",
         )
 
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     session["status"] = "active"
     session["last_activity_at"] = now.isoformat()
 
@@ -358,7 +358,7 @@ async def terminate_session(
             detail="Session is already terminated",
         )
 
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     session["status"] = "terminated"
     session["last_activity_at"] = now.isoformat()
 

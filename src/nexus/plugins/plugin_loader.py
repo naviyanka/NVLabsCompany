@@ -118,8 +118,19 @@ def discover_plugins(directory: Path) -> list[PluginMetadata]:
 
         # Extract metadata from the class
         metadata = getattr(plugin_class, "metadata", None)
-        if isinstance(metadata, PluginMetadata):
-            discovered.append(metadata)
+        if metadata is not None and hasattr(metadata, "name"):
+            name = getattr(metadata, "name")
+            version = getattr(metadata, "version", "0.1.0")
+            author = getattr(metadata, "author", "")
+            description = getattr(metadata, "description", "")
+            discovered.append(
+                PluginMetadata(
+                    name=name,
+                    version=version,
+                    author=author,
+                    description=description,
+                )
+            )
         else:
             # Try to construct metadata from class name
             discovered.append(

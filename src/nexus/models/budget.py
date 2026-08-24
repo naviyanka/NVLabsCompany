@@ -1,7 +1,7 @@
 """Budget policies and cost tracking models."""
 
 import uuid
-from datetime import datetime
+from datetime import timezone, datetime
 from typing import Optional
 
 from sqlmodel import Field, SQLModel
@@ -22,8 +22,8 @@ class BudgetPolicy(SQLModel, table=True):
     warn_percent: int = Field(default=80)
     hard_stop_enabled: bool = Field(default=True)
     is_active: bool = Field(default=True)
-    created_at: datetime = Field(default_factory=lambda: datetime.utcnow())
-    updated_at: datetime = Field(default_factory=lambda: datetime.utcnow())
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class CostEvent(SQLModel, table=True):
@@ -48,5 +48,5 @@ class CostEvent(SQLModel, table=True):
     output_tokens: int = Field(default=0)
     cost_cents: int = Field(default=0)
     billing_type: str = Field(default="llm_inference", max_length=100)
-    occurred_at: datetime = Field(default_factory=lambda: datetime.utcnow())
-    created_at: datetime = Field(default_factory=lambda: datetime.utcnow())
+    occurred_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

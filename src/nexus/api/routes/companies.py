@@ -14,7 +14,7 @@ than to whatever UUID appears in the URL:
 """
 
 import uuid
-from datetime import datetime
+from datetime import timezone, datetime
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, status
@@ -143,7 +143,7 @@ async def update_company(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="No fields to update",
         )
-    updates["updated_at"] = utcnow()
+    updates["updated_at"] = now(timezone.utc)
     stmt = update(Company).where(Company.id == company_id).values(**updates)
     await db.execute(stmt)
 

@@ -44,7 +44,7 @@ async def resolve_api_key(db: AsyncSession, credential: str) -> ApiKey | None:
     if key is None or key.status != "active":
         return None
 
-    if key.expires_at is not None and key.expires_at <= utcnow():
+    if key.expires_at is not None and key.expires_at <= now(timezone.utc):
         await db.execute(update(ApiKey).where(ApiKey.id == key.id).values(status="expired"))
         return None
 
@@ -53,4 +53,4 @@ async def resolve_api_key(db: AsyncSession, credential: str) -> ApiKey | None:
 
 async def touch_api_key(db: AsyncSession, key_id: uuid.UUID) -> None:
     """Record that a key was used."""
-    await db.execute(update(ApiKey).where(ApiKey.id == key_id).values(last_used_at=utcnow()))
+    await db.execute(update(ApiKey).where(ApiKey.id == key_id).values(last_used_at=now(timezone.utc)))

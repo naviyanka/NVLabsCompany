@@ -1,7 +1,7 @@
 """Notification API endpoints — CRUD, mark-read, preferences."""
 
 import uuid
-from datetime import datetime
+from datetime import timezone, datetime
 from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException, status
@@ -187,7 +187,7 @@ async def update_notification_preferences(company_id: uuid.UUID, body: Notificat
         await db.flush()
 
     updates = body.model_dump(exclude_unset=True)
-    updates["updated_at"] = datetime.utcnow()
+    updates["updated_at"] = datetime.now(timezone.utc)
     for key, val in updates.items():
         setattr(pref, key, val)
     await db.flush()

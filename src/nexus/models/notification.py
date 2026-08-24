@@ -1,7 +1,7 @@
 """Notification model for platform-wide event notifications."""
 
 import uuid
-from datetime import datetime
+from datetime import timezone, datetime
 from typing import Any, Optional
 
 from sqlalchemy import JSON
@@ -24,7 +24,7 @@ class Notification(SQLModel, table=True):
     dismissed: bool = Field(default=False)
     notification_metadata: Optional[dict[str, Any]] = Field(default=None, sa_column=Column(JSON, name="notification_metadata"))
     agent_id: Optional[uuid.UUID] = Field(default=None, foreign_key="agents.id", index=True)
-    created_at: datetime = Field(default_factory=lambda: datetime.utcnow())
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class NotificationPreference(SQLModel, table=True):
@@ -45,4 +45,4 @@ class NotificationPreference(SQLModel, table=True):
     security_alerts: bool = Field(default=True)
     system_updates: bool = Field(default=True)
     mentions: bool = Field(default=True)
-    updated_at: datetime = Field(default_factory=lambda: datetime.utcnow())
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

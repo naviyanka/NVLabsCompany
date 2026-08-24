@@ -1,7 +1,7 @@
 """Agent API endpoints - CRUD and lifecycle operations."""
 
 import uuid
-from datetime import datetime
+from datetime import timezone, datetime
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, status
@@ -165,7 +165,7 @@ async def update_agent(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="No fields to update",
         )
-    updates["updated_at"] = datetime.utcnow()
+    updates["updated_at"] = datetime.now(timezone.utc)
     stmt = update(Agent).where(Agent.id == agent_id, Agent.company_id == company_id).values(**updates)
     await db.execute(stmt)
 
@@ -201,7 +201,7 @@ async def patch_agent_company_scoped(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="No fields to update",
         )
-    updates["updated_at"] = datetime.utcnow()
+    updates["updated_at"] = datetime.now(timezone.utc)
     stmt = update(Agent).where(Agent.id == agent_id, Agent.company_id == company_id).values(**updates)
     await db.execute(stmt)
 
@@ -234,7 +234,7 @@ async def wake_agent(agent_id: uuid.UUID, db: DbSession, company_id: CurrentComp
     update_stmt = (
         update(Agent)
         .where(Agent.id == agent_id, Agent.company_id == company_id)
-        .values(status="ready", updated_at=datetime.utcnow())
+        .values(status="ready", updated_at=datetime.now(timezone.utc))
     )
     await db.execute(update_stmt)
     result = await db.execute(select(Agent).where(Agent.id == agent_id, Agent.company_id == company_id))
@@ -262,8 +262,8 @@ async def pause_agent(agent_id: uuid.UUID, db: DbSession, company_id: CurrentCom
         .where(Agent.id == agent_id, Agent.company_id == company_id)
         .values(
             status="paused",
-            paused_at=datetime.utcnow(),
-            updated_at=datetime.utcnow(),
+            paused_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
         )
     )
     await db.execute(update_stmt)
@@ -274,7 +274,7 @@ async def pause_agent(agent_id: uuid.UUID, db: DbSession, company_id: CurrentCom
 @router.post("/api/v1/agents/{agent_id}/heartbeat")
 async def agent_heartbeat(agent_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId) -> dict[str, Any]:
     """Record a heartbeat from an agent."""
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     stmt = (
         update(Agent)
         .where(Agent.id == agent_id, Agent.company_id == company_id)

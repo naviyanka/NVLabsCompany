@@ -60,12 +60,18 @@ class Objective:
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
 
+import json
+from pathlib import Path
+
+_OKR_FILE = Path("data/okrs_database.json")
+
+
 class OKRManager:
     """Manages objectives and key results for the company.
 
     Provides CRUD operations, progress computation, and risk detection
     for objectives and their associated key results. Uses in-memory
-    storage with optional database persistence.
+    storage with persistent JSON database backing.
 
     Attributes:
         objectives: Dictionary mapping objective IDs to Objective instances.
@@ -82,6 +88,66 @@ class OKRManager:
         self._company_id = company_id
         self._db = db
         self._objectives: dict[uuid.UUID, Objective] = {}
+        self._load_from_file()
+
+    def _load_from_file(self) -> None:
+        if _OKR_FILE.exists():
+            try:
+                raw_data = json.loads(_OKR_FILE.read_text(encoding="utf-8"))
+                for obj_dict in raw_data:
+                    krs = [
+                        KeyResult(
+                            id=uuid.UUID(kr["id"]),
+                            objective_id=uuid.UUID(kr["objective_id"]),
+                            title=kr["title"],
+                            target_value=kr["target_value"],
+                            current_value=kr.get("current_value", 0.0),
+                            unit=kr.get("unit", "percent"),
+                            status=kr.get("status", "on_track"),
+                        )
+                        for kr in obj_dict.get("key_results", [])
+                    ]
+                    obj = Objective(
+                        id=uuid.UUID(obj_dict["id"]),
+                        title=obj_dict["title"],
+                        description=obj_dict.get("description", ""),
+                        owner_agent_id=uuid.UUID(obj_dict["owner_agent_id"]),
+                        time_frame=obj_dict.get("time_frame", "Q1 2025"),
+                        status=obj_dict.get("status", "active"),
+                        key_results=krs,
+                    )
+                    self._objectives[obj.id] = obj
+            except Exception:
+                pass
+
+    def _save_to_file(self) -> None:
+        try:
+            _OKR_FILE.parent.mkdir(parents=True, exist_ok=True)
+            export_list = []
+            for obj in self._objectives.values():
+                export_list.append({
+                    "id": str(obj.id),
+                    "title": obj.title,
+                    "description": obj.description,
+                    "owner_agent_id": str(obj.owner_agent_id),
+                    "time_frame": obj.time_frame,
+                    "status": obj.status,
+                    "key_results": [
+                        {
+                            "id": str(kr.id),
+                            "objective_id": str(kr.objective_id),
+                            "title": kr.title,
+                            "target_value": kr.target_value,
+                            "current_value": kr.current_value,
+                            "unit": kr.unit,
+                            "status": kr.status,
+                        }
+                        for kr in obj.key_results
+                    ],
+                })
+            _OKR_FILE.write_text(json.dumps(export_list, indent=2), encoding="utf-8")
+        except Exception:
+            pass
 
     def create_objective(
         self,
@@ -109,6 +175,7 @@ class OKRManager:
             status="active",
         )
         self._objectives[objective.id] = objective
+        self._save_to_file()
         return objective
 
     def add_key_result(
@@ -145,6 +212,7 @@ class OKRManager:
             status="on_track",
         )
         objective.key_results.append(key_result)
+        self._save_to_file()
         return key_result
 
     def update_progress(
@@ -183,6 +251,7 @@ class OKRManager:
                     else:
                         kr.status = "behind"
 
+                    self._save_to_file()
                     return kr
 
         raise KeyError(f"KeyResult {key_result_id} not found")

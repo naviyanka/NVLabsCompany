@@ -76,8 +76,9 @@ class TestPublicPaths:
 class TestAnonymousRejection:
     """An anonymous request to a protected path is a 401."""
 
-    def test_returns_401_with_www_authenticate(self):
+    def test_returns_401_with_www_authenticate(self, monkeypatch: pytest.MonkeyPatch):
         """The response names Bearer so non-browser clients know how to retry."""
+        monkeypatch.setattr(settings, "auth_enabled", True)
         response = rejection_for("/api/v1/agents", None)
 
         assert response is not None
@@ -99,8 +100,9 @@ class TestAnonymousRejection:
 class TestTenantScoping:
     """A company id in the URL must match the caller's own."""
 
-    def test_mismatch_returns_403(self):
+    def test_mismatch_returns_403(self, monkeypatch: pytest.MonkeyPatch):
         """Substituting another tenant's UUID is forbidden, not silently served."""
+        monkeypatch.setattr(settings, "auth_enabled", True)
         response = rejection_for(
             f"/api/v1/companies/{OTHER_COMPANY_ID}/agents", _principal()
         )
@@ -109,29 +111,34 @@ class TestTenantScoping:
         assert response.status_code == 403
         assert b"TENANT_MISMATCH" in response.body
 
-    def test_match_passes(self):
+    def test_match_passes(self, monkeypatch: pytest.MonkeyPatch):
         """The caller's own company is served."""
+        monkeypatch.setattr(settings, "auth_enabled", True)
         assert (
             rejection_for(f"/api/v1/companies/{COMPANY_ID}/agents", _principal())
             is None
         )
 
-    def test_bare_company_path_passes(self):
+    def test_bare_company_path_passes(self, monkeypatch: pytest.MonkeyPatch):
         """``/api/v1/companies`` names no tenant, so there is nothing to compare."""
+        monkeypatch.setattr(settings, "auth_enabled", True)
         assert rejection_for("/api/v1/companies", _principal()) is None
 
-    def test_non_uuid_segment_passes(self):
+    def test_non_uuid_segment_passes(self, monkeypatch: pytest.MonkeyPatch):
         """A malformed id is routing's problem — a 404 or 422, not a 403."""
+        monkeypatch.setattr(settings, "auth_enabled", True)
         assert rejection_for("/api/v1/companies/not-a-uuid/agents", _principal()) is None
 
-    def test_uuid_shaped_but_invalid_segment_passes(self):
+    def test_uuid_shaped_but_invalid_segment_passes(self, monkeypatch: pytest.MonkeyPatch):
         """36 characters of the right alphabet still may not parse as a UUID."""
+        monkeypatch.setattr(settings, "auth_enabled", True)
         placeholder = "-" * 36
 
         assert rejection_for(f"/api/v1/companies/{placeholder}/agents", _principal()) is None
 
-    def test_other_paths_pass_for_authenticated_caller(self):
+    def test_other_paths_pass_for_authenticated_caller(self, monkeypatch: pytest.MonkeyPatch):
         """Paths without a company segment are left to the route."""
+        monkeypatch.setattr(settings, "auth_enabled", True)
         assert rejection_for("/api/v1/agents", _principal()) is None
 
 
@@ -149,15 +156,17 @@ class TestThroughTheApp:
 
         return TestClient(app, raise_server_exceptions=False)
 
-    def test_protected_route_rejects_anonymous(self, client: TestClient):
+    def test_protected_route_rejects_anonymous(self, client: TestClient, monkeypatch: pytest.MonkeyPatch):
         """A router that never declared a dependency is still protected."""
+        monkeypatch.setattr(settings, "auth_enabled", True)
         response = client.get(f"/api/v1/companies/{COMPANY_ID}/agents")
 
         assert response.status_code == 401
         assert response.json()["code"] == "UNAUTHENTICATED"
 
-    def test_company_id_header_is_not_a_credential(self, client: TestClient):
+    def test_company_id_header_is_not_a_credential(self, client: TestClient, monkeypatch: pytest.MonkeyPatch):
         """The header the API used to trust no longer authenticates anything."""
+        monkeypatch.setattr(settings, "auth_enabled", True)
         response = client.get(
             f"/api/v1/companies/{COMPANY_ID}/agents",
             headers={"X-Company-Id": str(COMPANY_ID)},

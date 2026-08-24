@@ -16,7 +16,9 @@ from nexus.company.okr import KeyResult, Objective, OKRManager
 @pytest.fixture
 def manager():
     """Provide an OKRManager instance for tests."""
-    return OKRManager(company_id=uuid.UUID("11111111-1111-1111-1111-111111111111"))
+    mgr = OKRManager(company_id=uuid.UUID("11111111-1111-1111-1111-111111111111"))
+    mgr._objectives.clear()
+    return mgr
 
 
 @pytest.fixture

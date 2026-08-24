@@ -1,7 +1,7 @@
 """Meeting API endpoints - scheduling, conducting, and recording meetings."""
 
 import uuid
-from datetime import datetime
+from datetime import timezone, datetime
 from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException, status
@@ -229,7 +229,7 @@ async def start_meeting(meeting_id: uuid.UUID, db: DbSession, company_id: Curren
             detail=f"Meeting cannot be started from status '{meeting.status}'",
         )
     meeting.status = "in_progress"
-    meeting.started_at = datetime.utcnow()
+    meeting.started_at = datetime.now(timezone.utc)
     await db.flush()
     return meeting
 
@@ -254,7 +254,7 @@ async def end_meeting(meeting_id: uuid.UUID, db: DbSession, company_id: CurrentC
             detail=f"Meeting cannot be ended from status '{meeting.status}'",
         )
     meeting.status = "completed"
-    meeting.completed_at = datetime.utcnow()
+    meeting.completed_at = datetime.now(timezone.utc)
     await db.flush()
     return meeting
 
@@ -375,7 +375,7 @@ async def delete_meeting(meeting_id: uuid.UUID, db: DbSession, company_id: Curre
 @router.get("/api/v1/companies/{company_id}/meetings/upcoming", response_model=list[MeetingResponse])
 async def list_upcoming_meetings(company_id: uuid.UUID, db: DbSession, limit: int = 50) -> Any:
     """List upcoming meetings (scheduled and in the future)."""
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     stmt = (
         select(Meeting)
         .where(
@@ -402,8 +402,8 @@ async def delete_meeting(meeting_id: uuid.UUID, db: DbSession, company_id: Curre
 @router.get("/api/v1/companies/{company_id}/meetings/upcoming", response_model=list[MeetingResponse])
 async def upcoming_meetings(company_id: uuid.UUID, db: DbSession, limit: int = 10) -> Any:
     """List upcoming scheduled meetings."""
-    from datetime import datetime
-    now = datetime.utcnow()
+    from datetime import timezone, datetime
+    now = datetime.now(timezone.utc)
     stmt = select(Meeting).where(Meeting.company_id == company_id, Meeting.status == "scheduled").order_by(Meeting.scheduled_at).limit(limit)
     result = await db.execute(stmt)
     return list(result.scalars().all())

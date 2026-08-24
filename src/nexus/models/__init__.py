@@ -20,6 +20,7 @@ from nexus.models.incident import Incident, IncidentAction, IncidentEvent
 from nexus.models.knowledge import ExperienceRecord, KnowledgeChunk, KnowledgePage
 from nexus.models.meeting import ActionItem, Meeting, MeetingMinutes, MeetingParticipant
 from nexus.models.memory import MemoryRecord
+from nexus.models.plaza import PlazaPost
 from nexus.models.policy import Policy, PolicyRule, PolicyVersion
 from nexus.models.secret import Secret, SecretAccess, SecretBinding, SecretVersion
 from nexus.models.skill import AgentSkill, Skill
@@ -41,6 +42,11 @@ from nexus.models.api_key import ApiKey
 from nexus.models.user_profile import UserProfile, UserSession
 from nexus.models.heartbeat_run import HeartbeatRun
 from nexus.runtime.checkpoint import ExecutionCheckpoint
+from nexus.models.notification import Notification, NotificationPreference
+from nexus.models.pipeline import Pipeline, PipelineRun
+from nexus.models.repository import Repository
+from nexus.models.settings import CompanySettings
+from nexus.models.workspace import Workspace
 
 __all__ = [
     # Company / Organization

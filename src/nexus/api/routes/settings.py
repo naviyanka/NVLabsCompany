@@ -1,7 +1,7 @@
 """Company settings and user preferences endpoints."""
 
 import uuid
-from datetime import datetime
+from datetime import timezone, datetime
 from typing import Any
 
 from fastapi import APIRouter
@@ -86,7 +86,7 @@ async def update_company_settings(company_id: uuid.UUID, body: CompanySettingsUp
         await db.flush()
 
     updates = body.model_dump(exclude_unset=True)
-    updates["updated_at"] = datetime.utcnow()
+    updates["updated_at"] = datetime.now(timezone.utc)
     for key, val in updates.items():
         setattr(settings, key, val)
     await db.flush()

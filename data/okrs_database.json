@@ -1,0 +1,21 @@
+[
+  {
+    "id": "b0eed21d-9f1c-42e2-a426-237ffdc23254",
+    "title": "Done",
+    "description": "",
+    "owner_agent_id": "22222222-2222-2222-2222-222222222222",
+    "time_frame": "Q1 2025",
+    "status": "active",
+    "key_results": [
+      {
+        "id": "9754d325-d714-4047-b5a2-9bd795c1afb6",
+        "objective_id": "b0eed21d-9f1c-42e2-a426-237ffdc23254",
+        "title": "KR1",
+        "target_value": 100.0,
+        "current_value": 0.0,
+        "unit": "percent",
+        "status": "on_track"
+      }
+    ]
+  }
+]

@@ -1,7 +1,7 @@
 """Company-wide memory endpoints — list, stats, detail, update, delete, archive, health."""
 
 import uuid
-from datetime import datetime, timedelta
+from datetime import timezone, datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, status
@@ -71,7 +71,7 @@ async def update_memory(memory_id: uuid.UUID, body: MemoryUpdate, db: DbSession,
     updates = body.model_dump(exclude_unset=True)
     if not updates:
         raise HTTPException(status_code=400, detail="No fields to update")
-    updates["updated_at"] = datetime.utcnow()
+    updates["updated_at"] = datetime.now(timezone.utc)
     stmt = update(MemoryRecord).where(MemoryRecord.id == memory_id, MemoryRecord.company_id == company_id).values(**updates)
     result = await db.execute(stmt)
     if result.rowcount == 0:
@@ -89,7 +89,7 @@ async def delete_memory(memory_id: uuid.UUID, db: DbSession, company_id: Current
 @router.post("/api/v1/memory/{memory_id}/archive")
 async def archive_memory(memory_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId) -> dict:
     """Archive memory (move to cold tier)."""
-    stmt = update(MemoryRecord).where(MemoryRecord.id == memory_id, MemoryRecord.company_id == company_id).values(tier="cold", updated_at=datetime.utcnow())
+    stmt = update(MemoryRecord).where(MemoryRecord.id == memory_id, MemoryRecord.company_id == company_id).values(tier="cold", updated_at=datetime.now(timezone.utc))
     result = await db.execute(stmt)
     if result.rowcount == 0:
         raise HTTPException(status_code=404, detail="Memory not found")
@@ -99,7 +99,7 @@ async def archive_memory(memory_id: uuid.UUID, db: DbSession, company_id: Curren
 @router.get("/api/v1/companies/{company_id}/memory/health")
 async def memory_health(company_id: uuid.UUID, db: DbSession) -> dict[str, Any]:
     """Memory health: stale count, low relevance count."""
-    cutoff = datetime.utcnow() - timedelta(days=90)
+    cutoff = datetime.now(timezone.utc) - timedelta(days=90)
     stale = await db.execute(select(func.count(MemoryRecord.id)).where(MemoryRecord.company_id == company_id, MemoryRecord.created_at < cutoff))
     low_rel = await db.execute(select(func.count(MemoryRecord.id)).where(MemoryRecord.company_id == company_id, MemoryRecord.importance < 0.3))
     return {"stale_count": stale.scalar() or 0, "low_relevance_count": low_rel.scalar() or 0, "duplicates_estimate": 0}

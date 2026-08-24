@@ -1,7 +1,7 @@
 """Policy management API endpoints."""
 
 import uuid
-from datetime import datetime
+from datetime import timezone, datetime
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, status
@@ -159,7 +159,7 @@ async def update_policy(
         )
 
     # Apply updates
-    update_data: dict[str, Any] = {"updated_at": datetime.utcnow()}
+    update_data: dict[str, Any] = {"updated_at": datetime.now(timezone.utc)}
     if body.name is not None:
         update_data["name"] = body.name
     if body.description is not None:
@@ -214,7 +214,7 @@ async def disable_policy(
     stmt = (
         update(Policy)
         .where(Policy.id == policy_id, Policy.company_id == company_id)
-        .values(enabled=False, updated_at=datetime.utcnow())
+        .values(enabled=False, updated_at=datetime.now(timezone.utc))
     )
     result = await db.execute(stmt)
     if result.rowcount == 0:  # type: ignore[union-attr]

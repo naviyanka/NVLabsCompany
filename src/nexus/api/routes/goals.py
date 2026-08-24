@@ -1,7 +1,7 @@
 """Goal API endpoints - strategic goal management."""
 
 import uuid
-from datetime import datetime
+from datetime import timezone, datetime
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, status
@@ -119,7 +119,7 @@ async def update_goal(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="No fields to update",
         )
-    updates["updated_at"] = datetime.utcnow()
+    updates["updated_at"] = datetime.now(timezone.utc)
     stmt = update(Goal).where(Goal.id == goal_id, Goal.company_id == company_id).values(**updates)
     await db.execute(stmt)
 
@@ -228,7 +228,7 @@ async def execute_goal(
     from sqlalchemy import update as sa_update
     new_status = "completed" if goal_result.success else "active"
     await db.execute(
-        sa_update(Goal).where(Goal.id == goal_id).values(status=new_status, updated_at=datetime.utcnow())
+        sa_update(Goal).where(Goal.id == goal_id).values(status=new_status, updated_at=datetime.now(timezone.utc))
     )
     await db.commit()
 

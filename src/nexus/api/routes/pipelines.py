@@ -1,7 +1,7 @@
 """Pipeline CRUD and execution endpoints."""
 
 import uuid
-from datetime import datetime
+from datetime import timezone, datetime
 from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException, status
@@ -90,7 +90,7 @@ async def update_pipeline(pipeline_id: uuid.UUID, body: PipelineUpdate, db: DbSe
     if not pipeline:
         raise HTTPException(status_code=404, detail="Pipeline not found")
     updates = body.model_dump(exclude_unset=True)
-    updates["updated_at"] = datetime.utcnow()
+    updates["updated_at"] = datetime.now(timezone.utc)
     for k, v in updates.items():
         setattr(pipeline, k, v)
     await db.flush()
@@ -140,7 +140,7 @@ async def _execute_pipeline_bg(run_id: uuid.UUID, pipeline_id: uuid.UUID, compan
         pipeline = p_res.scalar_one_or_none()
         if not pipeline or not pipeline.stages:
             run.status = "completed"
-            run.completed_at = datetime.utcnow()
+            run.completed_at = datetime.now(timezone.utc)
             db.add(run)
             await db.commit()
             return
@@ -184,7 +184,7 @@ async def _execute_pipeline_bg(run_id: uuid.UUID, pipeline_id: uuid.UUID, compan
                         "stage_index": i,
                         "status": "failed",
                         "error": "No available agents for parallel execution",
-                        "completed_at": datetime.utcnow().isoformat(),
+                        "completed_at": datetime.now(timezone.utc).isoformat(),
                     })
                     run.status = "failed"
                     run.error = f"Stage '{stage_name}': No agents for parallel"
@@ -230,7 +230,7 @@ async def _execute_pipeline_bg(run_id: uuid.UUID, pipeline_id: uuid.UUID, compan
                     "failed": parallel_result.failed,
                     "outputs": [o[:2000] for o in outputs],
                     "duration_ms": parallel_result.total_duration_ms,
-                    "completed_at": datetime.utcnow().isoformat(),
+                    "completed_at": datetime.now(timezone.utc).isoformat(),
                 })
                 continue
 
@@ -267,7 +267,7 @@ async def _execute_pipeline_bg(run_id: uuid.UUID, pipeline_id: uuid.UUID, compan
                     "stage_index": i,
                     "status": "failed",
                     "error": "No available agent to execute this stage",
-                    "completed_at": datetime.utcnow().isoformat(),
+                    "completed_at": datetime.now(timezone.utc).isoformat(),
                 })
                 run.status = "failed"
                 run.error = f"Stage '{stage_name}': No agent available"
@@ -331,7 +331,7 @@ async def _execute_pipeline_bg(run_id: uuid.UUID, pipeline_id: uuid.UUID, compan
                     "model_used": model_used,
                     "tokens_used": tokens_used,
                     "quality_score": quality_score,
-                    "completed_at": datetime.utcnow().isoformat(),
+                    "completed_at": datetime.now(timezone.utc).isoformat(),
                 })
 
             except Exception as e:
@@ -341,7 +341,7 @@ async def _execute_pipeline_bg(run_id: uuid.UUID, pipeline_id: uuid.UUID, compan
                     "stage_index": i,
                     "status": "failed",
                     "error": f"{type(e).__name__}: {e}",
-                    "completed_at": datetime.utcnow().isoformat(),
+                    "completed_at": datetime.now(timezone.utc).isoformat(),
                 })
 
                 # Conditional branching: if stage has on_fail, jump to that stage index
@@ -367,7 +367,7 @@ async def _execute_pipeline_bg(run_id: uuid.UUID, pipeline_id: uuid.UUID, compan
         if run.status == "running":
             run.status = "completed"
         run.results = stage_results
-        run.completed_at = datetime.utcnow()
+        run.completed_at = datetime.now(timezone.utc)
         db.add(run)
         await db.commit()
 
@@ -529,14 +529,14 @@ async def pause_pipeline(pipeline_id: uuid.UUID, db: DbSession, company_id: Curr
 @router.post("/api/v1/pipelines/{pipeline_id}/stop")
 async def stop_pipeline(pipeline_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId) -> dict:
     """Stop/cancel the latest running execution."""
-    from datetime import datetime
+    from datetime import timezone, datetime
     stmt = select(PipelineRun).where(PipelineRun.pipeline_id == pipeline_id, PipelineRun.company_id == company_id, PipelineRun.status.in_(["running", "paused"])).order_by(PipelineRun.started_at.desc()).limit(1)
     result = await db.execute(stmt)
     run = result.scalar_one_or_none()
     if not run:
         raise HTTPException(status_code=404, detail="No active execution found")
     run.status = "cancelled"
-    run.completed_at = datetime.utcnow()
+    run.completed_at = datetime.now(timezone.utc)
     await db.flush()
     return {"run_id": str(run.id), "status": "cancelled"}
 

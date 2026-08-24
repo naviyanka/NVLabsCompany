@@ -1,7 +1,7 @@
 """Trigger models for proactive agent behavior (Aware system)."""
 
 import uuid
-from datetime import datetime
+from datetime import timezone, datetime
 from typing import Any, Optional
 
 from sqlalchemy import JSON
@@ -32,7 +32,7 @@ class Trigger(SQLModel, table=True):
     is_active: bool = Field(default=True)
     last_fired_at: Optional[datetime] = Field(default=None)
     next_fire_at: Optional[datetime] = Field(default=None)
-    created_at: datetime = Field(default_factory=lambda: datetime.utcnow())
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class TriggerExecution(SQLModel, table=True):
@@ -46,5 +46,5 @@ class TriggerExecution(SQLModel, table=True):
     status: str = Field(default="running", max_length=50)
     result: Optional[dict[str, Any]] = Field(default=None, sa_column=Column(JSON))
     error: Optional[str] = Field(default=None)
-    started_at: datetime = Field(default_factory=lambda: datetime.utcnow())
+    started_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     completed_at: Optional[datetime] = Field(default=None)

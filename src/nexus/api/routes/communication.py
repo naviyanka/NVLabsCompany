@@ -1,7 +1,7 @@
 """Communication API endpoints - messaging, groups, and events."""
 
 import uuid
-from datetime import datetime
+from datetime import timezone, datetime
 from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException, status
@@ -416,7 +416,7 @@ async def mark_inbox_read(
             Message.company_id == company_id,
             Message.delivered == False,  # noqa: E712
         )
-        .values(delivered=True, updated_at=datetime.utcnow())
+        .values(delivered=True, updated_at=datetime.now(timezone.utc))
     )
     result = await db.execute(stmt)
     count = result.rowcount or 0

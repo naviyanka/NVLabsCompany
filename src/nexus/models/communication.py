@@ -1,7 +1,7 @@
 """Communication models for inter-agent messaging and events."""
 
 import uuid
-from datetime import datetime
+from datetime import timezone, datetime
 from typing import Any, Optional
 
 from sqlalchemy import JSON
@@ -34,7 +34,7 @@ class Message(SQLModel, table=True):
     correlation_id: Optional[str] = Field(default=None, max_length=255, index=True)
     delivered: bool = Field(default=False)
     delivery_route: str = Field(default="direct", max_length=50)  # direct/broadcast/team
-    created_at: datetime = Field(default_factory=lambda: datetime.utcnow())
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: Optional[datetime] = Field(default=None)
 
 
@@ -51,7 +51,7 @@ class Group(SQLModel, table=True):
     company_id: uuid.UUID = Field(foreign_key="companies.id", index=True)
     name: str = Field(max_length=255)
     description: Optional[str] = Field(default=None)
-    created_at: datetime = Field(default_factory=lambda: datetime.utcnow())
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class GroupMember(SQLModel, table=True):
@@ -66,7 +66,7 @@ class GroupMember(SQLModel, table=True):
     group_id: uuid.UUID = Field(foreign_key="groups.id", index=True)
     agent_id: uuid.UUID = Field(foreign_key="agents.id", index=True)
     role: str = Field(default="member", max_length=50)
-    joined_at: datetime = Field(default_factory=lambda: datetime.utcnow())
+    joined_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class Event(SQLModel, table=True):
@@ -84,4 +84,4 @@ class Event(SQLModel, table=True):
     source_agent_id: uuid.UUID = Field(foreign_key="agents.id", index=True)
     payload: Optional[dict[str, Any]] = Field(default=None, sa_column=Column(JSON))
     handled: bool = Field(default=False)
-    created_at: datetime = Field(default_factory=lambda: datetime.utcnow())
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

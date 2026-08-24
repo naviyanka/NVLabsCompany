@@ -1,7 +1,7 @@
 """Company simulation API endpoints - org chart, delegation, performance, hiring."""
 
 import uuid
-from datetime import datetime
+from datetime import timezone, datetime
 from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException, status
@@ -220,7 +220,7 @@ async def delegate_task(
     from datetime import timezone
 
     delegation_id = uuid.uuid4()
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     delegation = DelegationResponse(
         id=delegation_id,
         task_id=body.task_id,
@@ -341,7 +341,7 @@ async def submit_peer_review(
         reviewer_agent_id=body.reviewer_agent_id,
         rating=body.rating,
         feedback=body.feedback,
-        created_at=datetime.utcnow(),
+        created_at=datetime.now(timezone.utc),
     )
 
 

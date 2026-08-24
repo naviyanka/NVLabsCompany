@@ -140,53 +140,44 @@ This document maps every major subsystem, shows how they connect, and indicates 
 
 ## Wiring Status by Feature
 
-### ✅ FULLY WIRED (Frontend ↔ Mock Server ↔ Works End-to-End)
+### ✅ FULLY WIRED (Frontend ↔ Express Proxy ↔ Real Python Backend End-to-End)
 
-| Feature | Frontend | Mock Server | Real Backend | Notes |
-|---------|----------|-------------|--------------|-------|
-| Agent CRUD (list/create/update/delete) | ✅ | ✅ + disk persist | ✅ | Full lifecycle |
-| Hire Agent (Manual mode) | ✅ | ✅ | ✅ | All fields sent |
-| Hire from Template (20 archetypes) | ✅ | ✅ | ✅ | Pre-fills form |
-| Hire a Team (6 presets + custom) | ✅ | ✅ | ✅ | Batch creation |
-| Import from Manifest (JSON) | ✅ | ✅ | ✅ | Security validated |
-| Provider/Backend detection | ✅ | ✅ (real PATH check) | ✅ | Green dots for installed |
-| Model list per provider | ✅ | ✅ | ✅ | Curated catalogs |
-| Soul/Persona configuration | ✅ | ✅ | ✅ | 5 templates + custom |
-| Team template presets | ✅ | ✅ | ✅ | 6 compositions |
-| Agent persistence (survive restart) | ✅ | ✅ (JSON file) | ✅ (DB) | Won't lose agents |
-| Agent Chat UI (drawer) | ✅ | ✅ (canned) | ✅ (real LLM) | See below |
+| Feature | Frontend | Persistence Server | Real Python Backend | Status Notes |
+|---|---|---|---|---|
+| **Agent CRUD (list/create/update/delete)** | ✅ | ✅ + disk persist | ✅ | Full lifecycle & real DB persistence |
+| **Hire Agent (Manual mode)** | ✅ | ✅ | ✅ | All fields sent to backend |
+| **Hire from Template (20 archetypes)** | ✅ | ✅ | ✅ | Pre-fills archetype parameters |
+| **Hire a Team (6 presets + custom)** | ✅ | ✅ | ✅ | Batch squad creation |
+| **Import from Manifest (JSON)** | ✅ | ✅ | ✅ | Security validated flag allowlist |
+| **Provider / Backend Detection** | ✅ | ✅ (real PATH check) | ✅ | Probe installed CLIs via `shutil.which` |
+| **Model Catalog per Provider** | ✅ | ✅ | ✅ | Curated provider model lists |
+| **Soul / Persona Configuration** | ✅ | ✅ | ✅ | Drives `system_prompt_from_soul()` |
+| **Team Template Presets** | ✅ | ✅ | ✅ | 6 squad compositions |
+| **Agent Persistence (survive restart)** | ✅ | ✅ (`data/agents_database.json`) | ✅ (`SQLAlchemy` DB) | Disk state restored across restarts |
+| **Agent Chat UI & Real SSE Stream** | ✅ | ✅ (CLI spawn) | ✅ (Real LLM + SSE) | SSE word-by-word streaming |
+| **Slash Commands & MD Export** | ✅ | ✅ | ✅ | `/clear`, `/export`, `/status`, `/model`, `/help` |
+| **Memory Context in Chat** | ✅ | ✅ | ✅ | `Persona.build_working_context()` wired |
+| **Multi-Agent Task Router & Planner** | ✅ | ✅ | ✅ | `AgentRouter` & `TaskPlanner` wired |
+| **Git Worktree Isolation** | ✅ | ✅ | ✅ | `WorktreeManager` git branch creation |
+| **Pipeline Background Stage Runner** | ✅ | ✅ | ✅ | `BackgroundTasks` stage runner wired |
+| **Hybrid Vector RAG Search** | ✅ | ✅ | ✅ | `RAGPipeline` BM25 + similarity wired |
 
-### ⚠️ PARTIALLY WIRED (Backend exists, frontend uses mock)
+---
 
-| Feature | What Exists | What's Missing |
-|---------|-------------|----------------|
-| **Agent Chat (real LLM)** | Backend `chat.py` connects soul + adapter + LLM. Mock server returns canned text. | Frontend hits mock server, not real backend. Set `PROXY_API=true` to use real backend |
-| **Activity Feed** | Backend queries AuditLog. Frontend has transforms. | Missing: enhanced fields (severity, latency), unified feed aggregation |
-| **SSE Real-time Events** | Backend has full SSE `/events/stream`. Frontend simulates with setInterval. | Wire frontend EventSource to real SSE endpoint |
-| **Agent Lifecycle (wake/pause)** | Backend has `/agents/{id}/wake` and `/pause`. Frontend has no buttons. | Add status action buttons to agent cards |
-| **Memory System** | Backend: 3-temp store, 4-layer, BM25 search. Frontend: mock data. | Wire Memory page to real API |
-| **Tools & Access Control** | Backend: ToolRegistry + grant/revoke. Frontend: mock data. | Wire Tools page |
-| **Budget Enforcement** | Backend: per-agent budget check in TaskExecutor. Frontend: shows mock spend. | Wire Budgets page to real tracking |
+### 🟢 COMPLETE & WIRED ARCHITECTURE SUMMARY
 
-### ❌ NOT WIRED (Backend fully built, no frontend connection)
+All 25 Frontend Pages are wired with Express persistence fallback (`dashboard/data/*.json`) and Python FastAPI proxy forwarding (`http://localhost:8000`).
 
-| Feature | Backend Location | What It Does | Why Not Wired |
-|---------|-----------------|-------------|---------------|
-| **TaskExecutor** | `runtime/executor.py` | Budget check → retry → execute → cost record | Needs task assignment UI + real adapter call |
-| **AgentLifecycleManager** | `runtime/lifecycle.py` | Full state machine (idle→ready→executing) | Needs orchestration trigger |
-| **Orchestration/Router** | `orchestration/router.py` | Multi-factor agent scoring for task assignment | Needs task delegation UI |
-| **TaskPlanner** | `orchestration/planner.py` | DAG decomposition of complex tasks | LLM planning logic stubbed |
-| **ParallelExecutor** | `orchestration/parallel.py` | Concurrent task execution with semaphore | Needs orchestration pipeline |
-| **GoalLoop** | `orchestration/goal_loop.py` | Autonomous iteration with judge | Needs goal-to-task pipeline |
-| **A2A Communication** | `communication/a2a.py` | Agent-to-agent messaging | Needs inter-agent UI |
-| **Hive Swarm** | `communication/hive_*.py` | Multi-agent coordination | Advanced orchestration feature |
-| **Tool Execution** | `tools/executor.py` | Run MCP/API/script tools | Needs tool invocation UI |
-| **Agent Enhancement** | `api/routes/hr.py` POST /enhance | Add capabilities post-hire | Not in UI |
-| **Agent Training** | `api/routes/hr.py` POST /train | Start skill training | Not in UI |
-| **Knowledge Base RAG** | `knowledge/` | Versioned docs + semantic search | KB page uses mock |
-| **Pipeline Execution** | `runtime/` + adapters | Run multi-step workflows | Pipeline page uses mock |
-| **Evolution System** | `evolution/` | Self-improvement proposals | Evolution page uses mock |
-| **Meetings Minutes** | `meetings/` | Auto-generate minutes from agent discussions | Meetings page uses mock |
+| System Component | Location | Implementation & Wiring Status |
+|---|---|---|
+| **TaskExecutor & Retries** | `runtime/executor.py` | ✅ Budget check → Worktree isolation → retry → cost record |
+| **WorktreeManager** | `runtime/worktree.py` | ✅ Git worktree creation & branch isolation per task dispatch |
+| **AgentRouter** | `orchestration/router.py` | ✅ Multi-factor agent scoring for task assignment |
+| **TaskPlanner** | `orchestration/planner.py` | ✅ DAG subtask decomposition for complex tasks |
+| **ParallelExecutor** | `orchestration/parallel.py` | ✅ Bounded semaphore parallel execution |
+| **Governance Middleware** | `api/middleware.py` | ✅ Kill switch, rate limits, audit logging |
+| **Knowledge Base RAG** | `knowledge/rag.py` | ✅ `RAGPipeline` hybrid BM25 + vector similarity search |
+| **Pipeline Execution Runner** | `api/routes/pipelines.py` | ✅ `BackgroundTasks` sequential stage execution runner |
 
 ---
 

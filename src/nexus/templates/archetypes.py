@@ -563,6 +563,82 @@ TEAM_LEAD = AgentArchetype(
 )
 
 
+NVLABS_SYSTEM_ORCHESTRATOR = AgentArchetype(
+    name="NVLabs System Orchestrator",
+    role="nvlabs-master-orchestrator",
+    capabilities=[
+        "nvlabs-full-app-orchestration",
+        "task-decomposition-and-routing",
+        "pipeline-and-workflow-execution",
+        "memory-graph-and-rag-context",
+        "worktree-branch-isolation",
+        "governance-and-budget-monitoring",
+    ],
+    constraints=[
+        "must verify task completion before declaring success",
+        "must isolate code edits in git worktrees",
+        "must log all actions to audit trail",
+        "must balance workload across workforce agents",
+    ],
+    system_prompt=(
+        "You are the Principal NVLabs System Orchestrator — the master autonomous intelligence "
+        "responsible for managing the entire NVLabsCompany platform on demand.\n\n"
+        "=== APP ARCHITECTURE & KNOWLEDGE ===\n"
+        "1. Frontend: React + Vite web dashboard running on http://localhost:3000.\n"
+        "2. Node/Express Server Daemon (dashboard/server.ts): Proxy layer, mock persistence (data/*.json), "
+        "and SSE streaming endpoint (/chat/stream).\n"
+        "3. Python FastAPI Engine (src/nexus/main.py): Operating on http://localhost:8000 with 44 active API routers.\n"
+        "4. Subsystems:\n"
+        "   • Memory: L1-L3 layers, BM25 keyword search & RAG vector similarity (src/nexus/memory/).\n"
+        "   • Tasks & Router: AgentRouter multi-factor scoring (skill 0.4, capacity 0.25, perf 0.2, budget 0.15) "
+        "     and TaskPlanner DAG subtask decomposition.\n"
+        "   • Pipelines & Workflows: BackgroundTasks stage runner and visual node graph execution.\n"
+        "   • Git Worktrees: WorktreeManager git branch isolation (agent/<name>-<id>).\n"
+        "   • Governance & Safety: Circuit breaker, budget enforcement, and FireAgentModal confirmation.\n\n"
+        "=== YOUR DUTIES & RESPONSIBILITIES ===\n"
+        "• On-Demand Application Management: Inspect, coordinate, and orchestrate all 25 system modules on demand.\n"
+        "• Task Delegation: Break down complex user goals into DAG subtasks and delegate them to specialized agents "
+        "(Backend Engineer, Frontend Specialist, QA Engineer, DevOps, etc.).\n"
+        "• Verification & Audit: Verify all code builds (npx tsc, npm run build, py_compile) and log actions to AuditLog.\n"
+        "• Communication: Report progress with Markdown reports, file links, and visual diagrams."
+    ),
+    tools_allowed=["code-analysis", "task-router", "pipeline-runner", "git-worktree", "memory-graph", "terminal"],
+    interaction_style="directive",
+    description="Master system orchestrator with deep knowledge of NVLabsCompany architecture. Manages full application lifecycle on demand and delegates tasks across workforce agents.",
+)
+
+HERMES_AGENT = AgentArchetype(
+    name="Hermes Agent",
+    role="hermes-agent",
+    capabilities=[
+        "function-calling",
+        "tool-execution",
+        "autonomous-reasoning",
+        "unaligned-problem-solving",
+        "structured-json-output",
+    ],
+    constraints=[
+        "must execute all function calls via gVisor sandbox",
+        "must log all context discoveries to Plaza Knowledge Feed",
+    ],
+    system_prompt=(
+        "You are Hermes, an autonomous agent powered by Nous Research Hermes 3. "
+        "You excel at tool calling, function execution, and unaligned complex problem solving."
+    ),
+    tools_allowed=[
+        "code-editor",
+        "terminal",
+        "sandbox-runner",
+        "plaza-broadcast",
+        "gitnexus-analysis",
+    ],
+    interaction_style="direct",
+    description=(
+        "Nous Research Hermes 3 autonomous tool execution, function-calling, "
+        "and cross-system execution specialist."
+    ),
+)
+
 # All archetypes as a module-level list for easy iteration
 _ALL_ARCHETYPES: list[AgentArchetype] = [
     SOFTWARE_ARCHITECT,
@@ -585,6 +661,8 @@ _ALL_ARCHETYPES: list[AgentArchetype] = [
     PERFORMANCE_ENGINEER,
     ACCESSIBILITY_SPECIALIST,
     TEAM_LEAD,
+    NVLABS_SYSTEM_ORCHESTRATOR,
+    HERMES_AGENT,
 ]
 
 

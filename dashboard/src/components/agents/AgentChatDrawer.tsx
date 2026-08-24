@@ -310,18 +310,25 @@ export function AgentChatDrawer({ agent, isOpen, onClose }: AgentChatDrawerProps
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
         let accumulated = '';
+        let buffer = '';
+        let isFinished = false;
 
-        while (true) {
+        while (!isFinished) {
           const { done, value } = await reader.read();
           if (done) break;
 
-          const text = decoder.decode(value, { stream: true });
-          const lines = text.split('\n');
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || ''; // Keep partial line in buffer
 
           for (const line of lines) {
-            if (!line.startsWith('data: ')) continue;
-            const data = line.slice(6);
-            if (data === '[DONE]') continue;
+            const trimmed = line.trim();
+            if (!trimmed.startsWith('data: ')) continue;
+            const data = trimmed.slice(6);
+            if (data === '[DONE]') {
+              isFinished = true;
+              break;
+            }
 
             try {
               const event = JSON.parse(data);
@@ -331,36 +338,40 @@ export function AgentChatDrawer({ agent, isOpen, onClose }: AgentChatDrawerProps
                   prev.map((m) => m.id === streamMsgId ? { ...m, text: accumulated + '▍' } : m)
                 );
               } else if (event.type === 'done') {
-                // Replace streaming placeholder with final message
                 setMessages((prev) =>
                   prev.map((m) => m.id === streamMsgId ? event.message : m)
                 );
-                // Accumulate tokens from this response
                 if (event.tokens_used) {
                   setSessionTokens((prev) => prev + event.tokens_used);
                 }
+                isFinished = true;
               } else if (event.type === 'error') {
                 setMessages((prev) =>
                   prev.map((m) => m.id === streamMsgId ? { ...m, text: `Error: ${event.text}` } : m)
                 );
+                isFinished = true;
               }
             } catch {
-              // Not valid JSON — skip
+              // Ignore partial JSON parse errors
             }
           }
         }
 
-        // If stream ended without a 'done' event, finalize
-        if (accumulated && !accumulated.includes('[DONE]')) {
-          setMessages((prev) =>
-            prev.map((m) => m.id === streamMsgId ? { ...m, text: accumulated } : m)
-          );
-        }
+        // Final cleanup of cursor placeholder if message is still streaming
+        setMessages((prev) =>
+          prev.map((m) => {
+            if (m.id === streamMsgId) {
+              const cleanText = m.text.endsWith('▍') ? m.text.slice(0, -1) : m.text;
+              return { ...m, text: cleanText || accumulated || 'No response.' };
+            }
+            return m;
+          })
+        );
       }
-    } catch {
+    } catch (err: any) {
       setMessages((prev) =>
         prev.map((m) => m.id === streamMsgId
-          ? { ...m, text: 'Failed to process command. The agent may be unavailable.' }
+          ? { ...m, text: `Error: ${err?.message || 'Failed to send message.'}` }
           : m)
       );
     } finally {

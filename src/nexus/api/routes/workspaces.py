@@ -1,7 +1,7 @@
 """Workspace API — multi-project workspace management."""
 
 import uuid
-from datetime import datetime
+from datetime import timezone, datetime
 from pathlib import Path
 from typing import Any
 
@@ -74,7 +74,7 @@ async def activate_workspace(workspace_id: uuid.UUID, db: DbSession, company_id:
     if not ws:
         raise HTTPException(status_code=404, detail="Workspace not found")
     ws.is_active = True
-    ws.last_accessed_at = datetime.utcnow()
+    ws.last_accessed_at = datetime.now(timezone.utc)
     db.add(ws)
     await db.flush()
     return {"workspace_id": str(ws.id), "name": ws.name, "active": True}

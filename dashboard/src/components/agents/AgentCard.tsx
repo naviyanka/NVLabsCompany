@@ -43,7 +43,7 @@ export function AgentCard({ agent, onClick, onChat, onFire }: AgentCardProps) {
           {onChat && (
             <button
               onClick={(e) => { e.stopPropagation(); onChat(agent); }}
-              className="p-1.5 rounded-[4px] text-[#6B6B6E] hover:text-[#FFB020] hover:bg-[#FFB020]/10 transition-all cursor-pointer opacity-0 group-hover:opacity-100"
+              className="p-1.5 rounded-[4px] text-[#6B6B6E] hover:text-[#FFB020] hover:bg-[#FFB020]/10 transition-all cursor-pointer"
               title={`Chat with ${agent.name}`}
             >
               <MessageSquare size={14} />
@@ -51,11 +51,11 @@ export function AgentCard({ agent, onClick, onChat, onFire }: AgentCardProps) {
           )}
           {onFire && (
             <button
-              onClick={(e) => { e.stopPropagation(); if (confirm(`Fire ${agent.name}? This will permanently remove this agent.`)) onFire(agent); }}
-              className="p-1.5 rounded-[4px] text-[#6B6B6E] hover:text-red-400 hover:bg-red-400/10 transition-all cursor-pointer opacity-0 group-hover:opacity-100"
+              onClick={(e) => { e.stopPropagation(); onFire(agent); }}
+              className="p-1.5 rounded-[4px] text-[#6B6B6E] hover:text-red-400 hover:bg-red-400/10 transition-all cursor-pointer"
               title={`Fire ${agent.name}`}
             >
-              <Trash2 size={14} />
+              <Trash2 size={14} className="hover:scale-110 transition-transform" />
             </button>
           )}
           <Badge variant={badgeVariant as any}>{agent.status}</Badge>

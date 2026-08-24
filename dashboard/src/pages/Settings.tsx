@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { Settings as SettingsIcon, CheckCircle2, ExternalLink } from 'lucide-react';
 import { SettingsNav } from '@/components/settings/SettingsNav';
-import { ProfileSettingsTab } from '@/components/settings/ProfileSettingsTab';
 import { OtherSettingsTabs } from '@/components/settings/OtherSettingsTabs';
 import type { SettingsTabId } from '@/components/settings/types';
 
@@ -19,7 +18,7 @@ export function Settings() {
   };
 
   return (
-    <div className="w-full max-w-7xl mx-auto space-y-6 pb-12">
+    <div className="w-full max-w-7xl mx-auto space-y-6 pb-12 font-sans">
       {/* Settings Page Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-2">
         <div className="flex items-center gap-3.5">
@@ -47,25 +46,21 @@ export function Settings() {
         )}
       </div>
 
-      {/* Main Settings Body: Left Navigation + Content View */}
+      {/* Main Settings Body: Left Grouped Navigation + Right Modular View */}
       <div className="flex flex-col md:flex-row gap-6 items-start">
-        {/* Left Category Menu */}
+        {/* Left Grouped Category Menu */}
         <SettingsNav activeTab={activeTab} onSelectTab={setActiveTab} />
 
-        {/* Right Active View */}
+        {/* Right Active Modular Tab View */}
         <div className="flex-1 w-full min-w-0 bg-[#141416] border border-white/[0.08] rounded-xl p-5 sm:p-6 shadow-sm">
-          {activeTab === 'profile' ? (
-            <ProfileSettingsTab onSaveToast={() => triggerToast('Profile preferences saved successfully')} />
-          ) : (
-            <OtherSettingsTabs
-              activeTab={activeTab}
-              onSaveToast={() => triggerToast('Configuration saved successfully')}
-            />
-          )}
+          <OtherSettingsTabs
+            activeTab={activeTab}
+            onSaveToast={triggerToast}
+          />
         </div>
       </div>
 
-      {/* Footer matching reference layout & original theme */}
+      {/* Footer */}
       <footer className="pt-8 border-t border-white/[0.06] flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-[#6B6B6E]">
         <div>© 2024 NEXUS Mission Control. All rights reserved.</div>
         <div className="flex items-center gap-6 font-mono text-[11px]">

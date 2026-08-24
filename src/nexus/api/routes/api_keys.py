@@ -15,7 +15,7 @@ hash is stored, so a lost key cannot be recovered — it is revoked and replaced
 """
 
 import uuid
-from datetime import datetime, timedelta
+from datetime import timezone, datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, status
@@ -94,7 +94,7 @@ async def create_api_key(
         )
 
     expires_at = (
-        utcnow() + timedelta(days=body.expires_in_days)
+        now(timezone.utc) + timedelta(days=body.expires_in_days)
         if body.expires_in_days is not None
         else None
     )

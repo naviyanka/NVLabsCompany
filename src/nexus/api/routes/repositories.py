@@ -1,7 +1,7 @@
 """Git repository CRUD endpoints."""
 
 import uuid
-from datetime import datetime
+from datetime import timezone, datetime
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, status
@@ -91,7 +91,7 @@ async def update_repo(repo_id: uuid.UUID, body: RepoUpdate, db: DbSession, compa
     if not repo:
         raise HTTPException(status_code=404, detail="Repository not found")
     updates = body.model_dump(exclude_unset=True)
-    updates["updated_at"] = datetime.utcnow()
+    updates["updated_at"] = datetime.now(timezone.utc)
     for k, v in updates.items():
         setattr(repo, k, v)
     await db.flush()
@@ -114,7 +114,7 @@ async def sync_repo(repo_id: uuid.UUID, db: DbSession, company_id: CurrentCompan
     repo = result.scalar_one_or_none()
     if not repo:
         raise HTTPException(status_code=404, detail="Repository not found")
-    repo.last_synced_at = datetime.utcnow()
+    repo.last_synced_at = datetime.now(timezone.utc)
     await db.flush()
     return {"repo_id": str(repo_id), "synced_at": repo.last_synced_at.isoformat()}
 
@@ -201,7 +201,7 @@ async def get_repo_commits(repo_id: uuid.UUID, db: DbSession, company_id: Curren
             "sha": sha,
             "message": messages[i],
             "author": authors[i % len(authors)],
-            "date": (datetime.utcnow() - timedelta(days=10 - i)).isoformat(),
+            "date": (datetime.now(timezone.utc) - timedelta(days=10 - i)).isoformat(),
         })
 
     return commits
@@ -217,11 +217,11 @@ async def get_repo_pull_requests(repo_id: uuid.UUID, db: DbSession, company_id: 
         raise HTTPException(status_code=404, detail="Repository not found")
 
     prs = [
-        {"id": 1, "title": "Add input validation layer", "status": "open", "author": "alice", "created_at": (datetime.utcnow() - timedelta(days=1)).isoformat()},
-        {"id": 2, "title": "Refactor database models", "status": "merged", "author": "bob", "created_at": (datetime.utcnow() - timedelta(days=3)).isoformat()},
-        {"id": 3, "title": "Fix memory leak in worker", "status": "open", "author": "charlie", "created_at": (datetime.utcnow() - timedelta(days=2)).isoformat()},
-        {"id": 4, "title": "Update CI/CD pipeline config", "status": "closed", "author": "diana", "created_at": (datetime.utcnow() - timedelta(days=5)).isoformat()},
-        {"id": 5, "title": "Implement rate limiting middleware", "status": "merged", "author": "eve", "created_at": (datetime.utcnow() - timedelta(days=7)).isoformat()},
+        {"id": 1, "title": "Add input validation layer", "status": "open", "author": "alice", "created_at": (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()},
+        {"id": 2, "title": "Refactor database models", "status": "merged", "author": "bob", "created_at": (datetime.now(timezone.utc) - timedelta(days=3)).isoformat()},
+        {"id": 3, "title": "Fix memory leak in worker", "status": "open", "author": "charlie", "created_at": (datetime.now(timezone.utc) - timedelta(days=2)).isoformat()},
+        {"id": 4, "title": "Update CI/CD pipeline config", "status": "closed", "author": "diana", "created_at": (datetime.now(timezone.utc) - timedelta(days=5)).isoformat()},
+        {"id": 5, "title": "Implement rate limiting middleware", "status": "merged", "author": "eve", "created_at": (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()},
     ]
     return prs
 

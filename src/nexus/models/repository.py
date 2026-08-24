@@ -1,7 +1,7 @@
 """Repository model for connected git repositories."""
 
 import uuid
-from datetime import datetime
+from datetime import timezone, datetime
 from typing import Any, Optional
 
 from sqlalchemy import JSON
@@ -24,5 +24,5 @@ class Repository(SQLModel, table=True):
     is_active: bool = Field(default=True)
     last_synced_at: Optional[datetime] = Field(default=None)
     stats: Optional[dict[str, Any]] = Field(default=None, sa_column=Column(JSON))
-    created_at: datetime = Field(default_factory=lambda: datetime.utcnow())
-    updated_at: datetime = Field(default_factory=lambda: datetime.utcnow())
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

@@ -1,7 +1,7 @@
 """Policy models: policies, policy rules, and policy versions."""
 
 import uuid
-from datetime import datetime
+from datetime import timezone, datetime
 from typing import Any, Optional
 
 from sqlalchemy import JSON
@@ -21,8 +21,8 @@ class Policy(SQLModel, table=True):
     priority: int = Field(default=0)
     enabled: bool = Field(default=True)
     version: int = Field(default=1)
-    created_at: datetime = Field(default_factory=lambda: datetime.utcnow())
-    updated_at: datetime = Field(default_factory=lambda: datetime.utcnow())
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class PolicyRule(SQLModel, table=True):
@@ -34,7 +34,7 @@ class PolicyRule(SQLModel, table=True):
     policy_id: uuid.UUID = Field(foreign_key="policies.id", index=True)
     rule_type: str = Field(max_length=100)
     conditions: Optional[dict[str, Any]] = Field(default=None, sa_column=Column(JSON))
-    created_at: datetime = Field(default_factory=lambda: datetime.utcnow())
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class PolicyVersion(SQLModel, table=True):
@@ -49,4 +49,4 @@ class PolicyVersion(SQLModel, table=True):
         default=None, sa_column=Column(JSON)
     )
     changed_by: Optional[str] = Field(default=None, max_length=255)
-    created_at: datetime = Field(default_factory=lambda: datetime.utcnow())
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

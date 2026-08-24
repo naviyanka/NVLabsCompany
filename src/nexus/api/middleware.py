@@ -423,7 +423,7 @@ class GovernanceMiddleware:
             # Check time-based restrictions
             import datetime as dt
 
-            current_hour = dt.datetime.utcnow().hour
+            current_hour = dt.datetime.now(timezone.utc).hour
             deny_after = rules.get("deny_after_hour")
             deny_before = rules.get("deny_before_hour")
             if deny_after is not None and current_hour >= deny_after:

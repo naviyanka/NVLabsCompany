@@ -564,14 +564,19 @@ export function OpenOfficeCanvas({
     }
   };
 
-  // Mouse Wheel: Smooth Zoom centered on mouse cursor
-  const handleWheel = (e: React.WheelEvent<HTMLCanvasElement>) => {
-    e.preventDefault();
-    const zoomFactor = e.deltaY < 0 ? 1.1 : 0.9;
-    const newZoom = Math.min(Math.max(zoom * zoomFactor, 0.5), 2.2);
-
+  // Mouse Wheel: Smooth Zoom centered on mouse cursor (Native Non-Passive Listener)
+  useEffect(() => {
     const canvas = canvasRef.current;
-    if (canvas) {
+    if (!canvas) return;
+
+    const handleNativeWheel = (e: WheelEvent) => {
+      // Strictly prevent page scroll ONLY when scrolling on the office floor canvas
+      e.preventDefault();
+      e.stopPropagation();
+
+      const zoomFactor = e.deltaY < 0 ? 1.1 : 0.9;
+      const newZoom = Math.min(Math.max(zoom * zoomFactor, 0.5), 2.2);
+
       const rect = canvas.getBoundingClientRect();
       const mouseX = e.clientX - rect.left;
       const mouseY = e.clientY - rect.top;
@@ -580,10 +585,15 @@ export function OpenOfficeCanvas({
         x: mouseX - (mouseX - prev.x) * (newZoom / zoom),
         y: mouseY - (mouseY - prev.y) * (newZoom / zoom),
       }));
-    }
 
-    onZoomChange(newZoom);
-  };
+      onZoomChange(newZoom);
+    };
+
+    canvas.addEventListener('wheel', handleNativeWheel, { passive: false });
+    return () => {
+      canvas.removeEventListener('wheel', handleNativeWheel);
+    };
+  }, [zoom, onZoomChange]);
 
   // Resize canvas on container size change
   useEffect(() => {
@@ -637,7 +647,6 @@ export function OpenOfficeCanvas({
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
-        onWheel={handleWheel}
         className="w-full h-full block"
       />
 

@@ -26,7 +26,7 @@ switch arrives with the TOTP verification that makes it mean something.
 """
 
 import uuid
-from datetime import datetime
+from datetime import timezone, datetime
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, status
@@ -143,7 +143,7 @@ async def update_profile(
     profile = await _own_profile(db, principal.user_id)
     for key, value in updates.items():
         setattr(profile, key, value)
-    profile.updated_at = utcnow()
+    profile.updated_at = now(timezone.utc)
     db.add(profile)
     await db.flush()
     return profile

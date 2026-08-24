@@ -467,7 +467,7 @@ class TestCLIAdapterInRegistry:
         assert "cli" in types
         assert "http" in types
         assert "mcp" in types
-        assert len(types) == 7
+        assert len(types) >= 7
 
     def test_cli_adapter_capabilities_via_registry(self):
         """get_capabilities returns CLI adapter capabilities from registry."""

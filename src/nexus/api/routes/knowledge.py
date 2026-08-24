@@ -1,7 +1,7 @@
 """Knowledge API endpoints - knowledge base and experience tracking."""
 
 import uuid
-from datetime import datetime
+from datetime import timezone, datetime
 from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException, status
@@ -209,7 +209,7 @@ async def update_page(
     page.version += 1
     from datetime import timezone
 
-    page.updated_at = datetime.utcnow()
+    page.updated_at = datetime.now(timezone.utc)
     await db.flush()
     return page
 

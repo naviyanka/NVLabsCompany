@@ -1,7 +1,7 @@
 """Workspace model for multi-project switching."""
 
 import uuid
-from datetime import datetime
+from datetime import timezone, datetime
 from typing import Optional
 
 from sqlmodel import Field, SQLModel
@@ -20,5 +20,5 @@ class Workspace(SQLModel, table=True):
     is_active: bool = Field(default=False)
     is_git_repo: bool = Field(default=False)
     default_branch: Optional[str] = Field(default="main", max_length=100)
-    created_at: datetime = Field(default_factory=lambda: datetime.utcnow())
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     last_accessed_at: Optional[datetime] = Field(default=None)

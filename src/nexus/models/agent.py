@@ -1,7 +1,7 @@
 """Agent model - the core autonomous employee entity."""
 
 import uuid
-from datetime import datetime
+from datetime import timezone, datetime
 from typing import Any, Optional
 
 from sqlmodel import Column, Field, Index, SQLModel
@@ -80,5 +80,5 @@ class Agent(SQLModel, table=True):
     last_heartbeat_at: Optional[datetime] = Field(default=None)
 
     # Timestamps
-    created_at: datetime = Field(default_factory=lambda: datetime.utcnow())
-    updated_at: datetime = Field(default_factory=lambda: datetime.utcnow())
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

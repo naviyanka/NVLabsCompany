@@ -1,7 +1,7 @@
 """Chat message model for persistent conversation history."""
 
 import uuid
-from datetime import datetime
+from datetime import timezone, datetime
 from typing import Optional
 
 from sqlmodel import Field, SQLModel
@@ -20,4 +20,4 @@ class ChatMessage(SQLModel, table=True):
     conversation_id: Optional[str] = Field(default=None, max_length=255, index=True)
     model_used: Optional[str] = Field(default=None, max_length=100)
     tokens_used: int = Field(default=0)
-    created_at: datetime = Field(default_factory=lambda: datetime.utcnow())
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

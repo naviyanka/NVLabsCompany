@@ -248,3 +248,85 @@ class OpenAIAdapter(BaseAdapter):
             "system_prompt",
             "retry_on_rate_limit",
         ]
+
+    async def stream_execute(
+        self,
+        session: AgentSession,
+        task_id: uuid.UUID,
+        payload: dict[str, Any],
+    ) -> "AsyncGenerator[str, None]":
+        """Stream tokens from OpenAI Chat Completions API using SSE.
+
+        Yields text chunks as they arrive from OpenAI's streaming endpoint.
+
+        Args:
+            session: The active agent session.
+            task_id: The task identifier.
+            payload: Must contain 'prompt'. Optionally 'max_tokens', 'temperature'.
+
+        Yields:
+            Individual text chunks as they arrive.
+        """
+        import json
+        import httpx
+        from collections.abc import AsyncGenerator
+
+        prompt = payload.get("prompt", "")
+        temperature = payload.get("temperature", 0.7)
+        max_tokens = payload.get("max_tokens", 4096)
+
+        api_key = session.config["api_key"]
+        model = session.config["model"]
+        api_base = session.metadata.get("api_base", self._api_base)
+
+        history = self._conversation_history.get(session.session_id, [])
+        history.append({"role": "user", "content": prompt})
+
+        request_body: dict[str, Any] = {
+            "model": model,
+            "messages": history,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "stream": True,
+        }
+
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }
+
+        accumulated_text = ""
+
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            async with client.stream(
+                "POST",
+                f"{api_base}/chat/completions",
+                json=request_body,
+                headers=headers,
+            ) as response:
+                if response.status_code != 200:
+                    yield f"[Error: OpenAI API {response.status_code}]"
+                    return
+
+                async for line in response.aiter_lines():
+                    if not line.startswith("data: "):
+                        continue
+                    data = line[6:].strip()
+                    if data == "[DONE]":
+                        break
+
+                    try:
+                        event = json.loads(data)
+                        choices = event.get("choices", [])
+                        if choices:
+                            delta = choices[0].get("delta", {})
+                            content = delta.get("content", "")
+                            if content:
+                                accumulated_text += content
+                                yield content
+                    except Exception:
+                        continue
+
+        if accumulated_text:
+            history.append({"role": "assistant", "content": accumulated_text})
+            self._conversation_history[session.session_id] = history

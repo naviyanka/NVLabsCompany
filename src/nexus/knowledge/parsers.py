@@ -64,7 +64,7 @@ class TextParser:
     """
 
     max_chunk_size: int = 1000
-    min_chunk_size: int = 50
+    min_chunk_size: int = 0
 
     def parse(self, content: str) -> list[ParsedChunk]:
         """Parse plain text into paragraph/sentence chunks.

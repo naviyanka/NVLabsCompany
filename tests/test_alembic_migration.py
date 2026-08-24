@@ -23,9 +23,11 @@ EXPECTED_TABLES = {
     "audit_log",
     "auth_invites",
     "budget_policies",
+    "chat_messages",
     "circuit_breaker_records",
     "companies",
     "company_memberships",
+    "company_settings",
     "cost_events",
     "decision_queues",
     "decisions",
@@ -50,10 +52,16 @@ EXPECTED_TABLES = {
     "meetings",
     "memory_records",
     "messages",
+    "notification_preferences",
+    "notifications",
+    "pipeline_runs",
+    "pipelines",
+    "plaza_posts",
     "policies",
     "policy_rules",
     "policy_versions",
     "projects",
+    "repositories",
     "secret_accesses",
     "secret_bindings",
     "secret_versions",
@@ -74,6 +82,7 @@ EXPECTED_TABLES = {
     "triggers",
     "user_profiles",
     "user_sessions",
+    "workspaces",
 }
 
 MIGRATION_FILES = [
@@ -102,10 +111,10 @@ class TestModelMetadata:
     """Verify all SQLModel tables are discoverable in metadata."""
 
     def test_all_expected_tables_in_metadata(self) -> None:
-        """Import all models and confirm metadata contains all 60 expected tables."""
+        """Import all models and confirm metadata contains all expected tables."""
         actual_tables = set(SQLModel.metadata.tables.keys())
-        assert len(actual_tables) == 60, (
-            f"Expected 60 tables, found {len(actual_tables)}: "
+        assert len(actual_tables) == len(EXPECTED_TABLES), (
+            f"Expected {len(EXPECTED_TABLES)} tables, found {len(actual_tables)}: "
             f"missing={EXPECTED_TABLES - actual_tables}, "
             f"extra={actual_tables - EXPECTED_TABLES}"
         )
@@ -195,4 +204,4 @@ class TestSchemaCreation:
         assert "circuit_breaker_records" in created_tables
         assert "kill_switch_records" in created_tables
         assert "agents" in created_tables
-        assert len(created_tables) == 60
+        assert len(created_tables) == len(EXPECTED_TABLES)

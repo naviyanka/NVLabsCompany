@@ -1,29 +1,31 @@
-import { useState, useEffect } from 'react';
-import { NavLink, useLocation } from 'react-router-dom';
 import {
-  LayoutDashboard,
-  Box,
-  Users,
-  CheckSquare,
-  GitPullRequest,
-  Target,
-  Video,
-  Network,
-  Wrench,
-  Shield,
-  UserCheck,
-  DollarSign,
-  TrendingUp,
-  Database,
-  BookOpen,
-  GitBranch,
   Activity,
-  Settings,
+  BookOpen,
+  Box,
+  Boxes,
+  CheckSquare,
   ChevronLeft,
   ChevronRight,
-  Zap,
+  Database,
+  DollarSign,
+  GitBranch,
+  GitPullRequest,
+  LayoutDashboard,
+  Network,
+  Settings,
   Share2,
+  Shield,
+  Sparkles,
+  Target,
+  TrendingUp,
+  UserCheck,
+  Users,
+  Video,
+  Wrench,
+  Zap
 } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { NavLink, useLocation } from 'react-router-dom';
 
 import type { LucideIcon } from 'lucide-react';
 
@@ -48,11 +50,13 @@ const navGroups: NavGroup[] = [
     label: 'OPERATIONS',
     items: [
       { name: 'Ops Floor', to: '/', icon: LayoutDashboard },
+      { name: 'The Plaza Feed', to: '/plaza', icon: Sparkles },
       { name: '3D Virtual Office', to: '/office', icon: Box },
       { name: 'Workforce Agents', to: '/agents', icon: Users },
       { name: 'Task Operations', to: '/tasks', icon: CheckSquare },
       { name: 'Pipelines', to: '/pipelines', icon: GitPullRequest },
       { name: 'Workflows', to: '/workflows', icon: Zap },
+      { name: 'Node Library', to: '/nodes', icon: Boxes },
     ],
   },
   {
@@ -115,11 +119,9 @@ export function Sidebar({ isMobileOpen = false, onCloseMobile }: SidebarProps) {
 
       {/* Sidebar Container */}
       <aside
-        className={`fixed md:static inset-y-0 left-0 z-40 bg-[#0E0E10] border-r border-white/[0.08] flex flex-col transition-all duration-200 select-none ${
-          collapsed ? 'w-16' : 'w-60'
-        } ${
-          isMobileOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'
-        }`}
+        className={`fixed md:static inset-y-0 left-0 z-40 bg-[#0E0E10] border-r border-white/[0.08] flex flex-col transition-all duration-200 select-none ${collapsed ? 'w-16' : 'w-60'
+          } ${isMobileOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'
+          }`}
       >
         {/* Brand Header */}
         <div className="h-14 flex items-center justify-between px-4 border-b border-white/[0.08] shrink-0 bg-[#0A0A0B]">
@@ -170,9 +172,8 @@ export function Sidebar({ isMobileOpen = false, onCloseMobile }: SidebarProps) {
                     key={item.to}
                     to={item.to}
                     onClick={onCloseMobile}
-                    className={`sidebar-link flex items-center gap-3 px-3 py-2 text-xs transition-colors rounded-[4px] relative ${
-                      isActive ? 'active' : ''
-                    } ${collapsed ? 'justify-center px-0' : ''}`}
+                    className={`sidebar-link flex items-center gap-3 px-3 py-2 text-xs transition-colors rounded-[4px] relative ${isActive ? 'active' : ''
+                      } ${collapsed ? 'justify-center px-0' : ''}`}
                     title={collapsed ? item.name : undefined}
                   >
                     <Icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-[#FFB020]' : 'text-[#6B6B6E]'}`} />
