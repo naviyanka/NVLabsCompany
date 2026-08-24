@@ -1,291 +1,145 @@
-"""Embedding providers for the RAG pipeline.
+"""Embedding Provider — pluggable vector embedding generation for RAG.
 
-Provides a protocol for embedding providers and multiple implementations:
-- OpenAIEmbeddingProvider: Uses OpenAI text-embedding-3-small via async httpx
-- LocalEmbeddingProvider: Lightweight hash-based bag-of-words embeddings
-- FallbackEmbeddingProvider: Zero-dependency fallback wrapping LocalEmbeddingProvider
+Supports multiple backends:
+- OpenAI text-embedding-3-small/large
+- Ollama (local models like nomic-embed-text)
+- None (falls back to BM25/token-overlap in RAGPipeline)
+
+Configuration via environment variables:
+- EMBEDDING_PROVIDER: "openai" | "ollama" | "none" (default: "none")
+- OPENAI_API_KEY: required when provider is "openai"
+- OLLAMA_EMBED_MODEL: model name for Ollama (default: "nomic-embed-text")
+- OLLAMA_EMBED_URL: Ollama API URL (default: "http://localhost:11434")
 """
 
-import hashlib
-import math
-from typing import Protocol, runtime_checkable
-
-import httpx
-
-from nexus.config import settings
-from nexus.memory.retriever import tokenize
+import os
+from typing import Protocol
 
 
-# Default embedding dimension for local provider
-LOCAL_EMBEDDING_DIM = 256
-
-
-@runtime_checkable
 class EmbeddingProvider(Protocol):
-    """Protocol defining the interface for embedding providers.
+    """Protocol for embedding providers used by RAGPipeline."""
 
-    All embedding providers must implement async embed() for single texts
-    and async embed_batch() for multiple texts.
-    """
-
-    async def embed(self, text: str) -> list[float]:
-        """Compute an embedding vector for a single text.
+    async def embed(self, texts: list[str]) -> list[list[float]]:
+        """Generate embeddings for a list of text strings.
 
         Args:
-            text: The input text to embed.
+            texts: List of text strings to embed.
 
         Returns:
-            A list of floats representing the embedding vector.
+            List of embedding vectors (one per input text).
         """
         ...
 
-    async def embed_batch(self, texts: list[str]) -> list[list[float]]:
-        """Compute embedding vectors for multiple texts.
-
-        Args:
-            texts: List of input texts to embed.
-
-        Returns:
-            List of embedding vectors, one per input text.
-        """
+    @property
+    def dimension(self) -> int:
+        """The dimensionality of the embedding vectors."""
         ...
 
 
 class OpenAIEmbeddingProvider:
-    """Embedding provider using the OpenAI text-embedding-3-small API.
+    """Embedding provider using OpenAI's text-embedding API.
 
-    Communicates with the OpenAI embeddings endpoint via async httpx.
-    Reads the API key from nexus.config.settings.openai_api_key.
-
-    Attributes:
-        model: The OpenAI embedding model name.
-        api_key: The API key for authentication.
+    Requires OPENAI_API_KEY environment variable.
+    Uses text-embedding-3-small by default (1536 dimensions).
     """
 
-    def __init__(self, model: str = "text-embedding-3-small", api_key: str | None = None) -> None:
-        """Initialize the OpenAI embedding provider.
+    def __init__(self, model: str = "text-embedding-3-small") -> None:
+        self._model = model
+        self._api_key = os.environ.get("OPENAI_API_KEY", "")
+        self._dimension = 1536 if "small" in model else 3072
 
-        Args:
-            model: The embedding model to use. Defaults to text-embedding-3-small.
-            api_key: Optional API key override. If None, reads from settings.
-        """
-        self.model = model
-        self.api_key = api_key or settings.openai_api_key
-        self._api_base = "https://api.openai.com/v1"
+    @property
+    def dimension(self) -> int:
+        return self._dimension
 
-    async def embed(self, text: str) -> list[float]:
-        """Compute an embedding vector for a single text via OpenAI API.
+    async def embed(self, texts: list[str]) -> list[list[float]]:
+        """Call OpenAI embeddings API."""
+        import httpx
 
-        Args:
-            text: The input text to embed.
+        if not self._api_key:
+            raise RuntimeError("OPENAI_API_KEY not set — cannot generate embeddings")
 
-        Returns:
-            Embedding vector as a list of floats.
-
-        Raises:
-            httpx.HTTPStatusError: If the API returns an error status.
-            ValueError: If the API key is not configured.
-        """
-        if not self.api_key:
-            raise ValueError("OpenAI API key is not configured")
-
-        result = await self._call_api([text])
-        return result[0]
-
-    async def embed_batch(self, texts: list[str]) -> list[list[float]]:
-        """Compute embedding vectors for multiple texts via OpenAI API.
-
-        Args:
-            texts: List of input texts to embed.
-
-        Returns:
-            List of embedding vectors, one per input text.
-
-        Raises:
-            httpx.HTTPStatusError: If the API returns an error status.
-            ValueError: If the API key is not configured.
-        """
-        if not self.api_key:
-            raise ValueError("OpenAI API key is not configured")
-
-        if not texts:
-            return []
-
-        return await self._call_api(texts)
-
-    async def _call_api(self, texts: list[str]) -> list[list[float]]:
-        """Make the actual API call to OpenAI embeddings endpoint.
-
-        Args:
-            texts: List of texts to embed.
-
-        Returns:
-            List of embedding vectors in input order.
-        """
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json",
-        }
-        payload = {
-            "model": self.model,
-            "input": texts,
-        }
-
-        async with httpx.AsyncClient(timeout=60.0) as client:
+        async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post(
-                f"{self._api_base}/embeddings",
-                json=payload,
-                headers=headers,
+                "https://api.openai.com/v1/embeddings",
+                json={"model": self._model, "input": texts},
+                headers={
+                    "Authorization": f"Bearer {self._api_key}",
+                    "Content-Type": "application/json",
+                },
             )
-            response.raise_for_status()
+            if response.status_code != 200:
+                raise RuntimeError(f"OpenAI embeddings API error {response.status_code}: {response.text[:200]}")
 
-        data = response.json()
-        # Sort by index to ensure correct ordering
-        embeddings_data = sorted(data["data"], key=lambda x: x["index"])
-        return [item["embedding"] for item in embeddings_data]
+            data = response.json()
+            return [item["embedding"] for item in data["data"]]
 
 
-class LocalEmbeddingProvider:
-    """Lightweight local embedding provider using hash-based bag-of-words.
+class OllamaEmbeddingProvider:
+    """Embedding provider using a local Ollama instance.
 
-    Produces fixed-dimension vectors without any external dependencies.
-    Uses token hashing to map tokens into a fixed-size vector space,
-    producing consistent embeddings for the same input text.
-
-    Attributes:
-        dimensions: The fixed dimension of output vectors.
+    Uses nomic-embed-text by default (768 dimensions).
     """
 
-    def __init__(self, dimensions: int = LOCAL_EMBEDDING_DIM) -> None:
-        """Initialize the local embedding provider.
+    def __init__(
+        self,
+        model: str | None = None,
+        base_url: str | None = None,
+    ) -> None:
+        self._model = model or os.environ.get("OLLAMA_EMBED_MODEL", "nomic-embed-text")
+        self._base_url = base_url or os.environ.get("OLLAMA_EMBED_URL", "http://localhost:11434")
+        self._dimension = 768  # nomic-embed-text default
 
-        Args:
-            dimensions: The dimension of the output embedding vectors.
-        """
-        self.dimensions = dimensions
+    @property
+    def dimension(self) -> int:
+        return self._dimension
 
-    async def embed(self, text: str) -> list[float]:
-        """Compute a hash-based embedding vector for a single text.
+    async def embed(self, texts: list[str]) -> list[list[float]]:
+        """Call Ollama embeddings endpoint."""
+        import httpx
 
-        Tokenizes the text and maps each token to vector dimensions
-        using a deterministic hash function, then normalizes the result.
-
-        Args:
-            text: The input text to embed.
-
-        Returns:
-            A normalized embedding vector of fixed dimension.
-        """
-        return self._compute_embedding(text)
-
-    async def embed_batch(self, texts: list[str]) -> list[list[float]]:
-        """Compute hash-based embedding vectors for multiple texts.
-
-        Args:
-            texts: List of input texts to embed.
-
-        Returns:
-            List of normalized embedding vectors.
-        """
-        return [self._compute_embedding(text) for text in texts]
-
-    def _compute_embedding(self, text: str) -> list[float]:
-        """Compute a deterministic embedding vector from text.
-
-        Uses MD5 hashing of each token to distribute contributions
-        across vector dimensions. The result is L2-normalized.
-
-        Args:
-            text: Input text to embed.
-
-        Returns:
-            Normalized embedding vector.
-        """
-        vector = [0.0] * self.dimensions
-        tokens = tokenize(text)
-
-        if not tokens:
-            return vector
-
-        for token in tokens:
-            # Use MD5 hash to get deterministic pseudo-random bytes
-            token_hash = hashlib.md5(token.encode("utf-8")).hexdigest()
-            # Map hash bytes to dimension indices and values
-            for i in range(0, len(token_hash), 4):
-                hex_chunk = token_hash[i:i + 4]
-                dim_idx = int(hex_chunk[:2], 16) % self.dimensions
-                value = (int(hex_chunk[2:4], 16) - 128) / 128.0
-                vector[dim_idx] += value
-
-        # L2 normalize the vector
-        magnitude = math.sqrt(sum(v * v for v in vector))
-        if magnitude > 0:
-            vector = [v / magnitude for v in vector]
-
-        return vector
+        results = []
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            for text in texts:
+                response = await client.post(
+                    f"{self._base_url}/api/embeddings",
+                    json={"model": self._model, "prompt": text},
+                )
+                if response.status_code != 200:
+                    raise RuntimeError(f"Ollama embed error: {response.status_code}")
+                data = response.json()
+                results.append(data["embedding"])
+        return results
 
 
-class FallbackEmbeddingProvider:
-    """Zero-dependency fallback embedding provider.
+class NullEmbeddingProvider:
+    """No-op provider — RAGPipeline will fall back to token-overlap heuristic."""
 
-    Wraps LocalEmbeddingProvider to provide embeddings without any
-    external API key or network access. Suitable for development,
-    testing, and environments where no API key is available.
+    @property
+    def dimension(self) -> int:
+        return 0
 
-    Attributes:
-        _local: The wrapped LocalEmbeddingProvider instance.
-    """
-
-    def __init__(self, dimensions: int = LOCAL_EMBEDDING_DIM) -> None:
-        """Initialize the fallback embedding provider.
-
-        Args:
-            dimensions: The dimension of the output embedding vectors.
-        """
-        self._local = LocalEmbeddingProvider(dimensions=dimensions)
-
-    async def embed(self, text: str) -> list[float]:
-        """Compute an embedding vector using the local provider.
-
-        Args:
-            text: The input text to embed.
-
-        Returns:
-            A normalized embedding vector of fixed dimension.
-        """
-        return await self._local.embed(text)
-
-    async def embed_batch(self, texts: list[str]) -> list[list[float]]:
-        """Compute embedding vectors for multiple texts using the local provider.
-
-        Args:
-            texts: List of input texts to embed.
-
-        Returns:
-            List of normalized embedding vectors.
-        """
-        return await self._local.embed_batch(texts)
+    async def embed(self, texts: list[str]) -> list[list[float]]:
+        return []
 
 
-def cosine_similarity(vec_a: list[float], vec_b: list[float]) -> float:
-    """Compute cosine similarity between two vectors.
+def get_embedding_provider() -> EmbeddingProvider | None:
+    """Factory function to create the configured embedding provider.
 
-    Args:
-        vec_a: First vector.
-        vec_b: Second vector.
+    Reads EMBEDDING_PROVIDER env var:
+    - "openai" → OpenAIEmbeddingProvider
+    - "ollama" → OllamaEmbeddingProvider
+    - "none" or unset → None (BM25/token-overlap fallback)
 
     Returns:
-        Cosine similarity score between -1.0 and 1.0.
-        Returns 0.0 if either vector has zero magnitude.
+        An EmbeddingProvider instance, or None for fallback mode.
     """
-    if len(vec_a) != len(vec_b):
-        return 0.0
+    provider_type = os.environ.get("EMBEDDING_PROVIDER", "none").lower()
 
-    dot_product = sum(a * b for a, b in zip(vec_a, vec_b))
-    magnitude_a = math.sqrt(sum(a * a for a in vec_a))
-    magnitude_b = math.sqrt(sum(b * b for b in vec_b))
-
-    if magnitude_a == 0.0 or magnitude_b == 0.0:
-        return 0.0
-
-    return dot_product / (magnitude_a * magnitude_b)
+    if provider_type == "openai":
+        model = os.environ.get("OPENAI_EMBED_MODEL", "text-embedding-3-small")
+        return OpenAIEmbeddingProvider(model=model)
+    elif provider_type == "ollama":
+        return OllamaEmbeddingProvider()
+    else:
+        return None

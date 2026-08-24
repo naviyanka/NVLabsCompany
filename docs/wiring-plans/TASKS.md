@@ -171,8 +171,8 @@ These modules exist and are tested but need to be connected to the live API/exec
 | P2 (Governance) | 3 | 3 | 0 |
 | P3 (Feature Gaps) | 5 | 5 | 0 |
 | P4 (Polish) | 4 | 4 | 0 |
-| P5 (Remaining Gaps) | 8 | 0 | 8 |
-| **Total** | **27** | **19** | **8** |
+| P5 (Remaining Gaps) | 8 | 8 | 0 |
+| **Total** | **27** | **27** | **0** |
 
 ---
 
@@ -181,7 +181,7 @@ These modules exist and are tested but need to be connected to the live API/exec
 These are features that were either partially claimed as done but have deeper gaps, or exist in NvLabsOrg and have no implementation at all.
 
 ### 5.1 Wire ParallelExecutor for Fan-Out Pipeline Stages
-- **Status:** TODO
+- **Status:** DONE
 - **Problem:** Task 1.5 claimed orchestration wired, but `ParallelExecutor` is **never imported in any route or runner**. The pipeline runner (`_execute_pipeline_bg`) executes stages sequentially only.
 - **Fix:** Add a `parallel: true` field to pipeline stage definitions. When a stage has `parallel: true` and contains multiple sub-prompts (or multiple agent_ids), use `ParallelExecutor` with semaphore-bounded concurrency to fan out and collect results.
 - **Files:** `src/nexus/api/routes/pipelines.py`, `src/nexus/orchestration/parallel.py`
@@ -189,7 +189,7 @@ These are features that were either partially claimed as done but have deeper ga
 - **Dependencies:** 1.3 (pipeline runner — already done)
 
 ### 5.2 Wire FailureAnalyzer into Evolution/Diagnostics
-- **Status:** TODO
+- **Status:** DONE
 - **Problem:** `FailureAnalyzer` exists in `src/nexus/evolution/` but is never imported by any route. When evolution proposals are evaluated, failure patterns from execution history are not analyzed.
 - **Fix:** Add a `POST /api/v1/agents/{agent_id}/diagnose` endpoint that calls `FailureAnalyzer` with the agent's recent task failures. Optionally wire into `evaluate_proposal` as a pre-evaluation step.
 - **Files:** `src/nexus/api/routes/evolution.py` or new `src/nexus/api/routes/diagnostics.py`
@@ -197,7 +197,7 @@ These are features that were either partially claimed as done but have deeper ga
 - **Dependencies:** None
 
 ### 5.3 Embedding Provider Configuration + Vector Store for Real RAG
-- **Status:** TODO
+- **Status:** DONE
 - **Problem:** `RAGPipeline` accepts an `embedding_provider` but none is configured. The pipeline falls back to token-overlap heuristic (BM25-like). No vector store (pgvector, FAISS) is provisioned.
 - **Fix:** Add an `EMBEDDING_PROVIDER` env var (options: `openai`, `ollama`, `none`). Create an `OpenAIEmbeddingProvider` class that calls the embeddings API. Configure the knowledge search endpoint to pass it to `RAGPipeline`. Add optional pgvector extension for PostgreSQL or FAISS for local dev.
 - **Files:** `src/nexus/knowledge/embeddings.py` (new), `src/nexus/api/routes/knowledge.py`, `src/nexus/config.py`
@@ -205,7 +205,7 @@ These are features that were either partially claimed as done but have deeper ga
 - **Dependencies:** OpenAI API key or Ollama embedding model available
 
 ### 5.4 Multi-Agent Terminal Panel in Dashboard
-- **Status:** TODO
+- **Status:** DONE
 - **Problem:** Task 3.2 added WebSocket broadcasting from CLI adapter, but the dashboard has no UI panel that shows live output from multiple running agents simultaneously.
 - **Fix:** Create a `TerminalPanel` component that opens a WebSocket to `/ws/{client_id}`, subscribes to `agent:*` channels, and displays streaming output in a split-pane terminal view per agent.
 - **Files:** `dashboard/src/components/terminal/TerminalPanel.tsx` (new), `dashboard/src/pages/Terminal.tsx` (new)
@@ -213,7 +213,7 @@ These are features that were either partially claimed as done but have deeper ga
 - **Dependencies:** 3.2 (WebSocket broadcasting — already done)
 
 ### 5.5 Live Agent-to-Agent Message Delivery
-- **Status:** TODO
+- **Status:** DONE
 - **Problem:** Communication routes store messages in DB but nothing delivers them to agents during execution. Agent B doesn't "receive" messages from Agent A.
 - **Fix:** When an agent sends a message, push it to the recipient's WebSocket channel. When the recipient agent is executing a task, include unread messages in its next prompt context (similar to memory injection). Add a `/agents/{id}/inbox` endpoint to retrieve unread messages.
 - **Files:** `src/nexus/api/routes/communication.py`, `src/nexus/api/routes/chat.py`
@@ -221,7 +221,7 @@ These are features that were either partially claimed as done but have deeper ga
 - **Dependencies:** 3.2 (WebSocket — done), 1.1 (memory in chat — done)
 
 ### 5.6 Wire CriticEvaluator as Quality Gate
-- **Status:** TODO
+- **Status:** DONE
 - **Problem:** `CriticEvaluator` in `src/nexus/orchestration/critic.py` can assess output quality, but nothing triggers it. Agent outputs are never validated before being returned to the user.
 - **Fix:** Add an optional quality gate in the pipeline runner and/or chat endpoint: after the LLM responds, pass the output through `CriticEvaluator`. If quality score is below threshold, retry or flag the response.
 - **Files:** `src/nexus/api/routes/pipelines.py`, `src/nexus/api/routes/chat.py`
@@ -229,7 +229,7 @@ These are features that were either partially claimed as done but have deeper ga
 - **Dependencies:** None
 
 ### 5.7 Pipeline Builder UI (Visual Node Graph)
-- **Status:** TODO
+- **Status:** DONE
 - **Problem:** NvLabsOrg has a drag-and-drop visual pipeline editor. NVLabsCompany only has pipeline list/detail API and basic CRUD forms.
 - **Fix:** Create a React canvas component using reactflow or a similar library that allows users to visually compose pipeline stages, set agent assignments, and define dependencies.
 - **Files:** `dashboard/src/components/pipelines/PipelineBuilder.tsx` (new), `dashboard/src/pages/Pipelines.tsx`
@@ -237,7 +237,7 @@ These are features that were either partially claimed as done but have deeper ga
 - **Dependencies:** 1.3 (pipeline execution — done)
 
 ### 5.8 A/B Test Trigger Endpoint
-- **Status:** TODO
+- **Status:** DONE
 - **Problem:** `ABTestFramework` exists in `src/nexus/evolution/` and is used internally by `LLMEvolutionAdvisor`, but there's no API to trigger a real A/B experiment comparing two agent configurations against live traffic.
 - **Fix:** Add `POST /api/v1/evolution/ab-test` that creates an experiment with control/variant configs, routes a percentage of traffic to each, and collects comparative metrics over a time window.
 - **Files:** `src/nexus/api/routes/evolution.py`, `src/nexus/evolution/ab_test.py`

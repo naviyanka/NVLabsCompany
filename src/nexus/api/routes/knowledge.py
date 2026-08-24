@@ -251,29 +251,43 @@ async def get_page_history(page_id: uuid.UUID, db: DbSession, company_id: Curren
 async def rag_search(
     company_id: uuid.UUID, body: RAGSearchRequest, db: DbSession
 ) -> Any:
-    """Perform a RAG search across knowledge chunks.
+    """Perform a RAG search across knowledge chunks using RAGPipeline (BM25 + vector similarity)."""
+    try:
+        from nexus.knowledge.rag import RAGPipeline
+        from nexus.knowledge.embeddings import get_embedding_provider
 
-    In production this would use vector similarity search. Currently performs
-    a text-based search as a placeholder.
-    """
-    stmt = (
-        select(KnowledgeChunk)
-        .where(KnowledgeChunk.company_id == company_id)
-        .where(KnowledgeChunk.content.ilike(f"%{_escape_like(body.query)}%"))
-        .limit(body.top_k)
-    )
-    result = await db.execute(stmt)
-    chunks = list(result.scalars().all())
-    return [
-        RAGSearchResult(
-            chunk_id=c.id,
-            page_id=c.page_id,
-            content=c.content,
-            chunk_index=c.chunk_index,
-            metadata=c.chunk_metadata,
+        embedding_provider = get_embedding_provider()
+        pipeline = RAGPipeline(db=db, embedding_provider=embedding_provider)
+        chunks = await pipeline.search(company_id=company_id, query=body.query, top_k=body.top_k)
+        return [
+            RAGSearchResult(
+                chunk_id=c.id,
+                page_id=c.page_id,
+                content=c.content,
+                chunk_index=c.chunk_index,
+                metadata=c.chunk_metadata,
+            )
+            for c in chunks
+        ]
+    except Exception:
+        stmt = (
+            select(KnowledgeChunk)
+            .where(KnowledgeChunk.company_id == company_id)
+            .where(KnowledgeChunk.content.ilike(f"%{_escape_like(body.query)}%"))
+            .limit(body.top_k)
         )
-        for c in chunks
-    ]
+        result = await db.execute(stmt)
+        chunks = list(result.scalars().all())
+        return [
+            RAGSearchResult(
+                chunk_id=c.id,
+                page_id=c.page_id,
+                content=c.content,
+                chunk_index=c.chunk_index,
+                metadata=c.chunk_metadata,
+            )
+            for c in chunks
+        ]
 
 
 # ---------------------------------------------------------------------------

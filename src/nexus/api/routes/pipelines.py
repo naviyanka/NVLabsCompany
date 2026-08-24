@@ -157,11 +157,82 @@ async def _execute_pipeline_bg(run_id: uuid.UUID, pipeline_id: uuid.UUID, compan
             stage_name = stage.get("name", f"Stage-{i+1}")
             stage_prompt = stage.get("prompt", stage.get("instruction", ""))
             stage_agent_id = stage.get("agent_id")
+            is_parallel = stage.get("parallel", False)
+            sub_prompts = stage.get("sub_prompts", [])
 
             # Update current stage progress
             run.current_stage = i
             db.add(run)
             await db.commit()
+
+            # --- Parallel fan-out stage ---
+            if is_parallel and sub_prompts:
+                from nexus.orchestration.parallel import ParallelExecutor
+                from nexus.api.routes.chat import _build_system_prompt, _call_llm, _fetch_agent_memories
+
+                # Find agents for parallel execution
+                agent_stmt = select(Agent).where(
+                    Agent.company_id == company_id,
+                    Agent.status.in_(["active", "ready"]),
+                ).limit(len(sub_prompts))
+                a_res = await db.execute(agent_stmt)
+                available_agents = list(a_res.scalars().all())
+
+                if not available_agents:
+                    stage_results.append({
+                        "stage": stage_name,
+                        "stage_index": i,
+                        "status": "failed",
+                        "error": "No available agents for parallel execution",
+                        "completed_at": datetime.utcnow().isoformat(),
+                    })
+                    run.status = "failed"
+                    run.error = f"Stage '{stage_name}': No agents for parallel"
+                    break
+
+                # Build parallel task payloads
+                parallel_tasks = []
+                for j, sp in enumerate(sub_prompts):
+                    prompt_text = sp if isinstance(sp, str) else sp.get("prompt", "")
+                    if previous_output and i > 0:
+                        prompt_text = f"Context from previous stage:\n---\n{previous_output}\n---\n\n{prompt_text}"
+                    agent_for_task = available_agents[j % len(available_agents)]
+                    parallel_tasks.append({
+                        "id": str(uuid.uuid4()),
+                        "prompt": prompt_text,
+                        "agent": agent_for_task,
+                    })
+
+                # Executor function for ParallelExecutor
+                async def _execute_one(task_payload: dict[str, Any]) -> str:
+                    agent_obj = task_payload["agent"]
+                    memories = await _fetch_agent_memories(db, agent_obj.id, company_id, limit=3)
+                    sys_prompt = _build_system_prompt(agent_obj, memories=memories)
+                    text, _, _ = await _call_llm(agent_obj, sys_prompt, task_payload["prompt"], [])
+                    return text
+
+                executor = ParallelExecutor(max_concurrency=3, timeout_seconds=120.0)
+                parallel_result = await executor.execute_parallel(parallel_tasks, _execute_one)
+
+                # Collect parallel outputs
+                outputs = []
+                for pr in parallel_result.results:
+                    outputs.append(str(pr.output) if pr.success else f"[FAILED: {pr.error}]")
+
+                previous_output = "\n---\n".join(outputs)
+                stage_results.append({
+                    "stage": stage_name,
+                    "stage_index": i,
+                    "status": "success" if parallel_result.failed == 0 else "partial",
+                    "parallel": True,
+                    "total_tasks": parallel_result.total_tasks,
+                    "succeeded": parallel_result.succeeded,
+                    "failed": parallel_result.failed,
+                    "outputs": [o[:2000] for o in outputs],
+                    "duration_ms": parallel_result.total_duration_ms,
+                    "completed_at": datetime.utcnow().isoformat(),
+                })
+                continue
 
             # Inject previous stage output as context
             full_prompt = stage_prompt
@@ -215,17 +286,40 @@ async def _execute_pipeline_bg(run_id: uuid.UUID, pipeline_id: uuid.UUID, compan
                     agent, system_prompt, full_prompt, []
                 )
 
+                # Optional quality gate via CriticEvaluator
+                quality_score = None
+                quality_passed = True
+                if stage.get("quality_gate", False):
+                    try:
+                        from nexus.orchestration.critic import CriticEvaluator
+                        critic = CriticEvaluator(quality_threshold=stage.get("quality_threshold", 0.7))
+                        eval_result = await critic.evaluate(
+                            task_id=run_id,
+                            task_description=stage_prompt,
+                            result=response_text,
+                        )
+                        quality_score = eval_result.composite_score
+                        quality_passed = eval_result.passed
+                        if not quality_passed:
+                            logger.warning(
+                                "Pipeline stage %d failed quality gate (%.2f < threshold)",
+                                i, quality_score
+                            )
+                    except Exception as qe:
+                        logger.warning("Quality gate error (non-blocking): %s", qe)
+
                 previous_output = response_text
 
                 stage_results.append({
                     "stage": stage_name,
                     "stage_index": i,
-                    "status": "success",
-                    "output": response_text[:5000],  # Truncate for storage
+                    "status": "success" if quality_passed else "quality_failed",
+                    "output": response_text[:5000],
                     "agent_id": str(agent.id),
                     "agent_name": agent.name,
                     "model_used": model_used,
                     "tokens_used": tokens_used,
+                    "quality_score": quality_score,
                     "completed_at": datetime.utcnow().isoformat(),
                 })
 

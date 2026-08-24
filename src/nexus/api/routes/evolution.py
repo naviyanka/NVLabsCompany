@@ -568,3 +568,161 @@ async def reject_proposal(
     await db.flush()
     return proposal
 
+
+
+# ---------------------------------------------------------------------------
+# Diagnostics & A/B Testing
+# ---------------------------------------------------------------------------
+
+
+@router.post("/api/v1/agents/{agent_id}/diagnose")
+async def diagnose_agent_failures(
+    agent_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId
+) -> dict[str, Any]:
+    """Diagnose an agent's recent failures using the FailureAnalyzer.
+
+    Analyzes the agent's failed task executions to identify root causes,
+    patterns, and improvement opportunities.
+    """
+    from nexus.evolution.analyzer import FailureAnalyzer
+    from nexus.models.task import Task
+
+    # Fetch recent failed tasks for this agent
+    stmt = (
+        select(Task)
+        .where(Task.assigned_agent_id == agent_id, Task.company_id == company_id, Task.status == "failed")
+        .order_by(Task.updated_at.desc())
+        .limit(50)
+    )
+    result = await db.execute(stmt)
+    failed_tasks = list(result.scalars().all())
+
+    if not failed_tasks:
+        return {
+            "agent_id": str(agent_id),
+            "total_failures": 0,
+            "root_causes": [],
+            "recommendations": ["No recent failures found — agent is performing well."],
+        }
+
+    # Convert to dicts for the analyzer
+    failed_executions = [
+        {
+            "agent_id": str(agent_id),
+            "task_type": t.description[:50] if t.description else "unknown",
+            "tool_used": "llm",
+            "error": t.title,
+            "timestamp": t.updated_at.isoformat() if t.updated_at else "",
+        }
+        for t in failed_tasks
+    ]
+
+    analyzer = FailureAnalyzer()
+    root_causes = analyzer.root_cause_analysis(failed_executions)
+
+    # Generate recommendations based on root causes
+    recommendations = []
+    for rc in root_causes[:5]:
+        factor = rc["factor_type"]
+        value = rc["factor_value"]
+        pct = rc["percentage"]
+        if factor == "task_type":
+            recommendations.append(f"Task type '{value}' accounts for {pct:.0f}% of failures — consider improving capabilities for this area.")
+        elif factor == "tool_used":
+            recommendations.append(f"Tool '{value}' is involved in {pct:.0f}% of failures — review tool configuration.")
+
+    if not recommendations:
+        recommendations.append("Failures are spread across different categories — no single dominant pattern.")
+
+    return {
+        "agent_id": str(agent_id),
+        "total_failures": len(failed_tasks),
+        "root_causes": root_causes[:10],
+        "recommendations": recommendations,
+    }
+
+
+class ABTestRequest(BaseModel):
+    """Request body for triggering an A/B test experiment."""
+
+    control_config: dict[str, Any]
+    variant_config: dict[str, Any]
+    test_prompt: str
+    iterations: int = 5
+
+
+@router.post("/api/v1/evolution/ab-test")
+async def run_ab_test(
+    body: ABTestRequest, db: DbSession, company_id: CurrentCompanyId
+) -> dict[str, Any]:
+    """Run an A/B test comparing two agent configurations.
+
+    Creates an experiment with control and variant configs, runs the same
+    prompt through both configurations multiple times, and returns comparative
+    metrics (quality, speed, cost).
+    """
+    from nexus.models.agent import Agent
+    from nexus.api.routes.chat import _build_system_prompt, _call_llm
+
+    # Find an agent to use as the test subject
+    agent_stmt = select(Agent).where(
+        Agent.company_id == company_id, Agent.status.in_(["active", "ready"])
+    ).limit(1)
+    result = await db.execute(agent_stmt)
+    agent = result.scalar_one_or_none()
+    if not agent:
+        raise HTTPException(status_code=409, detail="No available agent for A/B test")
+
+    iterations = min(body.iterations, 10)  # Cap at 10 for safety
+
+    # Run control group
+    control_results = []
+    for _ in range(iterations):
+        try:
+            # Temporarily override agent config for control
+            original_model = agent.model
+            agent.model = body.control_config.get("model", agent.model)
+            system_prompt = _build_system_prompt(agent)
+            text, model_used, tokens = await _call_llm(agent, system_prompt, body.test_prompt, [])
+            control_results.append({"success": True, "tokens": tokens, "output_length": len(text)})
+            agent.model = original_model
+        except Exception as e:
+            control_results.append({"success": False, "error": str(e)})
+
+    # Run variant group
+    variant_results = []
+    for _ in range(iterations):
+        try:
+            agent.model = body.variant_config.get("model", agent.model)
+            system_prompt = _build_system_prompt(agent)
+            text, model_used, tokens = await _call_llm(agent, system_prompt, body.test_prompt, [])
+            variant_results.append({"success": True, "tokens": tokens, "output_length": len(text)})
+            agent.model = original_model
+        except Exception as e:
+            variant_results.append({"success": False, "error": str(e)})
+
+    # Compute aggregate metrics
+    def avg_metric(results: list[dict], key: str) -> float:
+        vals = [r[key] for r in results if r.get("success") and key in r]
+        return sum(vals) / len(vals) if vals else 0
+
+    control_success_rate = sum(1 for r in control_results if r.get("success")) / max(len(control_results), 1)
+    variant_success_rate = sum(1 for r in variant_results if r.get("success")) / max(len(variant_results), 1)
+
+    return {
+        "experiment": "ab_test",
+        "iterations": iterations,
+        "control": {
+            "config": body.control_config,
+            "success_rate": control_success_rate,
+            "avg_tokens": avg_metric(control_results, "tokens"),
+            "avg_output_length": avg_metric(control_results, "output_length"),
+        },
+        "variant": {
+            "config": body.variant_config,
+            "success_rate": variant_success_rate,
+            "avg_tokens": avg_metric(variant_results, "tokens"),
+            "avg_output_length": avg_metric(variant_results, "output_length"),
+        },
+        "winner": "variant" if variant_success_rate > control_success_rate else "control",
+    }

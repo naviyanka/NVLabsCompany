@@ -362,3 +362,62 @@ async def broadcast_message(
         "message": f"Broadcast sent to {sent_count} agents",
         "total_active": len(active_agents),
     }
+
+
+@router.get("/api/v1/agents/{agent_id}/inbox")
+async def get_agent_inbox(
+    agent_id: uuid.UUID,
+    db: DbSession,
+    company_id: CurrentCompanyId,
+    unread_only: bool = True,
+    limit: int = 20,
+) -> list[dict[str, Any]]:
+    """Get unread messages for an agent (inbox).
+
+    Returns messages addressed to this agent that haven't been delivered yet.
+    Used for live message delivery during agent execution.
+    """
+    stmt = (
+        select(Message)
+        .where(Message.recipient_agent_id == agent_id, Message.company_id == company_id)
+    )
+    if unread_only:
+        stmt = stmt.where(Message.delivered == False)  # noqa: E712
+    stmt = stmt.order_by(Message.created_at.desc()).limit(limit)
+    result = await db.execute(stmt)
+    messages = list(result.scalars().all())
+
+    return [
+        {
+            "id": str(m.id),
+            "sender_agent_id": str(m.sender_agent_id) if m.sender_agent_id else None,
+            "message_type": m.message_type,
+            "content": m.content,
+            "priority": m.priority,
+            "created_at": m.created_at.isoformat() if m.created_at else None,
+        }
+        for m in messages
+    ]
+
+
+@router.post("/api/v1/agents/{agent_id}/inbox/mark-read")
+async def mark_inbox_read(
+    agent_id: uuid.UUID,
+    db: DbSession,
+    company_id: CurrentCompanyId,
+) -> dict[str, int]:
+    """Mark all unread messages for an agent as delivered."""
+    from sqlalchemy import update as sa_update
+
+    stmt = (
+        sa_update(Message)
+        .where(
+            Message.recipient_agent_id == agent_id,
+            Message.company_id == company_id,
+            Message.delivered == False,  # noqa: E712
+        )
+        .values(delivered=True, updated_at=datetime.utcnow())
+    )
+    result = await db.execute(stmt)
+    count = result.rowcount or 0
+    return {"marked_read": count}
