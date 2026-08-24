@@ -195,8 +195,11 @@ class TestSSEAuthEnforcement:
     an anonymous request is a 401 and the company is never read off the wire.
     """
 
-    def test_sse_endpoint_rejects_anonymous_request(self):
+    def test_sse_endpoint_rejects_anonymous_request(self, monkeypatch):
         """GET /events/stream returns 401 without a session or API key."""
+        from nexus.config import settings
+
+        monkeypatch.setattr(settings, "auth_enabled", True)
         from nexus.main import app
 
         client = TestClient(app, raise_server_exceptions=False)
@@ -204,8 +207,11 @@ class TestSSEAuthEnforcement:
         assert response.status_code == 401
         assert response.headers["www-authenticate"] == "Bearer"
 
-    def test_sse_endpoint_ignores_company_id_header(self):
+    def test_sse_endpoint_ignores_company_id_header(self, monkeypatch):
         """A self-asserted X-Company-Id header no longer authenticates anything."""
+        from nexus.config import settings
+
+        monkeypatch.setattr(settings, "auth_enabled", True)
         from nexus.main import app
 
         client = TestClient(app, raise_server_exceptions=False)
@@ -215,8 +221,11 @@ class TestSSEAuthEnforcement:
         )
         assert response.status_code == 401
 
-    def test_sse_endpoint_rejects_bogus_bearer_token(self):
+    def test_sse_endpoint_rejects_bogus_bearer_token(self, monkeypatch):
         """An unresolvable bearer token is anonymous, not an error."""
+        from nexus.config import settings
+
+        monkeypatch.setattr(settings, "auth_enabled", True)
         from nexus.main import app
 
         client = TestClient(app, raise_server_exceptions=False)
