@@ -181,12 +181,14 @@ class HeartbeatService:
         Returns:
             List of stale HeartbeatRun instances.
         """
-        now = datetime.now(timezone.utc)
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
         stale: list[HeartbeatRun] = []
         for run in self._runs.values():
             if run.finished_at is not None:
                 continue
             reference_time = run.last_output_at if run.last_output_at is not None else run.started_at
+            if reference_time is not None and reference_time.tzinfo is not None:
+                reference_time = reference_time.replace(tzinfo=None)
             elapsed = (now - reference_time).total_seconds()
             if elapsed > threshold_seconds:
                 stale.append(run)

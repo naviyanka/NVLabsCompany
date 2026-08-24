@@ -86,7 +86,7 @@ async def _tick(session_factory: async_sessionmaker[AsyncSession]) -> None:
     if not await try_acquire_leader("scheduler", _instance_id):
         return
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
 
     async with session_factory() as db:
         # Find active triggers that are due

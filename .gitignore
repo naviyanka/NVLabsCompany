@@ -36,7 +36,6 @@ htmlcov/
 
 # Node
 node_modules/
-package-lock.json
 *.tsbuildinfo
 *.config.d.ts
 dashboard/dist/
