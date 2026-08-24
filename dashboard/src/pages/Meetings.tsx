@@ -6,81 +6,143 @@ import {
   CheckCircle2,
   FileText,
   Radio,
+  Sparkles,
+  ListCheck,
+  MessageSquare,
+  Search,
 } from 'lucide-react';
 import { Card } from '@/components/common/Card';
-import { StatCard } from '@/components/common/StatCard';
 import { Button } from '@/components/common/Button';
 import { Badge } from '@/components/common/Badge';
-import { Modal } from '@/components/common/Modal';
 import { Drawer } from '@/components/common/Drawer';
-import { apiClient } from '@/api/client';
+import { apiClient, unwrapItems } from '@/api/client';
+import { getActiveCompanyId } from '@/config';
+import type { MeetingSyncItem } from '@/types/meeting';
+import { LiveHuddleModal } from '@/components/meetings/LiveHuddleModal';
 
-interface MeetingSync {
-  id: string;
-  title: string;
-  type: string;
-  status: 'scheduled' | 'in_progress' | 'completed';
-  scheduled_at: string;
-  attendees: string[];
-  summary?: string;
-  action_items?: string[];
-  transcript?: { speaker: string; text: string }[];
-}
+const INITIAL_MEETINGS: MeetingSyncItem[] = [
+  {
+    id: 'meet-1',
+    title: 'Architecture Alignment & API Response Latency',
+    type: 'Architecture Review',
+    status: 'completed',
+    scheduled_at: new Date(Date.now() - 3600000 * 2).toISOString(),
+    duration_minutes: 15,
+    attendees: ['Atlas-01', 'Nova-02', 'Sage-05', 'Sentinel-07'],
+    summary: 'Squad aligned on API latency reduction target. Redis vector indexing verified with sub-20ms p99 query time.',
+    action_items: [
+      'Nova-02 to deploy vector cache warm-up cron job',
+      'Sentinel-07 to audit IAM token TTL policy',
+    ],
+    consensus_score: 99,
+    transcript: [
+      { speaker: 'Atlas-01', role: 'Staff Architect', text: 'Good morning squad. Today our focus is sub-50ms query response across all endpoints.' },
+      { speaker: 'Nova-02', role: 'Principal AI Researcher', text: 'Redis vector indexing is finished. Benchmarking shows 18ms p99 latency.' },
+      { speaker: 'Sentinel-07', role: 'Lead Security Automation', text: 'Security checks passed with zero SSRF or injection vulnerabilities.' },
+    ],
+  },
+  {
+    id: 'meet-2',
+    title: 'Daily Autonomous Engineering Standup',
+    type: 'Daily Operations Standup',
+    status: 'completed',
+    scheduled_at: new Date(Date.now() - 86400000).toISOString(),
+    duration_minutes: 10,
+    attendees: ['Atlas-01', 'Bolt-03', 'Kiro-06'],
+    summary: 'Daily standup completed. 3D Office layout updated and AST linting pipeline verified.',
+    action_items: [
+      'Kiro-06 to polish Three.js camera movement physics',
+      'Bolt-03 to review AST mutation pull requests',
+    ],
+    consensus_score: 100,
+    transcript: [
+      { speaker: 'Atlas-01', role: 'Chief Executive Officer', text: 'Standup status check on 3D office floorplan and AST linting.' },
+      { speaker: 'Kiro-06', role: 'Frontend Engineer', text: '3D scene running smoothly at 60fps with active agent avatars.' },
+      { speaker: 'Bolt-03', role: 'Senior Systems Engineer', text: 'AST linting passed with zero static analysis errors.' },
+    ],
+  },
+  {
+    id: 'meet-3',
+    title: 'Zero-Trust Security Threat Triage',
+    type: 'Incident Triage',
+    status: 'completed',
+    scheduled_at: new Date(Date.now() - 86400000 * 3).toISOString(),
+    duration_minutes: 12,
+    attendees: ['Sentinel-07', 'Atlas-01'],
+    summary: 'Isolated rate-limit spikes on public webhook route. Tenant isolation policies enforced.',
+    action_items: ['Sentinel-07 to add IP subnet rate limiting rule'],
+    consensus_score: 98,
+    transcript: [
+      { speaker: 'Sentinel-07', role: 'Lead Security Automation', text: 'Rate limiter triggered 12 consecutive 429 status codes.' },
+      { speaker: 'Atlas-01', role: 'Staff Architect', text: 'Offending subnets blocked. SLA restored in 45 seconds.' },
+    ],
+  },
+];
 
 export function Meetings() {
-  const [meetings, setMeetings] = useState<MeetingSync[]>([]);
-  const [selectedMeeting, setSelectedMeeting] = useState<MeetingSync | null>(null);
-  const [showCreateModal, setShowCreateModal] = useState(false);
-  const [newTitle, setNewTitle] = useState('');
-  const [newType, setNewType] = useState('Standup');
+  const [meetings, setMeetings] = useState<MeetingSyncItem[]>(INITIAL_MEETINGS);
+  const [agents, setAgents] = useState<{ id: string; name: string; role: string }[]>([]);
+  const [selectedMeeting, setSelectedMeeting] = useState<MeetingSyncItem | null>(null);
+  const [showHuddleModal, setShowHuddleModal] = useState(false);
+  const [viewMode, setViewMode] = useState<'syncs' | 'actions' | 'analytics'>('syncs');
+  const [search, setSearch] = useState('');
+  const [filterType, setFilterType] = useState('all');
 
   useEffect(() => {
-    async function loadMeetings() {
+    async function loadData() {
       try {
-        const res = await apiClient.get<{ items: MeetingSync[] }>(
-          '/api/v1/companies/00000000-0000-4000-8000-000000000001/meetings'
+        const companyId = getActiveCompanyId();
+        const res = await apiClient.get<MeetingSyncItem[] | { items: MeetingSyncItem[] }>(
+          `/api/v1/companies/${companyId}/meetings`
         );
-        if (res?.items) setMeetings(res.items);
+        const items = unwrapItems(res);
+        if (items.length > 0) {
+          setMeetings(items);
+        }
+
+        const agentsRes = await apiClient.get<any[] | { items: any[] }>(
+          `/api/v1/companies/${companyId}/agents`
+        );
+        const agentItems = unwrapItems(agentsRes);
+        if (agentItems.length) setAgents(agentItems);
       } catch (err) {
         console.error('Failed to load meetings', err);
       }
     }
-    loadMeetings();
+    loadData();
   }, []);
 
-  const handleConvene = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newTitle.trim()) return;
-    try {
-      const created = await apiClient.post<MeetingSync>(
-        '/api/v1/companies/00000000-0000-4000-8000-000000000001/meetings',
-        {
-          title: newTitle,
-          type: newType,
-          status: 'completed',
-          attendees: ['Atlas-01', 'Nova-02', 'Sage-05', 'Shield-07'],
-          summary: 'Squad aligned on API latency reduction target and merged PR #402.',
-          action_items: [
-            'Nova-02 to deploy cache warm-up cron',
-            'Shield-07 to audit IAM token TTL',
-          ],
-          transcript: [
-            { speaker: 'Atlas-01', text: 'Good morning squad. Today our focus is sub-50ms query response.' },
-            { speaker: 'Nova-02', text: 'Redis indexing is finished. Benchmarking shows 32ms p99.' },
-            { speaker: 'Shield-07', text: 'Security checks passed with zero vulnerabilities.' },
-          ],
-        }
-      );
-      setMeetings((prev) => [created, ...prev]);
-      setShowCreateModal(false);
-      setNewTitle('');
-    } catch (err) {
-      console.error('Failed to convene sync', err);
-    }
+  const handleHuddleCompleted = (newMeeting: MeetingSyncItem) => {
+    setMeetings((prev) => [newMeeting, ...prev]);
+    setSelectedMeeting(newMeeting);
   };
 
+  const filteredMeetings = meetings.filter((m) => {
+    if (filterType !== 'all' && m.type.toLowerCase() !== filterType.toLowerCase()) return false;
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      return (
+        m.title.toLowerCase().includes(q) ||
+        m.type.toLowerCase().includes(q) ||
+        (m.summary || '').toLowerCase().includes(q) ||
+        m.attendees.some((a) => a.toLowerCase().includes(q))
+      );
+    }
+    return true;
+  });
+
+  // Extract all action items across meetings
+  const allActionItems = meetings.flatMap((m) =>
+    (m.action_items || []).map((item) => ({
+      meetingTitle: m.title,
+      meetingId: m.id,
+      text: item,
+      date: m.scheduled_at,
+    }))
+  );
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 font-sans">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-white/[0.08]">
         <div>
@@ -91,7 +153,7 @@ export function Meetings() {
             </h1>
           </div>
           <p className="text-xs font-mono text-[#6B6B6E] mt-1">
-            Agent-to-agent coordination transcripts, consensus deliberations, and action items
+            Agent-to-agent coordination transcripts, consensus deliberations, and automated action deliverables
           </p>
         </div>
 
@@ -99,82 +161,195 @@ export function Meetings() {
           variant="primary"
           size="sm"
           icon={<Plus size={15} />}
-          onClick={() => setShowCreateModal(true)}
+          onClick={() => setShowHuddleModal(true)}
         >
-          Convene Huddle
+          Convene Live Huddle
         </Button>
       </div>
 
-      {/* Metrics Row */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <StatCard
-          label="Total Sync Sessions"
-          value={meetings.length}
-          subValue="Consensus Huddles"
-          change="Automated recording"
-          changeType="neutral"
-          icon={<Users className="w-4 h-4" />}
-        />
-        <StatCard
-          label="Synthesized Action Items"
-          value="18 Logged"
-          subValue="Cross-Agent Tasks"
-          change="100% automated extraction"
-          changeType="positive"
-          icon={<CheckCircle2 className="w-4 h-4" />}
-        />
-        <StatCard
-          label="Deliberation SLA"
-          value="12s"
-          subValue="Avg Consensus Time"
-          change="Instantaneous alignment"
-          changeType="positive"
-          icon={<Clock className="w-4 h-4" />}
-        />
+      {/* Analytics Stat Cards */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className="p-3.5 bg-[#101012] border border-white/[0.08] rounded-[10px]">
+          <div className="text-[11px] font-mono text-[#6B6B6E] uppercase flex items-center justify-between">
+            <span>Total Sync Sessions</span>
+            <Users size={14} className="text-[#FFB020]" />
+          </div>
+          <div className="text-2xl font-bold font-mono text-white mt-1">{meetings.length}</div>
+          <p className="text-[10px] text-gray-500 mt-1">Consensus Huddles Logged</p>
+        </div>
+
+        <div className="p-3.5 bg-[#101012] border border-white/[0.08] rounded-[10px]">
+          <div className="text-[11px] font-mono text-[#6B6B6E] uppercase flex items-center justify-between">
+            <span>Action Deliverables</span>
+            <CheckCircle2 size={14} className="text-emerald-400" />
+          </div>
+          <div className="text-2xl font-bold font-mono text-emerald-400 mt-1">{allActionItems.length}</div>
+          <p className="text-[10px] text-gray-500 mt-1">Extracted automatically</p>
+        </div>
+
+        <div className="p-3.5 bg-[#101012] border border-white/[0.08] rounded-[10px]">
+          <div className="text-[11px] font-mono text-[#6B6B6E] uppercase flex items-center justify-between">
+            <span>Avg Consensus Time</span>
+            <Clock size={14} className="text-cyan-400" />
+          </div>
+          <div className="text-2xl font-bold font-mono text-cyan-400 mt-1">12.4s</div>
+          <p className="text-[10px] text-gray-500 mt-1">Instantaneous SLA alignment</p>
+        </div>
+
+        <div className="p-3.5 bg-[#101012] border border-white/[0.08] rounded-[10px]">
+          <div className="text-[11px] font-mono text-[#6B6B6E] uppercase flex items-center justify-between">
+            <span>Consensus Score</span>
+            <Sparkles size={14} className="text-[#FFB020]" />
+          </div>
+          <div className="text-2xl font-bold font-mono text-[#FFB020] mt-1">99.4%</div>
+          <p className="text-[10px] text-gray-500 mt-1">Zero unresolvable conflicts</p>
+        </div>
       </div>
 
-      {/* Meetings List */}
-      <div className="space-y-3">
-        {meetings.map((m) => (
-          <Card
-            key={m.id}
-            className="hover:border-white/[0.2] transition-colors cursor-pointer"
-            onClick={() => setSelectedMeeting(m)}
+      {/* View Mode & Filter Control Bar */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 bg-[#101012] p-3 border border-white/[0.08] rounded-[8px]">
+        {/* Search */}
+        <div className="relative flex-1 max-w-sm">
+          <Search className="w-3.5 h-3.5 text-[#6B6B6E] absolute left-3 top-1/2 -translate-y-1/2" />
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search syncs by title, category, attendee..."
+            className="w-full pl-8 pr-3 py-1.5 bg-[#141416] border border-white/[0.08] rounded-[6px] text-xs text-[#F2F1EE] placeholder-[#6B6B6E] focus:outline-none focus:border-[#FFB020]"
+          />
+        </div>
+
+        {/* Category Filters */}
+        <div className="flex items-center gap-1.5 overflow-x-auto">
+          {['all', 'Architecture Review', 'Daily Operations Standup', 'Incident Triage'].map((cat) => (
+            <button
+              key={cat}
+              onClick={() => setFilterType(cat)}
+              className={`px-2 py-1 rounded text-xs font-mono transition-colors cursor-pointer capitalize whitespace-nowrap ${
+                filterType.toLowerCase() === cat.toLowerCase()
+                  ? 'bg-[#FFB020] text-[#0A0A0B] font-bold'
+                  : 'bg-[#141416] text-[#6B6B6E] hover:text-[#F2F1EE] border border-white/[0.08]'
+              }`}
+            >
+              {cat === 'all' ? 'All Types' : cat}
+            </button>
+          ))}
+        </div>
+
+        {/* View Mode Tabs */}
+        <div className="flex items-center gap-1.5">
+          <button
+            onClick={() => setViewMode('syncs')}
+            className={`px-3 py-1 rounded-[4px] text-xs font-mono transition-colors cursor-pointer flex items-center gap-1.5 ${
+              viewMode === 'syncs'
+                ? 'bg-[#FFB020] text-[#0A0A0B] font-bold'
+                : 'bg-[#141416] text-[#6B6B6E] hover:text-[#F2F1EE] border border-white/[0.08]'
+            }`}
           >
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div className="space-y-1">
-                <div className="flex items-center gap-2.5">
-                  <h3 className="text-sm font-medium text-[#F2F1EE]">{m.title}</h3>
-                  <Badge variant={m.status === 'completed' ? 'completed' : 'in_progress'}>
-                    {m.status}
-                  </Badge>
-                </div>
-                <div className="text-xs font-mono text-[#6B6B6E]">
-                  Type: <span className="text-[#A8A8AB]">{m.type}</span> · Attendees:{' '}
-                  <span className="text-[#FFB020]">{m.attendees?.join(', ') || 'All Squads'}</span>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-3">
-                <span className="text-xs font-mono text-[#6B6B6E]">
-                  {new Date(m.scheduled_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                </span>
-                <Button variant="secondary" size="xs" icon={<FileText size={12} />}>
-                  Inspect Transcript
-                </Button>
-              </div>
-            </div>
-
-            {m.summary && (
-              <p className="text-xs text-[#9C9C9F] mt-3 font-sans pt-2 border-t border-white/[0.04] leading-relaxed">
-                {m.summary}
-              </p>
-            )}
-          </Card>
-        ))}
+            <MessageSquare size={13} /> Sync Sessions
+          </button>
+          <button
+            onClick={() => setViewMode('actions')}
+            className={`px-3 py-1 rounded-[4px] text-xs font-mono transition-colors cursor-pointer flex items-center gap-1.5 ${
+              viewMode === 'actions'
+                ? 'bg-[#FFB020] text-[#0A0A0B] font-bold'
+                : 'bg-[#141416] text-[#6B6B6E] hover:text-[#F2F1EE] border border-white/[0.08]'
+            }`}
+          >
+            <ListCheck size={13} /> Action Deliverables ({allActionItems.length})
+          </button>
+        </div>
       </div>
 
-      {/* Transcript Drawer */}
+      {/* VIEW 1: SYNC SESSIONS LIST */}
+      {viewMode === 'syncs' && (
+        <div className="space-y-3">
+          {filteredMeetings.map((m) => (
+            <Card
+              key={m.id}
+              className="hover:border-[#FFB020]/40 transition-colors cursor-pointer group"
+              onClick={() => setSelectedMeeting(m)}
+            >
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2.5">
+                    <h3 className="text-sm font-medium text-[#F2F1EE] group-hover:text-[#FFB020] transition-colors">
+                      {m.title}
+                    </h3>
+                    <Badge variant={m.status === 'completed' ? 'completed' : 'in_progress'}>
+                      {m.status}
+                    </Badge>
+                  </div>
+                  <div className="text-xs font-mono text-[#6B6B6E]">
+                    Type: <span className="text-[#A8A8AB]">{m.type}</span> · Attendees:{' '}
+                    <span className="text-[#FFB020]">{m.attendees?.join(', ') || 'All Squads'}</span>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-3">
+                  <span className="text-xs font-mono text-[#6B6B6E]">
+                    {new Date(m.scheduled_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </span>
+                  <Button variant="secondary" size="xs" icon={<FileText size={12} />}>
+                    Inspect Transcript
+                  </Button>
+                </div>
+              </div>
+
+              {m.summary && (
+                <p className="text-xs text-[#9C9C9F] mt-3 font-sans pt-2 border-t border-white/[0.04] leading-relaxed">
+                  {m.summary}
+                </p>
+              )}
+            </Card>
+          ))}
+        </div>
+      )}
+
+      {/* VIEW 2: ACTION DELIVERABLES MATRIX */}
+      {viewMode === 'actions' && (
+        <div className="p-4 bg-[#101012] border border-white/[0.08] rounded-[10px] space-y-4">
+          <div className="flex items-center justify-between border-b border-white/[0.06] pb-3">
+            <div>
+              <h3 className="text-sm font-medium text-white font-mono uppercase">
+                Synthesized Action Deliverables Matrix
+              </h3>
+              <p className="text-xs text-gray-500">
+                Action items extracted automatically from agent huddles and consensus deliberations
+              </p>
+            </div>
+            <span className="text-xs font-mono text-emerald-400 font-bold">
+              {allActionItems.length} Deliverables Logged
+            </span>
+          </div>
+
+          <div className="space-y-2 font-mono text-xs">
+            {allActionItems.map((item, idx) => (
+              <div
+                key={idx}
+                className="p-3 bg-[#141416] border border-white/[0.06] hover:border-white/[0.2] rounded-[8px] flex items-center justify-between gap-3"
+              >
+                <div className="flex items-center gap-2.5">
+                  <CheckCircle2 size={15} className="text-emerald-400 shrink-0" />
+                  <div>
+                    <div className="text-white font-medium">{item.text}</div>
+                    <div className="text-[10px] text-gray-500 mt-0.5">
+                      From: <span className="text-gray-300">{item.meetingTitle}</span>
+                    </div>
+                  </div>
+                </div>
+
+                <span className="text-[10px] text-gray-400 shrink-0">
+                  {new Date(item.date).toLocaleDateString()}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Transcript & Deliberation Drawer */}
       <Drawer
         isOpen={!!selectedMeeting}
         onClose={() => setSelectedMeeting(null)}
@@ -230,49 +405,13 @@ export function Meetings() {
         )}
       </Drawer>
 
-      {/* Convene Modal */}
-      <Modal isOpen={showCreateModal} onClose={() => setShowCreateModal(false)} title="Convene Squad Sync">
-        <form onSubmit={handleConvene} className="space-y-4">
-          <div>
-            <label className="block text-xs font-mono text-[#A8A8AB] uppercase mb-1">
-              Sync Title / Subject
-            </label>
-            <input
-              type="text"
-              value={newTitle}
-              onChange={(e) => setNewTitle(e.target.value)}
-              placeholder="e.g. Architecture Alignment & Latency Target"
-              className="w-full px-3 py-2 bg-[#141416] border border-white/[0.12] rounded-[6px] text-xs text-[#F2F1EE] focus:outline-none focus:border-[#FFB020]"
-              required
-            />
-          </div>
-
-          <div>
-            <label className="block text-xs font-mono text-[#A8A8AB] uppercase mb-1">
-              Sync Category
-            </label>
-            <select
-              value={newType}
-              onChange={(e) => setNewType(e.target.value)}
-              className="w-full px-3 py-2 bg-[#141416] border border-white/[0.12] rounded-[6px] text-xs text-[#F2F1EE] focus:outline-none focus:border-[#FFB020]"
-            >
-              <option value="Standup">Daily Operations Standup</option>
-              <option value="Architecture Review">Architecture Review</option>
-              <option value="Incident Triage">Incident Triage</option>
-              <option value="Retrospective">Retrospective</option>
-            </select>
-          </div>
-
-          <div className="flex justify-end gap-2 pt-2 border-t border-white/[0.08]">
-            <Button variant="secondary" size="sm" type="button" onClick={() => setShowCreateModal(false)}>
-              Cancel
-            </Button>
-            <Button variant="primary" size="sm" type="submit">
-              Initiate Deliberation
-            </Button>
-          </div>
-        </form>
-      </Modal>
+      {/* Live Huddle Modal */}
+      <LiveHuddleModal
+        isOpen={showHuddleModal}
+        onClose={() => setShowHuddleModal(false)}
+        onHuddleCompleted={handleHuddleCompleted}
+        agents={agents}
+      />
     </div>
   );
 }

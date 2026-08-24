@@ -33,7 +33,8 @@ import { StatCard } from '@/components/common/StatCard';
 import { Button } from '@/components/common/Button';
 import { Modal } from '@/components/common/Modal';
 import { Drawer } from '@/components/common/Drawer';
-import { apiClient } from '@/api/client';
+import { apiClient, unwrapItems } from '@/api/client';
+import { getActiveCompanyId } from '@/config';
 
 export interface MemoryRecord {
   id: string;
@@ -147,11 +148,13 @@ export function Memory() {
   useEffect(() => {
     async function loadMemories() {
       try {
-        const res = await apiClient.get<{ items: MemoryRecord[] }>(
-          '/api/v1/companies/00000000-0000-4000-8000-000000000001/memories'
+        const companyId = getActiveCompanyId();
+        const res = await apiClient.get<MemoryRecord[] | { items: MemoryRecord[] }>(
+          `/api/v1/companies/${companyId}/memories`
         );
-        if (res?.items && res.items.length > 0) {
-          const formatted = res.items.map((item, i) => ({
+        const items = unwrapItems(res);
+        if (items.length > 0) {
+          const formatted = items.map((item: any, i: number) => ({
             ...item,
             decay_rate: item.decay_rate || 0.03,
             associated_nodes: item.associated_nodes || [`node_${i + 100}`],
@@ -188,7 +191,7 @@ export function Memory() {
     if (!newContent.trim()) return;
     try {
       const created = await apiClient.post<MemoryRecord>(
-        '/api/v1/companies/00000000-0000-4000-8000-000000000001/memories',
+        `/api/v1/companies/${getActiveCompanyId()}/memories`,
         {
           agent_id: newAgent,
           scope: newScope,

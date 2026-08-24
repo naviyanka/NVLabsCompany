@@ -14,6 +14,7 @@ import {
 import { Modal } from '@/components/common/Modal';
 import { Button } from '@/components/common/Button';
 import { apiClient } from '@/api/client';
+import { getActiveCompanyId } from '@/config';
 import type { SkillItem, SkillCategory } from '@/types/skill';
 
 interface AddSkillModalProps {
@@ -103,7 +104,7 @@ export function AddSkillModal({
 
     try {
       const created = await apiClient.post<SkillItem>(
-        '/api/v1/companies/00000000-0000-4000-8000-000000000001/skills',
+        `/api/v1/companies/${getActiveCompanyId()}/skills`,
         {
           name: name || cmdName,
           category,
@@ -151,7 +152,7 @@ export function AddSkillModal({
 
     try {
       const created = await apiClient.post<SkillItem>(
-        '/api/v1/companies/00000000-0000-4000-8000-000000000001/skills',
+        `/api/v1/companies/${getActiveCompanyId()}/skills`,
         {
           name: name.trim(),
           category,

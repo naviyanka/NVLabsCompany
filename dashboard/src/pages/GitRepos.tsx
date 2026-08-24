@@ -13,7 +13,8 @@ import {
 import { Github } from 'lucide-react';
 import { StatCard } from '@/components/common/StatCard';
 import { Button } from '@/components/common/Button';
-import { apiClient } from '@/api/client';
+import { apiClient, unwrapItems } from '@/api/client';
+import { getActiveCompanyId } from '@/config';
 import type { GitRepoItem, GitPullRequest as IGitPullRequest, GitProvider } from '@/types/gitRepo';
 import { RepoListCard } from '@/components/git/RepoListCard';
 import { RepoDetailDrawer } from '@/components/git/RepoDetailDrawer';
@@ -52,14 +53,15 @@ export function GitRepos() {
   const loadRepos = async () => {
     try {
       setIsLoading(true);
-      const res = await apiClient.get<{ items: GitRepoItem[] }>(
-        '/api/v1/companies/00000000-0000-4000-8000-000000000001/repos'
+      const res = await apiClient.get<GitRepoItem[] | { items: GitRepoItem[] }>(
+        `/api/v1/companies/${getActiveCompanyId()}/repos`
       );
-      if (res?.items) {
-        setRepos(res.items);
+      const repoItems = unwrapItems(res);
+      if (repoItems.length) {
+        setRepos(repoItems);
         // Refresh selectedRepo if currently open
         if (selectedRepo) {
-          const updated = res.items.find((r) => r.id === selectedRepo.id);
+          const updated = repoItems.find((r) => r.id === selectedRepo.id);
           if (updated) setSelectedRepo(updated);
         }
       }
@@ -78,7 +80,7 @@ export function GitRepos() {
   const handleSyncRepo = async (repoId: string) => {
     try {
       const res = await apiClient.post<{ message: string; repo: GitRepoItem }>(
-        `/api/v1/companies/00000000-0000-4000-8000-000000000001/repos/${repoId}/sync`
+        `/api/v1/companies/${getActiveCompanyId()}/repos/${repoId}/sync`
       );
       if (res?.repo) {
         setRepos((prev) => prev.map((r) => (r.id === repoId ? res.repo : r)));
@@ -97,7 +99,7 @@ export function GitRepos() {
     try {
       for (const repo of repos) {
         await apiClient.post(
-          `/api/v1/companies/00000000-0000-4000-8000-000000000001/repos/${repo.id}/sync`
+          `/api/v1/companies/${getActiveCompanyId()}/repos/${repo.id}/sync`
         );
       }
       await loadRepos();
@@ -122,7 +124,7 @@ export function GitRepos() {
   }) => {
     try {
       const created = await apiClient.post<GitRepoItem>(
-        '/api/v1/companies/00000000-0000-4000-8000-000000000001/repos',
+        `/api/v1/companies/${getActiveCompanyId()}/repos`,
         data
       );
       if (created) {
@@ -139,7 +141,7 @@ export function GitRepos() {
   const handleDeleteRepo = async (repoId: string) => {
     try {
       await apiClient.delete(
-        `/api/v1/companies/00000000-0000-4000-8000-000000000001/repos/${repoId}`
+        `/api/v1/companies/${getActiveCompanyId()}/repos/${repoId}`
       );
       setRepos((prev) => prev.filter((r) => r.id !== repoId));
       if (selectedRepo?.id === repoId) setSelectedRepo(null);
@@ -163,7 +165,7 @@ export function GitRepos() {
   ) => {
     try {
       const createdPR = await apiClient.post<IGitPullRequest>(
-        `/api/v1/companies/00000000-0000-4000-8000-000000000001/repos/${repoId}/prs`,
+        `/api/v1/companies/${getActiveCompanyId()}/repos/${repoId}/prs`,
         data
       );
       await loadRepos();
@@ -178,7 +180,7 @@ export function GitRepos() {
   const handleMergePR = async (repoId: string, prId: string) => {
     try {
       const res = await apiClient.post<{ message: string; pr: IGitPullRequest; repo: GitRepoItem }>(
-        `/api/v1/companies/00000000-0000-4000-8000-000000000001/repos/${repoId}/prs/${prId}/merge`
+        `/api/v1/companies/${getActiveCompanyId()}/repos/${repoId}/prs/${prId}/merge`
       );
       await loadRepos();
       if (activeDiffPR?.id === prId && res.pr) {
@@ -195,7 +197,7 @@ export function GitRepos() {
   const handleClosePR = async (repoId: string, prId: string) => {
     try {
       const res = await apiClient.post<{ message: string; pr: IGitPullRequest }>(
-        `/api/v1/companies/00000000-0000-4000-8000-000000000001/repos/${repoId}/prs/${prId}/close`
+        `/api/v1/companies/${getActiveCompanyId()}/repos/${repoId}/prs/${prId}/close`
       );
       await loadRepos();
       if (activeDiffPR?.id === prId && res.pr) {
@@ -211,7 +213,7 @@ export function GitRepos() {
   const handleTriggerReview = async (repoId: string, prId: string, reviewerAgent = 'Shield-07') => {
     try {
       const res = await apiClient.post<{ message: string; pr: IGitPullRequest }>(
-        `/api/v1/companies/00000000-0000-4000-8000-000000000001/repos/${repoId}/prs/${prId}/review`,
+        `/api/v1/companies/${getActiveCompanyId()}/repos/${repoId}/prs/${prId}/review`,
         { reviewer: reviewerAgent }
       );
       await loadRepos();

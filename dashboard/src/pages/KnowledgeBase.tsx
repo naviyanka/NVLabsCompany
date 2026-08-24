@@ -28,7 +28,8 @@ import {
 import { StatCard } from '@/components/common/StatCard';
 import { Button } from '@/components/common/Button';
 import { Modal } from '@/components/common/Modal';
-import { apiClient } from '@/api/client';
+import { apiClient, unwrapItems } from '@/api/client';
+import { getActiveCompanyId } from '@/config';
 
 export interface KnowledgeDoc {
   id: string;
@@ -158,11 +159,12 @@ export function KnowledgeBase() {
   useEffect(() => {
     async function loadDocs() {
       try {
-        const res = await apiClient.get<{ items: KnowledgeDoc[] }>(
-          '/api/v1/companies/00000000-0000-4000-8000-000000000001/knowledge'
+        const res = await apiClient.get<KnowledgeDoc[] | { items: KnowledgeDoc[] }>(
+          `/api/v1/companies/${getActiveCompanyId()}/knowledge`
         );
-        if (res?.items && res.items.length > 0) {
-          const formatted = res.items.map((doc, i) => ({
+        const items = unwrapItems(res);
+        if (items.length > 0) {
+          const formatted = items.map((doc, i) => ({
             ...doc,
             version: doc.version || 'v1.0',
             chunks: doc.chunks || Math.floor(Math.random() * 10) + 5,
@@ -184,7 +186,7 @@ export function KnowledgeBase() {
     if (!newTitle.trim() || !newContent.trim()) return;
     try {
       const created = await apiClient.post<KnowledgeDoc>(
-        '/api/v1/companies/00000000-0000-4000-8000-000000000001/knowledge',
+        `/api/v1/companies/${getActiveCompanyId()}/knowledge`,
         {
           title: newTitle,
           category: newCategory,

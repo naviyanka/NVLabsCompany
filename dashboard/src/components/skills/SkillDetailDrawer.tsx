@@ -21,6 +21,7 @@ import type { SkillItem, SkillTestResult } from '@/types/skill';
 import { Button } from '@/components/common/Button';
 import { Badge } from '@/components/common/Badge';
 import { apiClient } from '@/api/client';
+import { getActiveCompanyId } from '@/config';
 
 interface SkillDetailDrawerProps {
   skill: SkillItem | null;
@@ -72,7 +73,7 @@ export function SkillDetailDrawer({
     setAgentSaveMsg(null);
     try {
       const updated = await apiClient.patch<SkillItem>(
-        `/api/v1/companies/00000000-0000-4000-8000-000000000001/skills/${skill.id}`,
+        `/api/v1/companies/${getActiveCompanyId()}/skills/${skill.id}`,
         { equipped_agents: equippedAgents }
       );
       onSkillUpdated(updated);
@@ -89,7 +90,7 @@ export function SkillDetailDrawer({
     setTestResult(null);
     try {
       const res = await apiClient.post<SkillTestResult>(
-        `/api/v1/companies/00000000-0000-4000-8000-000000000001/skills/${skill.id}/test`,
+        `/api/v1/companies/${getActiveCompanyId()}/skills/${skill.id}/test`,
         { test_input: testInput }
       );
       setTestResult(res);
@@ -110,7 +111,7 @@ export function SkillDetailDrawer({
     setIsDeleting(true);
     try {
       await apiClient.delete(
-        `/api/v1/companies/00000000-0000-4000-8000-000000000001/skills/${skill.id}`
+        `/api/v1/companies/${getActiveCompanyId()}/skills/${skill.id}`
       );
       onSkillDeleted(skill.id);
       onClose();

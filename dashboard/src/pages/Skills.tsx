@@ -18,7 +18,8 @@ import {
 import { Card } from '@/components/common/Card';
 import { Button } from '@/components/common/Button';
 import { Badge } from '@/components/common/Badge';
-import { apiClient } from '@/api/client';
+import { apiClient, unwrapItems } from '@/api/client';
+import { getActiveCompanyId } from '@/config';
 import type { SkillItem, SkillSourceType } from '@/types/skill';
 import { AddSkillModal } from '@/components/skills/AddSkillModal';
 import { SkillDetailDrawer } from '@/components/skills/SkillDetailDrawer';
@@ -41,20 +42,26 @@ export function Skills() {
   useEffect(() => {
     async function loadData() {
       try {
-        const skillsRes = await apiClient.get<{ items: SkillItem[] }>(
-          '/api/v1/companies/00000000-0000-4000-8000-000000000001/skills'
+        const companyId = getActiveCompanyId();
+        const skillsRes = await apiClient.get<SkillItem[] | { items: SkillItem[] }>(
+          `/api/v1/companies/${companyId}/skills`
         );
-        if (skillsRes?.items) setSkills(skillsRes.items);
+        const skillItems = unwrapItems(skillsRes);
+        if (skillItems.length) setSkills(skillItems);
 
-        const agentsRes = await apiClient.get<{ items: any[] }>(
-          '/api/v1/companies/00000000-0000-4000-8000-000000000001/agents'
+        const agentsRes = await apiClient.get<any[] | { items: any[] }>(
+          `/api/v1/companies/${companyId}/agents`
         );
-        if (agentsRes?.items) setAgents(agentsRes.items);
+        const agentItems = unwrapItems(agentsRes);
+        if (agentItems.length) setAgents(agentItems);
 
-        const reposRes = await apiClient.get<{ items: any[] }>(
-          '/api/v1/companies/00000000-0000-4000-8000-000000000001/github/user-repos'
+        const reposRes = await apiClient.get<any[] | { items: any[] }>(
+          `/api/v1/companies/${companyId}/github/user-repos`
         ).catch(() => null);
-        if (reposRes?.items) setGithubRepos(reposRes.items);
+        if (reposRes) {
+          const repoItems = unwrapItems(reposRes);
+          if (repoItems.length) setGithubRepos(repoItems);
+        }
       } catch (err) {
         console.error('Failed to load skills workspace data', err);
       }
