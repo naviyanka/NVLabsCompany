@@ -298,7 +298,7 @@ async def _execute_pipeline_bg(run_id: uuid.UUID, pipeline_id: uuid.UUID, compan
                             task_description=stage_prompt,
                             result=response_text,
                         )
-                        quality_score = eval_result.composite_score
+                        quality_score = eval_result.score
                         quality_passed = eval_result.passed
                         if not quality_passed:
                             logger.warning(
