@@ -291,8 +291,19 @@ async def _execute_pipeline_bg(run_id: uuid.UUID, pipeline_id: uuid.UUID, compan
                 quality_passed = True
                 if stage.get("quality_gate", False):
                     try:
+                        # Try LLM-based critic first (better quality assessment)
+                        from nexus.orchestration.llm_critic import LLMCriticEvaluator
                         from nexus.orchestration.critic import CriticEvaluator
-                        critic = CriticEvaluator(quality_threshold=stage.get("quality_threshold", 0.7))
+                        threshold = stage.get("quality_threshold", 0.7)
+
+                        try:
+                            async def critic_llm_fn(prompt: str) -> str:
+                                t, _, _ = await _call_llm(agent, system_prompt, prompt, [])
+                                return t
+                            critic = LLMCriticEvaluator(llm_callable=critic_llm_fn, quality_threshold=threshold)
+                        except Exception:
+                            critic = CriticEvaluator(quality_threshold=threshold)
+
                         eval_result = await critic.evaluate(
                             task_id=run_id,
                             task_description=stage_prompt,

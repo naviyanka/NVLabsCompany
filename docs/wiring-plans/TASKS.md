@@ -246,4 +246,112 @@ These are features that were either partially claimed as done but have deeper ga
 
 ---
 
-*All tasks complete. Last updated: 2026-08-24 by Kiro agent session*
+## Priority 6: Autonomous Orchestration & System Completion
+
+These are the final features needed to make the system fully autonomous rather than purely reactive.
+
+### 6.1 Autonomous Orchestration Coordinator
+- **Status:** TODO
+- **Problem:** The system has 10 orchestration modules (router, planner, parallel, goal_loop, critic, etc.) that work independently but nothing composes them into a persistent autonomous loop. The platform is reactive (responds to API calls) not proactive (pursues goals).
+- **Fix:** Create `src/nexus/runtime/orchestrator.py` — a background service that:
+  1. Monitors active goals (status="active")
+  2. Decomposes goals into subtasks (LLMTaskPlanner if LLM available, TaskPlanner fallback)
+  3. Routes subtasks to best agents (AgentRouter)
+  4. Executes in parallel where possible (ParallelExecutor)
+  5. Evaluates quality (CriticEvaluator)
+  6. Retries with SmartRetry on failure
+  7. Escalates to humans when stuck
+  8. Updates goal progress
+- **Files:** `src/nexus/runtime/orchestrator.py` (new), `src/nexus/main.py` (wire to lifespan)
+- **Effort:** High (6-8 hours)
+- **Dependencies:** All P1-P5 orchestration work (done)
+
+### 6.2 Persist Chat History to Database
+- **Status:** TODO
+- **Problem:** Chat conversation history is stored in an in-memory dict (`_conversations`). Lost on server restart.
+- **Fix:** Create a `ChatMessage` model (or reuse Message model), persist each message to DB in `_add_message()`, load history from DB in `_get_history()`.
+- **Files:** `src/nexus/api/routes/chat.py`, `src/nexus/models/chat.py` (new)
+- **Effort:** Medium (2 hours)
+- **Dependencies:** None
+
+### 6.3 Persist OKR and Identity to Database
+- **Status:** TODO
+- **Problem:** OKR objectives/key-results and agent soul/persona state are in-memory only (lost on restart).
+- **Fix:** Migrate `okr.py` in-memory dict to OKR model queries. Migrate `identity.py` in-memory soul store to persist via Agent.soul_description field.
+- **Files:** `src/nexus/api/routes/okr.py`, `src/nexus/api/routes/identity.py`
+- **Effort:** Medium (2-3 hours)
+- **Dependencies:** None
+
+### 6.4 OpenAI Adapter stream_execute
+- **Status:** TODO
+- **Problem:** Only AnthropicAdapter has true token streaming. OpenAI adapter awaits full response.
+- **Fix:** Add `stream_execute()` async generator to OpenAIAdapter using `stream=true` in the chat completions API.
+- **Files:** `src/nexus/adapters/openai_adapter.py`
+- **Effort:** Medium (2 hours)
+- **Dependencies:** None
+
+### 6.5 Wire SmartRetry into TaskExecutor
+- **Status:** TODO
+- **Problem:** TaskExecutor has a simple 3x retry loop. SmartRetryWithEscalation exists but isn't used — it provides failure diagnosis and intelligent escalation (REASSIGN/DECOMPOSE/REPORT_BLOCKER).
+- **Fix:** Replace the simple retry loop in `executor.py` with SmartRetryWithEscalation. On REASSIGN, re-route via AgentRouter. On DECOMPOSE, call TaskPlanner.
+- **Files:** `src/nexus/runtime/executor.py`, `src/nexus/orchestration/smart_retry.py`
+- **Effort:** Medium (2-3 hours)
+- **Dependencies:** None
+
+### 6.6 Wire LLMTaskPlanner into /decompose Endpoint
+- **Status:** TODO
+- **Problem:** The `/tasks/{id}/decompose` endpoint uses the basic TaskPlanner (returns single subtask). LLMTaskPlanner exists with structured JSON prompting for real multi-step decomposition.
+- **Fix:** In the decompose endpoint, try LLMTaskPlanner first (if LLM adapter available), fall back to basic TaskPlanner.
+- **Files:** `src/nexus/api/routes/tasks.py`, `src/nexus/orchestration/llm_planner.py`
+- **Effort:** Low (1 hour)
+- **Dependencies:** None
+
+### 6.7 Wire LLMCriticEvaluator into Pipeline Quality Gate
+- **Status:** TODO
+- **Problem:** Pipeline quality gate uses heuristic CriticEvaluator (output length checks). LLMCriticEvaluator exists with per-criterion LLM evaluation and caching.
+- **Fix:** In the pipeline runner quality gate, use LLMCriticEvaluator when LLM is available, fall back to heuristic.
+- **Files:** `src/nexus/api/routes/pipelines.py`, `src/nexus/orchestration/llm_critic.py`
+- **Effort:** Low (1 hour)
+- **Dependencies:** None
+
+### 6.8 Bridge Domain EventBus to Orchestration
+- **Status:** TODO
+- **Problem:** Two event bus systems exist (realtime + domain) but aren't connected. Task failures don't trigger FailureAnalyzer. Agent errors don't trigger evolution proposals.
+- **Fix:** Subscribe to TASK_COMPLETED/AGENT_ERROR/BUDGET_WARNING events in the domain EventBus. On failure patterns, auto-trigger FailureAnalyzer and create evolution proposals.
+- **Files:** `src/nexus/communication/event_bus.py`, `src/nexus/runtime/orchestrator.py`
+- **Effort:** Medium (2-3 hours)
+- **Dependencies:** 6.1 (orchestrator)
+
+### 6.9 Budget Tracker DB Flush
+- **Status:** TODO
+- **Problem:** `_budget_tracker.pending_spend` accumulates in memory but is never written back to the Company.spent_monthly_cents column in DB.
+- **Fix:** Add a periodic flush (every 5 minutes or on shutdown) that writes accumulated spend back to DB.
+- **Files:** `src/nexus/api/middleware.py`, `src/nexus/main.py`
+- **Effort:** Low (1 hour)
+- **Dependencies:** None
+
+### 6.10 Activity Page Real-Time Feed
+- **Status:** TODO
+- **Problem:** Activity.tsx uses fake random events. The backend has a real activity/events endpoint.
+- **Fix:** Wire Activity.tsx to `GET /api/v1/companies/{id}/activity` and optionally subscribe to SSE/WebSocket for real-time updates.
+- **Files:** `dashboard/src/pages/Activity.tsx`
+- **Effort:** Low (1 hour)
+- **Dependencies:** None
+
+---
+
+## Completion Tracking
+
+| Priority | Total | Done | Remaining |
+|----------|-------|------|-----------|
+| P1 (Wiring Gaps) | 7 | 7 | 0 |
+| P2 (Governance) | 3 | 3 | 0 |
+| P3 (Feature Gaps) | 5 | 5 | 0 |
+| P4 (Polish) | 4 | 4 | 0 |
+| P5 (Remaining Gaps) | 8 | 8 | 0 |
+| P6 (Autonomy & Completion) | 10 | 0 | 10 |
+| **Total** | **37** | **27** | **10** |
+
+---
+
+*Last updated: 2026-08-24 by Kiro agent session*

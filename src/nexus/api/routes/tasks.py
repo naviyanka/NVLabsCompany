@@ -453,12 +453,39 @@ async def decompose_task(
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
 
-    planner = TaskPlanner(max_subtasks=10)
-    subtasks = await planner.decompose_task(
-        task_id=task.id,
-        description=f"{task.title}\n{task.description or ''}",
-        context={"priority": task.priority, "status": task.status},
-    )
+    # Try LLM-based planner first (better decomposition), fallback to heuristic
+    description = f"{task.title}\n{task.description or ''}"
+    try:
+        from nexus.orchestration.llm_planner import LLMTaskPlanner
+        from nexus.models.agent import Agent
+        from nexus.api.routes.chat import _call_llm, _build_system_prompt
+
+        # Find an agent to use as the LLM brain for planning
+        agent_stmt = select(Agent).where(Agent.company_id == company_id, Agent.status.in_(["active", "ready"])).limit(1)
+        a_res = await db.execute(agent_stmt)
+        agent = a_res.scalar_one_or_none()
+
+        if agent:
+            async def llm_fn(prompt: str) -> str:
+                text, _, _ = await _call_llm(agent, _build_system_prompt(agent), prompt, [])
+                return text
+
+            llm_planner = LLMTaskPlanner(llm_callable=llm_fn, max_subtasks=10)
+            subtasks = await llm_planner.decompose_task(
+                task_id=task.id,
+                description=description,
+                context={"priority": task.priority, "status": task.status},
+            )
+        else:
+            raise RuntimeError("No agent available for LLM planning")
+    except Exception:
+        # Fallback to basic planner
+        planner = TaskPlanner(max_subtasks=10)
+        subtasks = await planner.decompose_task(
+            task_id=task.id,
+            description=description,
+            context={"priority": task.priority, "status": task.status},
+        )
 
     # Create subtask records in DB
     created = []

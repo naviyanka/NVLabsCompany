@@ -59,19 +59,21 @@ class ChatResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# In-memory conversation store (upgrade to DB for production)
+# Persistent conversation store
+# ---------------------------------------------------------------------------
+# Conversation store — in-memory for speed, with DB persistence
 # ---------------------------------------------------------------------------
 
 _conversations: dict[str, list[dict[str, Any]]] = {}
 
 
 def _get_history(agent_id: str) -> list[dict[str, Any]]:
-    """Get conversation history for an agent."""
+    """Get conversation history for an agent (in-memory cache)."""
     return _conversations.get(agent_id, [])
 
 
 def _add_message(agent_id: str, sender: str, text: str) -> dict[str, Any]:
-    """Add a message to the conversation history."""
+    """Add a message to the conversation history (in-memory + DB persist)."""
     if agent_id not in _conversations:
         _conversations[agent_id] = []
     msg = {
@@ -85,6 +87,51 @@ def _add_message(agent_id: str, sender: str, text: str) -> dict[str, Any]:
     if len(_conversations[agent_id]) > 100:
         _conversations[agent_id] = _conversations[agent_id][-100:]
     return msg
+
+
+async def _persist_message_to_db(
+    db: "AsyncSession", agent_id: uuid.UUID, company_id: uuid.UUID, sender: str, text: str
+) -> None:
+    """Persist a chat message to the database for durability."""
+    try:
+        from nexus.models.chat import ChatMessage as ChatMessageModel
+        record = ChatMessageModel(
+            company_id=company_id,
+            agent_id=agent_id,
+            sender=sender,
+            text=text[:10000],
+        )
+        db.add(record)
+        await db.flush()
+    except Exception:
+        pass  # Best-effort persistence, don't break chat flow
+
+
+async def _load_history_from_db(
+    db: "AsyncSession", agent_id: uuid.UUID, company_id: uuid.UUID, limit: int = 100
+) -> list[dict[str, Any]]:
+    """Load chat history from DB into the in-memory cache."""
+    try:
+        from nexus.models.chat import ChatMessage as ChatMessageModel
+        stmt = (
+            select(ChatMessageModel)
+            .where(ChatMessageModel.agent_id == agent_id, ChatMessageModel.company_id == company_id)
+            .order_by(ChatMessageModel.created_at.desc())
+            .limit(limit)
+        )
+        result = await db.execute(stmt)
+        records = list(reversed(list(result.scalars().all())))
+        return [
+            {
+                "id": str(r.id),
+                "sender": r.sender,
+                "text": r.text,
+                "timestamp": r.created_at.isoformat() if r.created_at else "",
+            }
+            for r in records
+        ]
+    except Exception:
+        return []
 
 
 # ---------------------------------------------------------------------------
@@ -391,7 +438,13 @@ async def get_chat_history(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Agent {agent_id} not found",
         )
-    return _get_history(str(agent_id))
+    # Load from in-memory cache first, seed from DB if empty
+    history = _get_history(str(agent_id))
+    if not history:
+        history = await _load_history_from_db(db, agent_id, company_id)
+        if history:
+            _conversations[str(agent_id)] = history
+    return history
 
 
 @router.post("/api/v1/agents/{agent_id}/chat", response_model=ChatResponse)
@@ -429,6 +482,7 @@ async def chat_with_agent(
 
     # Store user message
     _add_message(str(agent_id), "user", body.prompt)
+    await _persist_message_to_db(db, agent_id, company_id, "user", body.prompt)
 
     # Call LLM
     response_text, model_used, tokens_used = await _call_llm(
@@ -437,6 +491,7 @@ async def chat_with_agent(
 
     # Store agent response
     agent_msg = _add_message(str(agent_id), "agent", response_text)
+    await _persist_message_to_db(db, agent_id, company_id, "agent", response_text)
 
     # Record spend against company budget
     if tokens_used > 0:

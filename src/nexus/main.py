@@ -189,10 +189,36 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     from nexus.runtime.scheduler import start_scheduler, stop_scheduler
     await start_scheduler(async_session_factory)
 
+    # Start the autonomous orchestration coordinator
+    from nexus.runtime.orchestrator import start_orchestrator, stop_orchestrator
+    await start_orchestrator(async_session_factory)
+
     yield
 
-    # Shutdown: stop scheduler, persist state, close connections
+    # Shutdown: stop orchestrator, stop scheduler, persist state, close connections
+    await stop_orchestrator()
     await stop_scheduler()
+
+    # Flush accumulated budget spend to DB
+    try:
+        from nexus.api.middleware import _budget_tracker
+        from nexus.models.company import Company as CompanyModel
+        from sqlalchemy import update as sa_update
+
+        async with async_session_factory() as flush_db:
+            for cid, amount in list(_budget_tracker._pending_spend.items()):
+                if amount > 0:
+                    await flush_db.execute(
+                        sa_update(CompanyModel)
+                        .where(CompanyModel.id == cid)
+                        .values(spent_monthly_cents=CompanyModel.spent_monthly_cents + amount)
+                    )
+            await flush_db.commit()
+            _budget_tracker._pending_spend.clear()
+        logging.getLogger(__name__).info("Budget spend flushed to DB")
+    except Exception as exc:
+        logging.getLogger(__name__).warning("Budget flush failed: %s", exc)
+
     import logging
     shutdown_logger = logging.getLogger(__name__)
     shutdown_logger.info("NEXUS shutdown initiated - persisting state...")
