@@ -5,8 +5,8 @@
  * and displays streaming stdout from all running agents in a split-pane view.
  */
 
-import { useState, useEffect, useRef } from 'react';
 import { Terminal, Trash2 } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
 
 interface TerminalLine {
   id: string;
@@ -146,6 +146,33 @@ export function AgentTerminalPanel({ agentIds, maxLines = 500 }: AgentTerminalPa
           ))
         )}
         <div ref={bottomRef} />
+      </div>
+
+      {/* Command Input */}
+      <div className="flex items-center gap-2 px-3 py-2 border-t border-white/[0.08] bg-[#101012]">
+        <span className="text-[10px] font-mono text-[#FFB020]">$</span>
+        <input
+          type="text"
+          placeholder="Type a command..."
+          className="flex-1 bg-transparent text-xs font-mono text-[#F2F1EE] placeholder-[#6B6B6E] focus:outline-none"
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && e.currentTarget.value.trim()) {
+              const cmd = e.currentTarget.value.trim();
+              const cmdLine: TerminalLine = {
+                id: `cmd-${Date.now()}`,
+                agentId: 'operator',
+                line: `> ${cmd}`,
+                timestamp: new Date().toISOString(),
+              };
+              setLines((prev) => [...prev, cmdLine]);
+              e.currentTarget.value = '';
+              // Send command via WebSocket if connected
+              if (wsRef.current?.readyState === WebSocket.OPEN) {
+                wsRef.current.send(JSON.stringify({ action: 'command', command: cmd }));
+              }
+            }
+          }}
+        />
       </div>
     </div>
   );

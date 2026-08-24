@@ -460,5 +460,20 @@ class GovernanceMiddleware:
 
         Uses the in-memory budget tracker. If no budget data is cached
         (first request before DB lookup), fails open (allows the request).
+        Also emits a warning log when budget usage exceeds 80%.
         """
-        return _budget_tracker.check(company_id, estimated_cost)
+        allowed = _budget_tracker.check(company_id, estimated_cost)
+
+        # Budget alert at 80% usage
+        remaining = _budget_tracker.get_remaining(company_id)
+        if remaining is not None:
+            entry = _budget_tracker._cache.get(company_id)
+            if entry and entry["budget"] > 0:
+                usage_pct = (entry["spent"] / entry["budget"]) * 100
+                if usage_pct >= 80 and usage_pct < 100:
+                    logger.warning(
+                        "budget_alert: company=%s usage=%.0f%% remaining=%d cents",
+                        company_id, usage_pct, remaining,
+                    )
+
+        return allowed

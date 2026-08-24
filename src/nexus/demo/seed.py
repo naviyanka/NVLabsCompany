@@ -443,3 +443,27 @@ async def seed_database(session) -> dict[str, int]:
 
     await session.commit()
     return counts
+
+
+# CLI support: python -m nexus.demo.seed [--reset]
+if __name__ == "__main__":
+    import asyncio
+    import sys
+
+    async def _main():
+        from nexus.database import async_session_factory, engine
+        from sqlmodel import SQLModel
+        import nexus.models  # noqa: F401
+
+        if "--reset" in sys.argv:
+            print("Resetting database...")
+            async with engine.begin() as conn:
+                await conn.run_sync(SQLModel.metadata.drop_all)
+                await conn.run_sync(SQLModel.metadata.create_all)
+            print("Tables recreated.")
+
+        async with async_session_factory() as session:
+            counts = await seed_database(session)
+            print(f"Seeded: {counts}")
+
+    asyncio.run(_main())
