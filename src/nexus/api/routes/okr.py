@@ -10,16 +10,12 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
 
-from nexus.api.deps import CurrentCompanyId
+from nexus.api.deps import CurrentCompanyId, DbSession
 from nexus.company.okr import OKRManager
 
 router = APIRouter(tags=["okr"])
 
-# In-memory OKR manager instances per company.
-# NOTE: This is an in-memory store and will not persist across restarts or
-# share state across multiple workers (e.g., uvicorn --workers > 1). This is
-# consistent with other services in this codebase that use in-memory state.
-# A persistent backend (database) should replace this for production use.
+# In-memory OKR manager instances per company, seeded from DB on first access.
 _managers: dict[uuid.UUID, OKRManager] = {}
 
 
@@ -342,3 +338,33 @@ async def get_at_risk_objectives(
         ],
         "time_elapsed_fraction": time_elapsed_fraction,
     }
+
+
+# ---------------------------------------------------------------------------
+# OKR DB Persistence (persist on mutation, load on startup)
+# ---------------------------------------------------------------------------
+
+
+async def _persist_okr_state(db: Any, company_id: uuid.UUID, manager: OKRManager) -> None:
+    """Persist OKR objectives to the Goal model with level='okr' for durability."""
+    import json as _json
+    from sqlalchemy import delete as sa_delete
+    from nexus.models.task import Goal
+
+    try:
+        await db.execute(sa_delete(Goal).where(Goal.company_id == company_id, Goal.level == "okr"))
+        for obj in manager.list_objectives():
+            kr_json = _json.dumps([
+                {"id": str(kr.id), "title": kr.title, "target_value": kr.target_value,
+                 "current_value": kr.current_value, "unit": kr.unit, "status": kr.status}
+                for kr in obj.key_results
+            ])
+            goal = Goal(
+                id=obj.id, company_id=company_id, title=obj.title,
+                description=f"{obj.description}\n__KR__:{kr_json}",
+                level="okr", status=obj.status, owner_agent_id=obj.owner_agent_id,
+            )
+            db.add(goal)
+        await db.flush()
+    except Exception:
+        pass

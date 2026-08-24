@@ -193,6 +193,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     from nexus.runtime.orchestrator import start_orchestrator, stop_orchestrator
     await start_orchestrator(async_session_factory)
 
+    # Register event bridge handlers (connects EventBus → orchestration)
+    try:
+        from nexus.runtime.event_bridge import register_event_handlers
+        from nexus.communication.event_bus import EventBus
+        app.state.event_bus = EventBus(company_id=default_company_id)
+        register_event_handlers(app.state.event_bus)
+    except Exception as exc:
+        _logger.warning("Event bridge registration failed: %s", exc)
+
     yield
 
     # Shutdown: stop orchestrator, stop scheduler, persist state, close connections
