@@ -1,29 +1,31 @@
-import { useState, useEffect, useMemo } from 'react';
+import { apiClient, unwrapItems } from '@/api/client';
+import { Button } from '@/components/common/Button';
+import { StatCard } from '@/components/common/StatCard';
+import { FileExplorer } from '@/components/files/FileExplorer';
+import { AllCommitsList } from '@/components/git/AllCommitsList';
+import { AllPRsList } from '@/components/git/AllPRsList';
+import { DiffViewer } from '@/components/git/DiffViewer';
+import { GitHubConnectorModal } from '@/components/git/GitHubConnectorModal';
+import { NewPRModal } from '@/components/git/NewPRModal';
+import { NewRepoModal } from '@/components/git/NewRepoModal';
+import { PRDiffModal } from '@/components/git/PRDiffModal';
+import { RepoDetailDrawer } from '@/components/git/RepoDetailDrawer';
+import { RepoListCard } from '@/components/git/RepoListCard';
+import { getActiveCompanyId } from '@/config';
+import type { GitProvider, GitRepoItem, GitPullRequest as IGitPullRequest } from '@/types/gitRepo';
 import {
-  FolderGit2,
-  GitPullRequest,
-  Cpu,
-  Plus,
-  Search,
-  RefreshCw,
   CheckCircle2,
+  Cpu,
+  FolderGit2,
   GitCommit,
+  Github,
+  GitPullRequest,
+  Plus,
+  RefreshCw,
+  Search,
   Zap,
 } from 'lucide-react';
-import { Github } from 'lucide-react';
-import { StatCard } from '@/components/common/StatCard';
-import { Button } from '@/components/common/Button';
-import { apiClient, unwrapItems } from '@/api/client';
-import { getActiveCompanyId } from '@/config';
-import type { GitRepoItem, GitPullRequest as IGitPullRequest, GitProvider } from '@/types/gitRepo';
-import { RepoListCard } from '@/components/git/RepoListCard';
-import { RepoDetailDrawer } from '@/components/git/RepoDetailDrawer';
-import { NewRepoModal } from '@/components/git/NewRepoModal';
-import { NewPRModal } from '@/components/git/NewPRModal';
-import { PRDiffModal } from '@/components/git/PRDiffModal';
-import { AllPRsList } from '@/components/git/AllPRsList';
-import { AllCommitsList } from '@/components/git/AllCommitsList';
-import { GitHubConnectorModal } from '@/components/git/GitHubConnectorModal';
+import { useEffect, useMemo, useState } from 'react';
 
 export function GitRepos() {
   const [repos, setRepos] = useState<GitRepoItem[]>([]);
@@ -398,11 +400,10 @@ export function GitRepos() {
       <div className="flex items-center gap-1 border-b border-white/[0.08] text-xs font-mono">
         <button
           onClick={() => setActiveTab('repositories')}
-          className={`flex items-center gap-2 px-4 py-2.5 border-b-2 font-medium transition-all cursor-pointer ${
-            activeTab === 'repositories'
-              ? 'border-[#FFB020] text-[#FFB020] bg-white/[0.02]'
-              : 'border-transparent text-[#A8A8AB] hover:text-[#F2F1EE] hover:bg-white/[0.01]'
-          }`}
+          className={`flex items-center gap-2 px-4 py-2.5 border-b-2 font-medium transition-all cursor-pointer ${activeTab === 'repositories'
+            ? 'border-[#FFB020] text-[#FFB020] bg-white/[0.02]'
+            : 'border-transparent text-[#A8A8AB] hover:text-[#F2F1EE] hover:bg-white/[0.01]'
+            }`}
         >
           <FolderGit2 className="w-4 h-4" />
           <span>Repositories</span>
@@ -413,11 +414,10 @@ export function GitRepos() {
 
         <button
           onClick={() => setActiveTab('prs')}
-          className={`flex items-center gap-2 px-4 py-2.5 border-b-2 font-medium transition-all cursor-pointer ${
-            activeTab === 'prs'
-              ? 'border-[#FFB020] text-[#FFB020] bg-white/[0.02]'
-              : 'border-transparent text-[#A8A8AB] hover:text-[#F2F1EE] hover:bg-white/[0.01]'
-          }`}
+          className={`flex items-center gap-2 px-4 py-2.5 border-b-2 font-medium transition-all cursor-pointer ${activeTab === 'prs'
+            ? 'border-[#FFB020] text-[#FFB020] bg-white/[0.02]'
+            : 'border-transparent text-[#A8A8AB] hover:text-[#F2F1EE] hover:bg-white/[0.01]'
+            }`}
         >
           <GitPullRequest className="w-4 h-4" />
           <span>Pull Requests</span>
@@ -431,11 +431,10 @@ export function GitRepos() {
 
         <button
           onClick={() => setActiveTab('commits')}
-          className={`flex items-center gap-2 px-4 py-2.5 border-b-2 font-medium transition-all cursor-pointer ${
-            activeTab === 'commits'
-              ? 'border-[#FFB020] text-[#FFB020] bg-white/[0.02]'
-              : 'border-transparent text-[#A8A8AB] hover:text-[#F2F1EE] hover:bg-white/[0.01]'
-          }`}
+          className={`flex items-center gap-2 px-4 py-2.5 border-b-2 font-medium transition-all cursor-pointer ${activeTab === 'commits'
+            ? 'border-[#FFB020] text-[#FFB020] bg-white/[0.02]'
+            : 'border-transparent text-[#A8A8AB] hover:text-[#F2F1EE] hover:bg-white/[0.01]'
+            }`}
         >
           <GitCommit className="w-4 h-4" />
           <span>All Commits</span>
@@ -594,6 +593,14 @@ export function GitRepos() {
           repos={repos}
           onSelectRepo={(r) => setSelectedRepo(r)}
         />
+      )}
+
+      {/* File Explorer & Diff Viewer (shown when repo selected) */}
+      {selectedRepo && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-4">
+          <FileExplorer repoId={selectedRepo.id} onFileSelect={(path) => console.log('Selected:', path)} />
+          <DiffViewer repoId={selectedRepo.id} />
+        </div>
       )}
 
       {/* Selected Repo Inspector Drawer */}

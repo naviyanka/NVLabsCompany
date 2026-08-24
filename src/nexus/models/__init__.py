@@ -122,4 +122,6 @@ __all__ = [
     "UserSession",
     "Invite",
     "ApiKey",
+    # Chat
+    "ChatMessage",
 ]

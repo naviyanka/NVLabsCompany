@@ -246,57 +246,6 @@ async def get_repo_contributors(repo_id: uuid.UUID, db: DbSession, company_id: C
 
 
 
-@router.get("/api/v1/companies/{company_id}/repos/stats")
-async def repo_stats(company_id: uuid.UUID, db: DbSession) -> dict[str, Any]:
-    """Repository statistics."""
-    from sqlalchemy import func
-    total = await db.execute(select(func.count(Repository.id)).where(Repository.company_id == company_id))
-    active = await db.execute(select(func.count(Repository.id)).where(Repository.company_id == company_id, Repository.is_active == True))
-    latest_sync = await db.execute(select(func.max(Repository.last_synced_at)).where(Repository.company_id == company_id))
-    return {"total": total.scalar() or 0, "active": active.scalar() or 0, "last_sync": (latest_sync.scalar() or datetime.utcnow()).isoformat()}
-
-
-@router.get("/api/v1/repos/{repo_id}/commits")
-async def repo_commits(repo_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId, limit: int = 10) -> list[dict[str, Any]]:
-    """Recent commits for a repository (generated from repo data)."""
-    stmt = select(Repository).where(Repository.id == repo_id, Repository.company_id == company_id)
-    result = await db.execute(stmt)
-    repo = result.scalar_one_or_none()
-    if not repo:
-        raise HTTPException(status_code=404, detail="Repository not found")
-    import hashlib
-    commits = []
-    for i in range(limit):
-        seed = f"{repo.name}-{i}"
-        sha = hashlib.md5(seed.encode()).hexdigest()[:7]
-        commits.append({"sha": sha, "message": f"commit {i+1}: update {repo.name.split('/')[-1]}", "author": "agent-dev", "date": (datetime.utcnow() - timedelta(hours=i*3)).isoformat()})
-    return commits
-
-
-@router.get("/api/v1/repos/{repo_id}/pull-requests")
-async def repo_pull_requests(repo_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId) -> list[dict[str, Any]]:
-    """Open pull requests for a repository."""
-    stmt = select(Repository).where(Repository.id == repo_id, Repository.company_id == company_id)
-    result = await db.execute(stmt)
-    repo = result.scalar_one_or_none()
-    if not repo:
-        raise HTTPException(status_code=404, detail="Repository not found")
-    return [
-        {"id": 1, "title": f"feat: add new endpoint for {repo.name.split('/')[-1]}", "status": "open", "author": "agent-alpha", "created_at": datetime.utcnow().isoformat()},
-        {"id": 2, "title": "fix: resolve tenant isolation gap", "status": "open", "author": "agent-bolt", "created_at": datetime.utcnow().isoformat()},
-    ]
-
-
-@router.get("/api/v1/repos/{repo_id}/contributors")
-async def repo_contributors(repo_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId) -> list[dict[str, Any]]:
-    """Top contributors for a repository."""
-    return [
-        {"name": "agent-alpha", "commits_count": 42, "avatar_url": None},
-        {"name": "agent-bolt", "commits_count": 38, "avatar_url": None},
-        {"name": "agent-nova", "commits_count": 25, "avatar_url": None},
-    ]
-
-
 @router.get("/api/v1/repos/{repo_id}/tree")
 async def get_repo_file_tree(
     repo_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId,
