@@ -497,35 +497,6 @@ class PipelineImportBody(BaseModel):
     stages: list[dict[str, Any]] | None = None
 
 
-@router.post(
-    "/api/v1/companies/{company_id}/pipelines/import",
-    status_code=status.HTTP_201_CREATED,
-    response_model=PipelineResponse,
-)
-
-
-
-@router.get("/api/v1/companies/{company_id}/pipelines/stats")
-async def pipeline_stats(company_id: uuid.UUID, db: DbSession) -> dict[str, Any]:
-    """Pipeline statistics."""
-    from sqlalchemy import func
-    total = await db.execute(select(func.count(Pipeline.id)).where(Pipeline.company_id == company_id))
-    active = await db.execute(select(func.count(Pipeline.id)).where(Pipeline.company_id == company_id, Pipeline.is_active == True))
-    return {"total": total.scalar() or 0, "active": active.scalar() or 0}
-
-
-@router.get("/api/v1/companies/{company_id}/pipelines/templates")
-async def pipeline_templates(company_id: uuid.UUID) -> list[dict[str, Any]]:
-    """Available pipeline templates."""
-    return [
-        {"id": "recon", "name": "Reconnaissance Pipeline", "description": "Multi-step recon: subdomain enum, port scan, tech detection", "stages_count": 5, "category": "security"},
-        {"id": "code-review", "name": "Code Review Automation", "description": "Lint, test, security scan, review, merge", "stages_count": 4, "category": "development"},
-        {"id": "data-etl", "name": "Data ETL Pipeline", "description": "Extract, transform, validate, load, notify", "stages_count": 5, "category": "data"},
-        {"id": "deploy", "name": "CI/CD Deployment", "description": "Build, test, stage, deploy, verify", "stages_count": 5, "category": "devops"},
-        {"id": "content", "name": "Content Generation", "description": "Research, draft, review, publish", "stages_count": 4, "category": "content"},
-    ]
-
-
 @router.post("/api/v1/pipelines/{pipeline_id}/pause")
 async def pause_pipeline(pipeline_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId) -> dict:
     """Pause the latest running execution."""

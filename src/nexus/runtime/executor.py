@@ -279,13 +279,76 @@ class TaskExecutor:
         diagnosis = retry_result.diagnosis
         last_error = diagnosis.diagnosis_detail if diagnosis else "Unknown error after retries"
 
-        # Log the escalation recommendation
-        if escalation == EscalationAction.REPORT_BLOCKER:
-            last_error = f"[BLOCKER] {last_error}"
-        elif escalation == EscalationAction.REASSIGN:
-            last_error = f"[REASSIGN RECOMMENDED] {last_error}"
+        # Act on escalation (not just log)
+        if escalation == EscalationAction.REASSIGN:
+            # Re-route to a different agent
+            try:
+                from nexus.orchestration.router import AgentCandidate, AgentRouter
+                from nexus.models.agent import Agent as AgentModel
+
+                agents_stmt = select(AgentModel).where(
+                    AgentModel.company_id == task.company_id,
+                    AgentModel.status.in_(["active", "ready"]),
+                    AgentModel.id != agent_id,  # Exclude current agent
+                )
+                agents_result = await self._db.execute(agents_stmt)
+                other_agents = list(agents_result.scalars().all())
+
+                if other_agents:
+                    candidates = [
+                        AgentCandidate(
+                            agent_id=a.id, name=a.name, skills=a.capabilities or [],
+                            current_workload=0, max_concurrent=5,
+                            budget_remaining_cents=a.budget_monthly_cents - a.spent_monthly_cents,
+                            performance_score=(a.performance_score or 50) / 100.0, status=a.status,
+                        )
+                        for a in other_agents
+                    ]
+                    router = AgentRouter()
+                    decision = await router.route_task(
+                        task_description=task.title,
+                        required_skills=[], estimated_cost_cents=100,
+                        available_agents=candidates,
+                    )
+                    if decision:
+                        from sqlalchemy import update as sa_update
+                        await self._db.execute(
+                            sa_update(Task).where(Task.id == task.id)
+                            .values(assigned_agent_id=decision.agent_id, status="pending",
+                                    updated_at=datetime.now(timezone.utc))
+                        )
+                        last_error = f"[REASSIGNED to {decision.agent_id}] {last_error}"
+                        logger.info("Task %s reassigned to agent %s", task.id, decision.agent_id)
+            except Exception as re_err:
+                last_error = f"[REASSIGN FAILED: {re_err}] {last_error}"
+
         elif escalation == EscalationAction.DECOMPOSE:
-            last_error = f"[DECOMPOSE RECOMMENDED] {last_error}"
+            # Break the task into smaller pieces
+            try:
+                from nexus.orchestration.planner import TaskPlanner
+                planner = TaskPlanner(max_subtasks=3)
+                subtasks = await planner.decompose_task(
+                    task_id=task.id,
+                    description=f"{task.title}\n{task.description or ''}",
+                )
+                for st in subtasks:
+                    sub = Task(
+                        company_id=task.company_id,
+                        title=st.description[:500],
+                        description=f"Decomposed from failed task: {task.title}",
+                        priority=task.priority,
+                        parent_id=task.id,
+                        status="pending",
+                    )
+                    self._db.add(sub)
+                await self._db.flush()
+                last_error = f"[DECOMPOSED into {len(subtasks)} subtasks] {last_error}"
+                logger.info("Task %s decomposed into %d subtasks", task.id, len(subtasks))
+            except Exception as dec_err:
+                last_error = f"[DECOMPOSE FAILED: {dec_err}] {last_error}"
+
+        elif escalation == EscalationAction.REPORT_BLOCKER:
+            last_error = f"[BLOCKER] {last_error}"
 
         # All retries exhausted
         await self._update_task_status(task.id, "failed", error_text=last_error)

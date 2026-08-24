@@ -186,21 +186,3 @@ async def get_top_agents(company_id: uuid.UUID, db: DbSession) -> list[dict[str,
     stmt = select(Agent).where(Agent.company_id == company_id).order_by(Agent.performance_score.desc().nulls_last()).limit(5)
     result = await db.execute(stmt)
     return [{"id": str(a.id), "name": a.name, "role": a.role, "model": a.model, "status": a.status, "performance_score": a.performance_score} for a in result.scalars().all()]
-
-
-@router.get("/api/v1/companies/{company_id}/dashboard/token-usage")
-async def get_token_usage_hourly(company_id: uuid.UUID, db: DbSession) -> list[dict[str, Any]]:
-    """Hourly token usage for last 24h."""
-    from nexus.models.budget import CostEvent
-    now = datetime.utcnow()
-    results = []
-    for i in range(24):
-        hour_start = now.replace(minute=0, second=0, microsecond=0) - timedelta(hours=23 - i)
-        hour_end = hour_start + timedelta(hours=1)
-        row = await db.execute(
-            select(func.coalesce(func.sum(CostEvent.input_tokens), 0), func.coalesce(func.sum(CostEvent.output_tokens), 0), func.coalesce(func.sum(CostEvent.cost_cents), 0))
-            .where(CostEvent.company_id == company_id, CostEvent.occurred_at >= hour_start, CostEvent.occurred_at < hour_end)
-        )
-        r = row.one()
-        results.append({"hour": hour_start.strftime("%H:00"), "input_tokens": r[0], "output_tokens": r[1], "cost_cents": r[2]})
-    return results

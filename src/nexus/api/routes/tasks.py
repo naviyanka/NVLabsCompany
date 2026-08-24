@@ -272,14 +272,6 @@ async def get_task_stats(company_id: uuid.UUID, db: DbSession) -> dict[str, Any]
     return {"total": total.scalar() or 0, "by_status": dict(by_status.all()), "by_priority": dict(by_priority.all()), "top_agents": [{"agent_id": str(a), "count": c} for a, c in top_agents.all()]}
 
 
-@router.get("/api/v1/tasks/{task_id}/subtasks", response_model=list[TaskResponse])
-async def get_subtasks(task_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId) -> Any:
-    """List subtasks of a task."""
-    stmt = select(Task).where(Task.parent_task_id == task_id, Task.company_id == company_id)
-    result = await db.execute(stmt)
-    return list(result.scalars().all())
-
-
 @router.post("/api/v1/tasks/{task_id}/subtasks", status_code=status.HTTP_201_CREATED, response_model=TaskResponse)
 async def create_subtask(task_id: uuid.UUID, body: TaskCreate, db: DbSession, company_id: CurrentCompanyId) -> Any:
     """Create a subtask under a parent task."""

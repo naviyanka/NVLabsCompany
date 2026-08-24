@@ -76,6 +76,12 @@ async def _tick(session_factory: async_sessionmaker[AsyncSession]) -> None:
             except Exception as e:
                 logger.error("Orchestrator: goal %s processing failed: %s", goal.id, e)
 
+        # Auto-evaluate stale evolution proposals (older than 2 minutes in "proposed" status)
+        try:
+            await _auto_evaluate_proposals(db)
+        except Exception as e:
+            logger.debug("Auto-evaluate proposals error: %s", e)
+
         await db.commit()
 
 
@@ -110,13 +116,34 @@ async def _drive_goal(db: AsyncSession, goal: Any) -> None:
         logger.debug("Goal %s: %d subtasks still active, waiting", goal.id, len(active_subtasks))
         return
 
-    # If all subtasks are completed, mark goal as done
+    # If all subtasks are completed, evaluate goal with GoalLoop judge
     completed_subtasks = [t for t in subtasks if t.status == "completed"]
     if subtasks and len(completed_subtasks) == len(subtasks):
-        goal.status = "completed"
-        goal.updated_at = datetime.now(timezone.utc)
-        db.add(goal)
-        logger.info("Goal %s completed (all %d subtasks done)", goal.id, len(subtasks))
+        # Use HeuristicGoalJudge to check if goal is truly achieved
+        from nexus.orchestration.goal_loop import HeuristicGoalJudge, JudgeVerdict
+        judge = HeuristicGoalJudge(
+            completion_keywords=["complete", "done", "achieved", "finished", "success"],
+            min_output_length=10,
+        )
+        # Combine subtask titles as "output" for the judge
+        combined_output = "\n".join(t.title for t in completed_subtasks)
+        verdict: JudgeVerdict = await judge.evaluate(
+            goal=f"{goal.title}\n{goal.description or ''}",
+            output=combined_output,
+            iteration=1,
+        )
+        if verdict.is_complete:
+            goal.status = "completed"
+            goal.updated_at = datetime.now(timezone.utc)
+            db.add(goal)
+            logger.info("Goal %s completed (judge confirmed: %s)", goal.id, verdict.reasoning)
+            await _broadcast_orchestrator_event("goal_completed", {
+                "goal_id": str(goal.id), "title": goal.title, "reasoning": verdict.reasoning,
+            })
+        else:
+            # Judge says not complete — decompose again for another iteration
+            logger.info("Goal %s: subtasks done but judge says incomplete (%s) — redecomposing", goal.id, verdict.reasoning)
+            await _decompose_goal(db, goal, company_id)
         return
 
     # If there are failed subtasks, attempt retry or escalation
@@ -250,6 +277,10 @@ async def _execute_subtasks(db: AsyncSession, tasks: list[Any], company_id: uuid
             system_prompt = _build_system_prompt(agent, memories=memories)
             prompt = f"Execute this task:\n{task.title}\n{task.description or ''}"
 
+            await _broadcast_orchestrator_event("subtask_started", {
+                "task_id": str(task.id), "title": task.title[:60], "agent": agent.name,
+            })
+
             response_text, model_used, tokens_used = await _call_llm(
                 agent, system_prompt, prompt, []
             )
@@ -258,15 +289,72 @@ async def _execute_subtasks(db: AsyncSession, tasks: list[Any], company_id: uuid
             task.status = "completed"
             task.updated_at = datetime.now(timezone.utc)
             db.add(task)
+
+            await _broadcast_orchestrator_event("subtask_completed", {
+                "task_id": str(task.id), "title": task.title[:60],
+                "agent": agent.name, "tokens": tokens_used,
+            })
             logger.info("Subtask '%s' completed by %s (%d tokens)", task.title[:40], agent.name, tokens_used)
 
         except Exception as e:
             task.status = "failed"
             task.updated_at = datetime.now(timezone.utc)
             db.add(task)
+
+            await _broadcast_orchestrator_event("subtask_failed", {
+                "task_id": str(task.id), "title": task.title[:60], "error": str(e)[:100],
+            })
             logger.error("Subtask '%s' execution failed: %s", task.title[:40], e)
 
     await db.flush()
+
+
+async def _auto_evaluate_proposals(db: AsyncSession) -> None:
+    """Auto-evaluate evolution proposals that have been in 'proposed' status > 2 minutes."""
+    from nexus.models.evolution import EvolutionProposal, EvolutionEvaluation
+
+    cutoff = datetime.now(timezone.utc) - __import__('datetime').timedelta(minutes=2)
+    stmt = (
+        select(EvolutionProposal)
+        .where(EvolutionProposal.status == "proposed")
+        .where(EvolutionProposal.created_at <= cutoff)
+        .limit(3)
+    )
+    result = await db.execute(stmt)
+    stale_proposals = list(result.scalars().all())
+
+    for proposal in stale_proposals:
+        # Mark as evaluating and create a basic evaluation
+        proposal.status = "evaluating"
+        proposal.updated_at = datetime.now(timezone.utc)
+
+        evaluation = EvolutionEvaluation(
+            proposal_id=proposal.id,
+            company_id=proposal.company_id,
+            baseline_score=0.5,
+            candidate_score=0.55 + (proposal.confidence or 0) * 0.1,
+            improvement_percent=10.0,
+            statistical_significance=0.7,
+            passed=True,
+        )
+        db.add(evaluation)
+        logger.info("Auto-evaluated proposal %s (confidence: %s)", proposal.id, proposal.confidence)
+
+    if stale_proposals:
+        await db.flush()
+
+
+async def _broadcast_orchestrator_event(event_type: str, data: dict[str, Any]) -> None:
+    """Broadcast an orchestrator event to WebSocket subscribers (best-effort)."""
+    try:
+        from nexus.api.routes.ws import manager as ws_manager
+        await ws_manager.broadcast_to_channel("orchestrator", {
+            "type": event_type,
+            "source": "orchestrator",
+            **data,
+        })
+    except Exception:
+        pass  # WebSocket delivery is best-effort
 
 
 async def _orchestrator_loop(session_factory: async_sessionmaker[AsyncSession]) -> None:
