@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AgentList } from '@/components/agents/AgentList';
 import { AgentChatDrawer } from '@/components/agents/AgentChatDrawer';
+import { FireAgentModal } from '@/components/agents/FireAgentModal';
 import { Button } from '@/components/common/Button';
 import { useApi } from '@/hooks/useApi';
 import { listAgents, deleteAgent } from '@/api/agents';
@@ -12,6 +13,7 @@ import { HireAgentModal } from '@/components/agents/HireAgentModal';
 export function Agents() {
   const [showHireModal, setShowHireModal] = useState(false);
   const [chatAgent, setChatAgent] = useState<Agent | null>(null);
+  const [firingAgent, setFiringAgent] = useState<Agent | null>(null);
   const navigate = useNavigate();
 
   const { data: agents, loading, error, refetch } = useApi<Agent[]>(
@@ -21,6 +23,13 @@ export function Agents() {
 
   const displayAgents = agents || [];
 
+  // Listen for /hire slash command from AgentChatDrawer
+  useEffect(() => {
+    const handler = () => setShowHireModal(true);
+    window.addEventListener('nexus:open-hire-modal', handler);
+    return () => window.removeEventListener('nexus:open-hire-modal', handler);
+  }, []);
+
   const handleAgentClick = (agent: Agent) => {
     navigate(`/agents/${agent.id}`);
   };
@@ -29,13 +38,14 @@ export function Agents() {
     setChatAgent(agent);
   };
 
-  const handleAgentFire = async (agent: Agent) => {
-    try {
-      await deleteAgent(agent.id);
-      refetch();
-    } catch (err) {
-      console.error('Failed to fire agent', err);
-    }
+  const handleOpenFireModal = (agent: Agent) => {
+    setFiringAgent(agent);
+  };
+
+  const handleConfirmFire = async (agent: Agent) => {
+    await deleteAgent(agent.id);
+    setFiringAgent(null);
+    refetch();
   };
 
   return (
@@ -70,7 +80,7 @@ export function Agents() {
         error={error ? error.message : null}
         onAgentClick={handleAgentClick}
         onAgentChat={handleAgentChat}
-        onAgentFire={handleAgentFire}
+        onAgentFire={handleOpenFireModal}
         onHireAgent={() => setShowHireModal(true)}
       />
 
@@ -82,6 +92,14 @@ export function Agents() {
           setShowHireModal(false);
           refetch();
         }}
+      />
+
+      {/* Confirmation Fire Agent Modal */}
+      <FireAgentModal
+        agent={firingAgent}
+        isOpen={!!firingAgent}
+        onClose={() => setFiringAgent(null)}
+        onConfirm={handleConfirmFire}
       />
 
       {/* Agent Chat Drawer */}

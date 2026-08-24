@@ -544,7 +544,7 @@ class CLIAdapter(BaseAdapter):
             return
 
         manager = WorktreeManager()
-        auto_merge = session.config.get("auto_merge", True)
+        auto_merge = session.config.get("auto_merge", False)
 
         try:
             # Auto-commit any pending changes

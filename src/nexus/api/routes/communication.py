@@ -304,3 +304,61 @@ async def list_events(
     stmt = stmt.offset(offset).limit(limit).order_by(Event.created_at.desc())
     result = await db.execute(stmt)
     return list(result.scalars().all())
+
+
+class BroadcastRequest(BaseModel):
+    """Request body for broadcasting a message to all active agents."""
+
+    message: str = Field(..., min_length=1, max_length=5000)
+    sender_agent_id: uuid.UUID | None = None
+    priority: str = "normal"
+
+
+@router.post("/api/v1/communication/broadcast")
+async def broadcast_message(
+    body: BroadcastRequest,
+    db: DbSession,
+    company_id: CurrentCompanyId,
+) -> dict[str, Any]:
+    """Broadcast a message to all active agents in the company.
+
+    Creates a message record for each active agent in the company.
+    Used by the /broadcast slash command in the chat UI.
+    """
+    from nexus.models.agent import Agent
+
+    # Find all active agents in the company
+    stmt = select(Agent).where(
+        Agent.company_id == company_id,
+        Agent.status.in_(["active", "ready"]),
+    )
+    result = await db.execute(stmt)
+    active_agents = list(result.scalars().all())
+
+    if not active_agents:
+        return {"recipients": 0, "message": "No active agents to broadcast to"}
+
+    # Create a message record for each agent
+    sent_count = 0
+    for agent in active_agents:
+        # Skip the sender if specified
+        if body.sender_agent_id and agent.id == body.sender_agent_id:
+            continue
+
+        msg = Message(
+            company_id=company_id,
+            sender_agent_id=body.sender_agent_id,
+            recipient_agent_id=agent.id,
+            message_type="broadcast",
+            content=body.message,
+            priority=body.priority,
+        )
+        db.add(msg)
+        sent_count += 1
+
+    await db.flush()
+    return {
+        "recipients": sent_count,
+        "message": f"Broadcast sent to {sent_count} agents",
+        "total_active": len(active_agents),
+    }
