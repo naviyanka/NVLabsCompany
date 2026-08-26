@@ -327,8 +327,8 @@ export function AgentDetailPage() {
                     </div>
                     <div
                       className={`p-3 rounded-[8px] text-xs leading-relaxed font-mono ${msg.sender === 'user'
-                          ? 'bg-[#FFB020] text-[#0A0A0B] font-medium'
-                          : 'bg-[#1C1C1F] text-[#F2F1EE] border border-white/[0.08]'
+                        ? 'bg-[#FFB020] text-[#0A0A0B] font-medium'
+                        : 'bg-[#1C1C1F] text-[#F2F1EE] border border-white/[0.08]'
                         }`}
                     >
                       {msg.text}
@@ -422,7 +422,7 @@ export function AgentDetailPage() {
                     }}
                     className="bg-[#101012] border border-white/[0.1] rounded-[4px] px-2 py-1 text-[#F2F1EE] text-xs focus:outline-none focus:border-[#FFB020] cursor-pointer"
                   >
-                    {['hermes', 'anthropic', 'openai', 'claude', 'codex', 'kiro-cli', 'antigravity', 'aider', 'opencode', 'ollama', 'langchain'].map((p) => (
+                    {['hermes', 'hermes-cli', 'anthropic', 'openai', 'claude', 'codex', 'kiro-cli', 'antigravity', 'aider', 'opencode', 'ollama', 'langchain'].map((p) => (
                       <option key={p} value={p}>{p}</option>
                     ))}
                   </select>

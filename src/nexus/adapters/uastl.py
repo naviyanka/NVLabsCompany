@@ -78,20 +78,47 @@ PROVIDERS: dict[str, dict[str, Any]] = {
         "supports_tools": False,
         "models": ["llama-3.1-70b-versatile", "mixtral-8x7b-32768"],
     },
-    # CLI backends (subprocess-based)
-    "claude": {"registry_key": "cli", "backend": "claude", "env_key": None},
+    "hermes": {
+        # Nous Research Hermes 3 — local Ollama with OpenRouter cloud fallback.
+        # Config keys follow HermesAdapter.create_session expectations:
+        # ollama_host + openrouter_api_key (NOT the generic "host").
+        "registry_key": "hermes",
+        "env_key": None,
+        "default_model": "hermes3:8b",
+        "host": "http://localhost:11434",
+        "supports_streaming": True,
+        "supports_tools": True,
+        "models": [
+            "hermes3:8b",
+            "nousresearch/hermes-3-llama-3.1-8b",
+            "nousresearch/hermes-3-llama-3.1-405b",
+        ],
+    },
+    # Claude Code dedicated subprocess adapter
+    "claude_code": {
+        "registry_key": "claude_code",
+        "env_key": None,
+        "supports_streaming": False,
+        "supports_tools": True,
+        "models": [],
+    },
+    # Generic CLI backends (subprocess-based)
+    "cli": {"registry_key": "cli", "backend": "claude", "env_key": None},
     "codex": {"registry_key": "cli", "backend": "codex", "env_key": None},
     "aider": {"registry_key": "cli", "backend": "aider", "env_key": None},
     "kiro-cli": {"registry_key": "cli", "backend": "kiro-cli", "env_key": None},
     "agy": {"registry_key": "cli", "backend": "agy", "env_key": None},
     "opencode": {"registry_key": "cli", "backend": "opencode", "env_key": None},
     "cursor": {"registry_key": "cli", "backend": "cursor", "env_key": None},
+    "hermes-cli": {"registry_key": "cli", "backend": "hermes", "env_key": None},
 }
 
-# Aliases for backward compatibility
+# Aliases for backward compatibility. "claude" historically resolved to the
+# Anthropic API adapter in chat routing (NOT the Claude Code CLI), so it stays
+# an alias here to avoid silently switching existing agents to subprocesses.
 PROVIDER_ALIASES: dict[str, str] = {
     "langchain": "anthropic",
-    "claude_code": "claude",
+    "claude": "anthropic",
     "antigravity": "agy",
 }
 
@@ -123,6 +150,12 @@ def resolve_provider(adapter_type: str, model: str | None = None) -> tuple[str, 
     if registry_key == "cli":
         config["backend"] = provider.get("backend", adapter_type)
         config["model"] = model or ""
+    elif registry_key == "hermes":
+        config["model"] = model or provider.get("default_model", "")
+        config["ollama_host"] = os.environ.get(
+            "OLLAMA_HOST", provider.get("host", "http://localhost:11434")
+        )
+        config["openrouter_api_key"] = os.environ.get("OPENROUTER_API_KEY", "")
     else:
         env_key = provider.get("env_key")
         if env_key:

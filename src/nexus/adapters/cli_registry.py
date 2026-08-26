@@ -99,6 +99,27 @@ class _KiroBackendInfo(CLIBackendInfo):
         return cmd
 
 
+class _HermesBackendInfo(CLIBackendInfo):
+    """Hermes Agent CLI backend with custom argument construction.
+
+    Uses `hermes --yolo --provider nous -m model -z "prompt"` for non-interactive
+    single-shot execution. The --yolo flag enables autonomous mode.
+    """
+
+    def build_args(self, prompt: str, extra_args: list[str] | None = None) -> list[str]:
+        """Hermes: uses -z for single-shot prompt, --yolo for auto-mode, --provider nous."""
+        cmd = [self.command, "--yolo", "--provider", "nous"]
+        # If no model specified in extra_args, use a working free model
+        if extra_args and any(a == "-m" or a == "--model" for a in extra_args):
+            cmd.extend(extra_args)
+        else:
+            cmd.extend(["-m", "poolside/laguna-s-2.1:free"])
+            if extra_args:
+                cmd.extend(extra_args)
+        cmd.extend(["-z", prompt])
+        return cmd
+
+
 # Default backend definitions
 _DEFAULT_BACKENDS: list[CLIBackendInfo] = [
     _ClaudeBackendInfo(
@@ -182,6 +203,19 @@ _DEFAULT_BACKENDS: list[CLIBackendInfo] = [
         supports_agent_type=False,
         supports_stdin=True,
         guard_type="none",
+    ),
+    _HermesBackendInfo(
+        id="hermes",
+        name="Hermes Agent (Nous Research)",
+        command="hermes",
+        instruction_path="",
+        stability="stable",
+        supports_resume=True,
+        supports_agent_type=True,
+        supports_stdin=True,
+        guard_type="none",
+        supports_native_worktree=True,
+        supports_structured_output=True,
     ),
 ]
 
