@@ -584,11 +584,50 @@ async def chat_with_agent(
     agent_memories = await _fetch_agent_memories(db, agent_id, company_id, query=body.prompt)
     system_prompt = _build_system_prompt(agent, memories=agent_memories)
 
-    # For CEO agents, inject live platform data into context
+    # For CEO agents, fetch live data by calling NEXUS API with service account key
     if agent.role == "ceo":
-        live_context = await _fetch_live_platform_context(db, company_id, body.prompt)
-        if live_context:
-            system_prompt += f"\n\n--- LIVE PLATFORM DATA (always use this over static knowledge) ---\n{live_context}"
+        from nexus.agents.ceo_tools import (
+            list_agents, list_tasks, list_goals, get_dashboard, get_budget, query_any_endpoint
+        )
+        # Use the first active admin API key for self-queries
+        from nexus.models.api_key import ApiKey as ApiKeyModel
+        api_key_stmt = select(ApiKeyModel).where(
+            ApiKeyModel.company_id == company_id,
+            ApiKeyModel.status == "active",
+            ApiKeyModel.role == "admin",
+        ).limit(1)
+        key_result = await db.execute(api_key_stmt)
+        api_key_row = key_result.scalar_one_or_none()
+
+        if api_key_row:
+            # Reconstruct the raw key from prefix (we can't — it's hashed)
+            # Instead, use the key from config or env
+            import os
+            ceo_api_key = os.environ.get("CEO_API_KEY", "")
+
+            if ceo_api_key:
+                prompt_lower = body.prompt.lower()
+                live_data = ""
+                try:
+                    if any(kw in prompt_lower for kw in ["agent", "workforce", "team", "hired", "who", "list agent", "how many"]):
+                        live_data = await list_agents(ceo_api_key)
+                    elif any(kw in prompt_lower for kw in ["task", "pending", "progress", "work"]):
+                        live_data = await list_tasks(ceo_api_key)
+                    elif any(kw in prompt_lower for kw in ["goal", "objective", "okr", "strategy"]):
+                        live_data = await list_goals(ceo_api_key)
+                    elif any(kw in prompt_lower for kw in ["dashboard", "overview", "stats", "summary"]):
+                        live_data = await get_dashboard(ceo_api_key)
+                    elif any(kw in prompt_lower for kw in ["budget", "spend", "cost", "money"]):
+                        live_data = await get_budget(ceo_api_key)
+                except Exception as e:
+                    live_data = f"[API query failed: {e}]"
+
+                if live_data:
+                    system_prompt += (
+                        f"\n\n--- LIVE PLATFORM DATA (fetched via authenticated API call) ---\n"
+                        f"{live_data}\n"
+                        f"--- Use this data to answer accurately. Do NOT make up numbers. ---"
+                    )
 
     # Get history for context (TTL-fresh across workers)
     history = await _get_history_fresh(db, str(agent_id), company_id)
@@ -669,11 +708,50 @@ async def chat_with_agent_stream(
     agent_memories = await _fetch_agent_memories(db, agent_id, company_id, query=body.prompt)
     system_prompt = _build_system_prompt(agent, memories=agent_memories)
 
-    # For CEO agents, inject live platform data into context
+    # For CEO agents, fetch live data by calling NEXUS API with service account key
     if agent.role == "ceo":
-        live_context = await _fetch_live_platform_context(db, company_id, body.prompt)
-        if live_context:
-            system_prompt += f"\n\n--- LIVE PLATFORM DATA (always use this over static knowledge) ---\n{live_context}"
+        from nexus.agents.ceo_tools import (
+            list_agents, list_tasks, list_goals, get_dashboard, get_budget, query_any_endpoint
+        )
+        # Use the first active admin API key for self-queries
+        from nexus.models.api_key import ApiKey as ApiKeyModel
+        api_key_stmt = select(ApiKeyModel).where(
+            ApiKeyModel.company_id == company_id,
+            ApiKeyModel.status == "active",
+            ApiKeyModel.role == "admin",
+        ).limit(1)
+        key_result = await db.execute(api_key_stmt)
+        api_key_row = key_result.scalar_one_or_none()
+
+        if api_key_row:
+            # Reconstruct the raw key from prefix (we can't — it's hashed)
+            # Instead, use the key from config or env
+            import os
+            ceo_api_key = os.environ.get("CEO_API_KEY", "")
+
+            if ceo_api_key:
+                prompt_lower = body.prompt.lower()
+                live_data = ""
+                try:
+                    if any(kw in prompt_lower for kw in ["agent", "workforce", "team", "hired", "who", "list agent", "how many"]):
+                        live_data = await list_agents(ceo_api_key)
+                    elif any(kw in prompt_lower for kw in ["task", "pending", "progress", "work"]):
+                        live_data = await list_tasks(ceo_api_key)
+                    elif any(kw in prompt_lower for kw in ["goal", "objective", "okr", "strategy"]):
+                        live_data = await list_goals(ceo_api_key)
+                    elif any(kw in prompt_lower for kw in ["dashboard", "overview", "stats", "summary"]):
+                        live_data = await get_dashboard(ceo_api_key)
+                    elif any(kw in prompt_lower for kw in ["budget", "spend", "cost", "money"]):
+                        live_data = await get_budget(ceo_api_key)
+                except Exception as e:
+                    live_data = f"[API query failed: {e}]"
+
+                if live_data:
+                    system_prompt += (
+                        f"\n\n--- LIVE PLATFORM DATA (fetched via authenticated API call) ---\n"
+                        f"{live_data}\n"
+                        f"--- Use this data to answer accurately. Do NOT make up numbers. ---"
+                    )
 
     # Get history for context (TTL-fresh across workers)
     history = await _get_history_fresh(db, str(agent_id), company_id)
