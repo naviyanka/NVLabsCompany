@@ -62,6 +62,7 @@ from nexus.api.routes.slack_events import router as slack_events_router
 from nexus.api.routes.sso import router as sso_router
 from nexus.api.routes.scim import router as scim_router
 from nexus.api.routes.telegram_bot import router as telegram_bot_router
+from nexus.api.routes.agent_profiling import router as agent_profiling_router
 from nexus.api.versioning import APIVersionMiddleware
 from nexus.config import settings
 from nexus.logging_config import RequestIDMiddleware, configure_logging
@@ -435,3 +436,4 @@ app.include_router(slack_events_router)
 app.include_router(sso_router)
 app.include_router(scim_router)
 app.include_router(telegram_bot_router)
+app.include_router(agent_profiling_router)

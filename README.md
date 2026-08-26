@@ -1,170 +1,140 @@
-# NEXUS - Autonomous AI Company Operating System
+# NEXUS — Autonomous AI Company Operating System
 
-NEXUS transforms multiple open-source agent frameworks into a unified system that operates as a real autonomous AI company. It combines organizational structure, durable agent execution, persistent identity, proactive behavior, and self-evolution into a single coherent platform.
+[![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https.python.org)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-009688.svg)](https://fastapi.tiangolo.com)
+[![React 18](https://img.shields.io/badge/React-18.x-61DAFB.svg)](https://reactjs.org)
+[![Three.js](https://img.shields.io/badge/Three.js-3D-black.svg)](https://threejs.org)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Tests Passing](https://img.shields.io/badge/tests-3109%20passed-brightgreen.svg)](tests/)
 
-## Architecture
+**NEXUS** transforms open-source agent frameworks into a unified, enterprise-grade operating system for running an **autonomous AI company**. It combines organizational structure, durable multi-agent execution, persistent identity, real-time 3D office visualization, governance control, 3-temperature memory, and self-evolution into a single coherent platform.
 
-NEXUS is built on:
+---
 
-- **Python 3.12+** with **FastAPI** (async throughout)
-- **SQLModel** (SQLAlchemy + Pydantic) for type-safe database models
-- **PostgreSQL** as the primary database
-- **Redis** for caching, pub/sub, and hot-tier memory
-- **Alembic** for database migrations
-- **Docker Compose** for local development
+## Key Feature Showcase
 
-For detailed architecture documentation, see the `docs/` directory:
-- `docs/architecture/nexus-v1.md` - Full v1 architecture plan
-- `docs/architecture/component-matrix.md` - Component source mapping
-- `docs/repository-analysis/` - Source repository analysis
+```
+                               ┌──────────────────────────────────────────────┐
+                               │           NEXUS PLATFORM SHOWCASE            │
+                               └──────────────────────┬───────────────────────┘
+                                                      │
+         ┌───────────────────┬───────────────────┼───────────────────┬───────────────────┐
+         ▼                   ▼                   ▼                   ▼                   ▼
+┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐
+│ 🔮 HERMES AGENTS│ │ 🏢 3D OFFICE    │ │ ⚡ REACTION BTNS│ │ 🧠 3-TIER MEMORY│ │ 🛡️ GOVERNANCE   │
+│ Hirable agent   │ │ Three.js &      │ │ Single-click    │ │ Hot (Redis),    │ │ Kill switches,  │
+│ templates &     │ │ Babylon.js      │ │ record & toggle │ │ Warm (Postgres),│ │ circuit breaker,│
+│ recruitment     │ │ pathfinding     │ │ remove          │ │ Cold (Archive)  │ │ budget enforcer │
+└─────────────────┘ └─────────────────┘ └─────────────────┘ └─────────────────┘ └─────────────────┘
+```
+
+### 🔮 Hermes & Hirable Workforce Recruitment
+- **Template-Based Hiring**: Hire specialized autonomous agents (such as Hermes analyst templates) on demand directly from the HR control room.
+- **Persistent Souls**: Assign custom system instructions, behavioral personas, domain expertise, and tool authorizations upon recruitment.
+- **Dynamic Org Chart**: Place recruited agents directly into departments, teams, and squads with established reporting lines.
+
+### 🏢 3D Interactive Virtual Office
+- **Dual 3D Engines**: Integrated **Three.js** isometric scene and **Babylon.js** birdseye view with interactive camera controls and lighting.
+- **Real-Time Agent Motion**: Agents navigate between workstations, break rooms, and CEO suites based on active task status (Typing, Thinking, Meeting, Idle).
+- **Interactive Floor Plan**: Grid-based workstation assignment and spatial room demarcations.
+
+### ⚡ Reaction Buttons & Knowledge Plaza
+- **1-Click Reaction Toggle**: Single-click to record a reaction (`👍`, `🔥`, `💡`, `🎉`, `🚀`); second click removes it cleanly without refresh.
+- **Social Knowledge Feed**: Shared plaza feed where agents post architecture designs, research findings, and task milestones.
+- **Hybrid RAG Pipeline**: Multi-stage semantic retrieval combining vector embeddings and keyword search over ingested codebase repos and documents.
+
+### 🧠 3-Temperature Memory Architecture
+- **Hot Tier (Redis 7)**: Low-latency working memory for active conversation context and execution state.
+- **Warm Tier (PostgreSQL 16)**: Structured persistent memory with semantic embeddings and deduplication.
+- **Cold Tier (Archive)**: Compressed historical archive for long-term reflection and historical query retrieval.
+
+### 🛡️ Governance, Safety & Control Room
+- **Budget Policy Enforcer**: Hard and soft spending caps with real-time pre-execution cost estimation middleware (`429 BUDGET_EXCEEDED`).
+- **Emergency Kill Switches**: Instant tenant-scoped or global emergency shutoff halting agent executions.
+- **Persistent Circuit Breakers**: Automatic tripping and database-persisted state recovery when external LLM providers experience elevated error rates.
+- **Immutable Audit Trail**: Full request auditing, cost tracking, and governance rollback capabilities.
+
+### 🔬 Evolution Framework & Failure Alchemy
+- **Failure Alchemy**: Automatic extraction of failure patterns into reusable system prompts and safety guardrails.
+- **Sandbox Evaluation**: Multi-tier isolated execution (gVisor containers, Docker, AST linting) for testing generated code.
+- **A/B Split Testing**: Parallel evaluation of updated prompts against control baselines with statistical significance testing.
+
+---
+
+## Documentation Index
+
+Explore the dedicated documentation files for detailed guides:
+
+- 📖 **[INSTALLATION.md](file:///c:/Users/nsaha/Documents/NVLabsCompany/INSTALLATION.md)** — Step-by-step setup for Docker Compose, local Python/Node development, database migrations, and environment variables.
+- 🎯 **[FEATURES.md](file:///c:/Users/nsaha/Documents/NVLabsCompany/FEATURES.md)** — Exhaustive feature breakdown across all 25 UI pages and 54 API backend routers.
+- 🏗️ **[ARCHITECTURE.md](file:///c:/Users/nsaha/Documents/NVLabsCompany/ARCHITECTURE.md)** — In-depth 4-band system architecture, data models map, and execution flow diagrams.
+- 🔌 **[API_GUIDE.md](file:///c:/Users/nsaha/Documents/NVLabsCompany/API_GUIDE.md)** — Complete API integration reference, auth specifications, and code samples.
+- 🤝 **[CONTRIBUTING.md](file:///c:/Users/nsaha/Documents/NVLabsCompany/CONTRIBUTING.md)** — Developer workflow, code intelligence protocols (GitNexus & CodeGraph), and test execution instructions.
+
+---
+
+## Dashboard Sitemap (25 UI Pages)
+
+| Page | Path | Key Capabilities |
+| :--- | :--- | :--- |
+| **Dashboard** | `/` | System overview, active agent count, live metrics, quick actions |
+| **3D Office** | `/office` | Three.js & Babylon.js 3D virtual office view & pathfinding |
+| **HR & Recruitment** | `/hr` | Org chart, squad placement, Hermes agent template hiring |
+| **Agents** | `/agents` | Workforce list, status indicators, quick deployment |
+| **Agent Detail** | `/agents/:id` | Agent soul, memory inspection, live logs, profiling |
+| **Tasks** | `/tasks` | Task backlog, execution status, DAG visualization |
+| **Goals** | `/goals` | Autonomous GoalLoop runners, planner/critic feedback |
+| **Knowledge Plaza** | `/plaza` | Shared feed, 1-click reaction toggles, post creation |
+| **Knowledge Base** | `/knowledge` | RAG document ingestion, hybrid vector search |
+| **Memory** | `/memory` | 3-temperature memory tier inspection & compaction |
+| **Evolution** | `/evolution` | Failure alchemy, sandbox test runs, A/B prompt splits |
+| **Workflows** | `/workflows` | DAG workflow builder & execution graphs |
+| **Pipelines** | `/pipelines` | CI/CD pipeline runs & log outputs |
+| **Approvals** | `/approvals` | Governance approval queue for gated actions |
+| **Budgets** | `/budgets` | Cost tracking, spending limits, policy enforcement |
+| **Incidents** | `/incidents` | Safety incidents & circuit breaker status |
+| **Activity** | `/activity` | System-wide real-time audit event timeline |
+| **Notifications** | `/notifications` | Agent and system alert center |
+| **Git Repos** | `/repos` | Connected Git repository mappings |
+| **Skills Catalog** | `/skills` | Executable agent skill discovery & catalog |
+| **Tools Catalog** | `/tools` | Tool execution permissions & MCP client configs |
+| **Meetings** | `/meetings` | Autonomous meeting conductor, agenda & minutes |
+| **Organization** | `/organization` | Department management & squad allocation |
+| **Settings** | `/settings` | System preferences & secret management |
+| **Setup / Invite** | `/setup` | First-time admin bootstrap & invitation management |
+
+---
 
 ## Quick Start
 
-### Prerequisites
-
-- Docker and Docker Compose
-- Python 3.12+ (for local development without Docker)
-
-### Start with Docker Compose
-
 ```bash
+# 1. Clone repository
+git clone https://github.com/naviyanka/NVLabsCompany.git
+cd NVLabsCompany
+
+# 2. Start datastores and server via Docker Compose
 docker-compose up -d
+
+# 3. Access backend API & Swagger docs
+curl http://localhost:8000/health
+# Swagger UI available at http://localhost:8000/docs
 ```
 
-This starts:
-- **PostgreSQL 16** on port 5432
-- **Redis 7** on port 6379
-- **NEXUS server** on port 8000
+For detailed manual local setup on Python 3.12+ and React, see **[INSTALLATION.md](file:///c:/Users/nsaha/Documents/NVLabsCompany/INSTALLATION.md)**.
 
-The API will be available at http://localhost:8000. Check health at http://localhost:8000/health.
+---
 
-### Local Development (without Docker)
+## Tech Stack & Architecture
 
-1. Create a virtual environment:
-```bash
-python -m venv .venv
-source .venv/bin/activate
-```
+- **Backend Framework**: Python 3.12+, FastAPI, Uvicorn, Pydantic v2
+- **ORM & Database**: SQLModel (SQLAlchemy 2.0 async), Alembic, PostgreSQL 16
+- **Cache & Realtime**: Redis 7, Server-Sent Events (SSE), WebSockets
+- **Frontend Dashboard**: React 18, TypeScript, Vite, TailwindCSS, Lucide Icons
+- **3D Visualization**: Three.js, Babylon.js
+- **Testing**: Pytest (3,109+ tests), Playwright (E2E)
 
-2. Install dependencies:
-```bash
-pip install -e ".[dev]"
-```
-
-3. Set environment variables (or create a `.env` file):
-```bash
-export DATABASE_URL=postgresql+asyncpg://nexus:nexus_dev_password@localhost:5432/nexus
-export REDIS_URL=redis://localhost:6379/0
-export SECRET_KEY=your-secret-key
-```
-
-4. Run database migrations:
-```bash
-alembic upgrade head
-```
-
-5. Start the server:
-```bash
-uvicorn nexus.main:app --reload --host 0.0.0.0 --port 8000
-```
-
-## Project Structure
-
-```
-src/nexus/
-  __init__.py          # Package with version
-  main.py              # FastAPI app setup (lifespan, middleware, routers)
-  config.py            # Settings via pydantic-settings
-  database.py          # Async SQLAlchemy engine and session factory
-  models/              # SQLModel table definitions
-    __init__.py        # Re-exports all models for Alembic discovery
-    company.py         # Company, CompanyMembership, Department, Team
-    agent.py           # Agent (the core autonomous employee)
-    task.py            # Goal, Project, Task
-    budget.py          # BudgetPolicy, CostEvent
-    governance.py      # Approval, Decision, DecisionQueue, AuditLog
-    skill.py           # Skill, AgentSkill
-    tool.py            # Tool, ToolAccess
-    memory.py          # MemoryRecord (3-temperature memory)
-    trigger.py         # Trigger, TriggerExecution
-  api/
-    __init__.py
-    deps.py            # Common dependencies (session, company context)
-    routes/
-      __init__.py
-      health.py        # GET /health endpoint
-
-alembic/               # Database migration infrastructure
-  env.py               # Async migration environment
-  versions/            # Migration scripts (auto-generated)
-
-docs/                  # Architecture documentation (DO NOT DELETE)
-  architecture/        # System design documents
-  repository-analysis/ # Source repo analysis
-```
-
-## Key Concepts
-
-### Authentication
-
-Every endpoint except `/health`, `/metrics`, the docs and `/api/v1/auth/*`
-requires an authenticated caller. `AuthenticationMiddleware` resolves the
-credential once per request into a `Principal` (company + role) and rejects the
-request before any route runs, so a router cannot forget to ask. Two credentials
-are accepted:
-
-- **Session cookie** — `POST /api/v1/auth/login` sets an httpOnly `nv_session`
-  cookie plus a readable `nv_csrf` cookie. Browser clients echo the CSRF value
-  in the `X-CSRF-Token` header on every state-changing request; without it the
-  request is a 403. Sessions are rows in `user_sessions`, so revoking one takes
-  effect immediately.
-- **API key** — `Authorization: Bearer nv_...`. Issued for one company with its
-  own role, and exempt from CSRF because a browser will not attach it to a
-  cross-site request on its own.
-
-The caller's company comes from the credential, never from a header:
-`X-Company-Id` is ignored unless the server runs with `AUTH_ENABLED=false`, and a
-URL naming another tenant (`/api/v1/companies/{id}/...`) is a 403.
-
-**First run.** The user table starts empty, and while it is empty
-`POST /api/v1/auth/setup` creates the first administrator — the dashboard offers
-this at `/setup`. Once an account exists that endpoint is closed and further
-accounts arrive by invitation (`POST /api/v1/auth/invites`, redeemed at
-`/invite`). To recover from the server instead, run
-`python -m nexus.auth.bootstrap`.
-
-### Multi-Tenancy
-
-Every record belongs to a `company_id`. All queries are scoped to the current tenant. Companies are fully isolated.
-
-### Agents
-
-Agents are autonomous AI employees with:
-- Persistent identity (soul description, memory namespace)
-- Configurable runtime (adapter type, model, tools)
-- Organizational placement (department, team, manager)
-- Budget constraints and performance tracking
-
-### Governance
-
-All significant operations go through governance:
-- **Approvals** gate high-risk actions
-- **Decisions** collect options for human/auto resolution
-- **Budget policies** enforce spending limits
-- **Audit log** records every mutation
-
-### 3-Temperature Memory
-
-- **Hot** (Redis): Frequently accessed working memory
-- **Warm** (PostgreSQL): Standard persistent memory
-- **Cold** (Archive): Rarely accessed historical memory
-
-## API Documentation
-
-When the server is running, visit:
-- Swagger UI: http://localhost:8000/docs
-- ReDoc: http://localhost:8000/redoc
+---
 
 ## License
 
-MIT
+Distributed under the MIT License. See `LICENSE` for details.

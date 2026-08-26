@@ -1,6 +1,6 @@
 [
   {
-    "id": "0f0bc47a-f751-48ff-9a05-de7b0e2ad62a",
+    "id": "1aa376ec-b3e4-4bcd-b06f-759d6f32dc41",
     "title": "Done",
     "description": "",
     "owner_agent_id": "22222222-2222-2222-2222-222222222222",
@@ -8,8 +8,8 @@
     "status": "active",
     "key_results": [
       {
-        "id": "0ec39fdd-1d02-4922-b442-e65f310310b3",
-        "objective_id": "0f0bc47a-f751-48ff-9a05-de7b0e2ad62a",
+        "id": "f234af1d-65ab-47bb-bc13-0e2f9c6582b2",
+        "objective_id": "1aa376ec-b3e4-4bcd-b06f-759d6f32dc41",
         "title": "KR1",
         "target_value": 100.0,
         "current_value": 0.0,
