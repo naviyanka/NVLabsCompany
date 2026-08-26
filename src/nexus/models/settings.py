@@ -1,4 +1,4 @@
-﻿"""Company settings and user preferences models."""
+"""Company settings and user preferences models."""
 
 import uuid
 from datetime import timezone, datetime

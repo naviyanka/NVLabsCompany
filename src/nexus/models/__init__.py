@@ -41,12 +41,15 @@ from nexus.governance.circuit_breaker_model import CircuitBreakerRecord
 from nexus.models.api_key import ApiKey
 from nexus.models.user_profile import UserProfile, UserSession
 from nexus.models.heartbeat_run import HeartbeatRun
+from nexus.models.hr import PerformanceReview, TrainingCurriculum
 from nexus.runtime.checkpoint import ExecutionCheckpoint
 from nexus.models.notification import Notification, NotificationPreference
 from nexus.models.pipeline import Pipeline, PipelineRun
 from nexus.models.repository import Repository
 from nexus.models.settings import CompanySettings
+from nexus.models.workflow_run import WorkflowRun
 from nexus.models.workspace import Workspace
+from nexus.models.okr import OKRObjective, OKRKeyResult
 
 __all__ = [
     # Company / Organization
@@ -123,6 +126,8 @@ __all__ = [
     # Runtime persistence
     "ExecutionCheckpoint",
     "HeartbeatRun",
+    "PerformanceReview",
+    "TrainingCurriculum",
     # Authentication / authorization
     "UserProfile",
     "UserSession",
@@ -130,4 +135,9 @@ __all__ = [
     "ApiKey",
     # Chat
     "ChatMessage",
+    # Workflows
+    "WorkflowRun",
+    # OKR
+    "OKRObjective",
+    "OKRKeyResult",
 ]

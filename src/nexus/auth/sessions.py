@@ -64,7 +64,7 @@ async def create_session(
         browser=browser[:255],
         ip_address=ip_address[:45],
         is_current=True,
-        expires_at=now(timezone.utc) + timedelta(seconds=lifetime),
+        expires_at=utcnow() + timedelta(seconds=lifetime),
     )
     db.add(session)
     await db.flush()
@@ -87,7 +87,7 @@ async def resolve_session(db: AsyncSession, token: str) -> UserSession | None:
 
     if session is None or session.revoked_at is not None:
         return None
-    if session.expires_at is None or session.expires_at <= now(timezone.utc):
+    if session.expires_at is None or session.expires_at <= utcnow():
         return None
 
     return session
@@ -96,7 +96,7 @@ async def resolve_session(db: AsyncSession, token: str) -> UserSession | None:
 async def touch_session(db: AsyncSession, session_id: uuid.UUID) -> None:
     """Record activity on a session without extending its expiry."""
     await db.execute(
-        update(UserSession).where(UserSession.id == session_id).values(last_active_at=now(timezone.utc))
+        update(UserSession).where(UserSession.id == session_id).values(last_active_at=utcnow())
     )
 
 
@@ -105,7 +105,7 @@ async def revoke_session(db: AsyncSession, session_id: uuid.UUID) -> bool:
     result = await db.execute(
         update(UserSession)
         .where(UserSession.id == session_id, UserSession.revoked_at.is_(None))
-        .values(revoked_at=now(timezone.utc), is_current=False)
+        .values(revoked_at=utcnow(), is_current=False)
     )
     return bool(result.rowcount)
 
@@ -124,7 +124,7 @@ async def revoke_user_sessions(
     stmt = (
         update(UserSession)
         .where(UserSession.user_id == user_id, UserSession.revoked_at.is_(None))
-        .values(revoked_at=now(timezone.utc), is_current=False)
+        .values(revoked_at=utcnow(), is_current=False)
     )
     if keep_session_id is not None:
         stmt = stmt.where(UserSession.id != keep_session_id)

@@ -88,6 +88,37 @@ _rate_limiter = _SlidingWindowRateLimiter()
 _agent_rate_limiter = _SlidingWindowRateLimiter(limit=30, window_seconds=60)
 
 
+_redis_rate_limiter = None
+_redis_rate_limiter_checked = False
+
+
+def _get_redis_rate_limiter():
+    """Lazily construct the Redis-backed rate limiter when Redis is configured.
+
+    Returns None when REDIS_URL is unset/unreachable so callers fall back to
+    the in-memory limiter (single-process deployments keep working unchanged).
+    """
+    global _redis_rate_limiter, _redis_rate_limiter_checked
+    if _redis_rate_limiter_checked:
+        return _redis_rate_limiter
+    _redis_rate_limiter_checked = True
+    try:
+        from nexus.config import settings
+
+        if not settings.redis_url:
+            return None
+        from nexus.governance.redis_rate_limiter import (
+            RedisRateLimitConfig,
+            RedisRateLimiter,
+        )
+
+        limiter = RedisRateLimiter(settings.redis_url)
+        _redis_rate_limiter = limiter
+    except Exception:
+        _redis_rate_limiter = None
+    return _redis_rate_limiter
+
+
 class _BudgetTracker:
     """In-memory budget tracker that caches company spend limits.
 
@@ -115,11 +146,38 @@ class _BudgetTracker:
             self._cache_time[company_id] = time.time()
 
     def record_spend(self, company_id: uuid.UUID, cost_cents: int) -> None:
-        """Record spend against a company's budget (in-memory accumulation)."""
+        """Record spend against a company's budget.
+
+        When Redis is available, uses INCRBY for cross-worker consistency so
+        all replicas see the same spend total. Falls back to in-memory
+        accumulation otherwise (flushed to DB at shutdown).
+        """
         with self._lock:
             self._pending_spend[company_id] = self._pending_spend.get(company_id, 0) + cost_cents
             if company_id in self._cache:
                 self._cache[company_id]["spent"] += cost_cents
+
+        # Best-effort Redis sync (non-blocking fire-and-forget via task)
+        try:
+            import asyncio
+
+            asyncio.get_event_loop().create_task(
+                self._redis_incrby(company_id, cost_cents)
+            )
+        except Exception:
+            pass
+
+    async def _redis_incrby(self, company_id: uuid.UUID, cost_cents: int) -> None:
+        """Increment spend counter in Redis for cross-worker visibility."""
+        try:
+            limiter = _get_redis_rate_limiter()
+            if limiter is None:
+                return
+            redis_client = limiter._redis
+            key = f"nexus:budget:spent:{company_id}"
+            await redis_client.incrby(key, cost_cents)
+        except Exception:
+            pass
 
     def check(self, company_id: uuid.UUID, estimated_cost: int) -> bool:
         """Return True if the company can afford the estimated cost.
@@ -257,8 +315,8 @@ class GovernanceMiddleware:
         if company_id:
             scope.setdefault("state", {})["company_id"] = company_id
 
-        # 3. Rate limiting check (company-level)
-        rate_limit_remaining = self._get_rate_limit_remaining(company_id)
+        # 3. Rate limiting check (company-level; Redis-backed when configured)
+        rate_limit_remaining = await self._check_rate_limit(company_id)
         if rate_limit_remaining == 0 and company_id:
             response = JSONResponse(
                 status_code=429,
@@ -360,6 +418,38 @@ class GovernanceMiddleware:
             await send(message)
 
         await self.app(scope, receive, send_wrapper)
+
+    async def _check_rate_limit(self, company_id: uuid.UUID | None) -> int:
+        """Check the company rate limit, preferring Redis when configured.
+
+        The Redis limiter counts across processes so multi-worker deployments
+        enforce one shared quota. When Redis is not configured (or errors),
+        fall back to the in-memory sliding window — single-process behavior
+        is unchanged.
+        """
+        if company_id is None:
+            return DEFAULT_RATE_LIMIT
+
+        limiter = _get_redis_rate_limiter()
+        if limiter is not None:
+            try:
+                from nexus.governance.redis_rate_limiter import RedisRateLimitConfig
+
+                config = RedisRateLimitConfig(
+                    requests_per_minute=DEFAULT_RATE_LIMIT,
+                    requests_per_hour=DEFAULT_RATE_LIMIT * 60,
+                    burst_allowance=0,
+                )
+                result = await limiter.check_rate_limit("company", company_id, config)
+                if not result.allowed:
+                    return 0
+                return min(
+                    result.remaining_minute,
+                    DEFAULT_RATE_LIMIT,
+                )
+            except Exception:
+                pass  # fall through to in-memory limiter
+        return self._get_rate_limit_remaining(company_id)
 
     def _get_rate_limit_remaining(self, company_id: uuid.UUID | None) -> int:
         """Get the remaining rate limit for this company/request.

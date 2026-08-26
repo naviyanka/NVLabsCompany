@@ -37,23 +37,6 @@ export interface ExtendedAgent extends Agent {
   warning_threshold_pct?: number;
 }
 
-const MODEL_SPEND_DISTRIBUTION = [
-  { model: 'Claude 3.7 Sonnet (Pro)', spend: 2150, share: '50.8%', color: '#FFB020' },
-  { model: 'GPT-4o (Pro)', spend: 1420, share: '33.5%', color: '#38BDF8' },
-  { model: 'Gemini 1.5 Pro', spend: 480, share: '11.3%', color: '#22C55E' },
-  { model: 'GPT-4o-mini (Flash)', spend: 185, share: '4.4%', color: '#A855F7' },
-];
-
-const DAILY_COST_TREND = [
-  { day: 'Mon', cost: 142, tokens: 420 },
-  { day: 'Tue', cost: 185, tokens: 540 },
-  { day: 'Wed', cost: 210, tokens: 680 },
-  { day: 'Thu', cost: 195, tokens: 590 },
-  { day: 'Fri', cost: 245, tokens: 780 },
-  { day: 'Sat', cost: 120, tokens: 340 },
-  { day: 'Sun', cost: 95, tokens: 280 },
-];
-
 const DEFAULT_AGENTS: ExtendedAgent[] = [];
 
 export function Budgets() {
@@ -79,12 +62,7 @@ export function Budgets() {
         );
         const items = unwrapItems(res);
         if (items.length > 0) {
-          const formatted = items.map((a) => ({
-            ...a,
-            daily_token_limit: 300000,
-            rate_limit_strategy: 'Cascade to Flash' as const,
-            warning_threshold_pct: 80,
-          }));
+          const formatted = items.map((a) => ({ ...a }));
           setAgents(formatted);
           if (formatted[0]) setSelectedAgentId(formatted[0].id);
         }
@@ -98,13 +76,32 @@ export function Budgets() {
   const totalSpentCents = useMemo(() => agents.reduce((sum, a) => sum + (a.spent_monthly_cents || 0), 0), [agents]);
   const totalBudgetCents = useMemo(() => agents.reduce((sum, a) => sum + (a.budget_monthly_cents || 30000), 0), [agents]);
 
+  const MODEL_SPEND_DISTRIBUTION = useMemo(() => {
+    const byModel = new Map<string, number>();
+    for (const a of agents) {
+      const key = a.model || a.adapter_type || 'unknown';
+      byModel.set(key, (byModel.get(key) || 0) + (a.spent_monthly_cents || 0) / 100);
+    }
+    const entries = [...byModel.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6);
+    const total = entries.reduce((sum, [, spend]) => sum + spend, 0);
+    const colors = ['#FFB020', '#38BDF8', '#22C55E', '#A855F7', '#F472B6', '#60A5FA'];
+    return entries.map(([model, spend], i) => ({
+      model,
+      spend: Math.round(spend * 100) / 100,
+      share: total > 0 ? `${((spend / total) * 100).toFixed(1)}%` : '—',
+      color: colors[i % colors.length],
+    }));
+  }, [agents]);
+
+  const DAILY_COST_TREND: { day: string; cost: number; tokens: number }[] = [];
+
   const handleUpdateCap = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedAgentId) return;
     try {
       const cents = Math.round(Number(newCapDollars) * 100);
       await apiClient.patch(
-        `/api/v1/companies/00000000-0000-4000-8000-000000000001/agents/${selectedAgentId}`,
+        `/api/v1/companies/${getActiveCompanyId()}/agents/${selectedAgentId}`,
         { budget_monthly_cents: cents }
       );
     } catch {
@@ -160,7 +157,7 @@ export function Budgets() {
       const spent = ((a.spent_monthly_cents || 0) / 100).toFixed(2);
       const cap = ((a.budget_monthly_cents || 30000) / 100).toFixed(2);
       const pct = Math.min(100, Math.round(((a.spent_monthly_cents || 0) / (a.budget_monthly_cents || 30000)) * 100));
-      return [a.id, `"${a.name}"`, `"${a.title}"`, a.adapter_type, a.model, spent, cap, `${pct}%`, a.rate_limit_strategy || 'Cascade to Flash'];
+      return [a.id, `"${a.name}"`, `"${a.title}"`, a.adapter_type, a.model, spent, cap, `${pct}%`, a.rate_limit_strategy || '—'];
     });
     const csvStr = [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
     const blob = new Blob([csvStr], { type: 'text/csv' });
@@ -182,7 +179,7 @@ export function Budgets() {
             <h1 className="text-xl font-display font-medium text-[#F2F1EE] tracking-tight flex items-center gap-3">
               Model Economics & Token Budgets
               <span className="text-xs px-2.5 py-0.5 rounded-full font-mono bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                CASCADE ROUTING ACTIVE
+                CASCADE ROUTING SIMULATOR
               </span>
             </h1>
           </div>
@@ -268,25 +265,28 @@ export function Budgets() {
         />
         <StatCard
           label="Daily Burn Rate"
-          value="$198.40"
-          subValue="Avg per day"
-          change="-4.2% vs last week"
+          value="—"
+          subValue="No daily metrics source yet"
+          change="Awaiting daily aggregation API"
           changeType="positive"
           icon={<TrendingUp className="w-4 h-4 text-cyan-400" />}
         />
         <StatCard
           label="Cascade Savings"
-          value="$1,420"
-          subValue="Auto Flash Fallback"
-          change="Flash vs Pro caching"
+          value={(() => {
+            const saved = cascadeSavings.savedDollars;
+            return `$${saved}`;
+          })()}
+          subValue="Simulated at current settings"
+          change="From simulator below, not tracked spend"
           changeType="positive"
           icon={<Cpu className="w-4 h-4 text-[#FFB020]" />}
         />
         <StatCard
           label="Anomalous Spikes"
-          value="0 Detected"
-          subValue="24h Guardrails Active"
-          change="Nominal operation"
+          value="—"
+          subValue="Not yet monitored"
+          change="Requires incidents integration"
           changeType="positive"
           icon={<ShieldAlert className="w-4 h-4 text-purple-400" />}
         />
@@ -456,7 +456,7 @@ export function Budgets() {
                   header: 'Rate Limit Strategy',
                   render: (a) => (
                     <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-white/[0.04] text-gray-300 border border-white/[0.08]">
-                      {a.rate_limit_strategy || 'Cascade to Flash'}
+                      {a.rate_limit_strategy || '—'}
                     </span>
                   ),
                 },
@@ -597,7 +597,7 @@ export function Budgets() {
 
             <div className="p-3 bg-[#101012] border border-white/[0.06] rounded space-y-1">
               <span className="text-[10px] text-gray-500 uppercase">Rate Limit Strategy</span>
-              <div className="text-cyan-400 font-bold">{selectedAgent.rate_limit_strategy || 'Cascade to Flash'}</div>
+              <div className="text-cyan-400 font-bold">{selectedAgent.rate_limit_strategy || '—'}</div>
             </div>
 
             <div className="flex justify-end pt-2 border-t border-white/[0.08]">

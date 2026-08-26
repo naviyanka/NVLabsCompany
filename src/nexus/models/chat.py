@@ -1,4 +1,4 @@
-﻿"""Chat message model for persistent conversation history."""
+"""Chat message model for persistent conversation history."""
 
 import uuid
 from datetime import timezone, datetime

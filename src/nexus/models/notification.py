@@ -1,4 +1,4 @@
-﻿"""Notification model for platform-wide event notifications."""
+"""Notification model for platform-wide event notifications."""
 
 import uuid
 from datetime import timezone, datetime

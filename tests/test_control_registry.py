@@ -399,54 +399,54 @@ class TestControlAPI:
 
     def test_pause_endpoint(self, client: TestClient):
         """POST /control/{agent_id}/pause sets pause state."""
-        resp = client.post("/control/agent-1/pause", json={"on": True})
+        resp = client.post("/api/v1/control/agent-1/pause", json={"on": True})
         assert resp.status_code == 200
         assert resp.json() == {"ok": True}
 
         # Verify via snapshot
-        snap_resp = client.get("/control/agent-1/snapshot")
+        snap_resp = client.get("/api/v1/control/agent-1/snapshot")
         assert snap_resp.json()["paused"] is True
 
     def test_gate_tool_endpoint(self, client: TestClient):
         """POST /control/{agent_id}/gate-tool gates a tool."""
-        resp = client.post("/control/agent-1/gate-tool", json={"tool": "write_file", "on": True})
+        resp = client.post("/api/v1/control/agent-1/gate-tool", json={"tool": "write_file", "on": True})
         assert resp.status_code == 200
 
-        snap_resp = client.get("/control/agent-1/snapshot")
+        snap_resp = client.get("/api/v1/control/agent-1/snapshot")
         assert "write_file" in snap_resp.json()["gated_tools"]
 
     def test_steer_endpoint(self, client: TestClient):
         """POST /control/{agent_id}/steer adds a steer note."""
-        resp = client.post("/control/agent-1/steer", json={"text": "do X"})
+        resp = client.post("/api/v1/control/agent-1/steer", json={"text": "do X"})
         assert resp.status_code == 200
 
-        snap_resp = client.get("/control/agent-1/snapshot")
+        snap_resp = client.get("/api/v1/control/agent-1/snapshot")
         assert snap_resp.json()["pending_steers"] == 1
 
     def test_halt_endpoint(self, client: TestClient):
         """POST /control/{agent_id}/halt sets halt flag."""
-        resp = client.post("/control/agent-1/halt")
+        resp = client.post("/api/v1/control/agent-1/halt")
         assert resp.status_code == 200
 
-        snap_resp = client.get("/control/agent-1/snapshot")
+        snap_resp = client.get("/api/v1/control/agent-1/snapshot")
         assert snap_resp.json()["halted"] is True
 
     def test_resume_endpoint(self, client: TestClient):
         """POST /control/{agent_id}/resume clears pause and halt."""
-        client.post("/control/agent-1/pause", json={"on": True})
-        client.post("/control/agent-1/halt")
+        client.post("/api/v1/control/agent-1/pause", json={"on": True})
+        client.post("/api/v1/control/agent-1/halt")
 
-        resp = client.post("/control/agent-1/resume")
+        resp = client.post("/api/v1/control/agent-1/resume")
         assert resp.status_code == 200
 
-        snap_resp = client.get("/control/agent-1/snapshot")
+        snap_resp = client.get("/api/v1/control/agent-1/snapshot")
         data = snap_resp.json()
         assert data["paused"] is False
         assert data["halted"] is False
 
     def test_snapshot_endpoint_unknown_agent(self, client: TestClient):
         """GET /control/{agent_id}/snapshot for unknown agent returns defaults."""
-        resp = client.get("/control/unknown-agent/snapshot")
+        resp = client.get("/api/v1/control/unknown-agent/snapshot")
         assert resp.status_code == 200
         data = resp.json()
         assert data["paused"] is False

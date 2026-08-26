@@ -1,4 +1,4 @@
-﻿"""Incident models: incidents, events, and actions."""
+"""Incident models: incidents, events, and actions."""
 
 import uuid
 from datetime import timezone, datetime

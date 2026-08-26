@@ -41,6 +41,8 @@ EXPECTED_TABLES = {
     "group_members",
     "groups",
     "heartbeat_runs",
+    "hr_performance_reviews",
+    "hr_training_curricula",
     "incident_actions",
     "incident_events",
     "incidents",
@@ -54,6 +56,8 @@ EXPECTED_TABLES = {
     "messages",
     "notification_preferences",
     "notifications",
+    "okr_key_results",
+    "okr_objectives",
     "pipeline_runs",
     "pipelines",
     "plaza_posts",
@@ -82,6 +86,7 @@ EXPECTED_TABLES = {
     "triggers",
     "user_profiles",
     "user_sessions",
+    "workflow_runs",
     "workspaces",
 }
 

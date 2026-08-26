@@ -1,15 +1,32 @@
-"""Nodes API — workflow node registry listing and search."""
+"""Nodes API — workflow node registry listing, search, and execution."""
 
 from typing import Any
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query, status
+from pydantic import BaseModel
 
+from nexus.api.deps import CurrentCompanyId
 from nexus.nodes.registry import NodeRegistry, NodeCategory
 
 router = APIRouter(prefix="/api/v1/nodes", tags=["nodes"])
 
 # Singleton registry instance
 _registry = NodeRegistry()
+
+
+class NodeExecuteRequest(BaseModel):
+    """Parameters for executing a node."""
+
+    params: dict[str, Any] = {}
+
+
+class NodeExecuteResponse(BaseModel):
+    """Result of a node execution."""
+
+    node_id: str
+    success: bool
+    outputs: dict[str, Any] = {}
+    error: str | None = None
 
 
 @router.get("")
@@ -61,3 +78,61 @@ async def get_node(node_id: str) -> dict[str, Any]:
         from fastapi import HTTPException
         raise HTTPException(status_code=404, detail=f"Node '{node_id}' not found")
     return node.to_dict()
+
+
+@router.post("/{node_id}/execute", response_model=NodeExecuteResponse)
+async def execute_node_endpoint(
+    node_id: str,
+    body: NodeExecuteRequest,
+    company_id: CurrentCompanyId,
+) -> NodeExecuteResponse:
+    """Execute a workflow node with the supplied parameters.
+
+    Only nodes with a registered executor are executable; others answer 503 so
+    clients can distinguish "exists, not executable yet" from "not found".
+    """
+    from nexus.nodes.executor import DEFAULT_TIMEOUT_SECONDS, get_default_registry
+
+    node = _registry.get(node_id)
+    if not node:
+        raise HTTPException(status_code=404, detail=f"Node '{node_id}' not found")
+
+    registry = get_default_registry()
+    if registry.get(node_id) is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Node '{node_id}' is defined but has no executor yet",
+        )
+
+    from nexus.nodes.executor import execute_node
+
+    result = await execute_node(
+        node_id,
+        body.params,
+        registry=registry,
+        timeout_seconds=DEFAULT_TIMEOUT_SECONDS,
+    )
+
+    try:
+        from nexus.database import async_session_factory
+        from nexus.models.governance import AuditLog
+
+        async with async_session_factory() as audit_db:
+            audit_db.add(AuditLog(
+                company_id=company_id,
+                action=f"node_execute:{node_id}",
+                resource_type="node",
+                resource_id=node_id,
+                actor=str(company_id),
+                details=f"success={result.success}" + (f" error={result.error}" if result.error else ""),
+            ))
+            await audit_db.commit()
+    except Exception:
+        pass
+
+    return NodeExecuteResponse(
+        node_id=node_id,
+        success=result.success,
+        outputs=result.outputs if result.success else {},
+        error=result.error,
+    )

@@ -11,77 +11,59 @@ import { StatCard } from '@/components/common/StatCard';
 import { Button } from '@/components/common/Button';
 import { Badge } from '@/components/common/Badge';
 import { EmptyState } from '@/components/common/EmptyState';
-import { apiClient } from '@/api/client';
+import { apiClient, unwrapItems } from '@/api/client';
+import { getActiveCompanyId } from '@/config';
 
 interface GovernanceApproval {
   id: string;
   title: string;
   agent_id: string;
   risk_level: 'critical' | 'high' | 'medium' | 'low';
-  category: 'tool_execution' | 'budget_override' | 'prod_deploy';
+  category: 'tool_execution' | 'budget_override' | 'prod_deploy' | string;
   status: 'pending' | 'approved' | 'rejected';
   payload_summary: string;
   created_at: string;
 }
 
-const defaultApprovalsMock: GovernanceApproval[] = [
-  {
-    id: 'appr-1',
-    title: 'AWS Production Kubernetes Cluster Scaling (Autoscaling Min 8 -> 16 Nodes)',
-    agent_id: 'agent-bolt',
-    risk_level: 'critical',
-    category: 'prod_deploy',
-    status: 'pending',
-    payload_summary: 'Requested by Bolt-03 to handle incoming LLM inference traffic spike. Est. monthly delta: +$1,200.',
-    created_at: new Date(Date.now() - 15 * 60000).toISOString(),
-  },
-  {
-    id: 'appr-2',
-    title: 'Monthly LLM Token Budget Override Request ($400 -> $750)',
-    agent_id: 'agent-sage',
-    risk_level: 'high',
-    category: 'budget_override',
-    status: 'pending',
-    payload_summary: 'Requested by Sage-05 for fine-tuning prompt distillation matrix on 10,000 synthetic test benchmarks.',
-    created_at: new Date(Date.now() - 45 * 60000).toISOString(),
-  },
-  {
-    id: 'appr-3',
-    title: 'Execute Database Schema Migration: Add Vector Column to memory_nodes',
-    agent_id: 'agent-nova',
-    risk_level: 'medium',
-    category: 'tool_execution',
-    status: 'approved',
-    payload_summary: 'ALTER TABLE memory_nodes ADD COLUMN embedding vector(1536); Non-blocking migration script.',
-    created_at: new Date(Date.now() - 3600000 * 3).toISOString(),
-  },
-  {
-    id: 'appr-4',
-    title: 'Grant Direct Shell Exec Privileges in Sandboxed Container',
-    agent_id: 'agent-shield',
-    risk_level: 'high',
-    category: 'tool_execution',
-    status: 'rejected',
-    payload_summary: 'Rejected due to policy violation: direct interactive root shell execution is disabled in non-isolated containers.',
-    created_at: new Date(Date.now() - 3600000 * 12).toISOString(),
-  },
-];
+function mapApproval(raw: Record<string, unknown>): GovernanceApproval {
+  const status = raw.status === 'approved' ? 'approved' : raw.status === 'rejected' ? 'rejected' : 'pending';
+  const type = (raw.type || 'tool_execution') as string;
+  const payload = (raw.payload || {}) as Record<string, unknown>;
+  const envVar = payload.env_var as string | undefined;
+  return {
+    id: String(raw.id ?? ''),
+    title: envVar ? `API Key Required: ${envVar}` : type,
+    agent_id: (payload.agent_name as string) || (payload.agent_id as string) || 'unknown',
+    risk_level: ((raw.risk_level as string) || payload.risk_level || 'medium') as GovernanceApproval['risk_level'],
+    category: type,
+    status,
+    payload_summary:
+      (payload.agent_name
+        ? `Agent ${payload.agent_name} (${payload.agent_role ?? 'agent'}) needs ${envVar ?? type} to function.`
+        : Object.keys(payload).length > 0
+        ? JSON.stringify(payload).slice(0, 200)
+        : ''),
+    created_at: (raw.created_at as string) || new Date().toISOString(),
+  };
+}
 
 export function Approvals() {
-  const [approvals, setApprovals] = useState<GovernanceApproval[]>(defaultApprovalsMock);
+  const [approvals, setApprovals] = useState<GovernanceApproval[]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     let isMounted = true;
     async function loadApprovals() {
       try {
-        const res = await apiClient.get<{ items: GovernanceApproval[] }>(
-          '/api/v1/companies/00000000-0000-4000-8000-000000000001/approvals'
+        const res = await apiClient.get<Record<string, unknown>[] | { items: Record<string, unknown>[] }>(
+          `/api/v1/companies/${getActiveCompanyId()}/approvals/pending`
         );
-        if (isMounted && res?.items && res.items.length > 0) {
-          setApprovals(res.items);
+        if (isMounted) {
+          setApprovals(unwrapItems(res).map(mapApproval));
+          setLoadError(null);
         }
       } catch (err) {
-        // Silently use defaults
+        if (isMounted) setLoadError('Failed to load approvals from the backend.');
       }
     }
     loadApprovals();
@@ -91,16 +73,13 @@ export function Approvals() {
   }, []);
 
   const handleDecision = async (id: string, decision: 'approved' | 'rejected') => {
+    const action = decision === 'approved' ? 'approve' : 'reject';
     try {
-      const res = await apiClient.patch<{ message: string; approval: GovernanceApproval }>(
-        `/api/v1/companies/00000000-0000-4000-8000-000000000001/approvals/${id}`,
-        { status: decision }
-      );
-      if (res?.approval) {
-        setApprovals((prev) => prev.map((a) => (a.id === id ? res.approval : a)));
-      }
+      await apiClient.post(`/api/v1/approvals/${id}/${action}`, { decided_by: 'operator' });
+      setApprovals((prev) => prev.map((a) => (a.id === id ? { ...a, status: decision } : a)));
     } catch (err) {
       console.error('Failed to record approval decision', err);
+      setLoadError('Failed to record the decision. Please retry.');
     }
   };
 
@@ -122,6 +101,13 @@ export function Approvals() {
           </p>
         </div>
       </div>
+
+      {loadError && (
+        <div className="flex items-center gap-2 p-3 rounded-[8px] bg-amber-500/10 border border-amber-500/20 text-amber-400 text-xs font-mono">
+          <AlertTriangle className="w-4 h-4 shrink-0" />
+          {loadError}
+        </div>
+      )}
 
       {/* Metrics Row */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">

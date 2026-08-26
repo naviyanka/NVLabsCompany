@@ -143,7 +143,7 @@ async def update_company(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="No fields to update",
         )
-    updates["updated_at"] = now(timezone.utc)
+    updates["updated_at"] = utcnow()
     stmt = update(Company).where(Company.id == company_id).values(**updates)
     await db.execute(stmt)
 

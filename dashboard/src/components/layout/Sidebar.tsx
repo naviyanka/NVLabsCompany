@@ -15,8 +15,10 @@ import {
   Settings,
   Share2,
   Shield,
+  ShieldAlert,
   Sparkles,
   Target,
+  Terminal,
   TrendingUp,
   UserCheck,
   Users,
@@ -57,6 +59,7 @@ const navGroups: NavGroup[] = [
       { name: 'Pipelines', to: '/pipelines', icon: GitPullRequest },
       { name: 'Workflows', to: '/workflows', icon: Zap },
       { name: 'Node Library', to: '/nodes', icon: Boxes },
+      { name: 'Agent Terminal', to: '/terminal', icon: Terminal },
     ],
   },
   {
@@ -73,6 +76,7 @@ const navGroups: NavGroup[] = [
   {
     label: 'GOVERNANCE & DATA',
     items: [
+      { name: 'Approval Gate', to: '/approvals', icon: ShieldAlert },
       { name: 'Budgets & Limits', to: '/budgets', icon: DollarSign },
       { name: 'Evolution & Evals', to: '/evolution', icon: TrendingUp },
       { name: 'Memory Graph', to: '/memory-graph', icon: Share2 },

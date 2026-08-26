@@ -6,6 +6,11 @@
 **Scope:** Complete codebase audit of `src/nexus/` - every subsystem, every module  
 **Method:** Direct code reading, import verification, test execution, dependency analysis
 
+> **PARTIALLY STALE — last reconciled against commit `1bbad4a` on 2026-08-26.**
+> §3 findings have been worked through as Phase 2 of `docs/GAP-CLOSURE-PLAN.md`
+> (R-01..R-06) and §3.3 (CORS) is resolved. Check the gap-closure plan before
+> treating any finding here as open.
+
 ---
 
 ## Executive Summary
@@ -351,11 +356,18 @@ These are the things that would cause actual incidents if you deployed this syst
 
 **Why this matters:** You cannot operate what you cannot observe. Without metrics, the first sign of a problem is user complaints. Without tracing, debugging multi-agent interactions requires reading raw logs.
 
-### 3.3 HIGH: CORS Configuration
+### 3.3 ~~HIGH: CORS Configuration~~ ✅ RESOLVED (verified 2026-08-26, commit `1bbad4a`)
 
-Current setting: `allow_origins=["*"]`
+**This finding is stale — do not re-audit it.** `src/nexus/main.py` builds
+`allow_origins` from `settings.cors_origins` (a comma-separated allowlist), never
+`["*"]`. Tracked as F-08 in `docs/GAP-CLOSURE-PLAN.md`, which found the fix had
+already landed upstream.
 
-This allows any website to make authenticated requests to your API. In production with real user sessions, this enables CSRF-style attacks where a malicious page calls your API using the user's cookies/tokens.
+Original finding, for the record:
+
+> Current setting: `allow_origins=["*"]`
+>
+> This allows any website to make authenticated requests to your API. In production with real user sessions, this enables CSRF-style attacks where a malicious page calls your API using the user's cookies/tokens.
 
 ### 3.4 HIGH: No Horizontal Scaling Story
 

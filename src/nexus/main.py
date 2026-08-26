@@ -20,6 +20,7 @@ from nexus.api.routes.auth import router as auth_router
 from nexus.api.routes.budgets import router as budgets_router
 from nexus.api.routes.communication import router as communication_router
 from nexus.api.routes.companies import router as companies_router
+from nexus.api.routes.control import router as control_router
 from nexus.api.routes.company_sim import router as company_sim_router
 from nexus.api.routes.degradation import router as degradation_router
 from nexus.api.routes.events import router as events_router
@@ -57,6 +58,10 @@ from nexus.api.routes.hr import router as hr_router
 from nexus.api.routes.departments import router as departments_router
 from nexus.api.routes.workspaces import router as workspaces_router
 from nexus.api.routes.nodes import router as nodes_router
+from nexus.api.routes.slack_events import router as slack_events_router
+from nexus.api.routes.sso import router as sso_router
+from nexus.api.routes.scim import router as scim_router
+from nexus.api.routes.telegram_bot import router as telegram_bot_router
 from nexus.api.versioning import APIVersionMiddleware
 from nexus.config import settings
 from nexus.logging_config import RequestIDMiddleware, configure_logging
@@ -74,11 +79,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     from nexus.config import settings
     from nexus.database import async_session_factory, engine
 
-    # Startup: create tables if not using production migrations
+    # Startup: create tables only for SQLite dev databases. PostgreSQL and
+    # other production databases are managed exclusively through Alembic
+    # migrations (`alembic upgrade head` — docker-compose runs it before
+    # uvicorn), so schema drift cannot hide between create_all and the
+    # migration history.
     from sqlmodel import SQLModel
     import nexus.models  # noqa: F401 - register all models
-    async with engine.begin() as conn:
-        await conn.run_sync(SQLModel.metadata.create_all)
+    if settings.database_url.startswith("sqlite"):
+        async with engine.begin() as conn:
+            await conn.run_sync(SQLModel.metadata.create_all)
 
     # Seed default company for the dashboard
     from nexus.models._time import utcnow
@@ -375,6 +385,7 @@ app.include_router(health_router)
 app.include_router(metrics_router)
 app.include_router(auth_router)
 app.include_router(companies_router)
+app.include_router(control_router)
 app.include_router(agents_router)
 app.include_router(tasks_router)
 app.include_router(goals_router)
@@ -420,3 +431,7 @@ app.include_router(chat_router)
 app.include_router(plaza_router)
 app.include_router(workspaces_router)
 app.include_router(nodes_router)
+app.include_router(slack_events_router)
+app.include_router(sso_router)
+app.include_router(scim_router)
+app.include_router(telegram_bot_router)

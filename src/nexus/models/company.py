@@ -1,4 +1,4 @@
-﻿"""Company and organizational structure models."""
+"""Company and organizational structure models."""
 
 import uuid
 from datetime import timezone, datetime

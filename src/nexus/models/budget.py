@@ -1,4 +1,4 @@
-﻿"""Budget policies and cost tracking models."""
+"""Budget policies and cost tracking models."""
 
 import uuid
 from datetime import timezone, datetime

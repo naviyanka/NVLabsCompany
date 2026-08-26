@@ -143,7 +143,7 @@ async def update_profile(
     profile = await _own_profile(db, principal.user_id)
     for key, value in updates.items():
         setattr(profile, key, value)
-    profile.updated_at = now(timezone.utc)
+    profile.updated_at = utcnow()
     db.add(profile)
     await db.flush()
     return profile

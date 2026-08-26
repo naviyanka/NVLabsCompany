@@ -1,4 +1,4 @@
-﻿"""Agent model - the core autonomous employee entity."""
+"""Agent model - the core autonomous employee entity."""
 
 import uuid
 from datetime import timezone, datetime

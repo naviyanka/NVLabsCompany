@@ -1,4 +1,4 @@
-﻿"""Pipeline models for multi-step automated workflows."""
+"""Pipeline models for multi-step automated workflows."""
 
 import uuid
 from datetime import timezone, datetime

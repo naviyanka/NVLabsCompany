@@ -389,21 +389,3 @@ async def list_upcoming_meetings(company_id: uuid.UUID, db: DbSession, limit: in
     result = await db.execute(stmt)
     return list(result.scalars().all())
 
-
-
-@router.delete("/api/v1/meetings/{meeting_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_meeting(meeting_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId) -> None:
-    """Delete/cancel a meeting."""
-    from sqlalchemy import delete as sa_delete
-    await sa_delete(MeetingParticipant).where(MeetingParticipant.meeting_id == meeting_id)
-    await db.execute(sa_delete(Meeting).where(Meeting.id == meeting_id, Meeting.company_id == company_id))
-
-
-@router.get("/api/v1/companies/{company_id}/meetings/upcoming", response_model=list[MeetingResponse])
-async def upcoming_meetings(company_id: uuid.UUID, db: DbSession, limit: int = 10) -> Any:
-    """List upcoming scheduled meetings."""
-    from datetime import timezone, datetime
-    now = datetime.now(timezone.utc)
-    stmt = select(Meeting).where(Meeting.company_id == company_id, Meeting.status == "scheduled").order_by(Meeting.scheduled_at).limit(limit)
-    result = await db.execute(stmt)
-    return list(result.scalars().all())

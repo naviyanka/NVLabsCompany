@@ -1,4 +1,4 @@
-﻿"""Knowledge models for organizational knowledge base and experience tracking."""
+"""Knowledge models for organizational knowledge base and experience tracking."""
 
 import uuid
 from datetime import timezone, datetime

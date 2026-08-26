@@ -393,7 +393,7 @@ export function Dashboard() {
                     size="xs"
                     icon={<Play className="w-3 h-3 text-[#FFB020]" />}
                     onClick={async () => {
-                      await apiClient.post(`/api/v1/companies/00000000-0000-4000-8000-000000000001/pipelines/${pipe.id}/trigger`);
+                      await apiClient.post(`/api/v1/companies/${getActiveCompanyId()}/pipelines/${pipe.id}/trigger`);
                       setPipelines((prev) =>
                         prev.map((p) => (p.id === pipe.id ? { ...p, status: 'running' } : p))
                       );

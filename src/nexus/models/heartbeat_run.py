@@ -1,4 +1,4 @@
-﻿"""Heartbeat run model with rich process and liveness tracking."""
+"""Heartbeat run model with rich process and liveness tracking."""
 
 import uuid
 from datetime import timezone, datetime

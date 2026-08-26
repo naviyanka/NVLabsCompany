@@ -5,6 +5,7 @@ of optional system components and reports their status as full, degraded,
 or unavailable.
 """
 
+import os
 import shutil
 
 from fastapi import APIRouter
@@ -126,11 +127,54 @@ def _check_mempalace() -> dict[str, str]:
         return {"status": "unavailable", "detail": "Memory module not available"}
 
 
+def _check_temporal() -> dict[str, str]:
+    """Check durable-workflow (Temporal) availability.
+
+    The integration is intentionally optional: the worker runs out-of-process
+    (docker-compose `temporal-worker`), and the SDK import is lazy so the app
+    never depends on temporalio being installed.
+    """
+    use_temporal = os.environ.get("USE_TEMPORAL", "").lower() == "true"
+    try:
+        import temporalio  # noqa: F401
+
+        sdk = True
+    except ImportError:
+        sdk = False
+
+    if use_temporal and sdk:
+        host = os.environ.get("TEMPORAL_HOST", "localhost:7233")
+        return {"status": "full", "detail": f"Temporal enabled (worker target {host})"}
+    if use_temporal and not sdk:
+        return {
+            "status": "degraded",
+            "detail": "USE_TEMPORAL=true but temporalio package not installed",
+        }
+    return {"status": "unavailable", "detail": "Temporal disabled (USE_TEMPORAL != true)"}
+
+
+def _check_rate_limiter_backend(redis_status: dict[str, str]) -> dict[str, str]:
+    """Report which rate limiter backend the middleware is using.
+
+    Distributed (Redis) enforcement is active only when Redis itself answers;
+    otherwise requests are limited per-process in memory.
+    """
+    if redis_status["status"] == "full":
+        return {
+            "status": "full",
+            "detail": "Redis-backed sliding window shared across workers",
+        }
+    return {
+        "status": "degraded",
+        "detail": "In-memory per-process rate limiting (no reachable Redis)",
+    }
+
+
 @router.get("/system/degradation")
 async def degradation_status() -> JSONResponse:
     """Return system degradation status for all optional components.
 
-    Checks Redis, Docker, LLM, embedding, and mempalace availability.
+    Checks Redis, Docker, LLM, embedding, mempalace, and Temporal availability.
     Returns a structured JSON response with per-feature status.
 
     Status values:
@@ -143,6 +187,7 @@ async def degradation_status() -> JSONResponse:
     llm_status = _check_llm()
     embedding_status = _check_embedding()
     mempalace_status = _check_mempalace()
+    temporal_status = _check_temporal()
 
     features = {
         "redis": redis_status,
@@ -150,6 +195,8 @@ async def degradation_status() -> JSONResponse:
         "llm": llm_status,
         "embedding": embedding_status,
         "mempalace": mempalace_status,
+        "temporal": temporal_status,
+        "rate_limiter": _check_rate_limiter_backend(redis_status),
     }
 
     # Determine overall system status

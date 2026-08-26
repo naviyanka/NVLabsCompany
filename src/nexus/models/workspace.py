@@ -1,4 +1,4 @@
-﻿"""Workspace model for multi-project switching."""
+"""Workspace model for multi-project switching."""
 
 import uuid
 from datetime import timezone, datetime

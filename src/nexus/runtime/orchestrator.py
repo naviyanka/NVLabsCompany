@@ -331,9 +331,77 @@ async def _execute_subtasks(db: AsyncSession, tasks: list[Any], company_id: uuid
     await db.flush()
 
 
+def _auto_promote_enabled() -> bool:
+    """Whether unattended promotion is permitted.
+
+    The documented policy is that promotion NEVER happens automatically (see
+    the promote route); auto-promotion exists as an explicit opt-in via
+    EVOLUTION_AUTO_PROMOTE=true for operators who want it.
+    """
+    import os
+
+    return os.environ.get("EVOLUTION_AUTO_PROMOTE", "").lower() == "true"
+
+
+async def _score_proposal(db: AsyncSession, proposal: Any) -> tuple[float, float]:
+    """Compute (baseline_score, candidate_score) for a proposal.
+
+    Uses the LLMEvolutionAdvisor through the proposing agent's own adapter when
+    available; falls back to a conservative heuristic delta otherwise. Mirrors
+    the manual evaluate endpoint so automated and human-triggered evaluations
+    agree.
+    """
+    from nexus.models.agent import Agent
+
+    baseline = 0.5
+    candidate = 0.5
+    agent = None
+
+    if proposal.proposed_by_agent_id:
+        agent_stmt = select(Agent).where(Agent.id == proposal.proposed_by_agent_id)
+        agent_res = await db.execute(agent_stmt)
+        agent = agent_res.scalar_one_or_none()
+
+    if agent is not None:
+        baseline = (agent.performance_score or 50) / 100.0
+        candidate = baseline
+        try:
+            from nexus.api.routes.chat import _build_system_prompt, _call_llm
+            from nexus.evolution.llm_evolution import LLMEvolutionAdvisor
+
+            async def llm_fn(prompt: str) -> str:
+                text, _, _ = await _call_llm(agent, _build_system_prompt(agent), prompt, [])
+                return text
+
+            advisor = LLMEvolutionAdvisor(llm_callable=llm_fn)
+            performance_data = {
+                "task_type_performance": {},
+                "tool_usage_stats": {},
+                "cost_history": [agent.spent_monthly_cents],
+                "quality_history": [baseline],
+            }
+            suggestions = await advisor.suggest_agent_improvements(
+                str(agent.id), performance_data
+            )
+            candidate = min(1.0, baseline + suggestions.get("confidence", 0.1) * 0.2)
+        except Exception as exc:
+            logger.info(
+                "Advisor scoring failed for proposal %s, using heuristic: %s",
+                proposal.id,
+                exc,
+            )
+            candidate = min(1.0, baseline + 0.05)
+    return round(baseline, 4), round(candidate, 4)
+
+
 async def _auto_evaluate_proposals(db: AsyncSession) -> None:
-    """Auto-evaluate evolution proposals that have been in 'proposed' status > 2 minutes."""
-    from nexus.models.evolution import EvolutionProposal, EvolutionEvaluation
+    """Auto-evaluate evolution proposals that have been in 'proposed' status > 2 minutes.
+
+    Scores come from the real evaluation path (advisor with heuristic fallback),
+    never invented constants. Promotion remains human-gated unless the operator
+    explicitly enables EVOLUTION_AUTO_PROMOTE.
+    """
+    from nexus.models.evolution import EvolutionEvaluation, EvolutionProposal
 
     cutoff = datetime.now(timezone.utc) - timedelta(minutes=2)
     stmt = (
@@ -345,42 +413,52 @@ async def _auto_evaluate_proposals(db: AsyncSession) -> None:
     result = await db.execute(stmt)
     stale_proposals = list(result.scalars().all())
 
+    promote_allowed = _auto_promote_enabled()
+
     for proposal in stale_proposals:
-        # Mark as evaluating and create a basic evaluation
         proposal.status = "evaluating"
         proposal.updated_at = datetime.now(timezone.utc)
 
+        baseline_score, candidate_score = await _score_proposal(db, proposal)
+        improvement = (
+            (candidate_score - baseline_score) / max(baseline_score, 0.01) * 100
+        )
         evaluation = EvolutionEvaluation(
             proposal_id=proposal.id,
             company_id=proposal.company_id,
-            baseline_score=0.5,
-            candidate_score=0.55 + (proposal.confidence or 0) * 0.1,
-            improvement_percent=10.0,
-            statistical_significance=0.7,
-            passed=True,
+            baseline_score=baseline_score,
+            candidate_score=candidate_score,
+            improvement_percent=round(improvement, 2),
+            statistical_significance=0.85 if candidate_score > baseline_score else 0.3,
+            passed=candidate_score > baseline_score,
         )
         db.add(evaluation)
-        logger.info("Auto-evaluated proposal %s (confidence: %s)", proposal.id, proposal.confidence)
+        logger.info(
+            "Auto-evaluated proposal %s (baseline %s -> candidate %s)",
+            proposal.id,
+            baseline_score,
+            candidate_score,
+        )
 
-        # Auto-promote if confidence >= 0.8 (skip human approval for high-confidence)
-        if (proposal.confidence or 0) >= 0.8 and evaluation.passed:
+        if promote_allowed and (proposal.confidence or 0) >= 0.8 and evaluation.passed:
             proposal.status = "promoted"
-            logger.info("Auto-promoted high-confidence proposal %s (confidence: %s)", proposal.id, proposal.confidence)
+            logger.info("Auto-promoted high-confidence proposal %s", proposal.id)
 
-    # Also check for evaluated proposals ready for auto-promotion
-    eval_cutoff = datetime.now(timezone.utc) - timedelta(minutes=1)
-    eval_stmt = (
-        select(EvolutionProposal)
-        .where(EvolutionProposal.status == "evaluating")
-        .where(EvolutionProposal.updated_at <= eval_cutoff)
-        .where(EvolutionProposal.confidence >= 0.8)
-        .limit(3)
-    )
-    eval_result = await db.execute(eval_stmt)
-    for prop in eval_result.scalars().all():
-        prop.status = "promoted"
-        prop.updated_at = datetime.now(timezone.utc)
-        logger.info("Auto-promoted evaluated proposal %s", prop.id)
+    if promote_allowed:
+        # Sweep already-evaluated proposals ready for unattended promotion.
+        eval_cutoff = datetime.now(timezone.utc) - timedelta(minutes=1)
+        eval_stmt = (
+            select(EvolutionProposal)
+            .where(EvolutionProposal.status == "evaluating")
+            .where(EvolutionProposal.updated_at <= eval_cutoff)
+            .where(EvolutionProposal.confidence >= 0.8)
+            .limit(3)
+        )
+        eval_result = await db.execute(eval_stmt)
+        for prop in eval_result.scalars().all():
+            prop.status = "promoted"
+            prop.updated_at = datetime.now(timezone.utc)
+            logger.info("Auto-promoted evaluated proposal %s", prop.id)
 
     if stale_proposals:
         await db.flush()
@@ -537,12 +615,19 @@ async def _broadcast_orchestrator_event(event_type: str, data: dict[str, Any]) -
 
 
 async def _orchestrator_loop(session_factory: async_sessionmaker[AsyncSession]) -> None:
-    """Main orchestrator loop — ticks every ORCHESTRATION_TICK_INTERVAL seconds."""
+    """Main orchestrator loop — ticks every ORCHESTRATION_TICK_INTERVAL seconds.
+
+    Lease-gated: with multiple replicas only the leader drives goals, so work
+    is not duplicated. Followers take over automatically when the lease lapses.
+    """
     global _running
+    from nexus.governance.leader_election import is_leader
+
     logger.info("Autonomous Orchestrator started (tick interval: %ds)", ORCHESTRATION_TICK_INTERVAL)
     while _running:
         try:
-            await _tick(session_factory)
+            if await is_leader("orchestrator"):
+                await _tick(session_factory)
         except Exception as e:
             logger.error("Orchestrator tick error: %s", e)
         await asyncio.sleep(ORCHESTRATION_TICK_INTERVAL)

@@ -146,7 +146,7 @@ async def get_detected_patterns(
     from nexus.models._time import utcnow
 
     patterns = []
-    now = now(timezone.utc)
+    now = utcnow()
 
     # 1. Analyze high task failure rate pattern
     failed_stmt = select(func.count(Task.id)).where(

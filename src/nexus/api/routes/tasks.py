@@ -250,14 +250,6 @@ async def list_subtasks(task_id: uuid.UUID, db: DbSession, company_id: CurrentCo
     return list(result.scalars().all())
 
 
-@router.post(
-    "/api/v1/tasks/{task_id}/subtasks",
-    status_code=status.HTTP_201_CREATED,
-    response_model=TaskResponse,
-)
-
-
-
 @router.get("/api/v1/companies/{company_id}/tasks/stats")
 async def get_task_stats(company_id: uuid.UUID, db: DbSession) -> dict[str, Any]:
     """Task statistics: counts by status, priority, top agents."""

@@ -426,8 +426,8 @@ class TestChannelRouter:
         assert isinstance(channel, ChannelInterface)
 
     @pytest.mark.asyncio
-    async def test_slack_channel_send(self, company_id, agent_a_id):
-        """SlackChannel stores sent messages."""
+    async def test_slack_channel_send(self, company_id, agent_a_id, monkeypatch):
+        """SlackChannel posts to Slack when configured; fails honestly when not."""
         from nexus.models.communication import Message
 
         channel = SlackChannel(channel_name="#general")
@@ -440,17 +440,55 @@ class TestChannelRouter:
             priority="normal",
             delivery_route="direct",
         )
+        # No webhook_url configured -> honest failure (no fake success)
         result = await channel.send(msg)
-        assert result is True
-        assert len(channel._sent) == 1
+        assert result is False
+
+        class _Resp:
+            status_code = 200
+
+        class _Client:
+            def __init__(self, **kwargs):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                return False
+
+            async def post(self, url, json=None):
+                return _Resp()
+
+        monkeypatch.setattr("httpx.AsyncClient", _Client)
+        channel = SlackChannel(channel_name="#general", webhook_url="https://hooks.slack.com/x")
+        assert await channel.send(msg) is True
 
     @pytest.mark.asyncio
-    async def test_channel_router_register_and_route(self, company_id, agent_a_id):
+    async def test_channel_router_register_and_route(self, company_id, agent_a_id, monkeypatch):
         """ChannelRouter routes messages to registered channels."""
         from nexus.models.communication import Message
 
+        class _Resp:
+            status_code = 200
+
+        class _Client:
+            def __init__(self, **kwargs):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                return False
+
+            async def post(self, *args, **kwargs):
+                return _Resp()
+
+        monkeypatch.setattr("httpx.AsyncClient", _Client)
+
         router = ChannelRouter()
-        slack = SlackChannel(channel_name="#alerts")
+        slack = SlackChannel(channel_name="#alerts", webhook_url="https://hooks.slack.com/x")
         router.register_channel("slack", slack)
         router.add_route("urgent", "slack")
 
@@ -465,7 +503,6 @@ class TestChannelRouter:
         )
         result = await router.route_outbound(msg)
         assert result is True
-        assert len(slack._sent) == 1
 
     @pytest.mark.asyncio
     async def test_channel_router_no_matching_route(self, company_id, agent_a_id):

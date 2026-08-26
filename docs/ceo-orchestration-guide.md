@@ -1,5 +1,11 @@
 # NVLabsCompany CEO Orchestration Guide & System Manual
 
+> **STALE — do not trust status claims in this document.**
+> Last verified against commit: never. Superseded by `docs/GAP-CLOSURE-PLAN.md`
+> (verified against commit `1bbad4a`, 2026-08-26), which is the single source of
+> truth for what is actually wired. Percentages and "complete" markers below are
+> historical intent, not measured state.
+
 **Author**: NVLabs System Architecture Team  
 **Target Audience**: Navi (CEO) & Autonomous Workforce Agents  
 **Version**: 2.0 (100% Fully Wired)

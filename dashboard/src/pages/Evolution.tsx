@@ -39,11 +39,11 @@ export interface EvolutionProposal {
   title: string;
   agent_id: string;
   category: MutationCategory;
-  score_delta: number;
+  score_delta?: number;
   status: 'pending' | 'approved' | 'rejected';
-  original_prompt: string;
-  mutated_prompt: string;
-  synthetic_evals: {
+  original_prompt?: string;
+  mutated_prompt?: string;
+  synthetic_evals?: {
     passed: number;
     total: number;
     latency_delta_ms: number;
@@ -55,17 +55,6 @@ export interface EvolutionProposal {
 
 const INITIAL_PROPOSALS: EvolutionProposal[] = [];
 
-const AGENT_LIST = [
-  'Dwight (QA Lead)',
-  'Angela (Budget Auditor)',
-  'Jim (PR Reviewer)',
-  'Ryan (DevOps Lead)',
-  'Toby (Compliance Officer)',
-  'Creed (Security Specialist)',
-  'Kevin (Data Engineer)',
-  'Pam (Docs & Comms)',
-];
-
 export function Evolution() {
   const [proposals, setProposals] = useState<EvolutionProposal[]>(INITIAL_PROPOSALS);
   const [selectedProposal, setSelectedProposal] = useState<EvolutionProposal | null>(INITIAL_PROPOSALS[0] || null);
@@ -74,13 +63,17 @@ export function Evolution() {
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [viewMode, setViewMode] = useState<'queue' | 'analytics' | 'safety'>('queue');
 
+  // Live agent list for targeting mutations
+  const [agentOptions, setAgentOptions] = useState<string[]>([]);
+
   // Trigger Mutation Modal State
   const [showMutationModal, setShowMutationModal] = useState(false);
-  const [mutationAgent, setMutationAgent] = useState(AGENT_LIST[0] || 'Dwight (QA Lead)');
+  const [mutationAgent, setMutationAgent] = useState('');
   const [mutationCategory, setMutationCategory] = useState<MutationCategory>('Prompt Refinement');
   const [mutationHypothesis, setMutationHypothesis] = useState('');
   const [isSimulating, setIsSimulating] = useState(false);
   const [copiedDiff, setCopiedDiff] = useState(false);
+  const [mutationError, setMutationError] = useState<string | null>(null);
 
   useEffect(() => {
     async function loadProposals() {
@@ -95,23 +88,31 @@ export function Evolution() {
             category: prop.category || 'Prompt Refinement',
             original_prompt: prop.original_prompt || 'Execute task instructions with default reasoning.',
             mutated_prompt: prop.mutated_prompt || 'Enforce structured verification checksums and zero-error static checks.',
-            synthetic_evals: prop.synthetic_evals || {
-              passed: 192,
-              total: 200,
-              latency_delta_ms: -35,
-              token_saving_pct: 11.2,
-              p_value: 0.0005,
-            },
           }));
           setProposals(formatted);
           if (!selectedProposal) setSelectedProposal(formatted[0] || null);
         }
       } catch {
-        // Fallback to initial mock proposals
+        // Leave the queue empty — no fabricated proposals.
       }
     }
     loadProposals();
   }, [selectedProposal]);
+
+  useEffect(() => {
+    async function loadAgents() {
+      try {
+        const res = await apiClient.get<{ name: string }[] | { items: { name: string }[] }>(
+          `/api/v1/companies/${getActiveCompanyId()}/agents`
+        );
+        const items = unwrapItems(res);
+        setAgentOptions(items.map((a) => a.name));
+      } catch {
+        setAgentOptions([]);
+      }
+    }
+    loadAgents();
+  }, []);
 
   const handleDecision = async (proposalId: string, status: 'approved' | 'rejected') => {
     try {
@@ -130,39 +131,45 @@ export function Evolution() {
     }
   };
 
-  const handleRunMutation = (e: React.FormEvent) => {
+  const handleRunMutation = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!mutationHypothesis.trim()) return;
 
     setIsSimulating(true);
-    setTimeout(() => {
-      const newId = `evo-${Math.floor(Math.random() * 9000) + 1000}`;
-      const scoreDelta = Math.round((Math.random() * 15 + 8) * 10) / 10;
+    setMutationError(null);
+    try {
+      const created = await apiClient.post<Record<string, unknown>>(
+        `/api/v1/companies/${getActiveCompanyId()}/evolution/proposals`,
+        {
+          proposal_type: 'prompt_mutation',
+          title: mutationHypothesis,
+          description: mutationHypothesis,
+          expected_impact: mutationCategory,
+          confidence: 0.5,
+          risk_level: 'medium',
+          estimated_cost_cents: 0,
+        }
+      );
       const newProposal: EvolutionProposal = {
-        id: newId,
-        title: mutationHypothesis,
-        agent_id: mutationAgent,
+        id: String(created.id ?? `evo-${Date.now()}`),
+        title: (created.title as string) || mutationHypothesis,
+        agent_id: mutationAgent || 'unassigned',
         category: mutationCategory,
-        score_delta: scoreDelta,
         status: 'pending',
-        original_prompt: `Execute ${mutationCategory.toLowerCase()} tasks with standard prompt context.`,
-        mutated_prompt: `${mutationHypothesis}. Enforce strict verification checksums and output validation.`,
-        synthetic_evals: {
-          passed: Math.floor(Math.random() * 10) + 190,
-          total: 200,
-          latency_delta_ms: -Math.floor(Math.random() * 50 + 20),
-          token_saving_pct: Math.round((Math.random() * 10 + 8) * 10) / 10,
-          p_value: 0.0003,
-        },
-        created_at: new Date().toISOString(),
+        original_prompt: 'Current prompt pending baseline capture.',
+        mutated_prompt: (created.description as string) || mutationHypothesis,
+        created_at: (created.created_at as string) || new Date().toISOString(),
       };
 
       setProposals((prev) => [newProposal, ...prev]);
       setSelectedProposal(newProposal);
-      setIsSimulating(false);
       setShowMutationModal(false);
       setMutationHypothesis('');
-    }, 1000);
+    } catch {
+      setMutationError('Failed to create the proposal on the backend. Please retry.');
+    } finally {
+      setIsSimulating(false);
+    }
   };
 
   // Filtered proposals
@@ -180,29 +187,23 @@ export function Evolution() {
   const approvedCount = proposals.filter((p) => p.status === 'approved').length;
   const avgLift = useMemo(() => {
     const approved = proposals.filter((p) => p.status === 'approved');
-    if (approved.length === 0) return '+14.2%';
-    const avg = approved.reduce((acc, curr) => acc + curr.score_delta, 0) / approved.length;
+    if (approved.length === 0) return '—';
+    const avg = approved.reduce((acc, curr) => acc + (curr.score_delta || 0), 0) / approved.length;
     return `+${avg.toFixed(1)}%`;
   }, [proposals]);
 
   // Chart Data Preparation
-  const progressionData = [
-    { generation: 'Gen 1', accuracy: 78.4, tokenEfficiency: 65 },
-    { generation: 'Gen 2', accuracy: 82.1, tokenEfficiency: 72 },
-    { generation: 'Gen 3', accuracy: 86.5, tokenEfficiency: 79 },
-    { generation: 'Gen 4', accuracy: 91.2, tokenEfficiency: 86 },
-    { generation: 'Gen 5 (Current)', accuracy: 95.8, tokenEfficiency: 92 },
-  ];
+  const progressionData: { generation: string; accuracy: number; tokenEfficiency: number }[] = [];
 
   const agentLiftChartData = useMemo(() => {
-    return AGENT_LIST.slice(0, 5).map((agent) => {
+    return agentOptions.slice(0, 5).map((agent) => {
       const prop = proposals.find((p) => p.agent_id === agent);
       return {
         name: (agent || 'Agent').split(' ')[0],
-        lift: prop ? prop.score_delta : Math.floor(Math.random() * 10) + 10,
+        lift: prop ? prop.score_delta || 0 : 0,
       };
     });
-  }, [proposals]);
+  }, [proposals, agentOptions]);
 
   const handleCopyDiff = useCallback(() => {
     if (!selectedProposal) return;
@@ -348,7 +349,7 @@ export function Evolution() {
               >
                 All
               </button>
-              {AGENT_LIST.slice(0, 4).map((ag) => (
+              {agentOptions.slice(0, 4).map((ag) => (
                 <button
                   key={ag}
                   onClick={() => setSelectedAgent(ag)}
@@ -416,7 +417,7 @@ export function Evolution() {
 
                         <div className="mt-3 flex items-center justify-between text-[11px] font-mono text-[#6B6B6E]">
                           <span className="text-gray-300 font-medium">{(prop.agent_id || 'Agent').split(' ')[0]}</span>
-                          <span className="text-emerald-400 font-bold">+{prop.score_delta}% Accuracy</span>
+                          <span className="text-emerald-400 font-bold">+{prop.score_delta ?? '—'}% Accuracy</span>
                         </div>
                       </div>
                     );
@@ -513,6 +514,7 @@ export function Evolution() {
                     </div>
 
                     {/* Synthetic Evals Grid */}
+                    {selectedProposal.synthetic_evals ? (
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-xs font-mono">
                       <div className="p-3 bg-[#101012] border border-white/[0.06] rounded-[6px]">
                         <div className="text-[10px] text-[#6B6B6E] uppercase">Eval Pass Rate</div>
@@ -542,6 +544,11 @@ export function Evolution() {
                         </div>
                       </div>
                     </div>
+                    ) : (
+                      <div className="p-3 bg-[#101012] border border-white/[0.06] rounded-[6px] text-[11px] font-mono text-[#6B6B6E]">
+                        No evaluation results yet — run the A/B evaluation to populate pass rate, latency delta, token saving, and p-value.
+                      </div>
+                    )}
                   </div>
                 </Card>
               ) : (
@@ -634,7 +641,7 @@ export function Evolution() {
                   <span className="text-white font-bold">{p.title}</span>
                   <div className="text-gray-400 text-[10px]">Target: {p.agent_id} · Category: {p.category}</div>
                 </div>
-                <div className="text-emerald-400 font-bold text-xs">+{p.score_delta}% Lift</div>
+                <div className="text-emerald-400 font-bold text-xs">+{p.score_delta ?? '—'}% Lift</div>
               </div>
             ))}
           </div>
@@ -648,6 +655,11 @@ export function Evolution() {
         title="Trigger Autonomous Mutation Run"
       >
         <form onSubmit={handleRunMutation} className="space-y-4">
+          {mutationError && (
+            <div className="p-2.5 bg-rose-500/10 border border-rose-500/20 text-rose-300 rounded text-xs font-mono">
+              {mutationError}
+            </div>
+          )}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-mono text-[#A8A8AB] uppercase mb-1">
@@ -658,7 +670,8 @@ export function Evolution() {
                 onChange={(e) => setMutationAgent(e.target.value)}
                 className="w-full px-3 py-2 bg-[#141416] border border-white/[0.12] rounded-[6px] text-xs text-[#F2F1EE] focus:outline-none focus:border-[#FFB020]"
               >
-                {AGENT_LIST.map((a) => (
+                {agentOptions.length === 0 && <option value="">No agents available</option>}
+                {agentOptions.map((a) => (
                   <option key={a} value={a}>{a}</option>
                 ))}
               </select>

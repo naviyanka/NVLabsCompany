@@ -53,7 +53,36 @@ const CATEGORY_COLORS: Record<string, string> = {
   'API Contracts': 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20',
 };
 
+interface RagSearchHit {
+  chunk_id: string;
+  page_id: string;
+  content: string;
+  chunk_index: number;
+  metadata?: Record<string, unknown> | null;
+  score?: number | null;
+}
+
+interface RagResult {
+  doc: KnowledgeDoc;
+  score: number | null;
+  chunkIndex: number;
+  matchSnippet: string;
+}
+
 const INITIAL_DOCS: KnowledgeDoc[] = [];
+
+/** Fill only the fields the API omits, without inventing counts or dates. */
+function normalizeDoc(doc: KnowledgeDoc): KnowledgeDoc {
+  return {
+    ...doc,
+    version: doc.version || '—',
+    author: doc.author || '—',
+    chunks: doc.chunks ?? 0,
+    tags: doc.tags ?? [],
+    refCount: doc.refCount ?? 0,
+    created_at: doc.created_at || '',
+  };
+}
 
 export function KnowledgeBase() {
   const [docs, setDocs] = useState<KnowledgeDoc[]>(INITIAL_DOCS);
@@ -67,14 +96,17 @@ export function KnowledgeBase() {
 
   // RAG Semantic Query Tester State
   const [ragQuery, setRagQuery] = useState('');
-  const [ragResults, setRagResults] = useState<{ doc: KnowledgeDoc; score: number; matchSnippet: string }[]>([]);
+  const [ragResults, setRagResults] = useState<RagResult[]>([]);
   const [isSearchingRag, setIsSearchingRag] = useState(false);
+  const [ragError, setRagError] = useState<string | null>(null);
 
   // New Doc Form
   const [newTitle, setNewTitle] = useState('');
   const [newCategory, setNewCategory] = useState('Architecture');
   const [newContent, setNewContent] = useState('');
   const [newTags, setNewTags] = useState('');
+  const [createError, setCreateError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   // Fetch initial knowledge docs from API
   useEffect(() => {
@@ -83,20 +115,11 @@ export function KnowledgeBase() {
         const res = await apiClient.get<KnowledgeDoc[] | { items: KnowledgeDoc[] }>(
           `/api/v1/companies/${getActiveCompanyId()}/knowledge`
         );
-        const items = unwrapItems(res);
-        if (items.length > 0) {
-          const formatted = items.map((doc, i) => ({
-            ...doc,
-            version: doc.version || 'v1.0',
-            chunks: doc.chunks || Math.floor(Math.random() * 10) + 5,
-            tags: doc.tags || ['Core', doc.category],
-            refCount: doc.refCount || Math.floor(Math.random() * 100) + 20,
-            created_at: doc.created_at || new Date(Date.now() - i * 86400000).toISOString(),
-          }));
-          setDocs(formatted);
-        }
+        setDocs(unwrapItems(res).map(normalizeDoc));
+        setLoadError(null);
       } catch {
-        // Fallback to initial mock playbooks
+        setDocs([]);
+        setLoadError('Could not load the knowledge base — the API is unreachable.');
       }
     }
     loadDocs();
@@ -112,79 +135,61 @@ export function KnowledgeBase() {
           title: newTitle,
           category: newCategory,
           content: newContent,
-          author: 'Operator',
-          version: 'v1.0',
-          chunks: Math.ceil(newContent.length / 150),
           tags: newTags ? newTags.split(',').map((t) => t.trim()) : [newCategory],
         }
       );
-      const newDoc: KnowledgeDoc = {
-        ...created,
-        id: created.id || `kb-${Date.now()}`,
-        version: 'v1.0',
-        chunks: Math.ceil(newContent.length / 150),
-        tags: newTags ? newTags.split(',').map((t) => t.trim()) : [newCategory],
-        refCount: 0,
-        created_at: new Date().toISOString(),
-      };
-      setDocs((prev) => [newDoc, ...prev]);
+      setDocs((prev) => [normalizeDoc(created), ...prev]);
       setShowModal(false);
       setNewTitle('');
       setNewContent('');
       setNewTags('');
+      setCreateError(null);
     } catch {
-      // Local fallback creation
-      const localDoc: KnowledgeDoc = {
-        id: `kb-${Date.now()}`,
-        title: newTitle,
-        category: newCategory,
-        content: newContent,
-        author: 'Operator (Local)',
-        version: 'v1.0',
-        chunks: Math.ceil(newContent.length / 150),
-        tags: newTags ? newTags.split(',').map((t) => t.trim()) : [newCategory],
-        refCount: 1,
-        created_at: new Date().toISOString(),
-      };
-      setDocs((prev) => [localDoc, ...prev]);
-      setShowModal(false);
-      setNewTitle('');
-      setNewContent('');
-      setNewTags('');
+      setCreateError('Publish failed — the document was not saved. Check the API connection.');
     }
   };
 
-  // Perform RAG Semantic Vector Search Simulation
-  const handleRagSearch = useCallback((query: string) => {
+  // Run the real backend RAG search (BM25 + vector) over indexed chunks
+  const handleRagSearch = useCallback(async (query: string) => {
     setRagQuery(query);
+    setRagError(null);
     if (!query.trim()) {
       setRagResults([]);
       return;
     }
 
     setIsSearchingRag(true);
-    setTimeout(() => {
-      const q = query.toLowerCase();
-      const scored = docs.map((doc) => {
-        let score = 0.45 + Math.random() * 0.2; // Base score
-        const text = `${doc.title} ${doc.content} ${doc.category} ${doc.tags.join(' ')}`.toLowerCase();
-        
-        q.split(/\s+/).forEach((word) => {
-          if (text.includes(word)) score += 0.15;
-        });
-        score = Math.min(score, 0.994);
-
-        return {
-          doc,
-          score: Math.round(score * 1000) / 10,
-          matchSnippet: doc.content.slice(0, 140) + '...',
-        };
-      });
-
-      scored.sort((a, b) => b.score - a.score);
-      setRagResults(scored.slice(0, 4));
+    try {
+      const hits = await apiClient.post<RagSearchHit[]>(
+        `/api/v1/companies/${getActiveCompanyId()}/knowledge/search`,
+        { query, top_k: 8 }
+      );
+      const byPage = new Map(docs.map((d) => [d.id, d]));
+      setRagResults(
+        (hits ?? []).map((hit) => ({
+          doc: byPage.get(hit.page_id) ?? {
+            id: hit.page_id,
+            title: 'Unindexed page',
+            category: '—',
+            content: hit.content,
+            author: '—',
+            version: '—',
+            chunks: 0,
+            tags: [],
+            refCount: 0,
+            created_at: '',
+          },
+          score: hit.score ?? null,
+          chunkIndex: hit.chunk_index,
+          matchSnippet: hit.content.slice(0, 240),
+        }))
+      );
+    } catch {
+      setRagResults([]);
+      setRagError('Search failed — the knowledge search endpoint is unreachable.');
+    } finally {
       setIsSearchingRag(false);
-    }, 400);
+    }
   }, [docs]);
 
   // Extract unique tags across all documents
@@ -330,6 +335,12 @@ export function KnowledgeBase() {
           icon={<FileText className="w-4 h-4 text-emerald-400" />}
         />
       </div>
+
+      {loadError && (
+        <div className="p-3 bg-rose-500/10 border border-rose-500/20 rounded-[8px] text-xs font-mono text-rose-400">
+          {loadError}
+        </div>
+      )}
 
       {/* View Mode Content */}
       {viewMode === 'catalog' && (
@@ -504,13 +515,25 @@ export function KnowledgeBase() {
           {ragQuery && (
             <div className="space-y-3">
               <div className="flex items-center justify-between font-mono text-xs text-gray-400">
-                <span>Top RAG Vector Chunk Matches for "{ragQuery}":</span>
+                <span>Top RAG chunk matches for "{ragQuery}":</span>
                 <span>{ragResults.length} Chunks Retrieved</span>
               </div>
 
+              {ragError && (
+                <div className="p-3 bg-rose-500/10 border border-rose-500/20 rounded-[8px] text-xs font-mono text-rose-400">
+                  {ragError}
+                </div>
+              )}
+
+              {!ragError && !isSearchingRag && ragResults.length === 0 && (
+                <div className="p-3 bg-white/[0.03] border border-white/[0.08] rounded-[8px] text-xs font-mono text-gray-400">
+                  No indexed chunks matched this query.
+                </div>
+              )}
+
               {ragResults.map((res, idx) => (
                 <div
-                  key={res.doc.id}
+                  key={`${res.doc.id}-${res.chunkIndex}`}
                   onClick={() => setSelectedDoc(res.doc)}
                   className="p-4 bg-[#141416] border border-white/[0.08] hover:border-[#FFB020]/40 rounded-[10px] transition-all cursor-pointer flex flex-col md:flex-row md:items-center justify-between gap-4 group"
                 >
@@ -531,10 +554,10 @@ export function KnowledgeBase() {
 
                   <div className="shrink-0 flex md:flex-col items-end justify-between gap-2 border-t md:border-t-0 pt-2 md:pt-0 border-white/[0.06]">
                     <div className="px-3 py-1 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded text-xs font-mono font-bold">
-                      {res.score}% Vector Match
+                      {res.score !== null ? `score ${res.score.toFixed(3)}` : 'score —'}
                     </div>
                     <span className="text-[10px] font-mono text-gray-500">
-                      {res.doc.chunks} Chunks · {res.doc.version}
+                      chunk #{res.chunkIndex} · {res.doc.version}
                     </span>
                   </div>
                 </div>
@@ -645,6 +668,11 @@ export function KnowledgeBase() {
       {/* Publish Ground-Truth Doc Modal */}
       <Modal isOpen={showModal} onClose={() => setShowModal(false)} title="Publish Ground-Truth Document">
         <form onSubmit={handleCreateDoc} className="space-y-4">
+          {createError && (
+            <div className="p-3 bg-rose-500/10 border border-rose-500/20 rounded-[8px] text-xs font-mono text-rose-400">
+              {createError}
+            </div>
+          )}
           <div>
             <label className="block text-xs font-mono text-[#A8A8AB] uppercase mb-1">
               Document Title

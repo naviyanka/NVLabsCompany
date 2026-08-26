@@ -1,4 +1,4 @@
-﻿"""Goal, Project, and Task models for work management."""
+"""Goal, Project, and Task models for work management."""
 
 import uuid
 from datetime import timezone, datetime

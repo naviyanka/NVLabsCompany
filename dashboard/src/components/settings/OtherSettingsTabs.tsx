@@ -11,6 +11,7 @@ import { BackupRestoreTab } from './tabs/BackupRestoreTab';
 import { AuditLogsTab } from './tabs/AuditLogsTab';
 import { AdvancedCliToolsTab } from './tabs/AdvancedCliToolsTab';
 import { AgentBudgetsBillingTab } from './tabs/AgentBudgetsBillingTab';
+import { ThemeTab } from './tabs/ThemeTab';
 import { ProfileSettingsTab } from './ProfileSettingsTab';
 
 interface OtherSettingsTabProps {
@@ -45,6 +46,7 @@ export function OtherSettingsTabs({ activeTab, onSaveToast }: OtherSettingsTabPr
     case 'billing':
       return <AgentBudgetsBillingTab onSaveToast={onSaveToast} />;
     case 'appearance':
+      return <ThemeTab onSaveToast={onSaveToast} />;
     case 'teams':
     case 'roles':
       return <DataAuditTab activeTab={activeTab} onSaveToast={onSaveToast} />;

@@ -42,252 +42,9 @@ export interface TrainingCurriculum {
   category: string;
 }
 
-const DEFAULT_CURRICULA: TrainingCurriculum[] = [
-  {
-    id: 'train-1',
-    title: 'Sub-Zero Hallucination Grounding Protocol',
-    target_agent: 'Atlas-01',
-    status: 'in_training',
-    progress: 68,
-    benchmark_lift: '+18.4% Precision',
-    category: 'Hallucination Mitigation',
-  },
-  {
-    id: 'train-2',
-    title: 'Advanced AST Refactoring & Code Mutation',
-    target_agent: 'Bolt-03',
-    status: 'in_training',
-    progress: 85,
-    benchmark_lift: '+24.1% Merge Rate',
-    category: 'Code Synthesis',
-  },
-  {
-    id: 'train-3',
-    title: 'Zero-Trust Threat Vector Modeling',
-    target_agent: 'Shield-07',
-    status: 'graduated',
-    progress: 100,
-    benchmark_lift: '+31.0% Exploit Detection',
-    category: 'Security & QA',
-  },
-  {
-    id: 'train-4',
-    title: 'Multi-Agent Consensus & Debate Arbitration',
-    target_agent: 'Sage-05',
-    status: 'in_training',
-    progress: 42,
-    benchmark_lift: '+14.8% Reasoning SLA',
-    category: 'Reasoning & Alignment',
-  },
-  {
-    id: 'train-5',
-    title: '3D WebGL Shader Optimization & Physics',
-    target_agent: 'Pixel-04',
-    status: 'graduated',
-    progress: 100,
-    benchmark_lift: '+40.0% FPS Stability',
-    category: 'Graphics Physics',
-  },
-];
-
-const DEFAULT_HR_AGENTS: ExtendedAgentHR[] = [
-  {
-    id: 'agent-atlas',
-    company_id: '00000000-0000-4000-8000-000000000001',
-    name: 'Atlas-01',
-    title: 'Chief Executive Officer',
-    role: 'ceo',
-    department_id: 'dept-exec',
-    team_id: null,
-    manager_id: null,
-    status: 'active',
-    adapter_type: 'anthropic',
-    model: 'claude-3-7-sonnet',
-    capabilities: ['strategy', 'leadership', 'resource_allocation'],
-    responsibilities: 'Executive oversight',
-    objectives: 'Company velocity',
-    budget_monthly_cents: 50000,
-    spent_monthly_cents: 18450,
-    performance_score: 98,
-    soul_description: 'Strategic vision and workforce alignment',
-    last_heartbeat_at: new Date().toISOString(),
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-    eval_score: 98,
-    certifications: ['Executive Leadership v3', 'Resource Router Certification'],
-    last_appraisal_notes: 'Exceeds SLA targets across multi-squad dispatch.',
-    training_status: 'Graduated',
-    competencies: [
-      { category: 'Architecture & Strategy', score: 99 },
-      { category: 'Resource Routing', score: 96 },
-      { category: 'Consensus Arbitration', score: 97 },
-    ],
-  },
-  {
-    id: 'agent-nova',
-    company_id: '00000000-0000-4000-8000-000000000001',
-    name: 'Nova-02',
-    title: 'Chief Technology Officer',
-    role: 'cto',
-    department_id: 'dept-eng',
-    team_id: null,
-    manager_id: 'agent-atlas',
-    status: 'active',
-    adapter_type: 'anthropic',
-    model: 'claude-3-7-sonnet',
-    capabilities: ['architecture', 'microservices', 'git_flow'],
-    responsibilities: 'Tech leadership',
-    objectives: 'Decoupled systems',
-    budget_monthly_cents: 40000,
-    spent_monthly_cents: 22100,
-    performance_score: 96,
-    soul_description: 'Architectural precision and system elegance',
-    last_heartbeat_at: new Date().toISOString(),
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-    eval_score: 96,
-    certifications: ['Distributed Systems Master', 'AST Refactoring v2'],
-    last_appraisal_notes: 'Flawless design decoupling across backend microservices.',
-    training_status: 'Graduated',
-    competencies: [
-      { category: 'System Architecture', score: 98 },
-      { category: 'Code Quality SLA', score: 95 },
-      { category: 'Refactoring Velocity', score: 96 },
-    ],
-  },
-  {
-    id: 'agent-bolt',
-    company_id: '00000000-0000-4000-8000-000000000001',
-    name: 'Bolt-03',
-    title: 'Senior Backend Engineer',
-    role: 'engineer',
-    department_id: 'dept-eng',
-    team_id: 'team-backend',
-    manager_id: 'agent-nova',
-    status: 'active',
-    adapter_type: 'openai',
-    model: 'gpt-4o',
-    capabilities: ['nodejs', 'express', 'postgresql'],
-    responsibilities: 'Backend microservices',
-    objectives: 'Fast APIs',
-    budget_monthly_cents: 30000,
-    spent_monthly_cents: 14200,
-    performance_score: 94,
-    soul_description: 'Rapid implementation and resilient APIs',
-    last_heartbeat_at: new Date().toISOString(),
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-    eval_score: 94,
-    certifications: ['Backend Async Expert', 'Postgres Vector Tuning'],
-    last_appraisal_notes: 'Currently undergoing AST Refactoring evaluation track.',
-    training_status: 'In Training',
-    competencies: [
-      { category: 'API Throughput', score: 96 },
-      { category: 'Query Optimization', score: 92 },
-      { category: 'Error Handling', score: 94 },
-    ],
-  },
-  {
-    id: 'agent-pixel',
-    company_id: '00000000-0000-4000-8000-000000000001',
-    name: 'Pixel-04',
-    title: 'Frontend & 3D Specialist',
-    role: 'engineer',
-    department_id: 'dept-eng',
-    team_id: 'team-frontend',
-    manager_id: 'agent-nova',
-    status: 'active',
-    adapter_type: 'openai',
-    model: 'gpt-4o',
-    capabilities: ['react', 'threejs', 'tailwind'],
-    responsibilities: '3D UI',
-    objectives: 'Smooth interfaces',
-    budget_monthly_cents: 25000,
-    spent_monthly_cents: 9800,
-    performance_score: 92,
-    soul_description: 'Visual crafting and 60fps interaction design',
-    last_heartbeat_at: new Date().toISOString(),
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-    eval_score: 92,
-    certifications: ['Three.js Graphics Specialist', 'Tailwind Micro-animations'],
-    last_appraisal_notes: 'Graduated from WebGL shader optimization track with +40% FPS stability.',
-    training_status: 'Graduated',
-    competencies: [
-      { category: 'UI Aesthetics', score: 98 },
-      { category: 'WebGL Shader Math', score: 91 },
-      { category: 'Component Modularization', score: 93 },
-    ],
-  },
-  {
-    id: 'agent-sage',
-    company_id: '00000000-0000-4000-8000-000000000001',
-    name: 'Sage-05',
-    title: 'AI Research Lead',
-    role: 'researcher',
-    department_id: 'dept-ai',
-    team_id: 'team-eval',
-    manager_id: 'agent-atlas',
-    status: 'idle',
-    adapter_type: 'anthropic',
-    model: 'claude-3-7-sonnet',
-    capabilities: ['evals', 'prompt_tuning', 'rag'],
-    responsibilities: 'Research',
-    objectives: 'Prompt tuning',
-    budget_monthly_cents: 40000,
-    spent_monthly_cents: 18900,
-    performance_score: 97,
-    soul_description: 'Deep reasoning, hallucination reduction, and evaluation science',
-    last_heartbeat_at: new Date().toISOString(),
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-    eval_score: 97,
-    certifications: ['Hallucination Grounding v4', 'RAG Vector Master'],
-    last_appraisal_notes: 'Enrolled in Sub-Zero Grounding Protocol training track.',
-    training_status: 'In Training',
-    competencies: [
-      { category: 'RAG Retrieval Precision', score: 99 },
-      { category: 'Prompt Mutation', score: 96 },
-      { category: 'Hallucination Mitigation', score: 96 },
-    ],
-  },
-  {
-    id: 'agent-shield',
-    company_id: '00000000-0000-4000-8000-000000000001',
-    name: 'Shield-07',
-    title: 'Security & QA Auditor',
-    role: 'qa',
-    department_id: 'dept-ops',
-    team_id: 'team-qa-sec',
-    manager_id: 'agent-forge',
-    status: 'active',
-    adapter_type: 'openai',
-    model: 'gpt-4o-mini',
-    capabilities: ['security', 'audits', 'penetration_test'],
-    responsibilities: 'Audits',
-    objectives: 'Zero bugs',
-    budget_monthly_cents: 15000,
-    spent_monthly_cents: 7200,
-    performance_score: 93,
-    soul_description: 'Vulnerability discovery and compliance verification',
-    last_heartbeat_at: new Date().toISOString(),
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-    eval_score: 93,
-    certifications: ['Zero-Trust Auditor v1', 'Static Analysis Specialist'],
-    last_appraisal_notes: 'Graduated from Zero-Trust Threat Vector track with +31% exploit detection.',
-    training_status: 'Graduated',
-    competencies: [
-      { category: 'Threat Vector Analysis', score: 97 },
-      { category: 'Static Code Audit', score: 94 },
-      { category: 'Compliance Enforcement', score: 92 },
-    ],
-  },
-];
-
 export function HRRoom() {
-  const [agents, setAgents] = useState<ExtendedAgentHR[]>(DEFAULT_HR_AGENTS);
-  const [curricula, setCurricula] = useState<TrainingCurriculum[]>(DEFAULT_CURRICULA);
+  const [agents, setAgents] = useState<ExtendedAgentHR[]>([]);
+  const [curricula, setCurricula] = useState<TrainingCurriculum[]>([]);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [viewMode, setViewMode] = useState<'academy' | 'ledger' | 'certifications'>('academy');
@@ -296,7 +53,7 @@ export function HRRoom() {
 
   // New Curriculum Modal State
   const [newTitle, setNewTitle] = useState('');
-  const [newAgent, setNewAgent] = useState('Atlas-01');
+  const [newAgent, setNewAgent] = useState('');
   const [newCategory, setNewCategory] = useState('Code Synthesis');
 
   // Appraisal Form State inside Drawer
@@ -312,59 +69,98 @@ export function HRRoom() {
         );
         const items = unwrapItems(res);
         if (items.length > 0) {
-          const merged = items.map((apiAgent) => {
-            const match = DEFAULT_HR_AGENTS.find((d) => d.name === apiAgent.name || d.id === apiAgent.id);
-            return {
-              ...apiAgent,
-              eval_score: apiAgent.performance_score || match?.eval_score || 95,
-              certifications: match?.certifications || ['Standard Operator v1'],
-              last_appraisal_notes: match?.last_appraisal_notes || 'Nominal operational SLA performance.',
-              training_status: match?.training_status || 'Graduated',
-              competencies: match?.competencies || [
-                { category: 'Task Execution', score: 95 },
-                { category: 'API Integration', score: 94 },
-              ],
-            };
-          });
-          setAgents(merged);
+          setAgents(items.map((apiAgent) => ({ ...apiAgent })));
         }
       } catch {
-        // Silently keep default HR agents list
+        // Leave the roster empty — no fabricated agents.
       }
     }
     loadAgents();
   }, []);
 
-  const handleEnroll = (e: React.FormEvent) => {
+  useEffect(() => {
+    async function loadCurricula() {
+      try {
+        const res = await apiClient.get<
+          Array<TrainingCurriculum & { target_agent_id: string }> | { items: Array<TrainingCurriculum & { target_agent_id: string }> }
+        >(`/api/v1/companies/${getActiveCompanyId()}/hr/curricula`);
+        const rows = unwrapItems(res);
+        const nameById = new Map(agents.map((a) => [a.id, a.name]));
+        setCurricula(
+          rows.map((row) => ({
+            ...row,
+            target_agent: nameById.get(row.target_agent_id) || row.target_agent_id,
+          }))
+        );
+      } catch {
+        // No persisted curricula yet.
+      }
+    }
+    if (agents.length > 0) loadCurricula();
+  }, [agents]);
+
+  const handleEnroll = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newTitle.trim()) return;
-    const item: TrainingCurriculum = {
-      id: `train-${Date.now()}`,
-      title: newTitle,
-      target_agent: newAgent,
-      status: 'in_training',
-      progress: 15,
-      benchmark_lift: '+15.0% Accuracy Lift',
-      category: newCategory,
-    };
-    setCurricula((prev) => [item, ...prev]);
-    setShowModal(false);
-    setNewTitle('');
+    const target = agents.find((a) => a.name === newAgent || a.id === newAgent);
+    if (!target) return;
+    try {
+      const created = await apiClient.post<{
+        id: string;
+        title: string;
+        category: string;
+        status: string;
+        progress: number;
+        benchmark_lift: string;
+      }>(`/api/v1/companies/${getActiveCompanyId()}/hr/curricula`, {
+        target_agent_id: target.id,
+        title: newTitle,
+        category: newCategory,
+        status: 'in_training',
+        progress: 15,
+        benchmark_lift: '',
+      });
+      setCurricula((prev) => [
+        {
+          id: created.id,
+          title: created.title,
+          target_agent: target.name,
+          status: (created.status as TrainingCurriculum['status']) ?? 'in_training',
+          progress: created.progress,
+          benchmark_lift: created.benchmark_lift,
+          category: created.category,
+        },
+        ...prev,
+      ]);
+      setShowModal(false);
+      setNewTitle('');
+    } catch {
+      // Keep modal open — enrollment failed.
+    }
   };
 
-  const handleSaveAppraisal = () => {
+  const handleSaveAppraisal = async () => {
     if (!selectedAgent) return;
-    const note = kudosNote.trim()
-      ? `KUDOS: ${kudosNote.trim()}`
+    const reviewType = kudosNote.trim()
+      ? 'kudos'
       : constraintNote.trim()
-      ? `CONSTRAINT: ${constraintNote.trim()}`
+      ? 'constraint'
+      : 'appraisal';
+    const feedback = kudosNote.trim()
+      ? kudosNote.trim()
+      : constraintNote.trim()
+      ? constraintNote.trim()
       : 'Calibrated SLA score and soul guidelines.';
 
-    setAgents((prev) =>
-      prev.map((a) => (a.id === selectedAgent.id ? { ...a, last_appraisal_notes: note } : a))
-    );
-
-    setAppraisalFeedback('Appraisal saved and soul updated!');
+    try {
+      await apiClient.post(
+        `/api/v1/companies/${getActiveCompanyId()}/hr/reviews`,
+        { agent_id: selectedAgent.id, review_type: reviewType, feedback }
+      );
+      setAppraisalFeedback('Saved to the agent record.');
+    } catch {
+      setAppraisalFeedback('Failed to save. Please retry.');
+    }
     setTimeout(() => setAppraisalFeedback(''), 3000);
     setKudosNote('');
     setConstraintNote('');
@@ -421,8 +217,8 @@ export function HRRoom() {
       `"${a.name}"`,
       `"${a.title}"`,
       a.model,
-      `${a.eval_score || 95}%`,
-      a.training_status || 'Graduated',
+      `${a.eval_score != null ? a.eval_score : '—'}%`,
+      a.training_status || '—',
       `"${(a.certifications || []).join('; ')}"`,
       `"${a.last_appraisal_notes || ''}"`,
     ]);
@@ -535,15 +331,21 @@ export function HRRoom() {
         />
         <StatCard
           label="Workforce SLA Accuracy"
-          value="96.2%"
-          subValue="Cross-squad average"
-          change="+4.2% MoM Lift"
+          value={(() => {
+            const scored = agents.filter((a) => a.eval_score != null);
+            if (scored.length === 0) return '—';
+            const avg =
+              scored.reduce((sum, a) => sum + (a.eval_score || 0), 0) / scored.length;
+            return `${avg.toFixed(1)}%`;
+          })()}
+          subValue="Average of scored agents"
+          change="From performance_score"
           changeType="positive"
           icon={<Award className="w-4 h-4 text-emerald-400" />}
         />
         <StatCard
-          label="Promoted Lead Models"
-          value={agents.filter((a) => a.training_status === 'Graduated').length}
+          label="Graduated Tracks"
+          value={graduatedCount}
           subValue="Verified Regression Free"
           change="Zero SLA regressions"
           changeType="positive"
@@ -672,7 +474,7 @@ export function HRRoom() {
                 sortable: true,
                 render: (a) => (
                   <span className="font-mono text-xs text-emerald-400 font-bold">
-                    {a.eval_score || 95}%
+                    {a.eval_score != null ? `${a.eval_score}%` : '—'}
                   </span>
                 ),
               },
@@ -681,7 +483,7 @@ export function HRRoom() {
                 header: 'Training Status',
                 render: (a) => (
                   <Badge variant={a.training_status === 'Graduated' ? 'completed' : 'in_progress'}>
-                    {a.training_status || 'Graduated'}
+                    {a.training_status || '—'}
                   </Badge>
                 ),
               },
@@ -690,7 +492,7 @@ export function HRRoom() {
                 header: 'Operator Appraisal Note',
                 render: (a) => (
                   <span className="font-mono text-[11px] text-gray-400 truncate max-w-xs block">
-                    {a.last_appraisal_notes || 'Nominal performance'}
+                    {a.last_appraisal_notes || '—'}
                   </span>
                 ),
               },
@@ -742,7 +544,7 @@ export function HRRoom() {
                 <div className="space-y-1.5">
                   <span className="text-[10px] text-gray-500 uppercase font-bold">Certifications:</span>
                   <div className="flex flex-wrap gap-1.5">
-                    {(ag.certifications || ['Standard Operator v1']).map((cert) => (
+                    {(ag.certifications || []).map((cert) => (
                       <span
                         key={cert}
                         className="px-2 py-0.5 rounded text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center gap-1"
@@ -756,7 +558,7 @@ export function HRRoom() {
 
                 <div className="pt-2 border-t border-white/[0.06] flex items-center justify-between text-[11px]">
                   <span className="text-gray-500">Eval Accuracy:</span>
-                  <span className="text-emerald-400 font-bold">{ag.eval_score || 95}%</span>
+                  <span className="text-emerald-400 font-bold">{ag.eval_score != null ? `${ag.eval_score}%` : '—'}</span>
                 </div>
               </div>
             ))}
@@ -778,14 +580,14 @@ export function HRRoom() {
               <div className="p-3 bg-[#101012] border border-white/[0.06] rounded">
                 <span className="text-[10px] text-gray-500 uppercase">Accuracy SLA Score</span>
                 <div className="text-emerald-400 font-bold text-sm mt-1">
-                  {selectedAgent.eval_score || 95}%
+                  {selectedAgent.eval_score != null ? `${selectedAgent.eval_score}%` : '—'}
                 </div>
               </div>
 
               <div className="p-3 bg-[#101012] border border-white/[0.06] rounded">
                 <span className="text-[10px] text-gray-500 uppercase">Training Track</span>
                 <div className="text-[#FFB020] font-bold text-sm mt-1">
-                  {selectedAgent.training_status || 'Graduated'}
+                  {selectedAgent.training_status || '—'}
                 </div>
               </div>
             </div>

@@ -1,4 +1,4 @@
-﻿"""Tool registry and access control models."""
+"""Tool registry and access control models."""
 
 import uuid
 from datetime import timezone, datetime

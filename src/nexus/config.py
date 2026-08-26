@@ -24,27 +24,38 @@ class Settings(BaseSettings):
 
     # Authentication
     # When False, requests without a resolvable principal fall back to the
-    # legacy X-Company-Id header. Intended only as an emergency escape hatch
-    # during rollout; production must leave this True.
+    # legacy X-Company-Id header. Intended only as emergency escape hatch
+    # during rollout; production must leave True.
     auth_enabled: bool = True
     session_cookie_name: str = "nv_session"
     csrf_cookie_name: str = "nv_csrf"
-    # 7 days. Sessions are DB-backed, so this is the absolute expiry stored on
-    # the user_sessions row as well as the cookie max-age.
+    # 7 days. Sessions are DB-backed, absolute expiry stored in the
+    # user_sessions row as well as cookie max-age.
     session_lifetime_seconds: int = 604800
     # Set False only for plain-HTTP local development; browsers refuse to send
-    # Secure cookies over http:// on non-localhost origins.
+    # Secure cookies over http:// non-localhost origins.
     session_cookie_secure: bool = True
     session_cookie_samesite: str = "lax"
     # Minimum accepted password length for logins created through bootstrap,
     # setup, or invite acceptance.
     password_min_length: int = 12
 
+    # SSO / OIDC
+    oidc_enabled: bool = False
+    oidc_issuer_url: str = ""
+    oidc_client_id: str = ""
+    oidc_client_secret: str = ""
+    oidc_redirect_uri: str = ""
+    oidc_scopes: str = "openid email profile"
+
     # Server
     debug: bool = False
     log_level: str = "INFO"
     server_host: str = "0.0.0.0"
     server_port: int = 8000
+
+    # Data directory for JSON-persisted runtime state (control registry, etc.)
+    data_dir: str = "./data"
 
     # API Keys
     openai_api_key: str = ""

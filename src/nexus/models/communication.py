@@ -1,4 +1,4 @@
-﻿"""Communication models for inter-agent messaging and events."""
+"""Communication models for inter-agent messaging and events."""
 
 import uuid
 from datetime import timezone, datetime

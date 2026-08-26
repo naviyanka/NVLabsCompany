@@ -1,4 +1,4 @@
-﻿"""Skill registry models."""
+"""Skill registry models."""
 
 import uuid
 from datetime import timezone, datetime

@@ -19,6 +19,7 @@ readable ``nv_csrf`` cookie, which the client echoes in ``X-CSRF-Token``.
 
 import uuid
 from datetime import timezone, datetime, timedelta
+from nexus.models._time import utcnow
 from typing import Any, Literal, cast
 
 from fastapi import APIRouter, HTTPException, Request, Response, status
@@ -368,7 +369,7 @@ async def login(body: LoginRequest, request: Request, response: Response, db: Db
         browser=request.headers.get("user-agent", ""),
         ip_address=_client_ip(request),
     )
-    user.last_login_at = now(timezone.utc)
+    user.last_login_at = utcnow()
     db.add(user)
     await db.flush()
 
@@ -542,7 +543,7 @@ async def change_password(
         ) from exc
 
     user.hashed_password = hash_password(body.new_password)
-    user.updated_at = now(timezone.utc)
+    user.updated_at = utcnow()
     db.add(user)
     await db.flush()
 
@@ -599,7 +600,7 @@ async def create_invite(
         email=email,
         role=role,
         token_hash=hash_token(token),
-        expires_at=now(timezone.utc) + timedelta(hours=body.expires_in_hours),
+        expires_at=utcnow() + timedelta(hours=body.expires_in_hours),
         created_by=principal.user_id,
     )
     db.add(invite)
@@ -644,7 +645,7 @@ async def accept_invite(body: InviteAcceptRequest, db: DbSession) -> Any:
 
     stmt = select(Invite).where(Invite.token_hash == hash_token(body.token))
     invite = (await db.execute(stmt)).scalars().first()
-    if invite is None or invite.accepted_at is not None or invite.expires_at <= now(timezone.utc):
+    if invite is None or invite.accepted_at is not None or invite.expires_at <= utcnow():
         raise invalid
 
     role = normalize_role(invite.role)
@@ -674,7 +675,7 @@ async def accept_invite(body: InviteAcceptRequest, db: DbSession) -> Any:
             db, user_id=user.id, company_id=invite.company_id, role=role
         )
 
-    invite.accepted_at = now(timezone.utc)
+    invite.accepted_at = utcnow()
     db.add(invite)
     await db.flush()
 
@@ -743,7 +744,7 @@ async def run_setup(
         last_name=body.last_name,
         is_superuser=True,
     )
-    user.last_login_at = now(timezone.utc)
+    user.last_login_at = utcnow()
     db.add(user)
 
     token, _session = await create_session(

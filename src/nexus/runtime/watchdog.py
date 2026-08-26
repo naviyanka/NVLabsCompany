@@ -215,16 +215,22 @@ class Watchdog:
     async def _patrol_loop(self, agents_provider: Any) -> None:
         """Internal patrol loop running at configured interval.
 
+        Lease-gated so replicas don't double-patrol; the no-Redis fallback
+        elects every instance, preserving single-process behavior.
+
         Args:
             agents_provider: Callable returning current agent states, or None.
         """
+        from nexus.governance.leader_election import is_leader
+
         try:
             while self._running:
-                if agents_provider is not None:
-                    agents = agents_provider()
-                else:
-                    agents = []
-                self.patrol(agents)
+                if await is_leader("watchdog"):
+                    if agents_provider is not None:
+                        agents = agents_provider()
+                    else:
+                        agents = []
+                    self.patrol(agents)
                 await asyncio.sleep(self._config.patrol_interval_seconds)
         except asyncio.CancelledError:
             return

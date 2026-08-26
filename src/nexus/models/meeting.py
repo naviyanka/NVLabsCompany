@@ -1,4 +1,4 @@
-﻿"""Meeting models for structured agent collaboration sessions."""
+"""Meeting models for structured agent collaboration sessions."""
 
 import uuid
 from datetime import timezone, datetime

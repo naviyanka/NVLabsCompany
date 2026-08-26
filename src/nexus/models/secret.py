@@ -1,4 +1,4 @@
-﻿"""Secret models: secrets, versions, bindings, and access records.
+"""Secret models: secrets, versions, bindings, and access records.
 
 IMPORTANT: Secret values (encrypted_value) must NEVER appear in logs,
 error messages, or API responses. Only metadata is exposed.

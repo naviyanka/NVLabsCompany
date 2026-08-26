@@ -192,12 +192,19 @@ async def _fire_trigger(db: AsyncSession, trigger: Any, now: datetime) -> None:
 
 
 async def _scheduler_loop(session_factory: async_sessionmaker[AsyncSession]) -> None:
-    """Main scheduler loop — ticks every TICK_INTERVAL seconds."""
+    """Main scheduler loop — ticks every TICK_INTERVAL seconds.
+
+    With multiple replicas, only the lease leader fires triggers; followers
+    keep looping cheaply so they can take over when the lease expires.
+    """
     global _running
+    from nexus.governance.leader_election import is_leader
+
     logger.info("Scheduler started (tick interval: %ds)", TICK_INTERVAL)
     while _running:
         try:
-            await _tick(session_factory)
+            if await is_leader("scheduler"):
+                await _tick(session_factory)
         except Exception as e:
             logger.error("Scheduler tick error: %s", e)
         await asyncio.sleep(TICK_INTERVAL)

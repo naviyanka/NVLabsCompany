@@ -1,4 +1,4 @@
-﻿"""Repository model for connected git repositories."""
+"""Repository model for connected git repositories."""
 
 import uuid
 from datetime import timezone, datetime
@@ -21,6 +21,10 @@ class Repository(SQLModel, table=True):
     default_branch: str = Field(default="main", max_length=100)
     description: Optional[str] = Field(default=None)
     language: Optional[str] = Field(default=None, max_length=50)
+    # Absolute path to a local clone of this repository. Commits, diffs, and
+    # file trees are served from here; None means no clone is available and
+    # history endpoints return empty results instead of guessing a directory.
+    local_path: Optional[str] = Field(default=None, max_length=1000)
     is_active: bool = Field(default=True)
     last_synced_at: Optional[datetime] = Field(default=None)
     stats: Optional[dict[str, Any]] = Field(default=None, sa_column=Column(JSON))

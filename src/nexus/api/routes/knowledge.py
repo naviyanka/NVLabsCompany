@@ -1,5 +1,6 @@
 """Knowledge API endpoints - knowledge base and experience tracking."""
 
+import logging
 import uuid
 from datetime import timezone, datetime
 from typing import Any, Optional
@@ -10,6 +11,8 @@ from sqlalchemy import select
 
 from nexus.api.deps import CurrentCompanyId, DbSession
 from nexus.models.knowledge import ExperienceRecord, KnowledgeChunk, KnowledgePage
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["knowledge"])
 
@@ -89,6 +92,7 @@ class RAGSearchResult(BaseModel):
     content: str
     chunk_index: int
     metadata: Optional[dict[str, Any]] = None
+    score: Optional[float] = None
 
 
 class RecordExperienceRequest(BaseModel):
@@ -258,18 +262,20 @@ async def rag_search(
 
         embedding_provider = get_embedding_provider()
         pipeline = RAGPipeline(db=db, embedding_provider=embedding_provider)
-        chunks = await pipeline.search(company_id=company_id, query=body.query, top_k=body.top_k)
+        results = await pipeline.search(company_id=company_id, query=body.query, top_k=body.top_k)
         return [
             RAGSearchResult(
-                chunk_id=c.id,
-                page_id=c.page_id,
-                content=c.content,
-                chunk_index=c.chunk_index,
-                metadata=c.chunk_metadata,
+                chunk_id=r["chunk"].id,
+                page_id=r["chunk"].page_id,
+                content=r["chunk"].content,
+                chunk_index=r["chunk"].chunk_index,
+                metadata=r["chunk"].chunk_metadata,
+                score=r.get("combined_score"),
             )
-            for c in chunks
+            for r in results
         ]
     except Exception:
+        logger.warning("RAG pipeline search failed; falling back to substring match", exc_info=True)
         stmt = (
             select(KnowledgeChunk)
             .where(KnowledgeChunk.company_id == company_id)
@@ -444,44 +450,3 @@ async def import_knowledge_pages(
     await db.flush()
     return {"created": created}
 
-
-
-@router.get("/api/v1/companies/{company_id}/knowledge/stats")
-async def knowledge_stats(company_id: uuid.UUID, db: DbSession) -> dict[str, Any]:
-    """Knowledge base statistics."""
-    from sqlalchemy import func
-    total_pages = await db.execute(select(func.count(KnowledgePage.id)).where(KnowledgePage.company_id == company_id))
-    total_chunks = await db.execute(select(func.count(KnowledgeChunk.id)).where(KnowledgeChunk.company_id == company_id))
-    by_status = await db.execute(select(KnowledgePage.status, func.count(KnowledgePage.id)).where(KnowledgePage.company_id == company_id).group_by(KnowledgePage.status))
-    by_category = await db.execute(select(KnowledgePage.category, func.count(KnowledgePage.id)).where(KnowledgePage.company_id == company_id, KnowledgePage.category != None).group_by(KnowledgePage.category))
-    return {"total_pages": total_pages.scalar() or 0, "total_chunks": total_chunks.scalar() or 0, "by_status": dict(by_status.all()), "by_category": dict(by_category.all())}
-
-
-@router.get("/api/v1/companies/{company_id}/knowledge/categories")
-async def knowledge_categories(company_id: uuid.UUID, db: DbSession) -> list[dict[str, Any]]:
-    """List knowledge base categories with counts."""
-    from sqlalchemy import func
-    stmt = select(KnowledgePage.category, func.count(KnowledgePage.id)).where(KnowledgePage.company_id == company_id, KnowledgePage.category != None).group_by(KnowledgePage.category)
-    result = await db.execute(stmt)
-    return [{"category": cat, "count": count} for cat, count in result.all()]
-
-
-@router.delete("/api/v1/knowledge/{page_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_page(page_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId) -> None:
-    """Delete a knowledge page."""
-    from sqlalchemy import delete as sa_delete
-    await db.execute(sa_delete(KnowledgeChunk).where(KnowledgeChunk.page_id == page_id, KnowledgeChunk.company_id == company_id))
-    await db.execute(sa_delete(KnowledgePage).where(KnowledgePage.id == page_id, KnowledgePage.company_id == company_id))
-
-
-@router.post("/api/v1/companies/{company_id}/knowledge/import")
-async def import_knowledge(company_id: uuid.UUID, db: DbSession, body: dict[str, Any] = {}) -> dict[str, int]:
-    """Bulk import knowledge pages."""
-    pages = body.get("pages", [])
-    created = 0
-    for page_data in pages:
-        page = KnowledgePage(company_id=company_id, title=page_data.get("title", "Untitled"), content=page_data.get("content", ""), category=page_data.get("category"), tags=page_data.get("tags"), status="published")
-        db.add(page)
-        created += 1
-    await db.flush()
-    return {"created": created}

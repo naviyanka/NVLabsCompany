@@ -54,7 +54,7 @@ export interface ActivityLog {
   timestamp: number;
   status: ActivityStatus;
   severity: ActivitySeverity;
-  latency_ms: number;
+  latency_ms?: number;
   metadata?: string;
   raw_payload?: Record<string, unknown>;
 }
@@ -92,7 +92,6 @@ export function Activity() {
             ...item,
             timestamp: item.timestamp || Date.now() - i * 60000,
             severity: item.severity || (item.status === 'failed' ? 'error' : 'info'),
-            latency_ms: item.latency_ms || Math.floor(Math.random() * 300) + 40,
           }));
           setLogs(formatted);
         }
@@ -148,9 +147,13 @@ export function Activity() {
   const totalEvents = logs.length;
   const successCount = logs.filter((l) => l.status === 'success').length;
   const successRate = totalEvents > 0 ? ((successCount / totalEvents) * 100).toFixed(1) : '100';
-  const avgLatency = Math.round(
-    logs.reduce((acc, curr) => acc + (curr.latency_ms || 100), 0) / (totalEvents || 1)
-  );
+  const latencyValues = logs
+    .map((l) => l.latency_ms)
+    .filter((v): v is number => typeof v === 'number');
+  const avgLatency =
+    latencyValues.length > 0
+      ? Math.round(latencyValues.reduce((acc, curr) => acc + curr, 0) / latencyValues.length)
+      : null;
 
   // Chart Data Preparation
   const chartData = useMemo(() => {
@@ -359,7 +362,7 @@ export function Activity() {
         />
         <StatCard
           label="Avg Latency (ms)"
-          value={`${avgLatency} ms`}
+          value={avgLatency != null ? `${avgLatency} ms` : '—'}
           subValue="Real-time Dispatch"
           change="Optimal response"
           changeType="positive"
@@ -490,7 +493,7 @@ export function Activity() {
 
                   <div className="flex items-center gap-4 text-xs font-mono text-[#6B6B6E] shrink-0">
                     <span className="hidden md:inline text-[10px] bg-white/[0.04] px-2 py-0.5 rounded border border-white/[0.06]">
-                      {log.latency_ms}ms
+                      {log.latency_ms != null ? `${log.latency_ms}ms` : '—'}
                     </span>
                     <span>Agent: <span className="text-[#FFB020] font-medium">{log.agent}</span></span>
                     <span>{log.time}</span>
@@ -534,7 +537,7 @@ export function Activity() {
                 <span className="text-purple-400 shrink-0">[{log.type}]</span>
                 <span className="text-amber-300 font-medium shrink-0">&lt;{log.agent}&gt;</span>
                 <span className="text-gray-200 truncate flex-1">{log.event} - {log.description}</span>
-                <span className="text-gray-500 select-none text-[10px]">{log.latency_ms}ms</span>
+                <span className="text-gray-500 select-none text-[10px]">{log.latency_ms != null ? `${log.latency_ms}ms` : ''}</span>
               </div>
             ))}
           </div>
@@ -649,7 +652,7 @@ export function Activity() {
               </div>
               <div className="p-3 bg-[#101012] border border-white/[0.06] rounded-[6px]">
                 <div className="text-[10px] text-[#6B6B6E] uppercase">Latency</div>
-                <div className="text-cyan-400 font-medium mt-1">{selectedLog.latency_ms} ms</div>
+                <div className="text-cyan-400 font-medium mt-1">{selectedLog.latency_ms != null ? `${selectedLog.latency_ms} ms` : '—'}</div>
               </div>
             </div>
 

@@ -1,5 +1,11 @@
 # NvLabsOrg vs NVLabsCompany — Feature Comparison & Ground-Truth Implementation Audit
 
+> **STALE — do not trust status claims in this document.**
+> Last verified against commit: never. Superseded by `docs/GAP-CLOSURE-PLAN.md`
+> (verified against commit `1bbad4a`, 2026-08-26), which is the single source of
+> truth for what is actually wired. Percentages and "complete" markers below are
+> historical intent, not measured state.
+
 ## Source: [github.com/naviyanka/NvLabsOrg](https://github.com/naviyanka/NvLabsOrg)
 
 ---

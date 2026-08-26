@@ -2,14 +2,66 @@
 
 Provides a Protocol-based interface for channel implementations (Slack, Discord,
 Webhooks) and a ChannelRouter that handles outbound message routing and inbound
-message conversion.
+message conversion. Outbound sends perform real HTTP calls; failed deliveries
+are enqueued for retry via the file-backed WebhookDeliveryQueue. Inbound
+messages arrive through the webhook server / trigger system, not receive().
 """
 
+import hashlib
+import hmac
+import json
+import logging
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Optional, Protocol, runtime_checkable
 
 from nexus.models.communication import Message
+
+logger = logging.getLogger(__name__)
+
+_RETRY_QUEUE: Optional["WebhookDeliveryQueue"] = None
+
+
+def _get_retry_queue():
+    """Lazily construct the file-backed retry queue under the data dir."""
+    global _RETRY_QUEUE
+    if _RETRY_QUEUE is not None:
+        return _RETRY_QUEUE
+    try:
+        from nexus.communication.webhook_queue import WebhookDeliveryQueue
+
+        base = Path("./data")
+        try:
+            from nexus.config import settings
+
+            base = Path(settings.data_dir)
+        except Exception:
+            pass
+        _RETRY_QUEUE = WebhookDeliveryQueue(base / "channel_deliveries.json")
+    except Exception as exc:
+        logger.warning("Retry queue unavailable: %s", exc)
+        return None
+    return _RETRY_QUEUE
+
+
+def _sign_payload(secret: str, body: bytes) -> str:
+    """HMAC-SHA256 signature (hex) of the exact bytes sent on the wire."""
+    return hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+
+
+def _message_payload(message: Message) -> dict[str, Any]:
+    """Serialize a Message into a JSON-safe webhook payload."""
+    return {
+        "id": str(message.id),
+        "sender_agent_id": str(message.sender_agent_id),
+        "recipient_agent_id": (
+            str(message.recipient_agent_id) if message.recipient_agent_id else None
+        ),
+        "message_type": message.message_type,
+        "priority": message.priority,
+        "content": message.content,
+    }
 
 
 @runtime_checkable
@@ -41,15 +93,9 @@ class ChannelInterface(Protocol):
 
 
 class SlackChannel:
-    """Slack channel implementation for sending/receiving messages via Slack.
+    """Slack channel sending messages through a Slack incoming webhook URL.
 
-    This is a placeholder implementation that stores messages in memory
-    for testing purposes. A production version would use the Slack API.
-
-    Attributes:
-        channel_name: The Slack channel name.
-        webhook_url: The Slack webhook URL for posting messages.
-        company_id: Company scope for tenant isolation.
+    Inbound messages are not polled here — they arrive via the webhook server.
     """
 
     def __init__(
@@ -72,16 +118,34 @@ class SlackChannel:
         self._inbox: list[Message] = []
 
     async def send(self, message: Message) -> bool:
-        """Send a message to the Slack channel.
+        """Post a message to Slack via the configured incoming webhook.
 
         Args:
             message: The Message object to send.
 
         Returns:
-            True (placeholder always succeeds).
+            True if Slack accepted the POST, False otherwise.
         """
-        self._sent.append(message)
-        return True
+        if not self.webhook_url:
+            logger.warning("SlackChannel %s has no webhook_url configured", self.channel_name)
+            return False
+        try:
+            import httpx
+
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.post(
+                    self.webhook_url,
+                    json={"text": f"[{message.message_type}] {message.content}"},
+                )
+            if 200 <= response.status_code < 300:
+                return True
+            logger.warning(
+                "Slack delivery to %s failed: HTTP %s", self.channel_name, response.status_code
+            )
+            return False
+        except Exception as exc:
+            logger.warning("Slack delivery failed: %s", exc)
+            return False
 
     async def receive(self) -> Optional[Message]:
         """Receive the next message from the Slack channel inbox.
@@ -95,16 +159,10 @@ class SlackChannel:
 
 
 class DiscordChannel:
-    """Discord channel implementation for sending/receiving messages via Discord.
+    """Discord channel posting messages through the bot-token REST API.
 
-    This is a placeholder implementation that stores messages in memory
-    for testing purposes. A production version would use the Discord API.
-
-    Attributes:
-        guild_id: The Discord guild (server) identifier.
-        channel_id: The Discord channel identifier.
-        bot_token: The Discord bot token for authentication.
-        company_id: Company scope for tenant isolation.
+    Outbound-only here: inbound events require the Gateway, which is handled
+    separately (not part of the request path).
     """
 
     def __init__(
@@ -130,16 +188,34 @@ class DiscordChannel:
         self._inbox: list[Message] = []
 
     async def send(self, message: Message) -> bool:
-        """Send a message to the Discord channel.
+        """Post a message to the configured Discord channel via bot REST API.
 
         Args:
             message: The Message object to send.
 
         Returns:
-            True (placeholder always succeeds).
+            True if Discord accepted the POST, False otherwise.
         """
-        self._sent.append(message)
-        return True
+        if not self.bot_token or not self.channel_id:
+            logger.warning("DiscordChannel missing bot_token or channel_id")
+            return False
+        try:
+            import httpx
+
+            url = f"https://discord.com/api/v10/channels/{self.channel_id}/messages"
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.post(
+                    url,
+                    headers={"Authorization": f"Bot {self.bot_token}"},
+                    json={"content": message.content[:2000]},
+                )
+            if 200 <= response.status_code < 300:
+                return True
+            logger.warning("Discord delivery failed: HTTP %s", response.status_code)
+            return False
+        except Exception as exc:
+            logger.warning("Discord delivery failed: %s", exc)
+            return False
 
     async def receive(self) -> Optional[Message]:
         """Receive the next message from the Discord channel inbox.
@@ -153,16 +229,11 @@ class DiscordChannel:
 
 
 class WebhookChannel:
-    """Webhook channel for sending/receiving messages via HTTP webhooks.
+    """Generic outbound webhook channel with HMAC-SHA256 request signing.
 
-    This is a placeholder implementation that stores messages in memory
-    for testing purposes. A production version would make HTTP calls
-    to configured endpoint URLs.
-
-    Attributes:
-        endpoint_url: The webhook endpoint URL.
-        secret: Optional webhook secret for request signing.
-        company_id: Company scope for tenant isolation.
+    Deliveries are signed with X-Nexus-Signature over the exact body bytes and
+    retried (with backoff, then dead-letter) via WebhookDeliveryQueue when the
+    endpoint is unreachable or rejects the POST.
     """
 
     def __init__(
@@ -185,16 +256,55 @@ class WebhookChannel:
         self._inbox: list[Message] = []
 
     async def send(self, message: Message) -> bool:
-        """Send a message via the webhook endpoint.
+        """POST the message to the endpoint, signed when a secret is set.
 
         Args:
             message: The Message object to send.
 
         Returns:
-            True (placeholder always succeeds).
+            True on a 2xx response; False otherwise (failed deliveries are
+            enqueued for retry).
         """
-        self._sent.append(message)
-        return True
+        if not self.endpoint_url:
+            logger.warning("WebhookChannel has no endpoint_url configured")
+            return False
+
+        payload = _message_payload(message)
+        body = json.dumps(payload).encode()
+        headers = {"Content-Type": "application/json"}
+        if self.secret:
+            headers["X-Nexus-Signature"] = _sign_payload(self.secret, body)
+
+        try:
+            import httpx
+
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.post(
+                    self.endpoint_url, content=body, headers=headers
+                )
+            if 200 <= response.status_code < 300:
+                return True
+            error = f"HTTP {response.status_code}"
+        except Exception as exc:
+            error = str(exc)
+            logger.warning("Webhook delivery to %s failed: %s", self.endpoint_url, exc)
+
+        queue = _get_retry_queue()
+        if queue is not None:
+            from nexus.communication.webhook_queue import WebhookDelivery
+
+            queue.enqueue(
+                WebhookDelivery(
+                    id=f"{message.id}-{uuid.uuid4().hex[:8]}",
+                    url=self.endpoint_url,
+                    payload=payload,
+                    headers=headers,
+                    created_at=datetime.now(timezone.utc),
+                    status="pending",
+                    last_error=error,
+                )
+            )
+        return False
 
     async def receive(self) -> Optional[Message]:
         """Receive the next message from the webhook inbox.
@@ -263,22 +373,30 @@ class ChannelRouter:
         Returns:
             True if the message was successfully routed, False otherwise.
         """
-        # Determine which channel to use
-        key = route_key or message.priority or message.message_type
-        channel_name = self._routes.get(key)
+        from nexus.observability.tracing import get_tracer
 
-        if channel_name is None:
-            # Try message type as fallback
-            channel_name = self._routes.get(message.message_type)
+        tracer = get_tracer("nexus.channels")
+        with tracer.start_as_current_span("route_outbound") as span:
+            key = route_key or message.priority or message.message_type
+            span.set_attribute("route_key", str(key))
+            channel_name = self._routes.get(key)
 
-        if channel_name is None:
-            return False
+            if channel_name is None:
+                channel_name = self._routes.get(message.message_type)
 
-        channel = self._channels.get(channel_name)
-        if channel is None:
-            return False
+            if channel_name is None:
+                span.set_attribute("routed", False)
+                return False
 
-        return await channel.send(message)
+            channel = self._channels.get(channel_name)
+            if channel is None:
+                span.set_attribute("routed", False)
+                return False
+
+            span.set_attribute("channel", channel_name)
+            result = await channel.send(message)
+            span.set_attribute("delivered", result)
+            return result
 
     async def handle_inbound(
         self,

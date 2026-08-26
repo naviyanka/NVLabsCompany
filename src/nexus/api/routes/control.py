@@ -1,5 +1,7 @@
 """Control API endpoints - operator control over running agents."""
 
+from pathlib import Path
+
 from fastapi import APIRouter, status
 from pydantic import BaseModel
 
@@ -7,8 +9,22 @@ from nexus.governance.control_registry import AgentControlSnapshot, ControlRegis
 
 router = APIRouter(tags=["control"])
 
+
+def _default_persist_path() -> Path:
+    """Resolve the registry's persistence file under the configured data dir."""
+    try:
+        from nexus.config import settings
+
+        base = Path(settings.data_dir)
+    except Exception:
+        base = Path("./data")
+    return base / "control_registry.json"
+
+
 # Module-level singleton registry; in production this would be injected via DI.
-_registry = ControlRegistry()
+# State survives restarts: every mutation writes through to the JSON file and
+# the constructor reloads it (main.py additionally persists on shutdown).
+_registry = ControlRegistry(persist_path=_default_persist_path())
 
 
 def get_registry() -> ControlRegistry:
@@ -62,7 +78,7 @@ class ControlActionResponse(BaseModel):
 
 
 @router.post(
-    "/control/{agent_id}/pause",
+    "/api/v1/control/{agent_id}/pause",
     status_code=status.HTTP_200_OK,
     response_model=ControlActionResponse,
 )
@@ -73,7 +89,7 @@ def pause_agent(agent_id: str, body: PauseRequest) -> ControlActionResponse:
 
 
 @router.post(
-    "/control/{agent_id}/gate-tool",
+    "/api/v1/control/{agent_id}/gate-tool",
     status_code=status.HTTP_200_OK,
     response_model=ControlActionResponse,
 )
@@ -84,7 +100,7 @@ def gate_tool(agent_id: str, body: GateToolRequest) -> ControlActionResponse:
 
 
 @router.post(
-    "/control/{agent_id}/steer",
+    "/api/v1/control/{agent_id}/steer",
     status_code=status.HTTP_200_OK,
     response_model=ControlActionResponse,
 )
@@ -95,7 +111,7 @@ def steer_agent(agent_id: str, body: SteerRequest) -> ControlActionResponse:
 
 
 @router.post(
-    "/control/{agent_id}/halt",
+    "/api/v1/control/{agent_id}/halt",
     status_code=status.HTTP_200_OK,
     response_model=ControlActionResponse,
 )
@@ -106,7 +122,7 @@ def halt_agent(agent_id: str) -> ControlActionResponse:
 
 
 @router.post(
-    "/control/{agent_id}/resume",
+    "/api/v1/control/{agent_id}/resume",
     status_code=status.HTTP_200_OK,
     response_model=ControlActionResponse,
 )
@@ -117,7 +133,7 @@ def resume_agent(agent_id: str) -> ControlActionResponse:
 
 
 @router.get(
-    "/control/{agent_id}/snapshot",
+    "/api/v1/control/{agent_id}/snapshot",
     status_code=status.HTTP_200_OK,
     response_model=SnapshotResponse,
 )

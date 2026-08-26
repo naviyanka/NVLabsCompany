@@ -94,7 +94,7 @@ async def create_api_key(
         )
 
     expires_at = (
-        now(timezone.utc) + timedelta(days=body.expires_in_days)
+        utcnow() + timedelta(days=body.expires_in_days)
         if body.expires_in_days is not None
         else None
     )

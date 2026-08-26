@@ -1,4 +1,4 @@
-﻿"""Trigger models for proactive agent behavior (Aware system)."""
+"""Trigger models for proactive agent behavior (Aware system)."""
 
 import uuid
 from datetime import timezone, datetime

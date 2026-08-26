@@ -40,6 +40,7 @@ class UserProfile(SQLModel, table=True):
     timezone: str = Field(default="UTC", max_length=50)
     status: str = Field(default="online", max_length=20)  # online/busy/dnd/offline
     two_factor_enabled: bool = Field(default=False)
+    oidc_sub: Optional[str] = Field(default=None, max_length=255)
     last_login_at: Optional[datetime] = Field(default=None)
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)

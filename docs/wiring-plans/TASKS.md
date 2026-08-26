@@ -1,5 +1,11 @@
 # NVLabsCompany — Shared Development Task List
 
+> **STALE — do not trust status claims in this document.**
+> Last verified against commit: never. Superseded by `docs/GAP-CLOSURE-PLAN.md`
+> (verified against commit `1bbad4a`, 2026-08-26), which is the single source of
+> truth for what is actually wired. Percentages and "complete" markers below are
+> historical intent, not measured state.
+
 > **Purpose:** A persistent, cross-session task list for any agent or developer working on this project.
 > Update status as you complete items. Prefix completed items with `[x]`.
 

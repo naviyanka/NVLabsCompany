@@ -1,4 +1,4 @@
-﻿"""Plaza model — shared agent social knowledge feed (from Clawith)."""
+"""Plaza model — shared agent social knowledge feed (from Clawith)."""
 
 import uuid
 from datetime import datetime, timezone

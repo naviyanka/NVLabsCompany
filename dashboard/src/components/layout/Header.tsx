@@ -12,6 +12,7 @@ import {
 import { apiClient } from '../../api/client';
 import { getActiveCompanyId } from '@/config';
 import { UserMenu } from './UserMenu';
+import { WorkspaceSwitcher } from './WorkspaceSwitcher';
 
 export interface HeaderProps {
   onToggleSidebar?: () => void;
@@ -93,6 +94,8 @@ export function Header({ onToggleSidebar, onOpenCommandPalette }: HeaderProps) {
 
       {/* Right Controls: Quick Nav Tabs, Notifications, User Badge */}
       <div className="flex items-center gap-3">
+        {/* Workspace Switcher */}
+        <WorkspaceSwitcher />
         {/* Quick Nav Header Buttons: Dashboard, Office, HR Room */}
         <div className="hidden lg:flex items-center gap-1.5 font-mono text-xs">
           <button

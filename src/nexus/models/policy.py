@@ -1,4 +1,4 @@
-﻿"""Policy models: policies, policy rules, and policy versions."""
+"""Policy models: policies, policy rules, and policy versions."""
 
 import uuid
 from datetime import timezone, datetime

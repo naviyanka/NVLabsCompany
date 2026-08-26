@@ -96,7 +96,7 @@ async def get_company_budget_usage(
     company_id: PathCompanyId, db: DbSession
 ) -> Any:
     """Get budget usage for a company."""
-    now = now(timezone.utc)
+    now = utcnow()
     window_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
     stmt = select(
@@ -131,7 +131,7 @@ async def get_agent_budget_usage(
     agent_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId
 ) -> Any:
     """Get budget usage for an agent."""
-    now = now(timezone.utc)
+    now = utcnow()
     window_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
     stmt = select(
@@ -165,7 +165,7 @@ async def cost_trend(
     company_id: PathCompanyId, db: DbSession, days: int = 7
 ) -> list[dict[str, Any]]:
     """Daily cost trend for the last N days."""
-    now = now(timezone.utc)
+    now = utcnow()
     results = []
     for i in range(days):
         day = now - timedelta(days=days - 1 - i)

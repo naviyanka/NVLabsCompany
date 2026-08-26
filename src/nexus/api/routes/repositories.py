@@ -21,6 +21,7 @@ class RepoCreate(BaseModel):
     default_branch: str = "main"
     description: str | None = None
     language: str | None = None
+    local_path: str | None = None
 
 
 class RepoUpdate(BaseModel):
@@ -28,6 +29,7 @@ class RepoUpdate(BaseModel):
     description: str | None = None
     default_branch: str | None = None
     is_active: bool | None = None
+    local_path: str | None = None
 
 
 class RepoResponse(BaseModel):
@@ -39,6 +41,7 @@ class RepoResponse(BaseModel):
     default_branch: str
     description: str | None
     language: str | None
+    local_path: str | None
     is_active: bool
     last_synced_at: datetime | None
     stats: dict[str, Any] | None
@@ -65,6 +68,7 @@ async def connect_repo(company_id: uuid.UUID, body: RepoCreate, db: DbSession) -
         default_branch=body.default_branch,
         description=body.description,
         language=body.language,
+        local_path=body.local_path,
     )
     db.add(repo)
     await db.flush()
@@ -108,12 +112,32 @@ async def disconnect_repo(repo_id: uuid.UUID, db: DbSession, company_id: Current
 
 @router.post("/api/v1/repos/{repo_id}/sync")
 async def sync_repo(repo_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId) -> dict:
-    """Trigger a repository sync (fetch latest commits/PRs)."""
+    """Trigger a repository sync (fetch latest commits/PRs).
+
+    A local clone path is required: sync validates the directory exists and is
+    a git repository, then records the sync time. Without a clone there is no
+    truthful data source to refresh.
+    """
     stmt = select(Repository).where(Repository.id == repo_id, Repository.company_id == company_id)
     result = await db.execute(stmt)
     repo = result.scalar_one_or_none()
     if not repo:
         raise HTTPException(status_code=404, detail="Repository not found")
+
+    if not repo.local_path:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No local clone configured. Set local_path on this repository before syncing.",
+        )
+    from pathlib import Path as FsPath
+
+    clone = FsPath(repo.local_path)
+    if not clone.exists() or not (clone / ".git").exists():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"local_path '{repo.local_path}' is not an available git clone",
+        )
+
     repo.last_synced_at = datetime.now(timezone.utc)
     await db.flush()
     return {"repo_id": str(repo_id), "synced_at": repo.last_synced_at.isoformat()}
@@ -121,7 +145,7 @@ async def sync_repo(repo_id: uuid.UUID, db: DbSession, company_id: CurrentCompan
 
 
 # ---------------------------------------------------------------------------
-# Repository Stats and Placeholder Data Endpoints
+# Repository Stats and History Endpoints
 # ---------------------------------------------------------------------------
 
 
@@ -168,81 +192,82 @@ async def get_repo_stats(company_id: uuid.UUID, db: DbSession) -> dict[str, Any]
 
 @router.get("/api/v1/repos/{repo_id}/commits")
 async def get_repo_commits(repo_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId) -> list[dict[str, Any]]:
-    """Return placeholder commit list for a repository."""
-    import hashlib
+    """List commits for a repository.
 
+    Returns real git-history data when a local clone path is available on the
+    repository record, otherwise an empty list. Fabricated sample data is
+    deliberately NOT returned here — clients should render an empty state and
+    prompt the user to sync a clone.
+    """
     stmt = select(Repository).where(Repository.id == repo_id, Repository.company_id == company_id)
     result = await db.execute(stmt)
     repo = result.scalar_one_or_none()
     if not repo:
         raise HTTPException(status_code=404, detail="Repository not found")
 
-    # Generate deterministic sample commits based on repo name
-    seed = repo.name
-    commits = []
-    messages = [
-        "Initial project setup",
-        "Add authentication module",
-        "Fix database connection pooling",
-        "Update dependencies to latest versions",
-        "Refactor API handlers for clarity",
-        "Add unit tests for core service",
-        "Implement caching layer",
-        "Fix race condition in worker queue",
-        "Update README with deployment guide",
-        "Performance optimization for search queries",
-    ]
-    authors = ["alice", "bob", "charlie", "diana", "eve"]
+    local_path = getattr(repo, "local_path", None)
+    if not local_path:
+        return []
 
-    for i in range(10):
-        sha_input = f"{seed}-{i}".encode()
-        sha = hashlib.sha256(sha_input).hexdigest()[:7]
-        commits.append({
-            "sha": sha,
-            "message": messages[i],
-            "author": authors[i % len(authors)],
-            "date": (datetime.now(timezone.utc) - timedelta(days=10 - i)).isoformat(),
-        })
+    import asyncio
+    from pathlib import Path as FsPath
 
+    if not FsPath(local_path).exists():
+        return []
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "git", "log", "-50", "--pretty=format:%H%x1f%an%x1f%aI%x1f%s",
+            cwd=local_path,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, _ = await proc.communicate()
+    except FileNotFoundError:
+        return []
+
+    commits: list[dict[str, Any]] = []
+    for line in stdout.decode("utf-8", errors="replace").splitlines():
+        parts = line.split("\x1f")
+        if len(parts) == 4:
+            sha, author, date, message = parts
+            commits.append({"sha": sha[:12], "message": message, "author": author, "date": date})
     return commits
 
 
 @router.get("/api/v1/repos/{repo_id}/pull-requests")
 async def get_repo_pull_requests(repo_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId) -> list[dict[str, Any]]:
-    """Return placeholder PR list for a repository."""
+    """List pull requests for a repository.
+
+    No forge (GitHub/GitLab) integration exists yet, so there is no truthful
+    data source for PRs — an empty list is returned rather than fabricated
+    samples.
+    """
     stmt = select(Repository).where(Repository.id == repo_id, Repository.company_id == company_id)
     result = await db.execute(stmt)
     repo = result.scalar_one_or_none()
     if not repo:
         raise HTTPException(status_code=404, detail="Repository not found")
 
-    prs = [
-        {"id": 1, "title": "Add input validation layer", "status": "open", "author": "alice", "created_at": (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()},
-        {"id": 2, "title": "Refactor database models", "status": "merged", "author": "bob", "created_at": (datetime.now(timezone.utc) - timedelta(days=3)).isoformat()},
-        {"id": 3, "title": "Fix memory leak in worker", "status": "open", "author": "charlie", "created_at": (datetime.now(timezone.utc) - timedelta(days=2)).isoformat()},
-        {"id": 4, "title": "Update CI/CD pipeline config", "status": "closed", "author": "diana", "created_at": (datetime.now(timezone.utc) - timedelta(days=5)).isoformat()},
-        {"id": 5, "title": "Implement rate limiting middleware", "status": "merged", "author": "eve", "created_at": (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()},
-    ]
-    return prs
+    return []
 
 
 @router.get("/api/v1/repos/{repo_id}/contributors")
 async def get_repo_contributors(repo_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId) -> list[dict[str, Any]]:
-    """Return placeholder contributors list for a repository."""
-    stmt = select(Repository).where(Repository.id == repo_id, Repository.company_id == company_id)
-    result = await db.execute(stmt)
-    repo = result.scalar_one_or_none()
-    if not repo:
-        raise HTTPException(status_code=404, detail="Repository not found")
+    """List contributors for a repository.
 
-    contributors = [
-        {"name": "Alice Chen", "commits_count": 142, "avatar_url": "https://api.dicebear.com/7.x/initials/svg?seed=AC"},
-        {"name": "Bob Martinez", "commits_count": 98, "avatar_url": "https://api.dicebear.com/7.x/initials/svg?seed=BM"},
-        {"name": "Charlie Kim", "commits_count": 76, "avatar_url": "https://api.dicebear.com/7.x/initials/svg?seed=CK"},
-        {"name": "Diana Patel", "commits_count": 54, "avatar_url": "https://api.dicebear.com/7.x/initials/svg?seed=DP"},
-        {"name": "Eve Johnson", "commits_count": 31, "avatar_url": "https://api.dicebear.com/7.x/initials/svg?seed=EJ"},
+    Derived from real git history when a local clone is available; otherwise an
+    empty list. Never returns synthetic authors.
+    """
+    commits = await get_repo_commits(repo_id, db, company_id)
+    counts: dict[str, int] = {}
+    for commit in commits:
+        counts[commit["author"]] = counts.get(commit["author"], 0) + 1
+    ranked = sorted(counts.items(), key=lambda kv: kv[1], reverse=True)
+    return [
+        {"name": name, "commits_count": count}
+        for name, count in ranked
     ]
-    return contributors
 
 
 
@@ -265,7 +290,13 @@ async def get_repo_file_tree(
     if not repo:
         raise HTTPException(status_code=404, detail="Repository not found")
 
-    base_path = FsPath(repo.local_path) if hasattr(repo, "local_path") and repo.local_path else FsPath(".")
+    local_path = getattr(repo, "local_path", None)
+    if not local_path:
+        return {"path": path, "entries": [], "error": "No local clone configured for this repository"}
+
+    base_path = FsPath(local_path)
+    if not base_path.exists():
+        return {"path": path, "entries": [], "error": f"Local clone not found at {local_path}"}
     target = base_path / path if path else base_path
 
     if not target.exists():
@@ -319,7 +350,13 @@ async def get_repo_diff(
     if not repo:
         raise HTTPException(status_code=404, detail="Repository not found")
 
-    repo_path = repo.local_path if hasattr(repo, "local_path") and repo.local_path else "."
+    repo_path = repo.local_path if hasattr(repo, "local_path") and repo.local_path else None
+    if not repo_path:
+        return {
+            "error": "No local clone configured for this repository",
+            "base": base,
+            "target": target,
+        }
 
     try:
         proc = await asyncio.create_subprocess_exec(

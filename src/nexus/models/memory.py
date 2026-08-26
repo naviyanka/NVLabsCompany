@@ -1,4 +1,4 @@
-﻿"""Memory record model for the 3-temperature memory system."""
+"""Memory record model for the 3-temperature memory system."""
 
 import uuid
 from datetime import timezone, datetime

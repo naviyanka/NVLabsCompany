@@ -1,4 +1,4 @@
-﻿"""Tool invocation audit model - records every tool execution for compliance and analytics."""
+"""Tool invocation audit model - records every tool execution for compliance and analytics."""
 
 import uuid
 from datetime import timezone, datetime

@@ -1,5 +1,11 @@
 # NEXUS Remaining Work Plan
 
+> **STALE — do not trust status claims in this document.**
+> Last verified against commit: never. Superseded by `docs/GAP-CLOSURE-PLAN.md`
+> (verified against commit `1bbad4a`, 2026-08-26), which is the single source of
+> truth for what is actually wired. Percentages and "complete" markers below are
+> historical intent, not measured state.
+
 > Comprehensive micro-phase breakdown for completing NEXUS from its current prototype state to production readiness.
 
 ## Current State Summary

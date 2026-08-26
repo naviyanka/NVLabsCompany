@@ -4,11 +4,45 @@ Provides configuration change approval, validation, rollback,
 audit trail, sensitive value encryption, and environment guards.
 """
 
+import base64
 import hashlib
+import threading
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Callable
+
+from cryptography.fernet import Fernet, InvalidToken
+
+# Distinct salt so config-governance keys cannot collide with the integration
+# secret backend's derived key even when both start from the same app secret.
+_SALT = b"nexus-config-governance"
+_ITERATIONS = 480_000
+_fernet: Fernet | None = None
+_fernet_lock = threading.Lock()
+
+
+def _get_fernet() -> Fernet | None:
+    """Lazily derive a Fernet instance from the application secret key."""
+    global _fernet
+    if _fernet is not None:
+        return _fernet
+    with _fernet_lock:
+        if _fernet is not None:
+            return _fernet
+        try:
+            from nexus.config import settings
+
+            derived = hashlib.pbkdf2_hmac(
+                "sha256",
+                settings.secret_key.encode(),
+                salt=_SALT,
+                iterations=_ITERATIONS,
+            )
+            _fernet = Fernet(base64.urlsafe_b64encode(derived[:32]))
+        except Exception:
+            _fernet = None
+    return _fernet
 
 
 @dataclass
@@ -289,22 +323,48 @@ class ConfigGovernance:
     def encrypt_sensitive_value(self, key: str, value: str) -> str:
         """Encrypt a sensitive configuration value.
 
-        Uses a hash-based obfuscation for in-memory storage.
-        In production, this would use proper encryption (AES-256, KMS, etc.).
+        Uses Fernet (AES-128-CBC + HMAC) with a key derived from the
+        application secret via PBKDF2-HMAC-SHA256. Reversible with
+        :meth:`decrypt_sensitive_value`; raises RuntimeError in the
+        fail-closed case where no key can be derived.
 
         Args:
             key: The configuration key.
-            value: The value to encrypt.
+            value: The plaintext value.
 
         Returns:
-            The encrypted/hashed representation.
+            The encrypted token.
         """
-        # Simple hash-based encryption placeholder
-        # In production, use proper encryption with key management
-        salt = f"nexus:{key}:"
-        encrypted = hashlib.sha256(f"{salt}{value}".encode()).hexdigest()
+        fernet = _get_fernet()
+        if fernet is None:
+            raise RuntimeError(
+                "No encryption key available: refusing to store sensitive "
+                "value for key '%s' (fail-closed)." % key
+            )
+        encrypted = fernet.encrypt(value.encode()).decode()
         self._encrypted_values[key] = encrypted
         return encrypted
+
+    def decrypt_sensitive_value(self, key: str) -> str | None:
+        """Decrypt a sensitive configuration value previously encrypted.
+
+        Args:
+            key: The configuration key.
+
+        Returns:
+            The decrypted plaintext, or None when the value does not exist
+            or cannot be authenticated/decrypted.
+        """
+        token = self._encrypted_values.get(key)
+        if token is None:
+            return None
+        fernet = _get_fernet()
+        if fernet is None:
+            return None
+        try:
+            return fernet.decrypt(token.encode()).decode()
+        except InvalidToken:
+            return None
 
     def set_environment_guard(self, environment: str, blocked_keys: set[str]) -> None:
         """Set environment-specific configuration guards.

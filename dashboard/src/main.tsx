@@ -1,7 +1,11 @@
 import React, { Component, type ReactNode } from 'react';
 import ReactDOMClient from 'react-dom/client';
 import App from './App';
+import { applyTheme, getActiveTheme } from './styles/themes';
 import './index.css';
+
+// Restore the persisted theme before first paint so there is no flash.
+applyTheme(getActiveTheme());
 
 interface Props {
   children: ReactNode;

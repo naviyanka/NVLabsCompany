@@ -1,4 +1,4 @@
-﻿"""Evolution models for continuous improvement and self-optimization.
+"""Evolution models for continuous improvement and self-optimization.
 
 The evolution system enables agents to propose improvements, evaluate them
 through A/B testing, and track versioned configurations. All promotions

@@ -1,4 +1,4 @@
-﻿"""Governance models: approvals, decisions, decision queues, and audit log."""
+"""Governance models: approvals, decisions, decision queues, and audit log."""
 
 import uuid
 from datetime import timezone, datetime

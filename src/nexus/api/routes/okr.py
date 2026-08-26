@@ -1,44 +1,24 @@
-"""OKR Management API routes.
+"""OKR Management API routes — DB-backed.
 
 Provides REST endpoints for managing Objectives and Key Results,
-including creation, progress updates, and risk detection.
+persisted in okr_objectives / okr_key_results tables.
 """
 
 import uuid
+from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
+from sqlalchemy import select
 
 from nexus.api.deps import CurrentCompanyId, DbSession
-from nexus.company.okr import OKRManager
+from nexus.models.okr import OKRKeyResult, OKRObjective
 
 router = APIRouter(tags=["okr"])
 
-# In-memory OKR manager instances per company, seeded from DB on first access.
-_managers: dict[uuid.UUID, OKRManager] = {}
-
-
-def _get_manager(company_id: uuid.UUID) -> OKRManager:
-    """Get or create an OKR manager for a company.
-
-    Args:
-        company_id: The company UUID to scope the manager.
-
-    Returns:
-        OKRManager instance for the given company.
-    """
-    if company_id not in _managers:
-        _managers[company_id] = OKRManager(company_id=company_id)
-    return _managers[company_id]
-
-
-# --- Request/Response Models ---
-
 
 class CreateObjectiveRequest(BaseModel):
-    """Request body for creating an objective."""
-
     title: str = Field(..., description="Title of the objective")
     description: str = Field("", description="Detailed description")
     owner_agent_id: uuid.UUID = Field(..., description="Agent responsible for this objective")
@@ -46,22 +26,16 @@ class CreateObjectiveRequest(BaseModel):
 
 
 class AddKeyResultRequest(BaseModel):
-    """Request body for adding a key result."""
-
     title: str = Field(..., description="Title of the key result")
     target_value: float = Field(..., description="Target value to achieve")
     unit: str = Field("percent", description="Unit of measurement")
 
 
 class UpdateProgressRequest(BaseModel):
-    """Request body for updating key result progress."""
-
     current_value: float = Field(..., description="Current progress value")
 
 
 class KeyResultResponse(BaseModel):
-    """Response model for a key result."""
-
     id: uuid.UUID
     objective_id: uuid.UUID
     title: str
@@ -73,12 +47,10 @@ class KeyResultResponse(BaseModel):
 
 
 class ObjectiveResponse(BaseModel):
-    """Response model for an objective."""
-
     id: uuid.UUID
     title: str
     description: str
-    owner_agent_id: uuid.UUID
+    owner_agent_id: uuid.UUID | None
     time_frame: str
     status: str
     key_results: list[KeyResultResponse]
@@ -87,60 +59,49 @@ class ObjectiveResponse(BaseModel):
 
 
 class ObjectiveListResponse(BaseModel):
-    """Response model for listing objectives."""
-
     objectives: list[ObjectiveResponse]
 
 
 class AtRiskResponse(BaseModel):
-    """Response model for at-risk objectives."""
-
     at_risk_objectives: list[ObjectiveResponse]
     time_elapsed_fraction: float
 
 
-def _serialize_objective(
-    objective: Any, manager: OKRManager
-) -> dict[str, Any]:
-    """Serialize an Objective to a response dict.
+def _compute_progress(key_results: list[OKRKeyResult]) -> float:
+    if not key_results:
+        return 0.0
+    total = 0.0
+    for kr in key_results:
+        if kr.target_value > 0:
+            total += min(kr.current_value / kr.target_value, 1.0)
+    return total / len(key_results)
 
-    Args:
-        objective: The Objective instance to serialize.
-        manager: The OKRManager for progress computation.
 
-    Returns:
-        Dict suitable for ObjectiveResponse.
-    """
-    key_results = [
-        {
-            "id": kr.id,
-            "objective_id": kr.objective_id,
-            "title": kr.title,
-            "target_value": kr.target_value,
-            "current_value": kr.current_value,
-            "unit": kr.unit,
-            "status": kr.status,
-            "updated_at": kr.updated_at.isoformat(),
-        }
-        for kr in objective.key_results
-    ]
-
-    progress = manager.compute_objective_progress(objective.id)
-
+def _serialize_objective(obj: OKRObjective, key_results: list[OKRKeyResult]) -> dict[str, Any]:
+    progress = _compute_progress(key_results)
     return {
-        "id": objective.id,
-        "title": objective.title,
-        "description": objective.description,
-        "owner_agent_id": objective.owner_agent_id,
-        "time_frame": objective.time_frame,
-        "status": objective.status,
-        "key_results": key_results,
-        "created_at": objective.created_at.isoformat(),
+        "id": obj.id,
+        "title": obj.title,
+        "description": obj.description or "",
+        "owner_agent_id": obj.owner_agent_id,
+        "time_frame": obj.time_frame,
+        "status": obj.status,
+        "key_results": [
+            {
+                "id": kr.id,
+                "objective_id": kr.objective_id,
+                "title": kr.title,
+                "target_value": kr.target_value,
+                "current_value": kr.current_value,
+                "unit": kr.unit,
+                "status": kr.status,
+                "updated_at": kr.updated_at.isoformat() if kr.updated_at else "",
+            }
+            for kr in key_results
+        ],
+        "created_at": obj.created_at.isoformat() if obj.created_at else "",
         "progress": progress,
     }
-
-
-# --- Route Handlers ---
 
 
 @router.post(
@@ -151,72 +112,67 @@ def _serialize_objective(
 async def create_objective(
     request: CreateObjectiveRequest,
     company_id: CurrentCompanyId,
+    db: DbSession,
 ) -> dict[str, Any]:
-    """Create a new objective.
-
-    Args:
-        request: The objective creation request body.
-        company_id: Authenticated company UUID from header.
-
-    Returns:
-        The created objective with initial progress.
-    """
-    manager = _get_manager(company_id)
-    objective = manager.create_objective(
+    obj = OKRObjective(
+        company_id=company_id,
         title=request.title,
         description=request.description,
         owner_agent_id=request.owner_agent_id,
         time_frame=request.time_frame,
+        status="active",
     )
-    return _serialize_objective(objective, manager)
+    db.add(obj)
+    await db.commit()
+    await db.refresh(obj)
+    return _serialize_objective(obj, [])
 
 
 @router.get("/okrs/objectives", response_model=ObjectiveListResponse)
 async def list_objectives(
     company_id: CurrentCompanyId,
+    db: DbSession,
 ) -> dict[str, Any]:
-    """List all objectives for the company.
+    result = await db.execute(
+        select(OKRObjective).where(OKRObjective.company_id == company_id)
+    )
+    objectives = result.scalars().all()
 
-    Args:
-        company_id: Authenticated company UUID from header.
+    serialized = []
+    for obj in objectives:
+        kr_result = await db.execute(
+            select(OKRKeyResult).where(OKRKeyResult.objective_id == obj.id)
+        )
+        krs = kr_result.scalars().all()
+        serialized.append(_serialize_objective(obj, krs))
 
-    Returns:
-        List of all objectives with progress information.
-    """
-    manager = _get_manager(company_id)
-    objectives = manager.get_company_okrs()
-    return {
-        "objectives": [
-            _serialize_objective(obj, manager) for obj in objectives
-        ]
-    }
+    return {"objectives": serialized}
 
 
 @router.get("/okrs/objectives/{objective_id}", response_model=ObjectiveResponse)
 async def get_objective(
     objective_id: uuid.UUID,
     company_id: CurrentCompanyId,
+    db: DbSession,
 ) -> dict[str, Any]:
-    """Get a single objective with progress.
-
-    Args:
-        objective_id: UUID of the objective to retrieve.
-        company_id: Authenticated company UUID from header.
-
-    Returns:
-        The objective with current progress.
-
-    Raises:
-        HTTPException: If the objective is not found.
-    """
-    manager = _get_manager(company_id)
-    objective = manager.get_objective(objective_id)
-    if objective is None:
+    result = await db.execute(
+        select(OKRObjective).where(
+            OKRObjective.id == objective_id,
+            OKRObjective.company_id == company_id,
+        )
+    )
+    obj = result.scalar_one_or_none()
+    if obj is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Objective {objective_id} not found",
         )
-    return _serialize_objective(objective, manager)
+
+    kr_result = await db.execute(
+        select(OKRKeyResult).where(OKRKeyResult.objective_id == obj.id)
+    )
+    krs = kr_result.scalars().all()
+    return _serialize_objective(obj, krs)
 
 
 @router.post(
@@ -228,34 +184,33 @@ async def add_key_result(
     objective_id: uuid.UUID,
     request: AddKeyResultRequest,
     company_id: CurrentCompanyId,
+    db: DbSession,
 ) -> dict[str, Any]:
-    """Add a key result to an objective.
-
-    Args:
-        objective_id: UUID of the parent objective.
-        request: The key result creation request body.
-        company_id: Authenticated company UUID from header.
-
-    Returns:
-        The created key result.
-
-    Raises:
-        HTTPException: If the objective is not found.
-    """
-    manager = _get_manager(company_id)
-    try:
-        kr = manager.add_key_result(
-            objective_id=objective_id,
-            title=request.title,
-            target_value=request.target_value,
-            unit=request.unit,
+    result = await db.execute(
+        select(OKRObjective).where(
+            OKRObjective.id == objective_id,
+            OKRObjective.company_id == company_id,
         )
-    except KeyError:
+    )
+    obj = result.scalar_one_or_none()
+    if obj is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Objective {objective_id} not found",
         )
 
+    kr = OKRKeyResult(
+        objective_id=objective_id,
+        company_id=company_id,
+        title=request.title,
+        target_value=request.target_value,
+        current_value=0.0,
+        unit=request.unit,
+        status="on_track",
+    )
+    db.add(kr)
+    await db.commit()
+    await db.refresh(kr)
     return {
         "id": kr.id,
         "objective_id": kr.objective_id,
@@ -264,7 +219,7 @@ async def add_key_result(
         "current_value": kr.current_value,
         "unit": kr.unit,
         "status": kr.status,
-        "updated_at": kr.updated_at.isoformat(),
+        "updated_at": kr.updated_at.isoformat() if kr.updated_at else "",
     }
 
 
@@ -276,32 +231,34 @@ async def update_key_result_progress(
     key_result_id: uuid.UUID,
     request: UpdateProgressRequest,
     company_id: CurrentCompanyId,
+    db: DbSession,
 ) -> dict[str, Any]:
-    """Update the progress of a key result.
-
-    Args:
-        key_result_id: UUID of the key result to update.
-        request: The progress update request body.
-        company_id: Authenticated company UUID from header.
-
-    Returns:
-        The updated key result.
-
-    Raises:
-        HTTPException: If the key result is not found.
-    """
-    manager = _get_manager(company_id)
-    try:
-        kr = manager.update_progress(
-            key_result_id=key_result_id,
-            current_value=request.current_value,
+    result = await db.execute(
+        select(OKRKeyResult).where(
+            OKRKeyResult.id == key_result_id,
+            OKRKeyResult.company_id == company_id,
         )
-    except KeyError:
+    )
+    kr = result.scalar_one_or_none()
+    if kr is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"KeyResult {key_result_id} not found",
         )
 
+    kr.current_value = request.current_value
+    kr.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+
+    progress = kr.current_value / kr.target_value if kr.target_value > 0 else 0.0
+    if progress >= 0.7:
+        kr.status = "on_track"
+    elif progress >= 0.3:
+        kr.status = "at_risk"
+    else:
+        kr.status = "behind"
+
+    await db.commit()
+    await db.refresh(kr)
     return {
         "id": kr.id,
         "objective_id": kr.objective_id,
@@ -310,61 +267,39 @@ async def update_key_result_progress(
         "current_value": kr.current_value,
         "unit": kr.unit,
         "status": kr.status,
-        "updated_at": kr.updated_at.isoformat(),
+        "updated_at": kr.updated_at.isoformat() if kr.updated_at else "",
     }
 
 
 @router.get("/okrs/at-risk", response_model=AtRiskResponse)
 async def get_at_risk_objectives(
     company_id: CurrentCompanyId,
+    db: DbSession,
     time_elapsed_fraction: float = 0.75,
 ) -> dict[str, Any]:
-    """Get objectives that are at risk of not being met.
-
-    Args:
-        company_id: Authenticated company UUID from header.
-        time_elapsed_fraction: Fraction of time elapsed (default 0.75).
-
-    Returns:
-        List of at-risk objectives and the time fraction used.
-    """
-    manager = _get_manager(company_id)
-    at_risk = manager.detect_at_risk_objectives(
-        time_elapsed_fraction=time_elapsed_fraction
+    result = await db.execute(
+        select(OKRObjective).where(
+            OKRObjective.company_id == company_id,
+            OKRObjective.status == "active",
+        )
     )
+    objectives = result.scalars().all()
+
+    at_risk = []
+    for obj in objectives:
+        if time_elapsed_fraction < 0.7:
+            continue
+        kr_result = await db.execute(
+            select(OKRKeyResult).where(OKRKeyResult.objective_id == obj.id)
+        )
+        krs = kr_result.scalars().all()
+        for kr in krs:
+            progress = kr.current_value / kr.target_value if kr.target_value > 0 else 0.0
+            if progress < 0.3:
+                at_risk.append(_serialize_objective(obj, krs))
+                break
+
     return {
-        "at_risk_objectives": [
-            _serialize_objective(obj, manager) for obj in at_risk
-        ],
+        "at_risk_objectives": at_risk,
         "time_elapsed_fraction": time_elapsed_fraction,
     }
-
-
-# ---------------------------------------------------------------------------
-# OKR DB Persistence (persist on mutation, load on startup)
-# ---------------------------------------------------------------------------
-
-
-async def _persist_okr_state(db: Any, company_id: uuid.UUID, manager: OKRManager) -> None:
-    """Persist OKR objectives to the Goal model with level='okr' for durability."""
-    import json as _json
-    from sqlalchemy import delete as sa_delete
-    from nexus.models.task import Goal
-
-    try:
-        await db.execute(sa_delete(Goal).where(Goal.company_id == company_id, Goal.level == "okr"))
-        for obj in manager.list_objectives():
-            kr_json = _json.dumps([
-                {"id": str(kr.id), "title": kr.title, "target_value": kr.target_value,
-                 "current_value": kr.current_value, "unit": kr.unit, "status": kr.status}
-                for kr in obj.key_results
-            ])
-            goal = Goal(
-                id=obj.id, company_id=company_id, title=obj.title,
-                description=f"{obj.description}\n__KR__:{kr_json}",
-                level="okr", status=obj.status, owner_agent_id=obj.owner_agent_id,
-            )
-            db.add(goal)
-        await db.flush()
-    except Exception:
-        pass
