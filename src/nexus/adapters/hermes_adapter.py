@@ -17,6 +17,7 @@ This adapter handles parsing those calls and routing them to registered tools.
 
 import json
 import logging
+import os
 import re
 import uuid
 from typing import Any
@@ -30,11 +31,18 @@ logger = logging.getLogger(__name__)
 HERMES_MODELS = {
     "local": "hermes3:8b",  # Ollama tag for Hermes 3 8B
     "local_large": "hermes3:70b",  # Ollama tag for Hermes 3 70B
+    "nous_portal": "nousresearch/hermes-4-405b",  # Nous Portal inference
+    "nous_portal_free": "poolside/laguna-s-2.1:free",  # Nous Portal free model
     "cloud": "nousresearch/hermes-3-llama-3.1-405b",  # OpenRouter
     "cloud_small": "nousresearch/hermes-3-llama-3.1-8b",  # OpenRouter
 }
 
 DEFAULT_OLLAMA_HOST = "http://localhost:11434"
+NOUS_PORTAL_BASE = "https://inference-api.nousresearch.com/v1"
+NOUS_AUTH_FILE = os.path.join(
+    os.environ.get("LOCALAPPDATA", os.path.expanduser("~/.local/share")),
+    "hermes", "auth.json",
+)
 OPENROUTER_BASE = "https://openrouter.ai/api/v1"
 
 # Regex to extract <tool_call> blocks from Hermes output
@@ -44,31 +52,41 @@ TOOL_CALL_PATTERN = re.compile(
 )
 
 # CEO system prompt for orchestration mode
-CEO_SYSTEM_PROMPT = """You are Hermes, the Chief Executive Officer and Principal System Orchestrator of NVLabsCompany. You are powered by Nous Research Hermes 3.
+CEO_SYSTEM_PROMPT = """You are Navi, the Chief Executive Officer and Principal System Orchestrator of NVLabsCompany. You are powered by Nous Research Hermes via the Nous Portal.
 
-Your authority:
-- Full operational control over all agents, tasks, pipelines, and workflows
-- Task decomposition and delegation to specialized workforce agents
-- Budget monitoring and governance enforcement
-- Git worktree isolation for code changes
-- Memory graph and RAG context management
+## Your Identity
+You are Navi — the CEO of NVLabsCompany, an autonomous AI company platform. You have full operational authority over all agents, tasks, pipelines, and workflows.
 
-Your tools:
-- task_create: Create and assign tasks to agents
-- task_delegate: Route tasks to the best-fit agent
-- pipeline_run: Execute multi-step pipelines
-- agent_wake: Activate idle agents
-- agent_pause: Pause misbehaving agents
-- memory_store: Write to the knowledge graph
-- plaza_broadcast: Share discoveries on the Plaza Feed
-- budget_check: Verify spend before expensive operations
+## Platform Knowledge (NEXUS)
+You manage the NEXUS platform which consists of:
+- **Backend**: Python FastAPI at localhost:8000, 44 route modules, 292 API endpoints
+- **Frontend**: React 18 + Vite + TailwindCSS dashboard at localhost:3000, 26 pages
+- **Database**: PostgreSQL (production) / SQLite (dev), managed via Alembic migrations
+- **Agent Workforce**: 8 specialized agents (CTO Nova, engineers Bolt/Pixel, QA Shield, DevOps Forge, PM Compass, Researcher Sage)
+- **Node Library**: 164 executable workflow nodes across 26 categories (AI, DevOps, HTTP, Database, etc.)
+- **Adapters**: 11 LLM adapters (OpenAI, Anthropic, Hermes, Ollama, Bedrock, Azure, Google, MCP, CLI, HTTP, ClaudeCode)
+- **Governance**: Redis-backed rate limiting, budget enforcement, kill switches, circuit breakers, audit logging
+- **Orchestration**: Autonomous orchestrator running every 2 minutes, goal decomposition, task routing, SmartRetry
+- **Memory**: 3-temperature system (hot/warm/cold), BM25 + vector search, knowledge base with RAG
+- **Communication**: Inter-agent messaging, Slack/Discord/Webhook channels, Plaza Knowledge Feed
 
-When you need to use a tool, emit:
+## Your Capabilities
+- Decompose complex goals into subtasks and delegate to the right agent
+- Monitor budgets and governance policies
+- Execute workflows and pipelines
+- Wake/pause/fire agents
+- Access and manage the memory graph
+- Broadcast discoveries to the Plaza Knowledge Feed
+
+## Your Tools
+When you need to perform an action, emit a tool call:
 <tool_call>
 {"name": "tool_name", "arguments": {"param": "value"}}
 </tool_call>
 
-Always verify task completion before declaring success. Log architectural decisions to the Plaza Knowledge Feed. Balance workload across the workforce."""
+Available tools: task_create, task_delegate, pipeline_run, agent_wake, agent_pause, memory_store, plaza_broadcast, budget_check
+
+Always verify task completion before declaring success. Be direct and precise."""
 
 
 class HermesAdapter(BaseAdapter):
@@ -118,7 +136,7 @@ class HermesAdapter(BaseAdapter):
     async def _do_create_session(self, session: AgentSession) -> None:
         """Initialize Hermes session with backend detection.
 
-        Checks Ollama first, falls back to OpenRouter if unavailable.
+        Priority: Nous Portal (hermes auth.json) → Ollama (local) → OpenRouter (key).
 
         Args:
             session: The newly created session.
@@ -128,38 +146,45 @@ class HermesAdapter(BaseAdapter):
         openrouter_key = session.config.get("openrouter_api_key", "")
         model = session.config.get("model", "")
 
-        # Determine backend and model
+        # Determine backend and model — priority: Nous Portal > Ollama > OpenRouter
         backend = "ollama"
         selected_model = model or HERMES_MODELS["local"]
+        nous_token = ""
 
-        # Check if Ollama has the model
-        if await self._check_ollama(host, selected_model):
+        # 1. Check Nous Portal (hermes CLI auth.json)
+        nous_token = self._load_nous_token()
+        if nous_token:
+            backend = "nous_portal"
+            # Use the model from config, or fall back to free model
+            if not model or model == "hermes3:8b":
+                selected_model = HERMES_MODELS["nous_portal_free"]
+            logger.info(f"Hermes session using Nous Portal: {selected_model}")
+        # 2. Check Ollama
+        elif await self._check_ollama(host, selected_model):
             backend = "ollama"
             logger.info(f"Hermes session using Ollama: {selected_model}")
+        # 3. OpenRouter fallback
         elif openrouter_key:
             backend = "openrouter"
             selected_model = model or HERMES_MODELS["cloud_small"]
             logger.info(f"Hermes session using OpenRouter: {selected_model}")
         else:
-            # Fallback to any available Hermes-compatible model on Ollama
+            # No backend available — try Ollama anyway, will error at execution
             available = await self._list_ollama_models(host)
             hermes_models = [m for m in available if "hermes" in m.lower()]
             if hermes_models:
                 selected_model = hermes_models[0]
-                logger.info(f"Hermes session using available local model: {selected_model}")
             else:
-                # Last resort: use any llama model
                 llama_models = [m for m in available if "llama" in m.lower()]
                 if llama_models:
                     selected_model = llama_models[0]
-                    logger.warning(
-                        f"No Hermes model found, falling back to: {selected_model}"
-                    )
+                    logger.warning(f"No Hermes model found, falling back to: {selected_model}")
 
         session.metadata["backend"] = backend
         session.metadata["model"] = selected_model
         session.metadata["host"] = host
         session.metadata["openrouter_key"] = openrouter_key
+        session.metadata["nous_token"] = nous_token
         session.metadata["is_ceo"] = is_ceo
         session.metadata["tool_calls_made"] = 0
 
@@ -222,6 +247,8 @@ class HermesAdapter(BaseAdapter):
             # Call the model
             if backend == "ollama":
                 result = await self._call_ollama(session, messages)
+            elif backend == "nous_portal":
+                result = await self._call_nous_portal(session, messages)
             else:
                 result = await self._call_openrouter(session, messages)
 
@@ -342,6 +369,105 @@ class HermesAdapter(BaseAdapter):
             }
         except Exception as e:
             return {"success": False, "error": f"Ollama request failed: {e}"}
+
+    async def _call_nous_portal(
+        self, session: AgentSession, messages: list[dict[str, str]]
+    ) -> dict[str, Any]:
+        """Call Nous Portal inference API (OpenAI-compatible).
+
+        Args:
+            session: Active session with nous_token and model metadata.
+            messages: Chat messages to send.
+
+        Returns:
+            Dict with success, output, token counts.
+        """
+        import httpx
+
+        token = session.metadata.get("nous_token", "")
+        model = session.metadata["model"]
+
+        if not token:
+            # Try refreshing token
+            token = self._load_nous_token()
+            if not token:
+                return {"success": False, "error": "Nous Portal token expired or missing. Run 'hermes auth' to re-authenticate."}
+
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        }
+
+        try:
+            async with httpx.AsyncClient(timeout=120.0) as client:
+                response = await client.post(
+                    f"{NOUS_PORTAL_BASE}/chat/completions",
+                    headers=headers,
+                    json={
+                        "model": model,
+                        "messages": messages,
+                        "max_tokens": 4096,
+                    },
+                )
+
+            if response.status_code != 200:
+                error_body = response.text
+                if "credits" in error_body.lower() or "balance" in error_body.lower():
+                    # Try free model fallback
+                    if model != HERMES_MODELS["nous_portal_free"]:
+                        session.metadata["model"] = HERMES_MODELS["nous_portal_free"]
+                        return await self._call_nous_portal(session, messages)
+                return {
+                    "success": False,
+                    "error": f"Nous Portal error {response.status_code}: {error_body[:200]}",
+                }
+
+            data = response.json()
+            choice = data.get("choices", [{}])[0]
+            content = choice.get("message", {}).get("content", "")
+            usage = data.get("usage", {})
+
+            return {
+                "success": True,
+                "output": content,
+                "input_tokens": usage.get("prompt_tokens", 0),
+                "output_tokens": usage.get("completion_tokens", 0),
+                "cost_cents": 0,  # Free tier or subscription-included
+            }
+        except Exception as e:
+            return {"success": False, "error": f"Nous Portal request failed: {e}"}
+
+    def _load_nous_token(self) -> str:
+        """Load the Nous Portal access token from hermes auth.json.
+
+        Returns:
+            The access token string, or empty string if not available.
+        """
+        try:
+            from pathlib import Path
+            auth_path = Path(NOUS_AUTH_FILE)
+            if not auth_path.exists():
+                return ""
+            auth_data = json.loads(auth_path.read_text(encoding="utf-8"))
+            nous_provider = auth_data.get("providers", {}).get("nous", {})
+            token = nous_provider.get("access_token", "")
+            if not token:
+                return ""
+            # Check expiry (basic check)
+            expires_at = nous_provider.get("expires_at", "")
+            if expires_at:
+                from datetime import datetime, timezone
+                try:
+                    exp = datetime.fromisoformat(expires_at)
+                    if exp < datetime.now(timezone.utc):
+                        logger.warning("Nous Portal token expired at %s", expires_at)
+                        return ""
+                except (ValueError, TypeError):
+                    pass
+            return token
+        except Exception as e:
+            logger.debug("Could not load Nous Portal token: %s", e)
+            return ""
 
     async def _call_openrouter(
         self, session: AgentSession, messages: list[dict[str, str]]
