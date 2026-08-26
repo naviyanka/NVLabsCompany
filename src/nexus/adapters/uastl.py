@@ -110,7 +110,23 @@ PROVIDERS: dict[str, dict[str, Any]] = {
     "agy": {"registry_key": "cli", "backend": "agy", "env_key": None},
     "opencode": {"registry_key": "cli", "backend": "opencode", "env_key": None},
     "cursor": {"registry_key": "cli", "backend": "cursor", "env_key": None},
-    "hermes-cli": {"registry_key": "cli", "backend": "hermes", "env_key": None},
+    "hermes-cli": {
+        # Uses the same Nous Portal backend as the hermes CLI app.
+        # Reads auth token from hermes auth.json (same credentials).
+        "registry_key": "hermes",
+        "env_key": None,
+        "default_model": "poolside/laguna-s-2.1:free",
+        "host": "http://localhost:11434",
+        "supports_streaming": True,
+        "supports_tools": True,
+        "models": [
+            "poolside/laguna-s-2.1:free",
+            "nousresearch/hermes-4-405b",
+            "nousresearch/hermes-4-70b",
+            "anthropic/claude-sonnet-4",
+            "deepseek/deepseek-chat",
+        ],
+    },
 }
 
 # Aliases for backward compatibility. "claude" historically resolved to the
