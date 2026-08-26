@@ -163,60 +163,104 @@ async def _load_history_from_db(
 
 
 async def _fetch_live_platform_context(
-    db: "AsyncSession", company_id: uuid.UUID, user_prompt: str
+    db: "AsyncSession", company_id: uuid.UUID, user_prompt: str, is_ceo: bool = False
 ) -> str:
-    """Fetch live platform data relevant to the user's question for CEO context.
+    """Fetch live platform data relevant to the user's question from the database.
 
     Queries the real database to provide accurate, real-time answers about
-    agents, tasks, pipelines, goals, etc. Only fetches data relevant to the
-    user's question (keyword-triggered).
+    agents, tasks, pipelines, goals, etc. Always includes agent workforce roster
+    for CEO/manager agents or when task/agent management is referenced.
     """
     from nexus.models.task import Task, Goal
 
     context_parts: list[str] = []
     prompt_lower = user_prompt.lower()
 
-    # Agent-related queries
-    if any(kw in prompt_lower for kw in ["agent", "workforce", "team", "hired", "who"]):
-        stmt = select(Agent).where(Agent.company_id == company_id)
-        result = await db.execute(stmt)
-        agents = list(result.scalars().all())
-        active = [a for a in agents if a.status == "active"]
+    # Query all agents for the company
+    stmt = select(Agent).where(Agent.company_id == company_id)
+    result = await db.execute(stmt)
+    agents = list(result.scalars().all())
+    active = [a for a in agents if a.status in ("active", "ready", "idle")]
+
+    agent_by_name = {a.name.lower(): a for a in agents}
+
+    # If prompt asks to assign a task to a named agent (e.g. Punni), auto-create or assign task in DB
+    if "assign" in prompt_lower:
+        for name, target_agent in agent_by_name.items():
+            if name in prompt_lower:
+                # User is requesting task assignment to target_agent
+                title = f"Task: {user_prompt[:120]}"
+                existing_stmt = select(Task).where(
+                    Task.company_id == company_id,
+                    Task.assigned_agent_id == target_agent.id,
+                    Task.status == "pending",
+                ).limit(1)
+                ex_res = await db.execute(existing_stmt)
+                existing_task = ex_res.scalar_one_or_none()
+                if not existing_task:
+                    new_task = Task(
+                        company_id=company_id,
+                        title=title,
+                        description=user_prompt,
+                        priority=1,
+                        assigned_agent_id=target_agent.id,
+                        status="pending",
+                    )
+                    db.add(new_task)
+                    await db.flush()
+                    assigned_task_info = f"  - Created and assigned Task '{new_task.title}' (ID: {new_task.id}) to agent {target_agent.name} [{target_agent.role}]"
+                else:
+                    assigned_task_info = f"  - Pending Task '{existing_task.title}' (ID: {existing_task.id}) is assigned to agent {target_agent.name} [{target_agent.role}]"
+
+                context_parts.append(f"[LIVE TASK ASSIGNMENT PERFORMED]\n{assigned_task_info}")
+                break
+
+    # Always include workforce roster for CEO or when agents/tasks are mentioned
+    include_agents = is_ceo or any(
+        kw in prompt_lower
+        for kw in ["agent", "workforce", "team", "hired", "who", "assign", "task", "member"]
+    ) or any(name in prompt_lower for name in agent_by_name)
+    if include_agents or len(agents) > 0:
         agent_lines = "\n".join(
-            f"  - {a.name} [{a.role}] adapter={a.adapter_type} model={a.model} status={a.status}"
+            f"  - Name: {a.name} | ID: {a.id} | Role: {a.role} | Title: {a.title or a.role} | Adapter: {a.adapter_type} | Model: {a.model or 'default'} | Status: {a.status}"
             for a in agents
         )
         context_parts.append(
-            f"[LIVE DATA] Company has {len(agents)} agents ({len(active)} active):\n{agent_lines}"
+            f"[LIVE WORKFORCE DATA] Company has {len(agents)} registered agents ({len(active)} active/ready):\n{agent_lines}"
         )
 
-    # Task-related queries
-    if any(kw in prompt_lower for kw in ["task", "pending", "progress", "work", "assigned"]):
-        stmt = select(Task).where(Task.company_id == company_id).limit(20)
+    # Task-related queries or CEO context
+    include_tasks = is_ceo or any(
+        kw in prompt_lower for kw in ["task", "pending", "progress", "work", "assigned", "assign", "do"]
+    )
+    if include_tasks:
+        stmt = select(Task).where(Task.company_id == company_id).order_by(Task.created_at.desc()).limit(20)
         result = await db.execute(stmt)
         tasks = list(result.scalars().all())
-        by_status: dict[str, int] = {}
-        for t in tasks:
-            by_status[t.status] = by_status.get(t.status, 0) + 1
-        status_summary = ", ".join(f"{s}: {c}" for s, c in sorted(by_status.items()))
-        context_parts.append(
-            f"[LIVE DATA] {len(tasks)} tasks total. Status breakdown: {status_summary}"
-        )
+        if tasks:
+            task_lines = "\n".join(
+                f"  - Task ID: {t.id} | Title: {t.title} | Status: {t.status} | Assigned Agent ID: {t.assigned_agent_id or 'unassigned'}"
+                for t in tasks
+            )
+            context_parts.append(
+                f"[LIVE TASK DATA] Total {len(tasks)} tasks:\n{task_lines}"
+            )
 
     # Goal-related queries
-    if any(kw in prompt_lower for kw in ["goal", "objective", "okr", "strategy"]):
+    if is_ceo or any(kw in prompt_lower for kw in ["goal", "objective", "okr", "strategy"]):
         stmt = select(Goal).where(Goal.company_id == company_id).limit(10)
         result = await db.execute(stmt)
         goals = list(result.scalars().all())
-        goal_lines = "\n".join(
-            f"  - [{g.status}] {g.title}" for g in goals
-        )
-        context_parts.append(
-            f"[LIVE DATA] {len(goals)} goals:\n{goal_lines}"
-        )
+        if goals:
+            goal_lines = "\n".join(
+                f"  - [{g.status}] {g.title} (Owner Agent ID: {g.owner_agent_id or 'unassigned'})" for g in goals
+            )
+            context_parts.append(
+                f"[LIVE GOALS DATA] {len(goals)} strategic goals:\n{goal_lines}"
+            )
 
     # Budget-related queries
-    if any(kw in prompt_lower for kw in ["budget", "spend", "cost", "money"]):
+    if is_ceo or any(kw in prompt_lower for kw in ["budget", "spend", "cost", "money"]):
         from nexus.models.company import Company
         stmt = select(Company).where(Company.id == company_id)
         result = await db.execute(stmt)
@@ -225,9 +269,9 @@ async def _fetch_live_platform_context(
             budget = company.budget_monthly_cents / 100
             spent = company.spent_monthly_cents / 100
             context_parts.append(
-                f"[LIVE DATA] Budget: ${spent:.2f} spent of ${budget:.2f} monthly cap "
-                f"({(spent/budget*100):.0f}% used)" if budget > 0 else
-                f"[LIVE DATA] Budget: ${spent:.2f} spent (no cap configured)"
+                f"[LIVE BUDGET DATA] Budget: ${spent:.2f} spent of ${budget:.2f} monthly cap"
+                if budget > 0 else
+                f"[LIVE BUDGET DATA] Budget: ${spent:.2f} spent (no cap configured)"
             )
 
     if not context_parts:
@@ -584,50 +628,15 @@ async def chat_with_agent(
     agent_memories = await _fetch_agent_memories(db, agent_id, company_id, query=body.prompt)
     system_prompt = _build_system_prompt(agent, memories=agent_memories)
 
-    # For CEO agents, fetch live data by calling NEXUS API with service account key
-    if agent.role == "ceo":
-        from nexus.agents.ceo_tools import (
-            list_agents, list_tasks, list_goals, get_dashboard, get_budget, query_any_endpoint
+    # Inject live platform context (workforce roster, active tasks, goals, live assignment) directly from DB
+    live_platform_context = await _fetch_live_platform_context(db, company_id, body.prompt, is_ceo=(agent.role == "ceo"))
+    if live_platform_context:
+        system_prompt += (
+            f"\n\n--- LIVE PLATFORM WORKFORCE & TASK DATA ---\n"
+            f"{live_platform_context}\n"
+            f"--- INSTRUCTION: Use this live data for answering and task assignment. "
+            f"Always refer to agents by their real names in this roster (e.g. Punni, Navi). ---"
         )
-        # Use the first active admin API key for self-queries
-        from nexus.models.api_key import ApiKey as ApiKeyModel
-        api_key_stmt = select(ApiKeyModel).where(
-            ApiKeyModel.company_id == company_id,
-            ApiKeyModel.status == "active",
-            ApiKeyModel.role == "admin",
-        ).limit(1)
-        key_result = await db.execute(api_key_stmt)
-        api_key_row = key_result.scalar_one_or_none()
-
-        if api_key_row:
-            # Reconstruct the raw key from prefix (we can't — it's hashed)
-            # Instead, use the key from config or env
-            import os
-            ceo_api_key = os.environ.get("CEO_API_KEY", "")
-
-            if ceo_api_key:
-                prompt_lower = body.prompt.lower()
-                live_data = ""
-                try:
-                    if any(kw in prompt_lower for kw in ["agent", "workforce", "team", "hired", "who", "list agent", "how many"]):
-                        live_data = await list_agents(ceo_api_key)
-                    elif any(kw in prompt_lower for kw in ["task", "pending", "progress", "work"]):
-                        live_data = await list_tasks(ceo_api_key)
-                    elif any(kw in prompt_lower for kw in ["goal", "objective", "okr", "strategy"]):
-                        live_data = await list_goals(ceo_api_key)
-                    elif any(kw in prompt_lower for kw in ["dashboard", "overview", "stats", "summary"]):
-                        live_data = await get_dashboard(ceo_api_key)
-                    elif any(kw in prompt_lower for kw in ["budget", "spend", "cost", "money"]):
-                        live_data = await get_budget(ceo_api_key)
-                except Exception as e:
-                    live_data = f"[API query failed: {e}]"
-
-                if live_data:
-                    system_prompt += (
-                        f"\n\n--- LIVE PLATFORM DATA (fetched via authenticated API call) ---\n"
-                        f"{live_data}\n"
-                        f"--- Use this data to answer accurately. Do NOT make up numbers. ---"
-                    )
 
     # Get history for context (TTL-fresh across workers)
     history = await _get_history_fresh(db, str(agent_id), company_id)
@@ -708,50 +717,15 @@ async def chat_with_agent_stream(
     agent_memories = await _fetch_agent_memories(db, agent_id, company_id, query=body.prompt)
     system_prompt = _build_system_prompt(agent, memories=agent_memories)
 
-    # For CEO agents, fetch live data by calling NEXUS API with service account key
-    if agent.role == "ceo":
-        from nexus.agents.ceo_tools import (
-            list_agents, list_tasks, list_goals, get_dashboard, get_budget, query_any_endpoint
+    # Inject live platform context (workforce roster, active tasks, goals, live assignment) directly from DB
+    live_platform_context = await _fetch_live_platform_context(db, company_id, body.prompt, is_ceo=(agent.role == "ceo"))
+    if live_platform_context:
+        system_prompt += (
+            f"\n\n--- LIVE PLATFORM WORKFORCE & TASK DATA ---\n"
+            f"{live_platform_context}\n"
+            f"--- INSTRUCTION: Use this live data for answering and task assignment. "
+            f"Always refer to agents by their real names in this roster (e.g. Punni, Navi). ---"
         )
-        # Use the first active admin API key for self-queries
-        from nexus.models.api_key import ApiKey as ApiKeyModel
-        api_key_stmt = select(ApiKeyModel).where(
-            ApiKeyModel.company_id == company_id,
-            ApiKeyModel.status == "active",
-            ApiKeyModel.role == "admin",
-        ).limit(1)
-        key_result = await db.execute(api_key_stmt)
-        api_key_row = key_result.scalar_one_or_none()
-
-        if api_key_row:
-            # Reconstruct the raw key from prefix (we can't — it's hashed)
-            # Instead, use the key from config or env
-            import os
-            ceo_api_key = os.environ.get("CEO_API_KEY", "")
-
-            if ceo_api_key:
-                prompt_lower = body.prompt.lower()
-                live_data = ""
-                try:
-                    if any(kw in prompt_lower for kw in ["agent", "workforce", "team", "hired", "who", "list agent", "how many"]):
-                        live_data = await list_agents(ceo_api_key)
-                    elif any(kw in prompt_lower for kw in ["task", "pending", "progress", "work"]):
-                        live_data = await list_tasks(ceo_api_key)
-                    elif any(kw in prompt_lower for kw in ["goal", "objective", "okr", "strategy"]):
-                        live_data = await list_goals(ceo_api_key)
-                    elif any(kw in prompt_lower for kw in ["dashboard", "overview", "stats", "summary"]):
-                        live_data = await get_dashboard(ceo_api_key)
-                    elif any(kw in prompt_lower for kw in ["budget", "spend", "cost", "money"]):
-                        live_data = await get_budget(ceo_api_key)
-                except Exception as e:
-                    live_data = f"[API query failed: {e}]"
-
-                if live_data:
-                    system_prompt += (
-                        f"\n\n--- LIVE PLATFORM DATA (fetched via authenticated API call) ---\n"
-                        f"{live_data}\n"
-                        f"--- Use this data to answer accurately. Do NOT make up numbers. ---"
-                    )
 
     # Get history for context (TTL-fresh across workers)
     history = await _get_history_fresh(db, str(agent_id), company_id)
