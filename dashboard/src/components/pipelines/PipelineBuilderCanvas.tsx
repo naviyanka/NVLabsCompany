@@ -10,7 +10,7 @@
 
 import { Button } from '@/components/common/Button';
 import type { CanvasEdge, CanvasNode, CanvasNodeType, PipelineItem } from '@/types/pipeline';
-import { Save, X } from 'lucide-react';
+import { Save, Trash2, X } from 'lucide-react';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import ReactFlow, {
   addEdge,
@@ -129,7 +129,16 @@ function BuilderInner({ pipeline, onSave, onClose }: PipelineBuilderCanvasProps)
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const wrapperRef = useRef<HTMLDivElement>(null);
-  const { project } = useReactFlow();
+  const { project, deleteElements } = useReactFlow();
+
+  const deleteSelected = useCallback(() => {
+    const selNodes = nodes.filter((n) => n.selected || n.id === selectedId).map((n) => ({ id: n.id }));
+    const selEdges = edges.filter((e) => e.selected).map((e) => ({ id: e.id }));
+    if (selNodes.length || selEdges.length) {
+      void deleteElements({ nodes: selNodes, edges: selEdges });
+      setSelectedId(null);
+    }
+  }, [nodes, edges, deleteElements, selectedId]);
 
   /* ── connection handling ── */
   const isValidConnection = useCallback(
@@ -285,9 +294,21 @@ function BuilderInner({ pipeline, onSave, onClose }: PipelineBuilderCanvasProps)
             placeholder="Pipeline name..."
           />
         </div>
-        <Button variant="primary" size="sm" icon={<Save size={14} />} onClick={handleSave}>
-          Save Pipeline
-        </Button>
+        <div className="flex items-center gap-2">
+          {selectedId && (
+            <Button
+              variant="secondary"
+              size="sm"
+              icon={<Trash2 size={14} className="text-rose-400" />}
+              onClick={deleteSelected}
+            >
+              Delete
+            </Button>
+          )}
+          <Button variant="primary" size="sm" icon={<Save size={14} />} onClick={handleSave}>
+            Save Pipeline
+          </Button>
+        </div>
       </div>
 
       <div className="flex flex-1 overflow-hidden">

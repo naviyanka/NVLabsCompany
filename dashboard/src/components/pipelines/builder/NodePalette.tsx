@@ -9,7 +9,8 @@
 import { apiClient } from '@/api/client';
 import type { ApiNode } from '@/types/pipeline';
 import { useEffect, useMemo, useState } from 'react';
-import { categoryColor, categoryIcon } from './categories';
+import { categoryColor } from './categories';
+import { NodeIcon } from './NodeIcon';
 
 /** Built-in pipeline control nodes that are not in the backend registry. */
 const BUILTIN_NODES: ApiNode[] = [
@@ -88,7 +89,6 @@ export function NodePalette({ onAdd }: { onAdd: (payload: PaletteDragPayload) =>
 
   const renderRow = (node: ApiNode, compact = false) => {
     const color = categoryColor(node.category);
-    const icon = node.icon || categoryIcon(node.category);
     return (
       <div
         key={node.id}
@@ -102,14 +102,13 @@ export function NodePalette({ onAdd }: { onAdd: (payload: PaletteDragPayload) =>
           <span
             className="flex items-center justify-center rounded shrink-0"
             style={{
-              width: compact ? 20 : 26,
-              height: compact ? 20 : 26,
-              fontSize: compact ? 10 : 13,
+              width: compact ? 22 : 26,
+              height: compact ? 22 : 26,
               background: color + '18',
               border: `1px solid ${color}60`,
             }}
           >
-            {icon}
+            <NodeIcon icon={node.icon} category={node.category} size={compact ? 12 : 14} color={color} />
           </span>
           <div className="min-w-0 flex-1">
             <div className="text-[11px] font-medium text-[#E0E0E0] group-hover:text-[#FFB020] truncate">

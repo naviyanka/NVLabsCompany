@@ -7,9 +7,11 @@
  * nodeId, params, disabled? }.
  */
 
+import { Trash2 } from 'lucide-react';
 import { memo } from 'react';
-import { Handle, Position, type NodeProps } from 'reactflow';
-import { categoryColor, categoryIcon } from './categories';
+import { Handle, Position, useReactFlow, type NodeProps } from 'reactflow';
+import { categoryColor } from './categories';
+import { NodeIcon } from './NodeIcon';
 
 export interface BuilderNodeData {
   label: string;
@@ -33,23 +35,30 @@ const HANDLE_STYLE_BASE: React.CSSProperties = {
 };
 
 function NodeShell({
+  id,
   data,
   selected,
   showInput,
   showOutput,
 }: {
+  id: string;
   data: BuilderNodeData;
   selected?: boolean;
   showInput: boolean;
   showOutput: boolean;
 }) {
+  const { deleteElements } = useReactFlow();
   const color = data.color || categoryColor(data.category);
-  const icon = data.icon || categoryIcon(data.category);
   const subtitle = data.agent || data.category || '';
+
+  const onDelete = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    void deleteElements({ nodes: [{ id }] });
+  };
 
   return (
     <div
-      className="relative rounded-[10px] border shadow-lg"
+      className="group relative rounded-[10px] border shadow-lg"
       style={{
         width: 210,
         background: '#141416',
@@ -64,6 +73,17 @@ function NodeShell({
         style={{ width: 4, background: color }}
       />
 
+      {/* delete button — visible on hover or when selected */}
+      <button
+        type="button"
+        onClick={onDelete}
+        title="Delete node"
+        className={`nodrag absolute -top-2.5 -right-2.5 z-10 flex h-5 w-5 items-center justify-center rounded-full border border-white/20 bg-[#1A1A1E] text-rose-400 hover:bg-rose-500 hover:text-white transition-opacity cursor-pointer ${selected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+          }`}
+      >
+        <Trash2 size={11} />
+      </button>
+
       {showInput && (
         <Handle
           type="target"
@@ -74,7 +94,7 @@ function NodeShell({
 
       <div className="flex items-center gap-2.5 px-3 py-2.5 pl-4">
         <span
-          className="flex items-center justify-center rounded text-base shrink-0"
+          className="flex items-center justify-center rounded shrink-0"
           style={{
             width: 30,
             height: 30,
@@ -82,7 +102,7 @@ function NodeShell({
             border: `1px solid ${color}60`,
           }}
         >
-          {icon}
+          <NodeIcon icon={data.icon} category={data.category} size={16} color={color} />
         </span>
         <div className="min-w-0 flex-1">
           <div className="text-[12px] font-medium text-white truncate">
@@ -107,18 +127,18 @@ function NodeShell({
   );
 }
 
-export const TriggerNode = memo(({ data, selected }: NodeProps<BuilderNodeData>) => (
-  <NodeShell data={data} selected={selected} showInput={false} showOutput={true} />
+export const TriggerNode = memo(({ id, data, selected }: NodeProps<BuilderNodeData>) => (
+  <NodeShell id={id} data={data} selected={selected} showInput={false} showOutput={true} />
 ));
 TriggerNode.displayName = 'TriggerNode';
 
-export const AgentNode = memo(({ data, selected }: NodeProps<BuilderNodeData>) => (
-  <NodeShell data={data} selected={selected} showInput={true} showOutput={true} />
+export const AgentNode = memo(({ id, data, selected }: NodeProps<BuilderNodeData>) => (
+  <NodeShell id={id} data={data} selected={selected} showInput={true} showOutput={true} />
 ));
 AgentNode.displayName = 'AgentNode';
 
-export const ActionNode = memo(({ data, selected }: NodeProps<BuilderNodeData>) => (
-  <NodeShell data={data} selected={selected} showInput={true} showOutput={true} />
+export const ActionNode = memo(({ id, data, selected }: NodeProps<BuilderNodeData>) => (
+  <NodeShell id={id} data={data} selected={selected} showInput={true} showOutput={true} />
 ));
 ActionNode.displayName = 'ActionNode';
 

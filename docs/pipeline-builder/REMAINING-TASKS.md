@@ -9,7 +9,7 @@ Live checklist. Completed items move to the "Done" section with a note.
       `isValidConnection`.
 - [ ] Conditional edges (`ConditionalEdge` + operators) for branch/if nodes.
 - [ ] Copy / paste of selected nodes (`useCopyPaste` equivalent).
-- [ ] Node context menu (right-click: duplicate, delete, disable).
+- [ ] Node context menu (right-click: duplicate, disable).
 - [ ] Editable node label inline (double-click title).
 - [ ] `displayOptions.show` style conditional parameter visibility in config panel.
 - [ ] Per-node run status overlay while a pipeline is executing (live from run polling).
@@ -46,3 +46,8 @@ Live checklist. Completed items move to the "Done" section with a note.
 - [x] Run → `POST /api/v1/pipelines/{id}/run` with run-status polling (existing wiring).
 - [x] `tsc --noEmit` clean; in-browser smoke test passed (palette loads, add node, config
       panel renders schema).
+- [x] Real per-node lucide icons (`builder/NodeIcon.tsx`) resolved from the backend `icon`
+      field (kebab→PascalCase lookup in lucide-react `icons`, category fallback), matching
+      the reference repo's backend-driven icon approach. Verified: brain/eye/mic/tag/file-text.
+- [x] Node deletion: per-node hover/selected trash button, toolbar Delete button, and
+      Delete/Backspace keys (verified in-browser: 2→1 nodes).
