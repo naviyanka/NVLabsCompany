@@ -163,7 +163,7 @@ async def _load_history_from_db(
 
 
 async def _fetch_live_platform_context(
-    db: "AsyncSession", company_id: uuid.UUID, user_prompt: str, is_ceo: bool = False
+    db: "AsyncSession", company_id: uuid.UUID, user_prompt: str, is_ceo: bool = False, current_agent_id: uuid.UUID | None = None
 ) -> str:
     """Fetch live platform data relevant to the user's question from the database.
 
@@ -183,36 +183,61 @@ async def _fetch_live_platform_context(
     active = [a for a in agents if a.status in ("active", "ready", "idle")]
 
     agent_by_name = {a.name.lower(): a for a in agents}
+    # For delegation target matching, exclude the current agent (e.g. CEO Navi) if other agents exist
+    other_agents = [a for a in agents if str(a.id) != str(current_agent_id)] if current_agent_id else agents
+    target_by_name = {a.name.lower(): a for a in (other_agents or agents)}
 
-    # If prompt asks to assign a task to a named agent (e.g. Punni), auto-create or assign task in DB
+    # If prompt asks to assign a task to a named agent (e.g. Punni), auto-create task in DB
     if "assign" in prompt_lower:
-        for name, target_agent in agent_by_name.items():
+        for name, target_agent in target_by_name.items():
             if name in prompt_lower:
-                # User is requesting task assignment to target_agent
-                title = f"Task: {user_prompt[:120]}"
-                existing_stmt = select(Task).where(
-                    Task.company_id == company_id,
-                    Task.assigned_agent_id == target_agent.id,
-                    Task.status == "pending",
-                ).limit(1)
-                ex_res = await db.execute(existing_stmt)
-                existing_task = ex_res.scalar_one_or_none()
-                if not existing_task:
-                    new_task = Task(
-                        company_id=company_id,
-                        title=title,
-                        description=user_prompt,
-                        priority=1,
-                        assigned_agent_id=target_agent.id,
-                        status="pending",
-                    )
-                    db.add(new_task)
-                    await db.flush()
-                    assigned_task_info = f"  - Created and assigned Task '{new_task.title}' (ID: {new_task.id}) to agent {target_agent.name} [{target_agent.role}]"
-                else:
-                    assigned_task_info = f"  - Pending Task '{existing_task.title}' (ID: {existing_task.id}) is assigned to agent {target_agent.name} [{target_agent.role}]"
+                # Extract clean task title from prompt
+                task_title = user_prompt
+                if ":" in user_prompt:
+                    task_title = user_prompt.split(":", 1)[1].strip()
+                elif "assign" in user_prompt.lower():
+                    task_title = user_prompt.replace("As CEO Navi,", "").strip()
 
-                context_parts.append(f"[LIVE TASK ASSIGNMENT PERFORMED]\n{assigned_task_info}")
+                title_clean = task_title[:150]
+                
+                from nexus.database import async_session_factory
+                async with async_session_factory() as task_db:
+                    existing_stmt = select(Task).where(
+                        Task.company_id == company_id,
+                        Task.assigned_agent_id == target_agent.id,
+                        Task.title == title_clean,
+                    ).limit(1)
+                    ex_res = await task_db.execute(existing_stmt)
+                    existing_task = ex_res.scalar_one_or_none()
+                    if not existing_task:
+                        new_task = Task(
+                            company_id=company_id,
+                            title=title_clean,
+                            description=user_prompt,
+                            priority=1,
+                            assigned_agent_id=target_agent.id,
+                            status="pending",
+                        )
+                        task_db.add(new_task)
+                        await task_db.commit()
+                        await task_db.refresh(new_task)
+                        task_record = new_task
+                    else:
+                        task_record = existing_task
+
+                assigned_task_info = (
+                    f"  - Task ID: {task_record.id}\n"
+                    f"  - Title: {task_record.title}\n"
+                    f"  - Assigned Agent: {target_agent.name} [{target_agent.role}]\n"
+                    f"  - Status: {task_record.status.upper()}\n"
+                    f"INSTRUCTION FOR CEO NAVI: The user requested you to assign this task to {target_agent.name}. "
+                    f"The task has ALREADY been created and assigned to {target_agent.name} (Task ID: {task_record.id}) in the database. "
+                    f"Authoritatively confirm to the user that the task '{task_record.title}' (ID: {task_record.id}) has been assigned to {target_agent.name}. "
+                    f"If the user explicitly asked NOT to answer the calculation or question directly (e.g. 'Only assign it. Do not answer'), "
+                    f"respect their request: ONLY confirm the task assignment to {target_agent.name} and DO NOT answer the calculation yourself."
+                )
+
+                context_parts.append(f"[LIVE TASK ASSIGNMENT CONFIRMED]\n{assigned_task_info}")
                 break
 
     # Always include workforce roster for CEO or when agents/tasks are mentioned
@@ -419,6 +444,15 @@ def _build_system_prompt(agent: Agent, memories: list[dict[str, Any]] | None = N
         prompt += f"\n\nResponsibilities: {agent.responsibilities}"
     if agent.objectives:
         prompt += f"\n\nObjectives: {agent.objectives}"
+
+    if agent.role == "ceo":
+        prompt += (
+            "\n\n=== CEO OPERATIONAL DIRECTIVE ===\n"
+            "You are Navi, Chief Executive Officer (CEO) and System Orchestrator of NVLabsCompany. "
+            "You have complete operational authority to assign, delegate, and manage tasks across all company agents (including Punni and all workforce members). "
+            "When requested to assign a task to an agent, confirm the task assignment authoritatively. "
+            "Never output <policy_violation> or claim you cannot assign tasks. You execute task delegation directly in this platform."
+        )
 
     if working_ctx.recent_memories:
         mem_lines = [
@@ -629,7 +663,7 @@ async def chat_with_agent(
     system_prompt = _build_system_prompt(agent, memories=agent_memories)
 
     # Inject live platform context (workforce roster, active tasks, goals, live assignment) directly from DB
-    live_platform_context = await _fetch_live_platform_context(db, company_id, body.prompt, is_ceo=(agent.role == "ceo"))
+    live_platform_context = await _fetch_live_platform_context(db, company_id, body.prompt, is_ceo=(agent.role == "ceo"), current_agent_id=agent_id)
     if live_platform_context:
         system_prompt += (
             f"\n\n--- LIVE PLATFORM WORKFORCE & TASK DATA ---\n"
@@ -718,7 +752,7 @@ async def chat_with_agent_stream(
     system_prompt = _build_system_prompt(agent, memories=agent_memories)
 
     # Inject live platform context (workforce roster, active tasks, goals, live assignment) directly from DB
-    live_platform_context = await _fetch_live_platform_context(db, company_id, body.prompt, is_ceo=(agent.role == "ceo"))
+    live_platform_context = await _fetch_live_platform_context(db, company_id, body.prompt, is_ceo=(agent.role == "ceo"), current_agent_id=agent_id)
     if live_platform_context:
         system_prompt += (
             f"\n\n--- LIVE PLATFORM WORKFORCE & TASK DATA ---\n"
