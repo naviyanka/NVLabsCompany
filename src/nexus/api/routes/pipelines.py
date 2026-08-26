@@ -1,8 +1,11 @@
 """Pipeline CRUD and execution endpoints."""
 
+import logging
 import uuid
 from datetime import timezone, datetime
 from typing import Any, Optional
+
+logger = logging.getLogger(__name__)
 
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel
@@ -390,8 +393,25 @@ async def run_pipeline(
     db.add(run)
     await db.flush()
 
-    # Schedule background execution worker
-    background_tasks.add_task(_execute_pipeline_bg, run.id, pipeline_id, company_id)
+    # Execute pipeline: prefer Temporal (durable) when enabled, fallback to BackgroundTasks
+    from nexus.temporal.client import is_temporal_enabled, start_pipeline_workflow
+
+    if is_temporal_enabled():
+        workflow_id = await start_pipeline_workflow(
+            pipeline_id=str(pipeline_id),
+            run_id=str(run.id),
+            company_id=str(company_id),
+            stages=pipeline.stages or [],
+        )
+        if workflow_id:
+            logger.info("Pipeline %s run %s dispatched to Temporal: %s", pipeline.name, run.id, workflow_id)
+        else:
+            # Temporal failed to start — fall back to background task
+            logger.warning("Temporal unavailable, falling back to BackgroundTasks for pipeline %s", pipeline.name)
+            background_tasks.add_task(_execute_pipeline_bg, run.id, pipeline_id, company_id)
+    else:
+        # Non-Temporal mode: use FastAPI BackgroundTasks
+        background_tasks.add_task(_execute_pipeline_bg, run.id, pipeline_id, company_id)
 
     # Audit: pipeline triggered
     from nexus.governance.audit_service import record_audit

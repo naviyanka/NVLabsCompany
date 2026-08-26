@@ -6,8 +6,10 @@ import { AddPipelineModal } from '@/components/pipelines/AddPipelineModal';
 import { PipelineBuilderCanvas } from '@/components/pipelines/PipelineBuilderCanvas';
 import { PipelineDetailDrawer } from '@/components/pipelines/PipelineDetailDrawer';
 import { getActiveCompanyId } from '@/config';
+import { NodeLibrary } from '@/pages/NodeLibrary';
 import type { CanvasEdge, CanvasNode, PipelineItem, PipelineStage } from '@/types/pipeline';
 import {
+  Boxes,
   CheckCircle2,
   Clock,
   GitPullRequest,
@@ -19,7 +21,7 @@ import {
   Plus,
   Search,
   ShieldCheck,
-  Workflow,
+  Workflow
 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 
@@ -33,7 +35,7 @@ export function Pipelines() {
 
   const [showAddModal, setShowAddModal] = useState(false);
   const [activeDrawerPipeline, setActiveDrawerPipeline] = useState<PipelineItem | null>(null);
-  const [viewMode, setViewMode] = useState<'split' | 'builder' | 'matrix' | 'security'>('split');
+  const [viewMode, setViewMode] = useState<'split' | 'builder' | 'matrix' | 'security' | 'nodes'>('split');
   const [search, setSearch] = useState('');
   const [triggerFilter, setTriggerFilter] = useState('all');
 
@@ -338,6 +340,7 @@ export function Pipelines() {
           {([
             { key: 'split', icon: <LayoutGrid size={13} />, label: 'Graph' },
             { key: 'builder', icon: <Workflow size={13} />, label: 'Builder' },
+            { key: 'nodes', icon: <Boxes size={13} />, label: 'Nodes' },
             { key: 'matrix', icon: <ListCheck size={13} />, label: 'History' },
             { key: 'security', icon: <ShieldCheck size={13} />, label: 'Security' },
           ] as const).map((v) => (
@@ -561,6 +564,11 @@ export function Pipelines() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* VIEW 4: NODE LIBRARY (n8n-style palette) */}
+      {viewMode === 'nodes' && (
+        <NodeLibrary />
       )}
 
       {/* Detail Drawer */}

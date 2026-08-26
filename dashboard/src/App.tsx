@@ -18,7 +18,6 @@ import { Login } from '@/pages/Login';
 import { Meetings } from '@/pages/Meetings';
 import { Memory } from '@/pages/Memory';
 import { MemoryGraph } from '@/pages/MemoryGraph';
-import { NodeLibrary } from '@/pages/NodeLibrary';
 import { Notifications } from '@/pages/Notifications';
 import { Organization } from '@/pages/Organization';
 import { Pipelines } from '@/pages/Pipelines';
@@ -80,7 +79,7 @@ export default function App() {
               <Route path="/budgets" element={<Budgets />} />
               <Route path="/evolution" element={<Evolution />} />
               <Route path="/workflows" element={<Workflows />} />
-              <Route path="/nodes" element={<NodeLibrary />} />
+              <Route path="/nodes" element={<Navigate to="/pipelines" replace />} />
               <Route path="/meetings" element={<Meetings />} />
               <Route path="/activity" element={<Activity />} />
               <Route path="/notifications" element={<Notifications />} />

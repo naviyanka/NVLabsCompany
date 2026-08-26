@@ -71,6 +71,25 @@ async def _tick(session_factory: async_sessionmaker[AsyncSession]) -> None:
         logger.info("Orchestrator tick: %d active goals to process", len(active_goals))
 
         for goal in active_goals:
+            # Temporal-backed durable goal pursuit when enabled
+            from nexus.temporal.client import is_temporal_enabled, start_goal_workflow
+
+            if is_temporal_enabled():
+                # Dispatch to Temporal — durable, survives crashes
+                workflow_id = await start_goal_workflow(
+                    goal_id=str(goal.id),
+                    company_id=str(goal.company_id),
+                    title=goal.title,
+                    description=goal.description or "",
+                    owner_agent_id=str(goal.owner_agent_id) if goal.owner_agent_id else None,
+                )
+                if workflow_id:
+                    logger.info("Goal %s dispatched to Temporal: %s", goal.id, workflow_id)
+                    # Mark goal as being processed by Temporal so we don't re-dispatch
+                    goal.status = "in_progress"
+                    continue
+                # Temporal unavailable — fall through to in-process execution
+
             # Multi-turn: try up to 3 iterations per goal per tick
             for _iteration in range(3):
                 try:
