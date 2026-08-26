@@ -162,6 +162,80 @@ async def _load_history_from_db(
 # ---------------------------------------------------------------------------
 
 
+async def _fetch_live_platform_context(
+    db: "AsyncSession", company_id: uuid.UUID, user_prompt: str
+) -> str:
+    """Fetch live platform data relevant to the user's question for CEO context.
+
+    Queries the real database to provide accurate, real-time answers about
+    agents, tasks, pipelines, goals, etc. Only fetches data relevant to the
+    user's question (keyword-triggered).
+    """
+    from nexus.models.task import Task, Goal
+
+    context_parts: list[str] = []
+    prompt_lower = user_prompt.lower()
+
+    # Agent-related queries
+    if any(kw in prompt_lower for kw in ["agent", "workforce", "team", "hired", "who"]):
+        stmt = select(Agent).where(Agent.company_id == company_id)
+        result = await db.execute(stmt)
+        agents = list(result.scalars().all())
+        active = [a for a in agents if a.status == "active"]
+        agent_lines = "\n".join(
+            f"  - {a.name} [{a.role}] adapter={a.adapter_type} model={a.model} status={a.status}"
+            for a in agents
+        )
+        context_parts.append(
+            f"[LIVE DATA] Company has {len(agents)} agents ({len(active)} active):\n{agent_lines}"
+        )
+
+    # Task-related queries
+    if any(kw in prompt_lower for kw in ["task", "pending", "progress", "work", "assigned"]):
+        stmt = select(Task).where(Task.company_id == company_id).limit(20)
+        result = await db.execute(stmt)
+        tasks = list(result.scalars().all())
+        by_status: dict[str, int] = {}
+        for t in tasks:
+            by_status[t.status] = by_status.get(t.status, 0) + 1
+        status_summary = ", ".join(f"{s}: {c}" for s, c in sorted(by_status.items()))
+        context_parts.append(
+            f"[LIVE DATA] {len(tasks)} tasks total. Status breakdown: {status_summary}"
+        )
+
+    # Goal-related queries
+    if any(kw in prompt_lower for kw in ["goal", "objective", "okr", "strategy"]):
+        stmt = select(Goal).where(Goal.company_id == company_id).limit(10)
+        result = await db.execute(stmt)
+        goals = list(result.scalars().all())
+        goal_lines = "\n".join(
+            f"  - [{g.status}] {g.title}" for g in goals
+        )
+        context_parts.append(
+            f"[LIVE DATA] {len(goals)} goals:\n{goal_lines}"
+        )
+
+    # Budget-related queries
+    if any(kw in prompt_lower for kw in ["budget", "spend", "cost", "money"]):
+        from nexus.models.company import Company
+        stmt = select(Company).where(Company.id == company_id)
+        result = await db.execute(stmt)
+        company = result.scalar_one_or_none()
+        if company:
+            budget = company.budget_monthly_cents / 100
+            spent = company.spent_monthly_cents / 100
+            context_parts.append(
+                f"[LIVE DATA] Budget: ${spent:.2f} spent of ${budget:.2f} monthly cap "
+                f"({(spent/budget*100):.0f}% used)" if budget > 0 else
+                f"[LIVE DATA] Budget: ${spent:.2f} spent (no cap configured)"
+            )
+
+    if not context_parts:
+        return ""
+
+    return "\n\n".join(context_parts)
+
+
 async def _fetch_agent_memories(
     db: "AsyncSession", agent_id: uuid.UUID, company_id: uuid.UUID,
     query: str | None = None, limit: int = 10
@@ -510,6 +584,12 @@ async def chat_with_agent(
     agent_memories = await _fetch_agent_memories(db, agent_id, company_id, query=body.prompt)
     system_prompt = _build_system_prompt(agent, memories=agent_memories)
 
+    # For CEO agents, inject live platform data into context
+    if agent.role == "ceo":
+        live_context = await _fetch_live_platform_context(db, company_id, body.prompt)
+        if live_context:
+            system_prompt += f"\n\n--- LIVE PLATFORM DATA (always use this over static knowledge) ---\n{live_context}"
+
     # Get history for context (TTL-fresh across workers)
     history = await _get_history_fresh(db, str(agent_id), company_id)
 
@@ -588,6 +668,12 @@ async def chat_with_agent_stream(
     # Build system prompt from agent's soul/persona and memory context
     agent_memories = await _fetch_agent_memories(db, agent_id, company_id, query=body.prompt)
     system_prompt = _build_system_prompt(agent, memories=agent_memories)
+
+    # For CEO agents, inject live platform data into context
+    if agent.role == "ceo":
+        live_context = await _fetch_live_platform_context(db, company_id, body.prompt)
+        if live_context:
+            system_prompt += f"\n\n--- LIVE PLATFORM DATA (always use this over static knowledge) ---\n{live_context}"
 
     # Get history for context (TTL-fresh across workers)
     history = await _get_history_fresh(db, str(agent_id), company_id)
