@@ -1,25 +1,25 @@
-import { useState, useEffect, useMemo } from 'react';
-import {
-  CheckSquare,
-  Plus,
-  Search,
-  Columns,
-  List,
-  Play,
-  Check,
-  BarChart3,
-  Bot,
-  ListChecks,
-} from 'lucide-react';
-import { Button } from '@/components/common/Button';
-import { Badge } from '@/components/common/Badge';
-import { Table } from '@/components/common/Table';
 import { apiClient, unwrapItems } from '@/api/client';
-import { getActiveCompanyId } from '@/config';
-import type { Task } from '@/types/task';
-import type { Agent } from '@/types/agent';
+import { Badge } from '@/components/common/Badge';
+import { Button } from '@/components/common/Button';
+import { Table } from '@/components/common/Table';
 import { AddTaskModal } from '@/components/tasks/AddTaskModal';
 import { TaskDetailDrawer } from '@/components/tasks/TaskDetailDrawer';
+import { getActiveCompanyId } from '@/config';
+import type { Agent } from '@/types/agent';
+import type { Task } from '@/types/task';
+import {
+  BarChart3,
+  Bot,
+  Check,
+  CheckSquare,
+  Columns,
+  List,
+  ListChecks,
+  Play,
+  Plus,
+  Search,
+} from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
 
 const MOCK_TASKS: Task[] = [];
 
@@ -93,7 +93,7 @@ export function Tasks() {
 
     try {
       await apiClient.patch<Task>(
-        `/api/v1/companies/00000000-0000-4000-8000-000000000001/tasks/${taskId}`,
+        `/api/v1/companies/${getActiveCompanyId()}/tasks/${taskId}`,
         { status: newStatus, completed_at: updatedTask.completed_at }
       );
     } catch (err) {
@@ -120,6 +120,12 @@ export function Tasks() {
   const pendingTasks = filteredTasks.filter((t) => t.status === 'pending');
   const inProgressTasks = filteredTasks.filter((t) => t.status === 'in_progress');
   const completedTasks = filteredTasks.filter((t) => t.status === 'completed');
+
+  const getAgentName = (agentId: string | null | undefined): string => {
+    if (!agentId) return 'Unassigned';
+    const agent = agents.find((a) => a.id === agentId);
+    return agent ? agent.name : agentId.substring(0, 8);
+  };
 
   /* Agent Workload Heatmap Data */
   const agentWorkloadMap = useMemo(() => {
@@ -201,8 +207,10 @@ export function Tasks() {
             <span>Agent Utilization</span>
             <BarChart3 size={14} className="text-purple-400" />
           </div>
-          <div className="text-2xl font-bold font-mono text-purple-400 mt-1">87.5%</div>
-          <p className="text-[10px] text-gray-500 mt-1">Workload balanced</p>
+          <div className="text-2xl font-bold font-mono text-purple-400 mt-1">
+            {agents.length > 0 ? Math.round((tasks.filter((t) => t.status === 'in_progress').length / Math.max(agents.length, 1)) * 100) : 0}%
+          </div>
+          <p className="text-[10px] text-gray-500 mt-1">{agents.length} agents in workforce</p>
         </div>
       </div>
 
@@ -250,25 +258,22 @@ export function Tasks() {
         <div className="flex items-center bg-[#141416] border border-white/[0.08] rounded p-0.5">
           <button
             onClick={() => setViewMode('board')}
-            className={`px-2.5 py-1 rounded text-xs font-mono flex items-center gap-1 transition-colors cursor-pointer ${
-              viewMode === 'board' ? 'bg-[#FFB020] text-black font-bold' : 'text-gray-400 hover:text-white'
-            }`}
+            className={`px-2.5 py-1 rounded text-xs font-mono flex items-center gap-1 transition-colors cursor-pointer ${viewMode === 'board' ? 'bg-[#FFB020] text-black font-bold' : 'text-gray-400 hover:text-white'
+              }`}
           >
             <Columns size={13} /> Kanban Board
           </button>
           <button
             onClick={() => setViewMode('table')}
-            className={`px-2.5 py-1 rounded text-xs font-mono flex items-center gap-1 transition-colors cursor-pointer ${
-              viewMode === 'table' ? 'bg-[#FFB020] text-black font-bold' : 'text-gray-400 hover:text-white'
-            }`}
+            className={`px-2.5 py-1 rounded text-xs font-mono flex items-center gap-1 transition-colors cursor-pointer ${viewMode === 'table' ? 'bg-[#FFB020] text-black font-bold' : 'text-gray-400 hover:text-white'
+              }`}
           >
             <List size={13} /> Matrix Table
           </button>
           <button
             onClick={() => setViewMode('workload')}
-            className={`px-2.5 py-1 rounded text-xs font-mono flex items-center gap-1 transition-colors cursor-pointer ${
-              viewMode === 'workload' ? 'bg-[#FFB020] text-black font-bold' : 'text-gray-400 hover:text-white'
-            }`}
+            className={`px-2.5 py-1 rounded text-xs font-mono flex items-center gap-1 transition-colors cursor-pointer ${viewMode === 'workload' ? 'bg-[#FFB020] text-black font-bold' : 'text-gray-400 hover:text-white'
+              }`}
           >
             <BarChart3 size={13} /> Agent Workload
           </button>
@@ -317,7 +322,7 @@ export function Tasks() {
                   )}
 
                   <div className="flex items-center justify-between pt-2 border-t border-white/[0.04] text-[10px] font-mono text-[#6B6B6E]">
-                    <span>Agent: {task.assigned_agent_id || 'Atlas-01'}</span>
+                    <span>Agent: {getAgentName(task.assigned_agent_id)}</span>
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
@@ -372,7 +377,7 @@ export function Tasks() {
                   )}
 
                   <div className="flex items-center justify-between pt-2 border-t border-white/[0.04] text-[10px] font-mono text-[#6B6B6E]">
-                    <span>Agent: {task.assigned_agent_id || 'Bolt-03'}</span>
+                    <span>Agent: {getAgentName(task.assigned_agent_id)}</span>
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
@@ -416,7 +421,7 @@ export function Tasks() {
                     </p>
                   )}
                   <div className="flex items-center justify-between pt-2 border-t border-white/[0.04] text-[10px] font-mono text-[#6B6B6E]">
-                    <span>Agent: {task.assigned_agent_id || 'Shield-07'}</span>
+                    <span>Agent: {getAgentName(task.assigned_agent_id)}</span>
                     <span>{new Date(task.updated_at).toLocaleDateString()}</span>
                   </div>
                 </div>
@@ -461,7 +466,7 @@ export function Tasks() {
               key: 'assigned_agent_id',
               header: 'Assignee',
               render: (t) => (
-                <span className="font-mono text-xs text-[#A8A8AB]">{t.assigned_agent_id || 'Atlas-01'}</span>
+                <span className="font-mono text-xs text-[#A8A8AB]">{getAgentName(t.assigned_agent_id)}</span>
               ),
             },
             {
