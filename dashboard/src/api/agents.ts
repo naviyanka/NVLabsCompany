@@ -205,5 +205,5 @@ export async function pauseAgent(agentId: string): Promise<Agent> {
 
 /** Delete an agent permanently. */
 export async function deleteAgent(agentId: string): Promise<void> {
-  return apiClient.delete<void>(companyPath(`/agents/${agentId}`));
+  return apiClient.delete<void>(`/api/v1/agents/${agentId}`);
 }
