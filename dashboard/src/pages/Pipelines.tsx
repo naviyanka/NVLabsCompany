@@ -1,27 +1,27 @@
-import { useState, useEffect, useMemo } from 'react';
-import {
-  GitPullRequest,
-  Play,
-  Clock,
-  Plus,
-  ShieldCheck,
-  Search,
-  ListCheck,
-  LayoutGrid,
-  CheckCircle2,
-  Lock,
-  Workflow,
-  Pencil,
-} from 'lucide-react';
-import { Card } from '@/components/common/Card';
-import { Button } from '@/components/common/Button';
-import { Badge } from '@/components/common/Badge';
 import { apiClient, unwrapItems } from '@/api/client';
-import { getActiveCompanyId } from '@/config';
-import type { PipelineItem, CanvasNode, CanvasEdge, PipelineStage } from '@/types/pipeline';
+import { Badge } from '@/components/common/Badge';
+import { Button } from '@/components/common/Button';
+import { Card } from '@/components/common/Card';
 import { AddPipelineModal } from '@/components/pipelines/AddPipelineModal';
-import { PipelineDetailDrawer } from '@/components/pipelines/PipelineDetailDrawer';
 import { PipelineBuilderCanvas } from '@/components/pipelines/PipelineBuilderCanvas';
+import { PipelineDetailDrawer } from '@/components/pipelines/PipelineDetailDrawer';
+import { getActiveCompanyId } from '@/config';
+import type { CanvasEdge, CanvasNode, PipelineItem, PipelineStage } from '@/types/pipeline';
+import {
+  CheckCircle2,
+  Clock,
+  GitPullRequest,
+  LayoutGrid,
+  ListCheck,
+  Lock,
+  Pencil,
+  Play,
+  Plus,
+  Search,
+  ShieldCheck,
+  Workflow,
+} from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
 
 const INITIAL_PIPELINES: PipelineItem[] = [];
 
@@ -91,52 +91,52 @@ export function Pipelines() {
     const target = pipelines.find((p) => p.id === pipeId);
     if (!target) return;
 
-    const stages = target.stages || [];
-    const updatedStages = stages.map((s, idx) => ({
-      ...s,
-      status: idx === 0 ? ('running' as const) : ('pending' as const),
-    }));
+    try {
+      // Call real backend pipeline execution
+      const run = await apiClient.post<any>(
+        `/api/v1/pipelines/${pipeId}/run`,
+        {}
+      );
 
-    const runningPipe: PipelineItem = {
-      ...target,
-      status: 'running',
-      stages: updatedStages,
-      last_run: new Date().toISOString(),
-    };
+      // Mark pipeline as running in UI
+      const runningPipe: PipelineItem = {
+        ...target,
+        status: 'running',
+        last_run: new Date().toISOString(),
+      };
+      handlePipelineUpdated(runningPipe);
 
-    handlePipelineUpdated(runningPipe);
-
-    let currentIdx = 0;
-    const interval = setInterval(() => {
-      if (currentIdx < stages.length) {
-        const nextStages = stages.map((st, i) => {
-          if (i <= currentIdx) {
-            return {
-              ...st,
-              status: 'completed' as const,
-              duration_ms: Math.floor(400 + Math.random() * 800),
-              logs: `[Stage Executed Cleanly]\n✔ Agent '${st.assignedAgent}' completed stage '${st.name}'`,
-            };
+      // Poll for completion
+      const pollInterval = setInterval(async () => {
+        try {
+          const runStatus = await apiClient.get<any>(
+            `/api/v1/companies/${getActiveCompanyId()}/pipelines/${pipeId}/runs/${run.id}`
+          );
+          if (runStatus.status === 'completed' || runStatus.status === 'failed') {
+            clearInterval(pollInterval);
+            handlePipelineUpdated({
+              ...target,
+              status: runStatus.status === 'completed' ? 'completed' : 'failed',
+              last_run: new Date().toISOString(),
+            });
+            setTriggeringId(null);
           }
-          if (i === currentIdx + 1) {
-            return { ...st, status: 'running' as const };
-          }
-          return st;
-        });
+        } catch {
+          clearInterval(pollInterval);
+          setTriggeringId(null);
+        }
+      }, 2000);
 
-        const isFinished = currentIdx === stages.length - 1;
-        handlePipelineUpdated({
-          ...target,
-          status: isFinished ? 'completed' : 'running',
-          stages: nextStages,
-          last_run: new Date().toISOString(),
-        });
-        currentIdx++;
-      } else {
-        clearInterval(interval);
+      // Safety timeout — stop polling after 5 min
+      setTimeout(() => {
+        clearInterval(pollInterval);
         setTriggeringId(null);
-      }
-    }, 1000);
+      }, 300000);
+
+    } catch (err) {
+      console.error('Failed to trigger pipeline', err);
+      setTriggeringId(null);
+    }
   };
 
   const filteredPipelines = useMemo(() => {
@@ -170,7 +170,7 @@ export function Pipelines() {
     const stages: PipelineStage[] = canvasNodes.map((n) => ({
       id: n.id,
       name: n.label,
-      assignedAgent: n.agent || 'Atlas-01',
+      assignedAgent: n.agent || 'Unassigned',
       status: 'pending' as const,
     }));
 
@@ -323,11 +323,10 @@ export function Pipelines() {
             <button
               key={trig}
               onClick={() => setTriggerFilter(trig)}
-              className={`px-2.5 py-1 rounded text-xs font-mono transition-colors cursor-pointer capitalize whitespace-nowrap ${
-                triggerFilter === trig
-                  ? 'bg-[#FFB020] text-black font-bold'
-                  : 'bg-[#141416] text-[#6B6B6E] hover:text-white border border-white/[0.08]'
-              }`}
+              className={`px-2.5 py-1 rounded text-xs font-mono transition-colors cursor-pointer capitalize whitespace-nowrap ${triggerFilter === trig
+                ? 'bg-[#FFB020] text-black font-bold'
+                : 'bg-[#141416] text-[#6B6B6E] hover:text-white border border-white/[0.08]'
+                }`}
             >
               {trig === 'all' ? 'All' : trig}
             </button>
@@ -345,9 +344,8 @@ export function Pipelines() {
             <button
               key={v.key}
               onClick={() => v.key === 'builder' ? openBuilderNew() : setViewMode(v.key)}
-              className={`px-2 py-1 rounded text-xs font-mono flex items-center gap-1 transition-colors cursor-pointer ${
-                viewMode === v.key ? 'bg-[#FFB020] text-black font-bold' : 'text-gray-400 hover:text-white'
-              }`}
+              className={`px-2 py-1 rounded text-xs font-mono flex items-center gap-1 transition-colors cursor-pointer ${viewMode === v.key ? 'bg-[#FFB020] text-black font-bold' : 'text-gray-400 hover:text-white'
+                }`}
             >
               {v.icon} {v.label}
             </button>
@@ -371,11 +369,10 @@ export function Pipelines() {
                   <div
                     key={pipe.id}
                     onClick={() => setSelectedPipeline(pipe)}
-                    className={`p-4 rounded-[8px] border transition-all cursor-pointer ${
-                      isSelected
-                        ? 'bg-[#18181B] border-[#FFB020] shadow-md'
-                        : 'bg-[#141416] border-white/[0.08] hover:border-white/[0.2]'
-                    }`}
+                    className={`p-4 rounded-[8px] border transition-all cursor-pointer ${isSelected
+                      ? 'bg-[#18181B] border-[#FFB020] shadow-md'
+                      : 'bg-[#141416] border-white/[0.08] hover:border-white/[0.2]'
+                      }`}
                   >
                     <div className="flex items-start justify-between gap-2">
                       <h3 className="text-xs font-medium text-[#F2F1EE]">{pipe.name}</h3>
@@ -461,9 +458,8 @@ export function Pipelines() {
                       const isRunning = stage.status === 'running';
                       return (
                         <div key={stage.id} className="relative">
-                          <div className={`p-3.5 border rounded-[6px] flex items-center justify-between transition-colors ${
-                            isDone ? 'bg-[#101012] border-emerald-500/30' : isRunning ? 'bg-[#FFB020]/10 border-[#FFB020] animate-pulse' : 'bg-[#101012] border-white/[0.06]'
-                          }`}>
+                          <div className={`p-3.5 border rounded-[6px] flex items-center justify-between transition-colors ${isDone ? 'bg-[#101012] border-emerald-500/30' : isRunning ? 'bg-[#FFB020]/10 border-[#FFB020] animate-pulse' : 'bg-[#101012] border-white/[0.06]'
+                            }`}>
                             <div className="flex items-center gap-3">
                               <div className="w-6 h-6 rounded-[4px] bg-white/[0.04] border border-white/[0.08] flex items-center justify-center text-xs text-[#FFB020]">
                                 {idx + 1}
