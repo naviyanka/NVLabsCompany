@@ -65,10 +65,33 @@ class ChatResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 _conversations: dict[str, list[dict[str, Any]]] = {}
+_cache_loaded_at: dict[str, float] = {}
+_CACHE_TTL_SECONDS = 5.0
 
 
 def _get_history(agent_id: str) -> list[dict[str, Any]]:
     """Get conversation history for an agent (in-memory cache)."""
+    return _conversations.get(agent_id, [])
+
+
+async def _get_history_fresh(
+    db: "AsyncSession", agent_id: str, company_id: uuid.UUID
+) -> list[dict[str, Any]]:
+    """Return history for an agent, re-reading from DB when the cache is stale.
+
+    The in-memory cache is per-process; with multiple workers a message written
+    by one worker would otherwise never appear to the others. A short TTL keeps
+    reads cheap locally while bounding cross-worker staleness.
+    """
+    import time
+
+    loaded_at = _cache_loaded_at.get(agent_id)
+    if loaded_at is not None and (time.monotonic() - loaded_at) < _CACHE_TTL_SECONDS:
+        return _conversations.get(agent_id, [])
+    records = await _load_history_from_db(db, uuid.UUID(agent_id), company_id)
+    if records:
+        _conversations[agent_id] = records
+        _cache_loaded_at[agent_id] = time.monotonic()
     return _conversations.get(agent_id, [])
 
 
@@ -140,23 +163,54 @@ async def _load_history_from_db(
 
 
 async def _fetch_agent_memories(
-    db: "AsyncSession", agent_id: uuid.UUID, company_id: uuid.UUID, limit: int = 10
+    db: "AsyncSession", agent_id: uuid.UUID, company_id: uuid.UUID,
+    query: str | None = None, limit: int = 10
 ) -> list[dict[str, Any]]:
     """Fetch the most relevant memories for an agent from the database.
 
-    Retrieves memories ordered by importance (descending), limited to the top N.
-    Returns them as dicts compatible with Persona.build_working_context().
+    When a query is provided (e.g. the user's chat prompt), performs keyword
+    matching against memory content to surface the most relevant context.
+    Falls back to top-N by importance when no query is given.
     """
     from sqlalchemy.ext.asyncio import AsyncSession  # noqa: F811
 
-    stmt = (
-        select(MemoryRecord)
-        .where(MemoryRecord.agent_id == agent_id, MemoryRecord.company_id == company_id)
-        .order_by(MemoryRecord.importance.desc(), MemoryRecord.created_at.desc())
-        .limit(limit)
-    )
-    result = await db.execute(stmt)
-    records = list(result.scalars().all())
+    if query:
+        # Keyword-based retrieval: match query terms against memory content
+        keywords = [w.lower() for w in query.split() if len(w) > 2]
+        # Fetch more candidates then rank by relevance
+        stmt = (
+            select(MemoryRecord)
+            .where(MemoryRecord.agent_id == agent_id, MemoryRecord.company_id == company_id)
+            .order_by(MemoryRecord.importance.desc())
+            .limit(100)  # Fetch larger pool for re-ranking
+        )
+        result = await db.execute(stmt)
+        all_records = list(result.scalars().all())
+
+        # Score by keyword overlap
+        scored = []
+        for r in all_records:
+            content_lower = (r.content or "").lower()
+            tags_lower = (getattr(r, "tags", "") or "").lower()
+            # Count matching keywords
+            matches = sum(1 for kw in keywords if kw in content_lower or kw in tags_lower)
+            # Boost by importance
+            score = matches * 2 + (r.importance or 0)
+            if matches > 0 or r.importance >= 0.9:
+                scored.append((score, r))
+
+        # Sort by relevance score descending
+        scored.sort(key=lambda x: x[0], reverse=True)
+        records = [r for _, r in scored[:limit]]
+    else:
+        stmt = (
+            select(MemoryRecord)
+            .where(MemoryRecord.agent_id == agent_id, MemoryRecord.company_id == company_id)
+            .order_by(MemoryRecord.importance.desc(), MemoryRecord.created_at.desc())
+            .limit(limit)
+        )
+        result = await db.execute(stmt)
+        records = list(result.scalars().all())
 
     return [
         {
@@ -260,64 +314,15 @@ def _build_system_prompt(agent: Agent, memories: list[dict[str, Any]] | None = N
 def _resolve_adapter_type(agent: Agent) -> tuple[str, dict[str, Any]]:
     """Resolve the adapter type and config from agent settings.
 
-    Maps agent.adapter_type to the AdapterRegistry key and builds
-    the appropriate config dict.
+    Delegates to the UASTL provider registry (nexus.adapters.uastl), which is
+    the single source of truth for adapter resolution. Legacy agent.adapter_type
+    values (anthropic/openai/claude/claude_code/cli/ollama/azure/bedrock/google/
+    langchain) keep their historical mappings; hermes resolves to the Hermes
+    adapter with Ollama host + OpenRouter key config.
     """
-    adapter_type = agent.adapter_type or "anthropic"
-    config: dict[str, Any] = {}
+    from nexus.adapters.uastl import resolve_provider
 
-    # Map common adapter_type values to registry keys
-    adapter_map = {
-        "anthropic": "anthropic",
-        "openai": "openai",
-        "claude": "anthropic",
-        "claude_code": "claude_code",
-        "cli": "cli",
-        "ollama": "ollama",
-        "azure": "azure_openai",
-        "bedrock": "bedrock",
-        "google": "google_gemini",
-        "langchain": "anthropic",  # Default fallback
-    }
-
-    registry_key = adapter_map.get(adapter_type, "anthropic")
-
-    # Build config based on adapter type
-    if registry_key == "anthropic":
-        import os
-
-        config = {
-            "api_key": os.environ.get("ANTHROPIC_API_KEY", ""),
-            "model": agent.model or "claude-sonnet-4-20250514",
-        }
-    elif registry_key == "openai":
-        import os
-
-        config = {
-            "api_key": os.environ.get("OPENAI_API_KEY", ""),
-            "model": agent.model or "gpt-4o",
-        }
-    elif registry_key == "ollama":
-        config = {
-            "model": agent.model or "llama3.1",
-            "host": "http://localhost:11434",
-        }
-    elif registry_key == "cli":
-        config = {
-            "backend": adapter_type if adapter_type in (
-                "claude", "codex", "aider", "kiro-cli", "agy", "opencode"
-            ) else "claude",
-            "model": agent.model or "",
-        }
-    else:
-        import os
-
-        config = {
-            "api_key": os.environ.get("ANTHROPIC_API_KEY", ""),
-            "model": agent.model or "claude-sonnet-4-20250514",
-        }
-
-    return registry_key, config
+    return resolve_provider(agent.adapter_type or "anthropic", agent.model)
 
 
 async def _call_llm(
@@ -354,18 +359,21 @@ async def _call_llm(
                 from sqlalchemy import func
                 existing = await proposal_db.execute(
                     select(func.count(Approval.id)).where(
-                        Approval.approval_type == "secret_request",
+                        Approval.type == "secret_request",
                         Approval.status == "pending",
                     )
                 )
                 if (existing.scalar() or 0) < 3:
                     approval = Approval(
-                        company_id=agent.company_id if hasattr(agent, 'company_id') else None,
-                        approval_type="secret_request",
-                        title=f"API Key Required: {env_var}",
-                        description=f"Agent {agent.name} ({agent.role}) needs {env_var} to function. Configure this environment variable to enable LLM responses.",
-                        requested_by=str(agent.id),
-                        status="pending",
+                        company_id=agent.company_id,
+                        type="secret_request",
+                        payload={
+                            "env_var": env_var,
+                            "agent_id": str(agent.id),
+                            "agent_name": agent.name,
+                            "agent_role": agent.role,
+                            "adapter_type": registry_key,
+                        },
                     )
                     proposal_db.add(approval)
                     await proposal_db.commit()
@@ -499,11 +507,11 @@ async def chat_with_agent(
         )
 
     # Build system prompt from agent's soul/persona and memory context
-    agent_memories = await _fetch_agent_memories(db, agent_id, company_id)
+    agent_memories = await _fetch_agent_memories(db, agent_id, company_id, query=body.prompt)
     system_prompt = _build_system_prompt(agent, memories=agent_memories)
 
-    # Get history for context
-    history = _get_history(str(agent_id))
+    # Get history for context (TTL-fresh across workers)
+    history = await _get_history_fresh(db, str(agent_id), company_id)
 
     # Store user message
     _add_message(str(agent_id), "user", body.prompt)
@@ -578,11 +586,11 @@ async def chat_with_agent_stream(
         )
 
     # Build system prompt from agent's soul/persona and memory context
-    agent_memories = await _fetch_agent_memories(db, agent_id, company_id)
+    agent_memories = await _fetch_agent_memories(db, agent_id, company_id, query=body.prompt)
     system_prompt = _build_system_prompt(agent, memories=agent_memories)
 
-    # Get history for context
-    history = _get_history(str(agent_id))
+    # Get history for context (TTL-fresh across workers)
+    history = await _get_history_fresh(db, str(agent_id), company_id)
 
     # Store user message
     _add_message(str(agent_id), "user", body.prompt)
