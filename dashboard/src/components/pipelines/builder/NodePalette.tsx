@@ -76,7 +76,9 @@ export function NodePalette({ onAdd }: { onAdd: (payload: PaletteDragPayload) =>
     if (search.trim()) {
       const q = search.toLowerCase();
       result = result.filter(
-        (n) => n.name.toLowerCase().includes(q) || n.description.toLowerCase().includes(q),
+        (n) =>
+          (n.name ?? '').toLowerCase().includes(q) ||
+          (n.description ?? '').toLowerCase().includes(q),
       );
     }
     return result;

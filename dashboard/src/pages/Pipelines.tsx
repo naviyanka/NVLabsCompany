@@ -143,12 +143,14 @@ export function Pipelines() {
 
   const filteredPipelines = useMemo(() => {
     return pipelines.filter((p) => {
-      if (triggerFilter !== 'all' && !p.trigger.toLowerCase().includes(triggerFilter.toLowerCase())) return false;
+      const trigger = (p.trigger ?? '').toLowerCase();
+      const name = (p.name ?? '').toLowerCase();
+      if (triggerFilter !== 'all' && !trigger.includes(triggerFilter.toLowerCase())) return false;
       if (search.trim()) {
         const q = search.toLowerCase();
         return (
-          p.name.toLowerCase().includes(q) ||
-          p.trigger.toLowerCase().includes(q) ||
+          name.includes(q) ||
+          trigger.includes(q) ||
           (p.description || '').toLowerCase().includes(q)
         );
       }
