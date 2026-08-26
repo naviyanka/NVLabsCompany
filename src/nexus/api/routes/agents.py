@@ -39,10 +39,12 @@ class AgentUpdate(BaseModel):
     title: str | None = None
     role: str | None = None
     status: str | None = None
+    adapter_type: str | None = None
     model: str | None = None
     capabilities: list[str] | None = None
     responsibilities: str | None = None
     objectives: str | None = None
+    soul_description: str | None = None
     budget_monthly_cents: int | None = None
 
 
