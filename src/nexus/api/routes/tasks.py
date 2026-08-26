@@ -127,6 +127,16 @@ async def create_task(
     )
     db.add(task)
     await db.flush()
+
+    # Audit: task created
+    from nexus.governance.audit_service import record_audit
+    await record_audit(
+        company_id, "task.created",
+        actor_type="user", resource_type="task", resource_id=str(task.id),
+        details={"title": task.title, "priority": task.priority, "assigned_agent_id": str(assigned_id) if assigned_id else None},
+        db=db,
+    )
+
     return task
 
 
@@ -219,6 +229,16 @@ async def update_task_status(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Task {task_id} not found",
         )
+
+    # Audit: task status changed
+    from nexus.governance.audit_service import record_audit
+    await record_audit(
+        company_id, "task.status_changed",
+        actor_type="user", resource_type="task", resource_id=str(task_id),
+        details={"new_status": body.status, "title": task.title},
+        db=db,
+    )
+
     return task
 
 

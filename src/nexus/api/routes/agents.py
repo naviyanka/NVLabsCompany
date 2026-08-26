@@ -100,6 +100,16 @@ async def create_agent(
     )
     db.add(agent)
     await db.flush()
+
+    # Audit: agent created
+    from nexus.governance.audit_service import record_audit
+    await record_audit(
+        company_id, "agent.created",
+        actor_type="user", resource_type="agent", resource_id=str(agent.id),
+        details={"name": agent.name, "role": agent.role, "adapter_type": agent.adapter_type},
+        db=db,
+    )
+
     return agent
 
 
@@ -240,7 +250,18 @@ async def wake_agent(agent_id: uuid.UUID, db: DbSession, company_id: CurrentComp
     )
     await db.execute(update_stmt)
     result = await db.execute(select(Agent).where(Agent.id == agent_id, Agent.company_id == company_id))
-    return result.scalar_one()
+    agent = result.scalar_one()
+
+    # Audit: agent woken
+    from nexus.governance.audit_service import record_audit
+    await record_audit(
+        company_id, "agent.woken",
+        actor_type="user", resource_type="agent", resource_id=str(agent_id),
+        details={"name": agent.name, "new_status": "ready"},
+        db=db,
+    )
+
+    return agent
 
 
 @router.post("/api/v1/agents/{agent_id}/pause", response_model=AgentResponse)

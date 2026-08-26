@@ -392,6 +392,15 @@ async def run_pipeline(
 
     # Schedule background execution worker
     background_tasks.add_task(_execute_pipeline_bg, run.id, pipeline_id, company_id)
+
+    # Audit: pipeline triggered
+    from nexus.governance.audit_service import record_audit
+    await record_audit(
+        company_id, "pipeline.triggered",
+        actor_type="user", resource_type="pipeline", resource_id=str(pipeline_id),
+        details={"run_id": str(run.id), "pipeline_name": pipeline.name, "stages_count": len(pipeline.stages or [])},
+    )
+
     return run
 
 
