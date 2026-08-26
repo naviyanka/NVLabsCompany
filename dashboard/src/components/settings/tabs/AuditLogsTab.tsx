@@ -66,17 +66,17 @@ export function AuditLogsTab({ onSaveToast }: AuditLogsTabProps) {
   const filteredLogs = logs.filter((log) => {
     const matchesSearch =
       search === '' ||
-      log.actor.toLowerCase().includes(search.toLowerCase()) ||
-      log.action.toLowerCase().includes(search.toLowerCase()) ||
-      log.target.toLowerCase().includes(search.toLowerCase()) ||
-      log.ip.toLowerCase().includes(search.toLowerCase()) ||
-      log.details.toLowerCase().includes(search.toLowerCase()) ||
+      (log.actor || '').toLowerCase().includes(search.toLowerCase()) ||
+      (log.action || '').toLowerCase().includes(search.toLowerCase()) ||
+      (log.target || (log as any).resource_type || '').toLowerCase().includes(search.toLowerCase()) ||
+      (log.ip || (log as any).ip_address || '').toLowerCase().includes(search.toLowerCase()) ||
+      (log.details && (typeof log.details === 'string' ? log.details : JSON.stringify(log.details)).toLowerCase().includes(search.toLowerCase())) ||
       (log.correlationId && log.correlationId.toLowerCase().includes(search.toLowerCase())) ||
       (log.traceId && log.traceId.toLowerCase().includes(search.toLowerCase())) ||
       (log.hostname && log.hostname.toLowerCase().includes(search.toLowerCase()));
 
     const matchesSeverity = severityFilter === 'all' || log.severity === severityFilter;
-    const matchesActor = actorFilter === 'all' || log.actorType === actorFilter;
+    const matchesActor = actorFilter === 'all' || (log.actorType || (log as any).actor_type) === actorFilter;
     const matchesCompliance =
       complianceFilter === 'all' || (log.complianceTags && log.complianceTags.includes(complianceFilter as any));
 
@@ -308,7 +308,7 @@ export function AuditLogsTab({ onSaveToast }: AuditLogsTabProps) {
                             <span className="font-bold text-[#FFB020] text-xs">{entry.action}</span>
                           </div>
                           <div className="text-[10px] text-gray-400 truncate max-w-[220px] font-sans mt-0.5">
-                            {entry.details}
+                            {typeof entry.details === 'string' ? entry.details : entry.details ? JSON.stringify(entry.details) : ''}
                           </div>
                         </div>
 
@@ -503,7 +503,7 @@ export function AuditLogsTab({ onSaveToast }: AuditLogsTabProps) {
                   <Code2 size={18} className="text-[#FFB020]" />
                   <span>Deep Audit Inspector: {selectedLog.id}</span>
                 </div>
-                <div className="text-[11px] text-gray-400 font-sans mt-0.5">{selectedLog.details}</div>
+                <div className="text-[11px] text-gray-400 font-sans mt-0.5">{typeof selectedLog.details === 'string' ? selectedLog.details : selectedLog.details ? JSON.stringify(selectedLog.details) : ''}</div>
               </div>
               <button
                 type="button"
