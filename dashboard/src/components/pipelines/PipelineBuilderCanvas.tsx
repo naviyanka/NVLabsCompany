@@ -1,22 +1,22 @@
-import { useState, useRef, useCallback, useEffect } from 'react';
-import {
-  Save,
-  Trash2,
-  ZoomIn,
-  ZoomOut,
-  Maximize2,
-  MousePointer2,
-  X,
-} from 'lucide-react';
 import { Button } from '@/components/common/Button';
 import type {
-  CanvasNode,
   CanvasEdge,
+  CanvasNode,
   CanvasNodeType,
   NodeTypeDefinition,
   PipelineItem,
 } from '@/types/pipeline';
 import { NODE_TYPE_CATALOG } from '@/types/pipeline';
+import {
+  Maximize2,
+  MousePointer2,
+  Save,
+  Trash2,
+  X,
+  ZoomIn,
+  ZoomOut,
+} from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 /* ─────── constants ─────── */
 const NODE_W = 200;
@@ -27,6 +27,25 @@ const MIN_ZOOM = 0.25;
 const MAX_ZOOM = 2.5;
 
 const snap = (v: number) => Math.round(v / GRID_SIZE) * GRID_SIZE;
+
+// Category colors for API nodes
+const CATEGORY_COLORS: Record<string, string> = {
+  ai: '#A855F7', communication: '#3B82F6', data: '#10B981', devops: '#F97316',
+  file: '#64748B', http: '#06B6D4', schedule: '#F59E0B', trigger: '#EF4444',
+  cloud: '#0EA5E9', browser: '#6366F1', email: '#EC4899', messaging: '#8B5CF6',
+  database: '#14B8A6', search: '#EAB308', analytics: '#84CC16', storage: '#78716C',
+  monitoring: '#F43F5E', testing: '#D946EF', media: '#EC4899', social: '#3B82F6',
+  crm: '#22C55E', ecommerce: '#F59E0B', voice: '#6366F1', iot: '#06B6D4',
+  security: '#EF4444', utility: '#6B7280', productivity: '#10B981', finance: '#22C55E',
+  custom: '#71717A',
+};
+const CATEGORY_ICONS: Record<string, string> = {
+  ai: '🧠', communication: '💬', data: '📊', devops: '🔧', file: '📄', http: '🌐',
+  schedule: '⏰', trigger: '⚡', cloud: '☁️', browser: '🖥️', email: '📧', messaging: '💬',
+  database: '🗄️', search: '🔍', analytics: '📈', storage: '💾', monitoring: '📡',
+  testing: '🧪', media: '🎬', social: '👥', crm: '👤', ecommerce: '🛒', voice: '🎙️',
+  iot: '📡', security: '🛡️', utility: '🔨', productivity: '⚡', finance: '💰', custom: '⬡',
+};
 
 /* ─────── helpers ─────── */
 function nodeColor(type: CanvasNodeType): string {
@@ -94,6 +113,34 @@ export function PipelineBuilderCanvas({
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [paletteOpen, setPaletteOpen] = useState(true);
   const [editingNode, setEditingNode] = useState<CanvasNode | null>(null);
+
+  // Node library state (fetched from real API)
+  const [apiNodes, setApiNodes] = useState<{ id: string; name: string; description: string; category: string }[]>([]);
+  const [nodeSearch, setNodeSearch] = useState('');
+  const [nodeCategory, setNodeCategory] = useState('all');
+
+  // Fetch real nodes from API on mount
+  useEffect(() => {
+    fetch('/api/v1/nodes')
+      .then((r) => r.ok ? r.json() : { items: [] })
+      .then((data) => setApiNodes(data.items || []))
+      .catch(() => { });
+  }, []);
+
+  const nodeCategories = useMemo(() => {
+    const cats = new Set(apiNodes.map((n) => n.category));
+    return Array.from(cats).sort();
+  }, [apiNodes]);
+
+  const filteredApiNodes = useMemo(() => {
+    let result = apiNodes;
+    if (nodeCategory !== 'all') result = result.filter((n) => n.category === nodeCategory);
+    if (nodeSearch.trim()) {
+      const q = nodeSearch.toLowerCase();
+      result = result.filter((n) => n.name.toLowerCase().includes(q) || n.description.toLowerCase().includes(q));
+    }
+    return result;
+  }, [apiNodes, nodeCategory, nodeSearch]);
 
   const svgRef = useRef<SVGSVGElement>(null);
 
@@ -220,7 +267,7 @@ export function PipelineBuilderCanvas({
       const canvasPt = screenToCanvas(clientX, clientY);
       for (const node of nodes) {
         if (node.id === sourceNodeId) continue;
-        
+
         // Node rectangle bounds (with generous 15px padding)
         if (
           canvasPt.x >= node.x - 15 &&
@@ -371,34 +418,91 @@ export function PipelineBuilderCanvas({
 
       <div className="flex flex-1 overflow-hidden">
         {/* ── Left: Node Type Palette ── */}
-        <div className={`${paletteOpen ? 'w-56' : 'w-0'} shrink-0 bg-[#0C0C0E] border-r border-white/[0.08] overflow-y-auto transition-all`}>
+        <div className={`${paletteOpen ? 'w-64' : 'w-0'} shrink-0 bg-[#0C0C0E] border-r border-white/[0.08] overflow-y-auto transition-all`}>
           {paletteOpen && (
             <div className="p-3 space-y-2">
-              <div className="text-[10px] font-mono text-[#FFB020] uppercase font-bold tracking-wider mb-2">
-                Node Types — Drag to Add
+              <div className="text-[10px] font-mono text-[#FFB020] uppercase font-bold tracking-wider mb-1">
+                Node Library — Click to Add
               </div>
+
+              {/* Search */}
+              <input
+                type="text"
+                placeholder="Search nodes..."
+                value={nodeSearch}
+                onChange={(e) => setNodeSearch(e.target.value)}
+                className="w-full px-2.5 py-1.5 bg-[#141416] border border-white/[0.08] rounded text-xs text-white placeholder-[#6B6B6E] focus:outline-none focus:border-[#FFB020]"
+              />
+
+              {/* Category filter */}
+              <select
+                value={nodeCategory}
+                onChange={(e) => setNodeCategory(e.target.value)}
+                className="w-full px-2 py-1 bg-[#141416] border border-white/[0.08] rounded text-[10px] text-white focus:outline-none focus:border-[#FFB020]"
+              >
+                <option value="all">All Categories ({apiNodes.length})</option>
+                {nodeCategories.map((cat) => (
+                  <option key={cat} value={cat}>{cat} ({apiNodes.filter((n) => n.category === cat).length})</option>
+                ))}
+              </select>
+
+              {/* Built-in pipeline node types */}
+              <div className="text-[9px] font-mono text-[#6B6B6E] uppercase mt-2 mb-1">Pipeline Controls</div>
               {NODE_TYPE_CATALOG.map((def) => (
                 <button
                   key={def.type}
                   onClick={() => addNodeFromPalette(def)}
-                  className="w-full text-left p-2.5 rounded-[8px] border border-white/[0.06] bg-[#141416] hover:border-white/[0.2] hover:bg-[#1A1A1E] transition-all cursor-pointer group"
+                  className="w-full text-left p-2 rounded-[6px] border border-white/[0.06] bg-[#141416] hover:border-white/[0.2] hover:bg-[#1A1A1E] transition-all cursor-pointer group"
                 >
                   <div className="flex items-center gap-2">
                     <span
-                      className="w-7 h-7 rounded-[6px] flex items-center justify-center text-sm border"
+                      className="w-6 h-6 rounded flex items-center justify-center text-xs border"
                       style={{ borderColor: def.color + '60', background: def.color + '18' }}
                     >
                       {def.icon}
                     </span>
                     <div>
-                      <div className="text-xs font-medium text-white group-hover:text-[#FFB020] transition-colors">
-                        {def.label}
-                      </div>
-                      <div className="text-[10px] text-gray-500 leading-tight">{def.description}</div>
+                      <div className="text-[11px] font-medium text-white group-hover:text-[#FFB020] transition-colors">{def.label}</div>
                     </div>
                   </div>
                 </button>
               ))}
+
+              {/* Real API nodes */}
+              <div className="text-[9px] font-mono text-[#6B6B6E] uppercase mt-3 mb-1">
+                Workflow Nodes ({filteredApiNodes.length})
+              </div>
+              <div className="space-y-1 max-h-[50vh] overflow-y-auto">
+                {filteredApiNodes.slice(0, 50).map((node) => (
+                  <button
+                    key={node.id}
+                    onClick={() => addNodeFromPalette({
+                      type: node.id as any,
+                      label: node.name,
+                      color: CATEGORY_COLORS[node.category] || '#FFB020',
+                      icon: CATEGORY_ICONS[node.category] || '⬡',
+                      description: node.description,
+                      defaultAgent: '',
+                    })}
+                    className="w-full text-left p-2 rounded-[6px] border border-white/[0.04] bg-[#101012] hover:border-white/[0.15] hover:bg-[#1A1A1E] transition-all cursor-pointer group"
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className="w-5 h-5 rounded flex items-center justify-center text-[10px] bg-white/[0.05] border border-white/[0.08]">
+                        {CATEGORY_ICONS[node.category] || '⬡'}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <div className="text-[10px] font-medium text-[#E0E0E0] group-hover:text-[#FFB020] truncate">{node.name}</div>
+                        <div className="text-[9px] text-[#6B6B6E] truncate">{node.category}</div>
+                      </div>
+                    </div>
+                  </button>
+                ))}
+                {filteredApiNodes.length > 50 && (
+                  <div className="text-[9px] text-[#6B6B6E] text-center py-1">
+                    +{filteredApiNodes.length - 50} more — narrow with search
+                  </div>
+                )}
+              </div>
             </div>
           )}
         </div>
