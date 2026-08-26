@@ -42,6 +42,40 @@ export interface CanvasNode {
   y: number;
   agent?: string;
   config?: Record<string, string>;
+  /** Backend node id (from /api/v1/nodes) when this node wraps a registry node. */
+  nodeId?: string;
+  /** Node category (ai, trigger, data, ...) used for visual kind + color. */
+  category?: string;
+  /** Parameter values keyed by the node input `name`. */
+  params?: Record<string, unknown>;
+}
+
+/* ── Backend node registry types (GET /api/v1/nodes) ── */
+
+export interface ApiNodeInput {
+  name: string;
+  type: string; // string | number | boolean | json | file | credential
+  required?: boolean;
+  default?: unknown;
+  description?: string;
+}
+
+export interface ApiNodeOutput {
+  name: string;
+  type: string;
+  description?: string;
+}
+
+export interface ApiNode {
+  id: string;
+  name: string;
+  description: string;
+  category: string;
+  icon?: string;
+  inputs: ApiNodeInput[];
+  outputs: ApiNodeOutput[];
+  credentials: string[];
+  version?: string;
 }
 
 export type CanvasNodeType =
@@ -72,13 +106,13 @@ export interface NodeTypeDefinition {
 }
 
 export const NODE_TYPE_CATALOG: NodeTypeDefinition[] = [
-  { type: 'trigger',       label: 'Trigger',         color: '#FFB020', icon: '⚡', description: 'Webhook, Cron, Git Push, or Manual dispatch', defaultAgent: 'System' },
-  { type: 'agent_task',    label: 'Agent Task',       color: '#818CF8', icon: '🤖', description: 'Assign a task to a specific agent', defaultAgent: 'Atlas-01' },
-  { type: 'code_review',   label: 'Code Review',      color: '#22D3EE', icon: '🔍', description: 'Automated code review & lint analysis', defaultAgent: 'Nova-02' },
-  { type: 'security_gate', label: 'Security Gate',     color: '#22C55E', icon: '🛡️', description: 'gVisor sandbox audit & SAST scan', defaultAgent: 'Sentinel-07' },
-  { type: 'test_suite',    label: 'Test Suite',        color: '#F472B6', icon: '🧪', description: 'Run unit, integration, or E2E tests', defaultAgent: 'Bolt-03' },
-  { type: 'deploy',        label: 'Deploy',            color: '#FB923C', icon: '🚀', description: 'Canary rollout or production deploy', defaultAgent: 'Forge-04' },
-  { type: 'condition',     label: 'Condition',         color: '#FACC15', icon: '⑂',  description: 'Branch pipeline based on a condition' },
-  { type: 'notification',  label: 'Notification',      color: '#A78BFA', icon: '🔔', description: 'Send Slack, email, or webhook notification' },
-  { type: 'merge',         label: 'Merge / Join',      color: '#94A3B8', icon: '⊕',  description: 'Wait for multiple upstream branches' },
+  { type: 'trigger', label: 'Trigger', color: '#FFB020', icon: '⚡', description: 'Webhook, Cron, Git Push, or Manual dispatch', defaultAgent: 'System' },
+  { type: 'agent_task', label: 'Agent Task', color: '#818CF8', icon: '🤖', description: 'Assign a task to a specific agent', defaultAgent: 'Atlas-01' },
+  { type: 'code_review', label: 'Code Review', color: '#22D3EE', icon: '🔍', description: 'Automated code review & lint analysis', defaultAgent: 'Nova-02' },
+  { type: 'security_gate', label: 'Security Gate', color: '#22C55E', icon: '🛡️', description: 'gVisor sandbox audit & SAST scan', defaultAgent: 'Sentinel-07' },
+  { type: 'test_suite', label: 'Test Suite', color: '#F472B6', icon: '🧪', description: 'Run unit, integration, or E2E tests', defaultAgent: 'Bolt-03' },
+  { type: 'deploy', label: 'Deploy', color: '#FB923C', icon: '🚀', description: 'Canary rollout or production deploy', defaultAgent: 'Forge-04' },
+  { type: 'condition', label: 'Condition', color: '#FACC15', icon: '⑂', description: 'Branch pipeline based on a condition' },
+  { type: 'notification', label: 'Notification', color: '#A78BFA', icon: '🔔', description: 'Send Slack, email, or webhook notification' },
+  { type: 'merge', label: 'Merge / Join', color: '#94A3B8', icon: '⊕', description: 'Wait for multiple upstream branches' },
 ];
