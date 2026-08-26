@@ -1,44 +1,44 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { apiClient, unwrapItems } from '@/api/client';
+import { Drawer } from '@/components/common/Drawer';
+import { StatCard } from '@/components/common/StatCard';
+import { getActiveCompanyId } from '@/config';
 import {
   Activity as ActivityIcon,
-  Search,
+  AlertTriangle,
+  BarChart3,
+  Check,
   CheckCircle2,
-  Zap,
-  Radio,
+  ChevronRight,
+  Clock,
+  Copy,
+  Cpu,
+  Database,
+  Download,
+  Filter,
+  GitCommit,
+  Layers,
+  LayoutList,
   Pause,
   Play,
-  Download,
-  AlertTriangle,
-  Terminal,
-  LayoutList,
-  BarChart3,
+  Radio,
   RefreshCw,
-  Cpu,
-  GitCommit,
+  Search,
   Shield,
-  Database,
-  Copy,
-  Check,
-  Filter,
-  Clock,
-  ChevronRight,
-  Layers,
+  Terminal,
+  Zap,
 } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  ResponsiveContainer,
-  AreaChart,
   Area,
+  AreaChart,
+  Cell,
+  Pie,
+  PieChart,
+  Tooltip as RechartsTooltip,
+  ResponsiveContainer,
   XAxis,
   YAxis,
-  Tooltip as RechartsTooltip,
-  PieChart,
-  Pie,
-  Cell,
 } from 'recharts';
-import { StatCard } from '@/components/common/StatCard';
-import { Drawer } from '@/components/common/Drawer';
-import { apiClient, unwrapItems } from '@/api/client';
-import { getActiveCompanyId } from '@/config';
 
 export type ActivitySeverity = 'info' | 'warning' | 'error' | 'critical';
 export type ActivityStatus = 'success' | 'failed' | 'in_progress';
@@ -96,7 +96,7 @@ export function Activity() {
           setLogs(formatted);
         }
       } catch {
-        // Keep initial mock logs if API returns error
+        // API error — show empty state
       }
     }
     loadActivity();
@@ -259,9 +259,8 @@ export function Activity() {
             <Radio className={`w-5 h-5 ${isLive ? 'text-[#22C55E] animate-pulse' : 'text-gray-500'}`} />
             <h1 className="text-xl font-display font-medium text-[#F2F1EE] tracking-tight flex items-center gap-3">
               Real-Time Audit Log & Telemetry Traces
-              <span className={`text-xs px-2 py-0.5 rounded-full font-mono border ${
-                isLive ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-gray-500/10 text-gray-400 border-gray-500/20'
-              }`}>
+              <span className={`text-xs px-2 py-0.5 rounded-full font-mono border ${isLive ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-gray-500/10 text-gray-400 border-gray-500/20'
+                }`}>
                 {isLive ? 'LIVE STREAMING' : 'PAUSED'}
               </span>
             </h1>
@@ -276,11 +275,10 @@ export function Activity() {
           {/* Live Stream Toggle */}
           <button
             onClick={() => setIsLive(!isLive)}
-            className={`px-3 py-1.5 rounded-[6px] text-xs font-mono font-medium border flex items-center gap-2 transition-all cursor-pointer ${
-              isLive
+            className={`px-3 py-1.5 rounded-[6px] text-xs font-mono font-medium border flex items-center gap-2 transition-all cursor-pointer ${isLive
                 ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20'
                 : 'bg-white/[0.04] border-white/[0.1] text-gray-300 hover:bg-white/[0.08]'
-            }`}
+              }`}
           >
             {isLive ? <Pause size={14} /> : <Play size={14} />}
             <span>{isLive ? 'Pause Stream' : 'Resume Live Stream'}</span>
@@ -290,9 +288,8 @@ export function Activity() {
           <div className="flex items-center bg-[#101012] border border-white/[0.08] rounded-[6px] p-0.5">
             <button
               onClick={() => setViewMode('list')}
-              className={`px-2.5 py-1 rounded-[4px] text-xs font-mono flex items-center gap-1.5 transition-colors cursor-pointer ${
-                viewMode === 'list' ? 'bg-[#FFB020] text-black font-semibold' : 'text-gray-400 hover:text-white'
-              }`}
+              className={`px-2.5 py-1 rounded-[4px] text-xs font-mono flex items-center gap-1.5 transition-colors cursor-pointer ${viewMode === 'list' ? 'bg-[#FFB020] text-black font-semibold' : 'text-gray-400 hover:text-white'
+                }`}
               title="Detailed List View"
             >
               <LayoutList size={13} />
@@ -300,9 +297,8 @@ export function Activity() {
             </button>
             <button
               onClick={() => setViewMode('terminal')}
-              className={`px-2.5 py-1 rounded-[4px] text-xs font-mono flex items-center gap-1.5 transition-colors cursor-pointer ${
-                viewMode === 'terminal' ? 'bg-[#FFB020] text-black font-semibold' : 'text-gray-400 hover:text-white'
-              }`}
+              className={`px-2.5 py-1 rounded-[4px] text-xs font-mono flex items-center gap-1.5 transition-colors cursor-pointer ${viewMode === 'terminal' ? 'bg-[#FFB020] text-black font-semibold' : 'text-gray-400 hover:text-white'
+                }`}
               title="CLI Terminal Log Stream"
             >
               <Terminal size={13} />
@@ -310,9 +306,8 @@ export function Activity() {
             </button>
             <button
               onClick={() => setViewMode('analytics')}
-              className={`px-2.5 py-1 rounded-[4px] text-xs font-mono flex items-center gap-1.5 transition-colors cursor-pointer ${
-                viewMode === 'analytics' ? 'bg-[#FFB020] text-black font-semibold' : 'text-gray-400 hover:text-white'
-              }`}
+              className={`px-2.5 py-1 rounded-[4px] text-xs font-mono flex items-center gap-1.5 transition-colors cursor-pointer ${viewMode === 'analytics' ? 'bg-[#FFB020] text-black font-semibold' : 'text-gray-400 hover:text-white'
+                }`}
               title="Analytics Charts"
             >
               <BarChart3 size={13} />
@@ -402,11 +397,10 @@ export function Activity() {
                 <button
                   key={type}
                   onClick={() => setSelectedType(type)}
-                  className={`px-2 py-0.5 rounded-[4px] text-[11px] font-mono transition-colors cursor-pointer ${
-                    selectedType.toLowerCase() === type.toLowerCase()
+                  className={`px-2 py-0.5 rounded-[4px] text-[11px] font-mono transition-colors cursor-pointer ${selectedType.toLowerCase() === type.toLowerCase()
                       ? 'bg-[#FFB020] text-[#0A0A0B] font-bold'
                       : 'bg-[#141416] text-[#A8A8AB] hover:text-white border border-white/[0.08]'
-                  }`}
+                    }`}
                 >
                   {type}
                 </button>
@@ -425,11 +419,10 @@ export function Activity() {
               <button
                 key={sev}
                 onClick={() => setSelectedSeverity(sev)}
-                className={`px-2 py-0.5 rounded text-[10px] uppercase transition-colors cursor-pointer ${
-                  selectedSeverity === sev
+                className={`px-2 py-0.5 rounded text-[10px] uppercase transition-colors cursor-pointer ${selectedSeverity === sev
                     ? 'bg-white/20 text-white font-bold border border-white/30'
                     : 'text-[#6B6B6E] hover:text-gray-300'
-                }`}
+                  }`}
               >
                 {sev}
               </button>
@@ -442,11 +435,10 @@ export function Activity() {
               <button
                 key={st}
                 onClick={() => setSelectedStatus(st)}
-                className={`px-2 py-0.5 rounded text-[10px] uppercase transition-colors cursor-pointer ${
-                  selectedStatus === st
+                className={`px-2 py-0.5 rounded text-[10px] uppercase transition-colors cursor-pointer ${selectedStatus === st
                     ? 'bg-[#FFB020]/20 text-[#FFB020] border border-[#FFB020]/30 font-bold'
                     : 'text-[#6B6B6E] hover:text-gray-300'
-                }`}
+                  }`}
               >
                 {st.replace('_', ' ')}
               </button>
@@ -527,11 +519,10 @@ export function Activity() {
                 className="hover:bg-white/[0.04] p-1.5 rounded cursor-pointer transition-colors flex items-start gap-2 text-[11px] leading-relaxed"
               >
                 <span className="text-gray-500 select-none">[{log.time}]</span>
-                <span className={`uppercase font-bold shrink-0 ${
-                  log.severity === 'critical' ? 'text-red-400' :
-                  log.severity === 'error' ? 'text-rose-400' :
-                  log.severity === 'warning' ? 'text-amber-400' : 'text-blue-400'
-                }`}>
+                <span className={`uppercase font-bold shrink-0 ${log.severity === 'critical' ? 'text-red-400' :
+                    log.severity === 'error' ? 'text-rose-400' :
+                      log.severity === 'warning' ? 'text-amber-400' : 'text-blue-400'
+                  }`}>
                   [{log.severity}]
                 </span>
                 <span className="text-purple-400 shrink-0">[{log.type}]</span>

@@ -1,25 +1,26 @@
-import { useState, useEffect } from 'react';
+import { apiClient } from '@/api/client';
+import { Button } from '@/components/common/Button';
+import { getActiveCompanyId } from '@/config';
 import {
-  FileText,
-  ShieldCheck,
-  Search,
-  Download,
-  Eye,
-  X,
-  Copy,
+  Activity,
   Check,
-  Code2,
   ChevronDown,
   ChevronRight,
+  Code2,
+  Copy,
+  Cpu,
+  Download,
+  Eye,
+  FileText,
+  Lock,
   Maximize2,
   Network,
-  Cpu,
-  Lock,
-  Activity,
+  Search,
   Server,
+  ShieldCheck,
+  X,
 } from 'lucide-react';
-import { Button } from '@/components/common/Button';
-import { apiClient } from '@/api/client';
+import { useEffect, useState } from 'react';
 import type { AuditLogEntry } from '../types';
 
 interface AuditLogsTabProps {
@@ -27,210 +28,7 @@ interface AuditLogsTabProps {
 }
 
 export function AuditLogsTab({ onSaveToast }: AuditLogsTabProps) {
-  const [logs, setLogs] = useState<AuditLogEntry[]>([
-    {
-      id: 'aud-9042',
-      timestamp: '2024-05-20 02:28:15 UTC',
-      correlationId: 'corr-9f81a02b-4019-482a-b7e1-88912c490192',
-      traceId: '4bf92f3577b34da6a3ce929d0e0e4736',
-      spanId: '00f067aa0ba902b7',
-      parentSpanId: '5e2b8c9d0a1b2c3d',
-      actor: 'admin@nvlabs.ai',
-      actorType: 'Operator',
-      actorRole: 'Platform Architect',
-      authScheme: 'SAML 2.0 SSO + 2FA TOTP',
-      tenantId: '00000000-0000-4000-8000-000000000001',
-      organizationSquad: 'Core Infrastructure & AI Ops',
-      environment: 'production',
-      hostname: 'k8s-us-west-prod-node-04.nvlabs.internal',
-      executionEngine: 'Node.js v22.23.1 (gVisor MicroVM)',
-      action: 'SYSTEM_SETTINGS_UPDATE',
-      target: 'Hyperparameters',
-      targetType: 'hyperparameter',
-      ip: '192.168.1.104',
-      location: 'San Francisco, CA, US',
-      severity: 'warning',
-      details: 'Updated primary model router from GPT-4o to Claude 3.7 Sonnet.',
-      httpMethod: 'PATCH',
-      requestPath: '/api/v1/companies/00000000-0000-4000-8000-000000000001/settings',
-      protocol: 'HTTP/2.0 TLSv1.3',
-      statusCode: 200,
-      latencyMs: 18,
-      bytesTransferred: '3.4 KB',
-      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/125.0',
-      sessionId: 'sess_8f3a9102c9a187',
-      requestHeaders: {
-        'authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6...',
-        'content-type': 'application/json',
-        'x-correlation-id': 'corr-9f81a02b-4019-482a-b7e1-88912c490192',
-        'x-request-id': 'req-9042-8819',
-        'x-forwarded-for': '192.168.1.104',
-      },
-      riskScore: 45,
-      complianceTags: ['SOC2', 'ISO27001'],
-      beforeState: {
-        defaultModel: 'GPT-4o',
-        maxTaskBudget: '10.00',
-        dailyCompanyCap: '200.00',
-      },
-      afterState: {
-        defaultModel: 'Claude 3.7 Sonnet',
-        maxTaskBudget: '15.00',
-        dailyCompanyCap: '250.00',
-      },
-      previousHash: '8f7e6d5c4b3a2f1e0d9c8b7a6f5e4d3c2b1a0f9e',
-      sha256: '9f81d02c34a177e0129f1048b301cfa331904a1140129f102c9a',
-      signature: 'hmac-sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
-      payload: {
-        operator: 'admin@nvlabs.ai',
-        updatedFields: ['defaultModel', 'maxTaskBudget', 'dailyCompanyCap'],
-      },
-    },
-    {
-      id: 'aud-9041',
-      timestamp: '2024-05-20 02:14:02 UTC',
-      correlationId: 'corr-819a-3301-992a-10293a049182',
-      traceId: '5c1920a1f9402e3a102948a20194851f',
-      spanId: '77a0192e441029a1',
-      parentSpanId: '102948a20194851f',
-      actor: 'admin@nvlabs.ai',
-      actorType: 'Operator',
-      actorRole: 'Platform Architect',
-      authScheme: 'SAML 2.0 SSO + 2FA TOTP',
-      tenantId: '00000000-0000-4000-8000-000000000001',
-      organizationSquad: 'Core Infrastructure & AI Ops',
-      environment: 'production',
-      hostname: 'k8s-us-west-prod-node-01.nvlabs.internal',
-      executionEngine: 'Node.js v22.23.1 (gVisor MicroVM)',
-      action: 'KILL_SWITCH_DISENGAGED',
-      target: 'System Router',
-      targetType: 'hyperparameter',
-      ip: '192.168.1.104',
-      location: 'San Francisco, CA, US',
-      severity: 'critical',
-      details: 'Emergency kill switch disengaged. Resumed autonomous agent loops.',
-      httpMethod: 'POST',
-      requestPath: '/api/v1/companies/00000000-0000-4000-8000-000000000001/kill-switch',
-      protocol: 'HTTP/2.0 TLSv1.3',
-      statusCode: 200,
-      latencyMs: 12,
-      bytesTransferred: '1.2 KB',
-      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/125.0',
-      sessionId: 'sess_8f3a9102c9a187',
-      requestHeaders: {
-        'authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6...',
-        'content-type': 'application/json',
-        'x-correlation-id': 'corr-819a-3301-992a-10293a049182',
-      },
-      riskScore: 85,
-      complianceTags: ['SOC2', 'ISO27001', 'HIPAA'],
-      beforeState: { killSwitchEngaged: true },
-      afterState: { killSwitchEngaged: false },
-      previousHash: '3c7b20e1f9942a0014b7e900a391c0e2d194851f',
-      sha256: 'e8f39a01c4482b7f32e9104c81a700010f3918a24c019a82',
-      signature: 'hmac-sha256:7c9e0192a849182c40192a48192a0194851f0192485',
-      payload: {
-        operator: 'admin@nvlabs.ai',
-        previousState: 'ENGAGED',
-        newState: 'DISENGAGED',
-        sessionDuration: '14m',
-        verificationToken: 'totp-ok-7721',
-      },
-    },
-    {
-      id: 'aud-9040',
-      timestamp: '2024-05-20 02:00:15 UTC',
-      correlationId: 'corr-0192a-7740-1029-48192a019485',
-      traceId: '102948a20194851f5c1920a1f9402e3a',
-      spanId: '9012a48192a01948',
-      parentSpanId: '5c1920a1f9402e3a',
-      actor: 'Architect-01',
-      actorType: 'Agent Workload',
-      actorRole: 'Autonomous Agent Worker',
-      authScheme: 'mTLS Client Cert + Service Account Token',
-      tenantId: '00000000-0000-4000-8000-000000000001',
-      organizationSquad: 'Autonomous Development Squad',
-      environment: 'production',
-      hostname: 'k8s-pod-worker-01.internal.nvlabs',
-      executionEngine: 'gVisor MicroVM Sandbox v1.2',
-      action: 'AGENT_TASK_DISPATCH',
-      target: 'Task #TSK-4092',
-      targetType: 'task',
-      ip: '10.244.2.19',
-      location: 'k8s-cluster-us-west',
-      severity: 'info',
-      details: 'Architect agent assigned sub-task #TSK-4092 (AST Impact Check).',
-      httpMethod: 'POST',
-      requestPath: '/api/v1/companies/00000000-0000-4000-8000-000000000001/tasks/dispatch',
-      protocol: 'gRPC / HTTP/2.0',
-      statusCode: 201,
-      latencyMs: 24,
-      bytesTransferred: '8.7 KB',
-      userAgent: 'NEXUS-AgentRuntime/2.4 (gVisor microVM)',
-      sessionId: 'agent_loop_901',
-      requestHeaders: {
-        'x-agent-id': 'Architect-01',
-        'x-correlation-id': 'corr-0192a-7740-1029-48192a019485',
-      },
-      riskScore: 15,
-      complianceTags: ['SOC2', 'GDPR'],
-      beforeState: { taskStatus: 'pending', assignedAgent: null },
-      afterState: { taskStatus: 'in_progress', assignedAgent: 'Alpha-001' },
-      previousHash: '1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b',
-      sha256: '3c7b20e1f9942a0014b7e900a391c0e2d194851f8019',
-      signature: 'hmac-sha256:1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b',
-      payload: {
-        agentId: 'agent-manager',
-        assignedTo: 'Alpha-001',
-        budgetCapCents: 450,
-        promptHash: 'sha256-40192',
-      },
-    },
-    {
-      id: 'aud-9039',
-      timestamp: '2024-05-19 23:45:10 UTC',
-      correlationId: 'corr-sec-scan-9901-2049182a0194',
-      traceId: '99012049182a0194851f5c1920a1f940',
-      spanId: '40192a0194851f5c',
-      actor: 'Security Daemon',
-      actorType: 'Security Engine',
-      actorRole: 'Automated IAM Governance Daemon',
-      authScheme: 'Internal HMAC System Signature',
-      tenantId: '00000000-0000-4000-8000-000000000001',
-      organizationSquad: 'Cyber Security & Compliance',
-      environment: 'production',
-      hostname: 'sec-daemon-01.nvlabs.internal',
-      executionEngine: 'Rust Security Worker Engine v1.8',
-      action: 'API_KEY_REVOKED',
-      target: 'Key nx_live_3c44...',
-      targetType: 'api_key',
-      ip: '127.0.0.1',
-      location: 'Local Security Runner',
-      severity: 'critical',
-      details: 'Security audit revoked expired Prom metrics API key.',
-      httpMethod: 'DELETE',
-      requestPath: '/api/v1/companies/00000000-0000-4000-8000-000000000001/api-keys/k3',
-      protocol: 'HTTP/1.1 Internal',
-      statusCode: 204,
-      latencyMs: 8,
-      bytesTransferred: '0.4 KB',
-      userAgent: 'NEXUS-SecurityScanner/1.0',
-      sessionId: 'daemon_cron_sec',
-      riskScore: 90,
-      complianceTags: ['SOC2', 'ISO27001', 'HIPAA'],
-      beforeState: { keyActive: true, keyId: 'k3' },
-      afterState: { keyActive: false, revokedAt: '2024-05-19T23:45:10Z' },
-      previousHash: '7e6d5c4b3a2f1e0d9c8b7a6f5e4d3c2b1a0f9e8d',
-      sha256: '1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b0019',
-      signature: 'hmac-sha256:99012049182a0194851f5c1920a1f940',
-      payload: {
-        keyId: 'k3',
-        keyPrefix: 'nx_live_3c44...',
-        reason: 'Expired Scope Token',
-        autoRevoked: true,
-      },
-    },
-  ]);
+  const [logs, setLogs] = useState<AuditLogEntry[]>([]);
 
   // Filters State
   const [search, setSearch] = useState('');
@@ -250,17 +48,16 @@ export function AuditLogsTab({ onSaveToast }: AuditLogsTabProps) {
   const [copiedField, setCopiedField] = useState<string | null>(null);
   const [inspectTab, setInspectTab] = useState<'payload' | 'diff' | 'telemetry' | 'headers' | 'trace'>('payload');
 
-  // Fetch real audit logs from backend if available
+  // Fetch real audit logs from backend
   useEffect(() => {
     async function loadLogs() {
       try {
         const res = await apiClient.get<{ items: AuditLogEntry[] }>(
-          '/api/v1/companies/00000000-0000-4000-8000-000000000001/audit-logs'
+          `/api/v1/companies/${getActiveCompanyId()}/audit-logs`
         );
-        if (res && Array.isArray(res.items) && res.items.length > 0) {
-          setLogs(res.items);
-        }
-      } catch {}
+        const items = Array.isArray(res) ? res : (res?.items || []);
+        setLogs(items);
+      } catch { }
     }
     loadLogs();
   }, []);
@@ -470,9 +267,8 @@ export function AuditLogsTab({ onSaveToast }: AuditLogsTabProps) {
                       {/* Parent Row */}
                       <div
                         onClick={() => toggleExpandRow(entry.id)}
-                        className={`grid grid-cols-12 items-center p-3 cursor-pointer transition-colors font-mono ${
-                          isExpanded ? 'bg-[#1C1C1F]/80 border-l-2 border-l-[#FFB020]' : 'hover:bg-white/[0.03]'
-                        }`}
+                        className={`grid grid-cols-12 items-center p-3 cursor-pointer transition-colors font-mono ${isExpanded ? 'bg-[#1C1C1F]/80 border-l-2 border-l-[#FFB020]' : 'hover:bg-white/[0.03]'
+                          }`}
                       >
                         <div className="col-span-1 flex items-center justify-center text-gray-500 group-hover:text-white">
                           {isExpanded ? <ChevronDown size={15} className="text-[#FFB020]" /> : <ChevronRight size={15} />}
@@ -497,15 +293,14 @@ export function AuditLogsTab({ onSaveToast }: AuditLogsTabProps) {
                           <div className="flex items-center gap-1.5">
                             {entry.httpMethod && (
                               <span
-                                className={`px-1.5 py-0.2 rounded text-[9px] font-bold ${
-                                  entry.httpMethod === 'POST'
-                                    ? 'bg-emerald-500/20 text-emerald-400'
-                                    : entry.httpMethod === 'DELETE'
+                                className={`px-1.5 py-0.2 rounded text-[9px] font-bold ${entry.httpMethod === 'POST'
+                                  ? 'bg-emerald-500/20 text-emerald-400'
+                                  : entry.httpMethod === 'DELETE'
                                     ? 'bg-rose-500/20 text-rose-400'
                                     : entry.httpMethod === 'PATCH'
-                                    ? 'bg-amber-500/20 text-amber-400'
-                                    : 'bg-cyan-500/20 text-cyan-400'
-                                }`}
+                                      ? 'bg-amber-500/20 text-amber-400'
+                                      : 'bg-cyan-500/20 text-cyan-400'
+                                  }`}
                               >
                                 {entry.httpMethod}
                               </span>
@@ -534,8 +329,8 @@ export function AuditLogsTab({ onSaveToast }: AuditLogsTabProps) {
                                   entry.riskScore > 70
                                     ? 'text-rose-400'
                                     : entry.riskScore > 30
-                                    ? 'text-amber-400'
-                                    : 'text-emerald-400'
+                                      ? 'text-amber-400'
+                                      : 'text-emerald-400'
                                 }
                               >
                                 {entry.riskScore}/100
@@ -547,13 +342,12 @@ export function AuditLogsTab({ onSaveToast }: AuditLogsTabProps) {
                         {/* Severity */}
                         <div className="col-span-1">
                           <span
-                            className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] uppercase font-bold border ${
-                              entry.severity === 'critical'
-                                ? 'bg-rose-500/15 text-rose-400 border-rose-500/30'
-                                : entry.severity === 'warning'
+                            className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] uppercase font-bold border ${entry.severity === 'critical'
+                              ? 'bg-rose-500/15 text-rose-400 border-rose-500/30'
+                              : entry.severity === 'warning'
                                 ? 'bg-amber-500/15 text-amber-400 border-amber-500/30'
                                 : 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
-                            }`}
+                              }`}
                           >
                             {entry.severity}
                           </span>
@@ -733,11 +527,10 @@ export function AuditLogsTab({ onSaveToast }: AuditLogsTabProps) {
                   key={tab.id}
                   type="button"
                   onClick={() => setInspectTab(tab.id as any)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer transition-colors ${
-                    inspectTab === tab.id
-                      ? 'bg-[#1C1C1F] text-[#FFB020] border border-[#FFB020]/30'
-                      : 'text-gray-400 hover:text-white'
-                  }`}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer transition-colors ${inspectTab === tab.id
+                    ? 'bg-[#1C1C1F] text-[#FFB020] border border-[#FFB020]/30'
+                    : 'text-gray-400 hover:text-white'
+                    }`}
                 >
                   {tab.name}
                 </button>
