@@ -284,7 +284,9 @@ class HermesAdapter(BaseAdapter):
                 tool_name = call.get("name", "")
                 tool_args = call.get("arguments", {})
 
-                tool_result = await self._execute_tool(tool_name, tool_args)
+                tool_result = await self._execute_tool(
+                    tool_name, tool_args, agent_id=session.agent_id
+                )
                 tool_results.append({
                     "tool": tool_name,
                     "arguments": tool_args,
@@ -559,12 +561,19 @@ class HermesAdapter(BaseAdapter):
 
         return calls
 
-    async def _execute_tool(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    async def _execute_tool(
+        self,
+        name: str,
+        arguments: dict[str, Any],
+        agent_id: uuid.UUID | None = None,
+    ) -> dict[str, Any]:
         """Execute a registered tool by name.
 
         Args:
             name: The tool name to execute.
             arguments: The arguments to pass to the tool handler.
+            agent_id: The calling agent, used to resolve its autonomy tier. When
+                omitted only the guardrail chain applies.
 
         Returns:
             Tool execution result dict.
@@ -577,7 +586,7 @@ class HermesAdapter(BaseAdapter):
         # tool error so the model can see it and adapt.
         from nexus.tools.factory import guard_tool_call
 
-        refusal = await guard_tool_call(name, arguments)
+        refusal = await guard_tool_call(name, arguments, agent_id=agent_id)
         if refusal is not None:
             return refusal
 

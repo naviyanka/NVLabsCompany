@@ -163,7 +163,9 @@ class MCPAgentAdapter(BaseAdapter):
             # This loop dispatches tools directly, so it has to clear the same
             # guardrails a ToolExecutor applies. A refusal is recorded as an
             # ordinary tool error so the model sees it and can adapt.
-            refusal = await guard_tool_call(tool_name, arguments)
+            refusal = await guard_tool_call(
+                tool_name, arguments, agent_id=session.agent_id
+            )
             if refusal is not None:
                 self._add_log(session.session_id, f"[{tool_name}] {refusal['error']}")
                 results.append({

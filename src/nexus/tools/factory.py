@@ -95,18 +95,22 @@ async def guard_tool_call(
     *,
     allowed_tools: list[str] | None = None,
     context: dict[str, Any] | None = None,
+    agent_id: uuid.UUID | None = None,
 ) -> dict[str, Any] | None:
     """Screen one tool call, for dispatch paths that cannot use a ToolExecutor.
 
-    The adapter tool loops call handlers directly and have no database session,
-    so they cannot build a full executor. They can still run the guardrail chain,
-    which needs nothing but the call itself.
+    The adapter tool loops call handlers directly, so they cannot use a
+    ToolExecutor. They can still get the same two checks: the guardrail chain,
+    which needs nothing but the call itself, and — when the calling agent is
+    known — the autonomy gate, which needs a database session and opens its own.
 
     Args:
         tool_name: Name of the tool about to run.
         arguments: Arguments the tool would receive.
         allowed_tools: Optional tool-name whitelist.
         context: Optional context passed through to the guardrails.
+        agent_id: The calling agent. Without it the autonomy tier cannot be
+            resolved and only the guardrail chain runs.
 
     Returns:
         None when the call may proceed, or an error dict shaped like an ordinary
@@ -120,16 +124,43 @@ async def guard_tool_call(
         # Fail open on a guardrail *error*: a bug in a check must not take out
         # legitimate work. A guardrail *verdict* still blocks, below.
         logger.warning("Guardrail check errored for tool %s, allowing: %s", tool_name, exc)
+        result = None
+
+    if result is not None and not result.passed:
+        reason = "; ".join(result.violations) or "blocked by policy"
+        logger.warning("Guardrail blocked tool %s: %s", tool_name, reason)
+        return {
+            "error": f"Blocked by guardrail: {reason}",
+            "status": "guardrail_blocked",
+        }
+
+    if agent_id is None:
         return None
 
-    if result.passed:
+    # Guardrails first, autonomy second: a call the policy refuses outright
+    # should not be sent to a human for approval.
+    try:
+        from nexus.database import async_session_factory
+
+        async with async_session_factory() as db:
+            gate = build_autonomy_gate(db)
+            decision = await gate.check(
+                agent_id=agent_id,
+                tool_id=uuid.uuid5(uuid.NAMESPACE_URL, f"tool:{tool_name}"),
+                tool_name=tool_name,
+                arguments=arguments,
+            )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Autonomy check errored for tool %s, allowing: %s", tool_name, exc)
         return None
 
-    reason = "; ".join(result.violations) or "blocked by policy"
-    logger.warning("Guardrail blocked tool %s: %s", tool_name, reason)
+    if decision.allowed:
+        return None
+
     return {
-        "error": f"Blocked by guardrail: {reason}",
-        "status": "guardrail_blocked",
+        "error": decision.reason or f"Requires approval: {decision.action_type}",
+        "status": "autonomy_blocked",
+        "correlation_id": str(decision.correlation_id),
     }
 
 

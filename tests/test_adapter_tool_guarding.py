@@ -127,6 +127,73 @@ class TestMCPToolGuarding:
         assert [name for name, _ in client.calls] == ["shell"]
 
 
+class TestAutonomyGating:
+    """With a known agent, the guard also resolves that agent's autonomy tier."""
+
+    async def test_level_three_tool_is_refused(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        import nexus.tools.factory as factory
+
+        class BlockingGate:
+            async def check(self, **kwargs: Any) -> Any:
+                class Decision:
+                    allowed = False
+                    reason = "Autonomy level 3 for 'delete_files' requires approval"
+                    action_type = "delete_files"
+                    correlation_id = uuid.uuid4()
+
+                return Decision()
+
+        monkeypatch.setattr(factory, "build_autonomy_gate", lambda db, **k: BlockingGate())
+
+        refusal = await factory.guard_tool_call(
+            "delete_file", {"path": "notes.txt"}, agent_id=uuid.uuid4()
+        )
+
+        assert refusal is not None
+        assert refusal["status"] == "autonomy_blocked"
+        assert "correlation_id" in refusal
+
+    async def test_no_agent_id_skips_the_autonomy_check(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Without an agent the tier cannot be resolved, so only guardrails run."""
+        import nexus.tools.factory as factory
+
+        def explode(*a: Any, **k: Any) -> Any:
+            raise AssertionError("autonomy gate built without an agent_id")
+
+        monkeypatch.setattr(factory, "build_autonomy_gate", explode)
+
+        assert await factory.guard_tool_call("read_file", {"path": "notes.txt"}) is None
+
+    async def test_guardrail_refusal_short_circuits_autonomy(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A call the policy refuses outright is not sent for human approval."""
+        import nexus.tools.factory as factory
+
+        def explode(*a: Any, **k: Any) -> Any:
+            raise AssertionError("autonomy gate consulted after a guardrail refusal")
+
+        monkeypatch.setattr(factory, "build_autonomy_gate", explode)
+
+        refusal = await factory.guard_tool_call("shell", DANGEROUS, agent_id=uuid.uuid4())
+        assert refusal is not None
+        assert refusal["status"] == "guardrail_blocked"
+
+    async def test_allows_when_the_autonomy_check_errors(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import nexus.tools.factory as factory
+
+        def explode(*a: Any, **k: Any) -> Any:
+            raise RuntimeError("no database")
+
+        monkeypatch.setattr(factory, "build_autonomy_gate", explode)
+
+        assert await factory.guard_tool_call("read_file", {}, agent_id=uuid.uuid4()) is None
+
+
 class TestGuardHelper:
     """`guard_tool_call` is the shared screen both adapters use."""
 
