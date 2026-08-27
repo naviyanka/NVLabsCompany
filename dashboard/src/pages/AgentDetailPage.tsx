@@ -1,5 +1,7 @@
 import { deleteAgent } from '@/api/agents';
 import { apiClient } from '@/api/client';
+import { AutonomyPolicyPanel } from '@/components/agents/AutonomyPolicyPanel';
+import { EditAgentModal } from '@/components/agents/EditAgentModal';
 import { FireAgentModal } from '@/components/agents/FireAgentModal';
 import { Badge } from '@/components/common/Badge';
 import { Button } from '@/components/common/Button';
@@ -18,9 +20,11 @@ import {
   DollarSign,
   MessageSquare,
   Pause,
+  Pencil,
   Play,
   Send,
-  Trash2,
+  ShieldCheck,
+  Trash2
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -57,6 +61,7 @@ export function AgentDetailPage() {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('chat');
   const [showFireModal, setShowFireModal] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
 
   // Chat state
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
@@ -219,6 +224,15 @@ export function AgentDetailPage() {
         {/* Action Controls */}
         <div className="flex items-center gap-2.5 shrink-0">
           <Button
+            variant="secondary"
+            size="sm"
+            icon={<Pencil size={14} className="text-[#FFB020]" />}
+            onClick={() => setShowEditModal(true)}
+          >
+            Edit Soul & Traits
+          </Button>
+
+          <Button
             variant={agent.status === 'active' ? 'secondary' : 'primary'}
             size="sm"
             icon={agent.status === 'active' ? <Pause size={14} /> : <Play size={14} />}
@@ -247,6 +261,13 @@ export function AgentDetailPage() {
           </Button>
         </div>
       </div>
+
+      <EditAgentModal
+        agent={agent}
+        isOpen={showEditModal}
+        onClose={() => setShowEditModal(false)}
+        onSuccess={(updated) => setAgent(updated)}
+      />
 
       <FireAgentModal
         agent={agent}
@@ -294,6 +315,7 @@ export function AgentDetailPage() {
           { id: 'chat', label: 'Operator Console & Live Chat', icon: <MessageSquare size={14} /> },
           { id: 'dossier', label: 'Soul & Capabilities Dossier', icon: <Cpu size={14} /> },
           { id: 'memory', label: 'Context Memory Entries', icon: <Database size={14} />, count: memories.length },
+          { id: 'autonomy', label: 'Autonomy & Guardrails', icon: <ShieldCheck size={14} /> },
           { id: 'telemetry', label: 'Token Consumption Telemetry', icon: <Activity size={14} /> },
         ]}
       />
@@ -476,6 +498,14 @@ export function AgentDetailPage() {
             )}
           </div>
         </Card>
+      )}
+
+      {activeTab === 'autonomy' && (
+        <AutonomyPolicyPanel
+          agentId={agent.id}
+          policy={agent.autonomy_policy}
+          onSaved={(next) => setAgent((prev) => (prev ? { ...prev, autonomy_policy: next as Record<string, number> } : prev))}
+        />
       )}
 
       {activeTab === 'telemetry' && (

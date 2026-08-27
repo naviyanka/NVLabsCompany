@@ -1,4 +1,4 @@
-import type { UUID, DateTimeString, AgentStatus } from './common';
+import type { AgentStatus, DateTimeString, UUID } from './common';
 
 export interface Agent {
   id: UUID;
@@ -19,6 +19,8 @@ export interface Agent {
   spent_monthly_cents: number;
   performance_score?: number;
   soul_description: string;
+  /** Per-action autonomy policy: { action_type: 1|2|3, spend_above_cents?: number }. */
+  autonomy_policy?: Record<string, number> | null;
   last_heartbeat_at: DateTimeString | null;
   created_at: DateTimeString;
   updated_at: DateTimeString;
