@@ -1,9 +1,26 @@
-"""Trigger Executor - fires triggers and records execution results."""
+"""Trigger Executor - fires triggers and records execution results.
+
+Execution records live in the ``trigger_executions`` table, so history is
+queryable after a restart. :class:`TriggerExecutionRecord` is the DTO returned
+to callers; the row is the record of truth.
+"""
 
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Callable, Awaitable
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+
+def _naive(value: datetime | None) -> datetime | None:
+    """Drop tzinfo so the value matches the table's naive UTC columns."""
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value
+    return value.astimezone(timezone.utc).replace(tzinfo=None)
 
 
 @dataclass
@@ -45,10 +62,45 @@ class TriggerExecutor:
     4. Records the duration and result
     """
 
-    def __init__(self) -> None:
-        """Initialize the trigger executor."""
-        self._executions: list[TriggerExecutionRecord] = []
+    def __init__(
+        self, session_factory: async_sessionmaker[AsyncSession] | None = None
+    ) -> None:
+        """Initialize the trigger executor.
+
+        Args:
+            session_factory: Session factory used to write and read
+                ``trigger_executions`` rows. Defaults to the app's factory.
+        """
+        self._session_factory = session_factory
         self._action_handlers: dict[str, Callable[..., Awaitable[Any]]] = {}
+
+    def _factory(self) -> async_sessionmaker[AsyncSession]:
+        """Resolve the session factory, importing the app default lazily."""
+        if self._session_factory is None:
+            from nexus.database import async_session_factory
+
+            self._session_factory = async_session_factory
+        return self._session_factory
+
+    async def _persist(self, record: TriggerExecutionRecord) -> None:
+        """Insert or update the row backing an execution record."""
+        from nexus.models.trigger import TriggerExecution
+
+        async with self._factory()() as db:
+            row = await db.get(TriggerExecution, record.id)
+            if row is None:
+                row = TriggerExecution(
+                    id=record.id,
+                    trigger_id=record.trigger_id,
+                    company_id=record.company_id,
+                    started_at=_naive(record.started_at),
+                )
+                db.add(row)
+            row.status = record.status
+            row.result = record.result
+            row.error = record.error
+            row.completed_at = _naive(record.completed_at)
+            await db.commit()
 
     def register_action(
         self, action_type: str, handler: Callable[..., Awaitable[Any]]
@@ -88,7 +140,7 @@ class TriggerExecutor:
             trigger_id=trigger_id,
             company_id=company_id,
         )
-        self._executions.append(record)
+        await self._persist(record)
 
         start_time = datetime.now(timezone.utc)
 
@@ -100,6 +152,7 @@ class TriggerExecutor:
             record.duration_ms = int(
                 (record.completed_at - start_time).total_seconds() * 1000
             )
+            await self._persist(record)
             return record
 
         try:
@@ -126,9 +179,10 @@ class TriggerExecutor:
                 (end_time - start_time).total_seconds() * 1000
             )
 
+        await self._persist(record)
         return record
 
-    def get_executions(
+    async def get_executions(
         self,
         trigger_id: uuid.UUID | None = None,
         company_id: uuid.UUID | None = None,
@@ -144,17 +198,37 @@ class TriggerExecutor:
             limit: Maximum records to return.
 
         Returns:
-            List of matching TriggerExecutionRecord objects.
+            List of matching TriggerExecutionRecord objects, most recent first.
         """
-        results: list[TriggerExecutionRecord] = []
-        for record in reversed(self._executions):
-            if trigger_id and record.trigger_id != trigger_id:
-                continue
-            if company_id and record.company_id != company_id:
-                continue
-            if status and record.status != status:
-                continue
-            results.append(record)
-            if len(results) >= limit:
-                break
-        return results
+        from nexus.models.trigger import TriggerExecution
+
+        stmt = select(TriggerExecution)
+        if trigger_id:
+            stmt = stmt.where(TriggerExecution.trigger_id == trigger_id)
+        if company_id:
+            stmt = stmt.where(TriggerExecution.company_id == company_id)
+        if status:
+            stmt = stmt.where(TriggerExecution.status == status)
+        stmt = stmt.order_by(TriggerExecution.started_at.desc()).limit(limit)
+
+        async with self._factory()() as db:
+            rows = list((await db.execute(stmt)).scalars().all())
+
+        return [
+            TriggerExecutionRecord(
+                id=row.id,
+                trigger_id=row.trigger_id,
+                company_id=row.company_id,
+                status=row.status,
+                result=row.result,
+                error=row.error,
+                started_at=row.started_at,
+                completed_at=row.completed_at,
+                duration_ms=int(
+                    (row.completed_at - row.started_at).total_seconds() * 1000
+                )
+                if row.completed_at and row.started_at
+                else 0,
+            )
+            for row in rows
+        ]

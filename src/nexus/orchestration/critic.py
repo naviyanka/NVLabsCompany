@@ -15,6 +15,10 @@ class EvaluationResult:
         passed: Whether the result meets the quality threshold.
         feedback: Human-readable evaluation feedback.
         criteria_scores: Per-criterion breakdown of scores.
+        verdict: Structured verdict - one of pass, fail, continue, paused.
+            "continue" means the judge errored and the gate failed open.
+            "paused" means the judge failed repeatedly and the caller
+            should stop rather than spin.
     """
 
     task_id: uuid.UUID
@@ -22,6 +26,7 @@ class EvaluationResult:
     passed: bool
     feedback: str = ""
     criteria_scores: dict[str, float] = field(default_factory=dict)
+    verdict: str = "pass"
 
 
 @dataclass
@@ -144,6 +149,7 @@ class CriticEvaluator:
             passed=passed,
             feedback=" ".join(feedback_parts),
             criteria_scores=criteria_scores,
+            verdict="pass" if passed else "fail",
         )
 
     async def _evaluate_criterion(

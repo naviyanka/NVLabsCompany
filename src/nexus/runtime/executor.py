@@ -340,7 +340,7 @@ class TaskExecutor:
                         title=st.description[:500],
                         description=f"Decomposed from failed task: {task.title}",
                         priority=task.priority,
-                        parent_id=task.id,
+                        parent_task_id=task.id,
                         status="pending",
                     )
                     self._db.add(sub)

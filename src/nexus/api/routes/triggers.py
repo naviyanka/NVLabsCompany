@@ -10,6 +10,7 @@ from sqlalchemy import select, update
 
 from nexus.api.deps import CurrentCompanyId, DbSession
 from nexus.models.trigger import Trigger, TriggerExecution
+from nexus.runtime.scheduler import compute_next_fire
 
 router = APIRouter(tags=["triggers"])
 
@@ -73,7 +74,20 @@ class TriggerExecutionResponse(BaseModel):
 async def create_trigger(
     company_id: uuid.UUID, body: TriggerCreate, db: DbSession
 ) -> Any:
-    """Create a new trigger for an agent."""
+    """Create a new trigger for an agent.
+
+    When the caller does not pin ``next_fire_at``, the scheduler's own
+    computation seeds it, so the trigger is due at the right time even if the
+    process restarts before its first fire.
+    """
+    next_fire_at = body.next_fire_at
+    if next_fire_at is None:
+        next_fire_at = compute_next_fire(
+            body.trigger_type, body.config, datetime.now(timezone.utc).replace(tzinfo=None)
+        )
+    elif next_fire_at.tzinfo is not None:
+        next_fire_at = next_fire_at.astimezone(timezone.utc).replace(tzinfo=None)
+
     trigger = Trigger(
         company_id=company_id,
         agent_id=body.agent_id,
@@ -82,7 +96,7 @@ async def create_trigger(
         description=body.description,
         config=body.config,
         is_active=body.is_active,
-        next_fire_at=body.next_fire_at,
+        next_fire_at=next_fire_at,
     )
     db.add(trigger)
     await db.flush()
@@ -131,6 +145,32 @@ async def update_trigger(
             detail=f"Trigger {trigger_id} not found",
         )
     return trigger
+
+
+@router.get(
+    "/api/v1/triggers/{trigger_id}/executions",
+    response_model=list[TriggerExecutionResponse],
+)
+async def list_trigger_executions(
+    trigger_id: uuid.UUID,
+    db: DbSession,
+    company_id: CurrentCompanyId,
+    limit: int = 100,
+    offset: int = 0,
+) -> Any:
+    """List execution history for a trigger, most recent first."""
+    stmt = (
+        select(TriggerExecution)
+        .where(
+            TriggerExecution.trigger_id == trigger_id,
+            TriggerExecution.company_id == company_id,
+        )
+        .order_by(TriggerExecution.started_at.desc())
+        .offset(offset)
+        .limit(limit)
+    )
+    result = await db.execute(stmt)
+    return list(result.scalars().all())
 
 
 @router.post(

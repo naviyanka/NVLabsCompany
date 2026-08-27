@@ -150,6 +150,9 @@ async def _execute_pipeline_bg(run_id: uuid.UUID, pipeline_id: uuid.UUID, compan
 
         stage_results: list[dict[str, Any]] = []
         previous_output = ""
+        # Critics live for the whole run so their parse-failure counters persist
+        # across stages; keyed by the settings that actually vary per stage.
+        critics: dict[tuple[float, Any], Any] = {}
 
         for i, stage in enumerate(pipeline.stages):
             # Check if run was cancelled/paused externally
@@ -292,20 +295,32 @@ async def _execute_pipeline_bg(run_id: uuid.UUID, pipeline_id: uuid.UUID, compan
                 # Optional quality gate via CriticEvaluator
                 quality_score = None
                 quality_passed = True
+                quality_verdict = None
                 if stage.get("quality_gate", False):
                     try:
-                        # Try LLM-based critic first (better quality assessment)
-                        from nexus.orchestration.llm_critic import LLMCriticEvaluator
-                        from nexus.orchestration.critic import CriticEvaluator
+                        # LLM critic is the default gate; heuristic only when no model.
+                        from nexus.orchestration.llm_critic import make_critic
                         threshold = stage.get("quality_threshold", 0.7)
 
-                        try:
-                            async def critic_llm_fn(prompt: str) -> str:
-                                t, _, _ = await _call_llm(agent, system_prompt, prompt, [])
-                                return t
-                            critic = LLMCriticEvaluator(llm_callable=critic_llm_fn, quality_threshold=threshold)
-                        except Exception:
-                            critic = CriticEvaluator(quality_threshold=threshold)
+                        async def critic_llm_fn(prompt: str) -> str:
+                            t, _, _ = await _call_llm(
+                                agent, system_prompt, prompt, [], temperature=0.0
+                            )
+                            return t
+
+                        # Critics are cached per (threshold, use_llm) for the whole
+                        # run. A fresh instance per stage would reset the
+                        # consecutive-parse-failure counter every stage, so the cap
+                        # that pauses a wedged judge could never be reached.
+                        critic_key = (threshold, stage.get("quality_use_llm"))
+                        critic = critics.get(critic_key)
+                        if critic is None:
+                            critic = make_critic(
+                                llm_callable=critic_llm_fn,
+                                quality_threshold=threshold,
+                                use_llm=stage.get("quality_use_llm"),
+                            )
+                            critics[critic_key] = critic
 
                         eval_result = await critic.evaluate(
                             task_id=run_id,
@@ -314,7 +329,13 @@ async def _execute_pipeline_bg(run_id: uuid.UUID, pipeline_id: uuid.UUID, compan
                         )
                         quality_score = eval_result.score
                         quality_passed = eval_result.passed
-                        if not quality_passed:
+                        quality_verdict = eval_result.verdict
+                        if quality_verdict == "paused":
+                            logger.error(
+                                "Pipeline stage %d quality gate paused: %s",
+                                i, eval_result.feedback
+                            )
+                        elif not quality_passed:
                             logger.warning(
                                 "Pipeline stage %d failed quality gate (%.2f < threshold)",
                                 i, quality_score
@@ -334,8 +355,15 @@ async def _execute_pipeline_bg(run_id: uuid.UUID, pipeline_id: uuid.UUID, compan
                     "model_used": model_used,
                     "tokens_used": tokens_used,
                     "quality_score": quality_score,
+                    "quality_verdict": quality_verdict,
                     "completed_at": datetime.now(timezone.utc).isoformat(),
                 })
+
+                # A broken judge pauses the run rather than letting it spin.
+                if quality_verdict == "paused":
+                    run.status = "paused"
+                    run.error = "Quality gate paused: judge unusable"
+                    break
 
             except Exception as e:
                 logger.error("Pipeline stage %d failed: %s", i, e)

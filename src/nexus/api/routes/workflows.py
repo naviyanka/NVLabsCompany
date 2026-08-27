@@ -192,16 +192,9 @@ def _row_to_trace(run: WorkflowRun) -> dict[str, Any]:
 _running_tasks: dict[str, asyncio.Task[None]] = {}
 
 
-async def _load_run(run_id: uuid.UUID) -> WorkflowRun | None:
-    from nexus.database import async_session_factory
-
-    async with async_session_factory() as session:
-        result = await session.execute(select(WorkflowRun).where(WorkflowRun.id == run_id))
-        return result.scalar_one_or_none()
-
-
 async def _persist_completion(
     run_id: uuid.UUID,
+    company_id: uuid.UUID,
     *,
     status_value: str,
     steps: list[dict[str, Any]] | None = None,
@@ -215,11 +208,19 @@ async def _persist_completion(
 
     A cancelled run keeps its cancelled status — the engine finishing after a
     cancel request must not resurrect it.
+
+    The ``company_id`` filter is not defensive padding: a run id is a UUID the
+    caller of the flow supplies, and without it a background runner would write
+    another tenant's run row on a collision or a mixed-up id.
     """
     from nexus.database import async_session_factory
 
     async with async_session_factory() as session:
-        result_q = await session.execute(select(WorkflowRun).where(WorkflowRun.id == run_id))
+        result_q = await session.execute(
+            select(WorkflowRun).where(
+                WorkflowRun.id == run_id, WorkflowRun.company_id == company_id
+            )
+        )
         run = result_q.scalar_one_or_none()
         if run is None or run.status in _TERMINAL_STATUSES:
             return
@@ -284,16 +285,19 @@ async def _run_company_flow(
         )
         await _persist_completion(
             run_id,
+            company_uuid,
             status_value=str(getattr(trace.status, "value", trace.status)),
             steps=_steps_to_dicts(trace.steps),
             total_cost_cents=trace.total_cost_cents,
             completed_at=trace.completed_at,
         )
     except asyncio.CancelledError:
-        await _persist_completion(run_id, status_value="cancelled")
+        await _persist_completion(run_id, company_uuid, status_value="cancelled")
         raise
     except Exception as exc:
-        await _persist_completion(run_id, status_value="failed", error=str(exc))
+        await _persist_completion(
+            run_id, company_uuid, status_value="failed", error=str(exc)
+        )
 
 
 async def _run_task_flow(
@@ -332,6 +336,7 @@ async def _run_task_flow(
         )
         await _persist_completion(
             run_id,
+            company_uuid,
             status_value=str(getattr(execution.status, "value", execution.status)),
             steps=_execution_to_step_dicts(execution),
             total_cost_cents=execution.cost_cents,
@@ -345,10 +350,12 @@ async def _run_task_flow(
             },
         )
     except asyncio.CancelledError:
-        await _persist_completion(run_id, status_value="cancelled")
+        await _persist_completion(run_id, company_uuid, status_value="cancelled")
         raise
     except Exception as exc:
-        await _persist_completion(run_id, status_value="failed", error=str(exc))
+        await _persist_completion(
+            run_id, company_uuid, status_value="failed", error=str(exc)
+        )
 
 
 # ---------------------------------------------------------------------------

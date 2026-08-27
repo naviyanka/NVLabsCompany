@@ -9,7 +9,7 @@ from pydantic import BaseModel
 from sqlalchemy import select, update
 
 from nexus.api.deps import CurrentCompanyId, DbSession
-from nexus.models.task import Task
+from nexus.models.task import RunCompletionReason, Task
 
 router = APIRouter(tags=["tasks"])
 
@@ -37,6 +37,7 @@ class TaskStatusUpdate(BaseModel):
     status: str
     result: str | None = None
     error: str | None = None
+    completion_reason: str | None = None
 
 
 class TaskResponse(BaseModel):
@@ -53,6 +54,7 @@ class TaskResponse(BaseModel):
     parent_task_id: uuid.UUID | None = None
     result: str | None = None
     error: str | None = None
+    completion_reason: str | None = None
     started_at: datetime | None = None
     completed_at: datetime | None = None
     created_at: datetime
@@ -148,13 +150,16 @@ async def list_tasks(
     company_id: uuid.UUID,
     db: DbSession,
     status_filter: str | None = None,
+    completion_reason: str | None = None,
     limit: int = 100,
     offset: int = 0,
 ) -> Any:
-    """List tasks for a company."""
+    """List tasks for a company, optionally filtered by status or why it ended."""
     stmt = select(Task).where(Task.company_id == company_id)
     if status_filter:
         stmt = stmt.where(Task.status == status_filter)
+    if completion_reason:
+        stmt = stmt.where(Task.completion_reason == completion_reason)
     stmt = stmt.offset(offset).limit(limit).order_by(Task.priority.desc())
     result = await db.execute(stmt)
     return list(result.scalars().all())
@@ -212,12 +217,28 @@ async def update_task_status(
         values["started_at"] = datetime.now(timezone.utc)
     elif body.status == "completed":
         values["completed_at"] = datetime.now(timezone.utc)
+        values["completion_reason"] = body.completion_reason or RunCompletionReason.goal.value
         if body.result:
             values["result"] = body.result
     elif body.status == "failed":
         values["completed_at"] = datetime.now(timezone.utc)
+        values["completion_reason"] = body.completion_reason or RunCompletionReason.error.value
         if body.error:
             values["error"] = body.error
+    elif body.completion_reason:
+        values["completion_reason"] = body.completion_reason
+
+    if values.get("completion_reason") is not None:
+        try:
+            RunCompletionReason(values["completion_reason"])
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    f"Unknown completion_reason '{values['completion_reason']}'. "
+                    f"Expected one of: {', '.join(r.value for r in RunCompletionReason)}"
+                ),
+            )
 
     stmt = update(Task).where(Task.id == task_id, Task.company_id == company_id).values(**values)
     await db.execute(stmt)
@@ -235,7 +256,11 @@ async def update_task_status(
     await record_audit(
         company_id, "task.status_changed",
         actor_type="user", resource_type="task", resource_id=str(task_id),
-        details={"new_status": body.status, "title": task.title},
+        details={
+            "new_status": body.status,
+            "title": task.title,
+            "completion_reason": task.completion_reason,
+        },
         db=db,
     )
 
@@ -376,7 +401,7 @@ async def decompose_task(
             title=st.description[:500],
             description=f"Subtask of {task.title}",
             priority=task.priority,
-            parent_id=task.id,
+            parent_task_id=task.id,
             status="pending",
         )
         db.add(subtask_record)
