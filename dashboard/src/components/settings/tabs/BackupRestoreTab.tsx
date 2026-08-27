@@ -1,25 +1,26 @@
-import { useState, useEffect } from 'react';
+import { apiClient } from '@/api/client';
+import { Button } from '@/components/common/Button';
+import { getActiveCompanyId } from '@/config';
 import {
+  AlertTriangle,
+  Check,
+  CheckCircle2,
+  Clock,
+  Cloud,
+  Download,
+  FileCheck,
+  Folder,
+  HardDrive,
+  Play,
+  Plus,
   RotateCcw,
   Save,
-  Download,
-  Trash2,
-  Plus,
-  Clock,
   ShieldCheck,
-  HardDrive,
-  Folder,
-  Cloud,
-  CheckCircle2,
-  AlertTriangle,
-  Play,
-  FileCheck,
+  Trash2,
   X,
-  Check,
 } from 'lucide-react';
-import { Button } from '@/components/common/Button';
-import { apiClient } from '@/api/client';
-import { getActiveCompanyId } from '@/config';
+import { useEffect, useState } from 'react';
+import { CompanyPortabilitySection } from '../CompanyPortabilitySection';
 import type { BackupLocationConfig, SnapshotArchiveItem } from '../types';
 
 interface BackupRestoreTabProps {
@@ -212,6 +213,9 @@ export function BackupRestoreTab({ onSaveToast }: BackupRestoreTabProps) {
         </Button>
       </div>
 
+      {/* Company export / import */}
+      <CompanyPortabilitySection onSaveToast={onSaveToast} />
+
       {/* 1. Health Banner */}
       <div className="p-4 bg-[#101012] border border-white/[0.08] rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div className="flex items-center gap-3">
@@ -280,11 +284,10 @@ export function BackupRestoreTab({ onSaveToast }: BackupRestoreTabProps) {
               key={type.id}
               type="button"
               onClick={() => setConfig((prev) => ({ ...prev, targetType: type.id as any }))}
-              className={`p-3 rounded-xl border text-left cursor-pointer transition-all flex flex-col justify-between ${
-                config.targetType === type.id
-                  ? 'bg-[#1C1C1F] border-[#FFB020]/40 shadow-sm'
-                  : 'bg-[#141416] border-white/[0.06] opacity-75 hover:opacity-100'
-              }`}
+              className={`p-3 rounded-xl border text-left cursor-pointer transition-all flex flex-col justify-between ${config.targetType === type.id
+                ? 'bg-[#1C1C1F] border-[#FFB020]/40 shadow-sm'
+                : 'bg-[#141416] border-white/[0.06] opacity-75 hover:opacity-100'
+                }`}
             >
               <div className="flex items-center justify-between w-full mb-1">
                 {type.icon}
@@ -330,11 +333,10 @@ export function BackupRestoreTab({ onSaveToast }: BackupRestoreTabProps) {
 
             {testResult && (
               <div
-                className={`p-2.5 rounded-lg border text-xs font-mono flex items-center gap-2 ${
-                  testResult.success
-                    ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
-                    : 'bg-rose-500/10 border-rose-500/30 text-rose-300'
-                }`}
+                className={`p-2.5 rounded-lg border text-xs font-mono flex items-center gap-2 ${testResult.success
+                  ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                  : 'bg-rose-500/10 border-rose-500/30 text-rose-300'
+                  }`}
               >
                 {testResult.success ? <Check size={14} /> : <AlertTriangle size={14} />}
                 <span>{testResult.message}</span>

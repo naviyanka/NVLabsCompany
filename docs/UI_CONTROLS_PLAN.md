@@ -74,7 +74,7 @@ The button today fakes success client-side.
   liveness, and any `needs_recovery` state.
 - **Check:** an active run shows live; a stalled fixture shows flagged.
 
-### Phase U7 — Company export/import · backend + UI · LOW
+### Phase U7 — Company export/import · backend + UI · LOW · DONE
 - U7.1 Backend: `GET /api/v1/companies/{id}/export` (secret-scrubbed archive) and
   `POST /api/v1/companies/import` (ID remap) if a service exists; else defer.
 - U7.2 UI: buttons in Settings → Backup/Restore (or a new tab).
@@ -119,5 +119,10 @@ unusable from UI; audit verify is a correctness lie). U4–U6 second. U7–U8 la
       silence > 1h). Added a "Liveness" view to the Activity page with summary cards
       (active/healthy/stalled/confirmed-dead) + per-run rows. Verified with seeded runs:
       healthy (silent 1m) and stalled (silent 2h, attempt 2) rendered correctly.
-- [ ] U7 Company export/import
+- [x] U7 Company export/import — a CompanyPortabilityService already existed; added routes
+      GET /api/v1/companies/{id}/export and POST /api/v1/companies/import (routes/portability.py)
+      + a Company Portability section in Backup & Restore. Export verified (200, 18 tables, 15
+      secret values scrubbed, downloads JSON). Import works into a FRESH db (its design); into
+      the same db it returns a graceful 409 (unique constraint, e.g. user email) rather than a
+      500. NOTE: dev DB needed 2 more columns reconciled (tasks.goal_id, tasks.completion_reason).
 - [ ] U8 Adapter coverage / MCP surface
