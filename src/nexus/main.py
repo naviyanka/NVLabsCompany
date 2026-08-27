@@ -8,62 +8,63 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from nexus import __version__
 from nexus.api.middleware import GovernanceMiddleware
-from nexus.auth.middleware import AuthenticationMiddleware
+from nexus.api.routes.activity import router as activity_router
 from nexus.api.routes.adapters import router as adapters_router
-from nexus.api.routes.archetypes import router as archetypes_router
-from nexus.api.routes.chat import router as chat_router
-from nexus.api.routes.hiring import router as hiring_router
-from nexus.api.routes.providers import router as providers_router
+from nexus.api.routes.agent_logs import router as agent_logs_router
+from nexus.api.routes.agent_profiling import router as agent_profiling_router
 from nexus.api.routes.agents import router as agents_router
+from nexus.api.routes.api_keys import router as api_keys_router
 from nexus.api.routes.approvals import router as approvals_router
+from nexus.api.routes.archetypes import router as archetypes_router
+from nexus.api.routes.audit import router as audit_router
 from nexus.api.routes.auth import router as auth_router
 from nexus.api.routes.budgets import router as budgets_router
+from nexus.api.routes.chat import router as chat_router
 from nexus.api.routes.communication import router as communication_router
 from nexus.api.routes.companies import router as companies_router
-from nexus.api.routes.control import router as control_router
 from nexus.api.routes.company_sim import router as company_sim_router
+from nexus.api.routes.control import router as control_router
+from nexus.api.routes.dashboard import router as dashboard_router
 from nexus.api.routes.degradation import router as degradation_router
+from nexus.api.routes.departments import router as departments_router
 from nexus.api.routes.events import router as events_router
-from nexus.api.routes.okr import router as okr_router
-from nexus.api.routes.plaza import router as plaza_router
 from nexus.api.routes.evolution import router as evolution_router
 from nexus.api.routes.goals import router as goals_router
 from nexus.api.routes.health import router as health_router
+from nexus.api.routes.hiring import router as hiring_router
+from nexus.api.routes.hr import router as hr_router
 from nexus.api.routes.identity import router as identity_router
 from nexus.api.routes.incidents import router as incidents_router
 from nexus.api.routes.knowledge import router as knowledge_router
 from nexus.api.routes.meetings import router as meetings_router
 from nexus.api.routes.memory import router as memory_router
-from nexus.api.routes.policies import router as policies_router
-from nexus.api.routes.rotation import router as rotation_router
-from nexus.api.routes.secrets import router as secrets_router
-from nexus.api.routes.skills import router as skills_router
-from nexus.api.routes.tasks import router as tasks_router
-from nexus.api.routes.tools import router as tools_router
-from nexus.api.routes.triggers import router as triggers_router
-from nexus.api.routes.workflows import router as workflows_router
-from nexus.api.routes.ws import router as ws_router
-from nexus.api.routes.notifications import router as notifications_router
-from nexus.api.routes.dashboard import router as dashboard_router
-from nexus.api.routes.activity import router as activity_router
-from nexus.api.routes.agent_logs import router as agent_logs_router
-from nexus.api.routes.settings import router as settings_router
-from nexus.api.routes.pipelines import router as pipelines_router
-from nexus.api.routes.repositories import router as repositories_router
-from nexus.api.routes.api_keys import router as api_keys_router
-from nexus.api.routes.profile import router as profile_router
-from nexus.api.routes.audit import router as audit_router
 from nexus.api.routes.memory_global import router as memory_global_router
-from nexus.api.routes.hr import router as hr_router
-from nexus.api.routes.departments import router as departments_router
-from nexus.api.routes.workspaces import router as workspaces_router
 from nexus.api.routes.nodes import router as nodes_router
+from nexus.api.routes.notifications import router as notifications_router
+from nexus.api.routes.okr import router as okr_router
+from nexus.api.routes.pipelines import router as pipelines_router
+from nexus.api.routes.plaza import router as plaza_router
+from nexus.api.routes.policies import router as policies_router
+from nexus.api.routes.profile import router as profile_router
+from nexus.api.routes.providers import router as providers_router
+from nexus.api.routes.repositories import router as repositories_router
+from nexus.api.routes.rotation import router as rotation_router
+from nexus.api.routes.scim import router as scim_router
+from nexus.api.routes.secrets import router as secrets_router
+from nexus.api.routes.settings import router as settings_router
+from nexus.api.routes.skills import router as skills_router
 from nexus.api.routes.slack_events import router as slack_events_router
 from nexus.api.routes.sso import router as sso_router
-from nexus.api.routes.scim import router as scim_router
+from nexus.api.routes.tasks import router as tasks_router
 from nexus.api.routes.telegram_bot import router as telegram_bot_router
-from nexus.api.routes.agent_profiling import router as agent_profiling_router
+from nexus.api.routes.tools import router as tools_router
+from nexus.api.routes.triggers import router as triggers_router
+from nexus.api.routes.webhooks import router as webhooks_router
+from nexus.api.routes.workflows import router as workflows_router
+from nexus.api.routes.workspaces import router as workspaces_router
+from nexus.api.routes.ws import router as ws_router
 from nexus.api.versioning import APIVersionMiddleware
+from nexus.auth.middleware import AuthenticationMiddleware
 from nexus.config import settings
 from nexus.logging_config import RequestIDMiddleware, configure_logging
 from nexus.telemetry import MetricsMiddleware, metrics_router
@@ -77,25 +78,24 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan handler for startup and shutdown events."""
     import uuid
 
-    from nexus.config import settings
-    from nexus.database import async_session_factory, engine
-
     # Startup: create tables only for SQLite dev databases. PostgreSQL and
     # other production databases are managed exclusively through Alembic
     # migrations (`alembic upgrade head` — docker-compose runs it before
     # uvicorn), so schema drift cannot hide between create_all and the
     # migration history.
     from sqlmodel import SQLModel
+
     import nexus.models  # noqa: F401 - register all models
+    from nexus.config import settings
+    from nexus.database import async_session_factory, engine
     if settings.database_url.startswith("sqlite"):
         async with engine.begin() as conn:
             await conn.run_sync(SQLModel.metadata.create_all)
 
     # Seed default company for the dashboard
-    from nexus.models._time import utcnow
-
     from sqlalchemy import select
 
+    from nexus.models._time import utcnow
     from nexus.models.company import Company
     default_company_id = uuid.UUID("00000000-0000-4000-8000-000000000001")
     async with async_session_factory() as session:
@@ -198,7 +198,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         _logger.warning("Could not initialize secret backend: %s", exc)
 
     # Initialize Plugin SDK (empty registry - plugins are not auto-loaded)
-    from nexus.plugins import PluginRegistry, HookManager
+    from nexus.plugins import HookManager, PluginRegistry
 
     hook_manager = HookManager()
     plugin_registry = PluginRegistry(hook_manager=hook_manager)
@@ -234,8 +234,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # Register event bridge handlers (connects EventBus → orchestration)
     try:
-        from nexus.runtime.event_bridge import register_event_handlers
         from nexus.communication.event_bus import EventBus
+        from nexus.runtime.event_bridge import register_event_handlers
         app.state.event_bus = EventBus(company_id=default_company_id)
         register_event_handlers(app.state.event_bus)
     except Exception as exc:
@@ -250,9 +250,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # Flush accumulated budget spend to DB
     try:
+        from sqlalchemy import update as sa_update
+
         from nexus.api.middleware import _budget_tracker
         from nexus.models.company import Company as CompanyModel
-        from sqlalchemy import update as sa_update
 
         async with async_session_factory() as flush_db:
             for cid, amount in list(_budget_tracker._pending_spend.items()):
@@ -425,6 +426,8 @@ app.include_router(approvals_router)
 app.include_router(budgets_router)
 app.include_router(memory_router)
 app.include_router(triggers_router)
+# Public: authenticated by a per-trigger secret, not a session.
+app.include_router(webhooks_router)
 app.include_router(communication_router)
 app.include_router(knowledge_router)
 app.include_router(meetings_router)

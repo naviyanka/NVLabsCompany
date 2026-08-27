@@ -95,6 +95,11 @@ TENANT_QUERY_OWNERS = {
     "companies.py",
     # Login and setup run before a company is known.
     "auth.py",
+    # An external service firing a webhook has no session, so the company is not
+    # known until the trigger row is read -- the lookup is by id plus a
+    # constant-time secret check, and every subsequent query in the request is
+    # scoped to that row's company_id.
+    "webhooks.py",
 }
 
 # --- Baseline ---------------------------------------------------------------
