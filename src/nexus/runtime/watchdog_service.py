@@ -19,7 +19,6 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from nexus.models.agent import Agent
 from nexus.models.heartbeat_run import HeartbeatRun
-from nexus.runtime.heartbeat import HeartbeatMonitor
 from nexus.runtime.watchdog import AgentInfo, RecoveryAction, Watchdog, WatchdogConfig
 
 logger = logging.getLogger(__name__)
@@ -125,10 +124,7 @@ async def patrol_once(session_factory: async_sessionmaker[AsyncSession]) -> None
     global _watchdog
 
     if _watchdog is None:
-        _watchdog = Watchdog(
-            heartbeat_monitor=HeartbeatMonitor(),
-            config=WatchdogConfig(),
-        )
+        _watchdog = Watchdog(config=WatchdogConfig())
 
     async with session_factory() as session:
         agents = await _load_agents(session)

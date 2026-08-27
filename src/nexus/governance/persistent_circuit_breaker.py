@@ -6,15 +6,35 @@ On startup, loads all open circuits from the database to restore state.
 
 import logging
 import uuid
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from nexus.governance.kill_switch import CircuitBreakerState
-
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class CircuitBreakerState:
+    """A snapshot of one agent's circuit, as loaded from the database.
+
+    Attributes:
+        agent_id: The agent being monitored.
+        consecutive_failures: Number of consecutive failures.
+        is_open: Whether the circuit is open (agent is blocked).
+        last_failure_at: When the last failure occurred.
+        opened_at: When the circuit was opened.
+        cooldown_seconds: Time before the circuit resets.
+    """
+
+    agent_id: uuid.UUID
+    consecutive_failures: int = 0
+    is_open: bool = False
+    last_failure_at: datetime | None = None
+    opened_at: datetime | None = None
+    cooldown_seconds: int = 300
 
 
 class PersistentCircuitBreaker:

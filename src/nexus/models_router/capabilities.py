@@ -39,6 +39,11 @@ _FAMILY_LIMITS: tuple[tuple[str, ModelLimits], ...] = (
     ("gpt-4o-mini", ModelLimits(128_000, 16_384)),
     ("gpt-4o", ModelLimits(128_000, 16_384)),
     ("gpt-4-turbo", ModelLimits(128_000, 4_096)),
+    # Azure's deployment id drops the dot ("gpt-35-turbo"); adapters/azure_adapter.py
+    # prices exactly that string, so it has to resolve here and not fall to the default.
+    ("gpt-35-turbo", ModelLimits(16_385, 4_096)),
+    ("gpt-3.5-turbo", ModelLimits(16_385, 4_096)),
+    ("titan", ModelLimits(8_192, 4_096)),
     ("o1", ModelLimits(200_000, 100_000)),
     ("o3", ModelLimits(200_000, 100_000)),
     ("gemini-1.5-pro", ModelLimits(2_000_000, 8_192)),
@@ -49,8 +54,15 @@ _FAMILY_LIMITS: tuple[tuple[str, ModelLimits], ...] = (
     ("llama", ModelLimits(8_192, 4_096)),
 )
 
-# When the model id is unknown, assume a mid-size window and a small output cap.
-DEFAULT_LIMITS: ModelLimits = ModelLimits(128_000, 4_096)
+# When the model id is unknown, assume the smallest window still in common use.
+#
+# The direction matters. This value feeds resolve_history_budget() in
+# memory/compaction.py, so overestimating means keeping more history than the
+# model will accept: the call then fails at dispatch with a context-length error
+# instead of compacting. Underestimating only compacts sooner than strictly
+# necessary. 8k is the floor among the models listed above, so an unrecognized id
+# errs toward compacting rather than toward a failed call.
+DEFAULT_LIMITS: ModelLimits = ModelLimits(8_192, 4_096)
 
 
 class ModelCapabilityResolver:

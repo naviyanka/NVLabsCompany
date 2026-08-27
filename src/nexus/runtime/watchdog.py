@@ -6,8 +6,8 @@ Performs scheduled patrols to identify and act on:
 - Budget-exceeded agents: spending beyond their monthly allocation
 - Circuit-broken agents: in cooldown states that may be ready for half-open test
 
-Integrates with HeartbeatMonitor for liveness detection and uses pure logic
-with no direct database access (receives agent state via AgentInfo dataclass).
+Uses pure logic with no direct database access: liveness comes from the
+``last_heartbeat_at`` on the AgentInfo dataclass the caller supplies.
 """
 
 import asyncio
@@ -20,7 +20,6 @@ from enum import Enum
 from typing import Any
 
 from nexus.models.heartbeat_run import HeartbeatRun
-from nexus.runtime.heartbeat import HeartbeatMonitor
 
 logger = logging.getLogger(__name__)
 
@@ -141,24 +140,22 @@ class PatrolReport:
 class Watchdog:
     """Performs periodic patrols to detect and recover unhealthy agents.
 
-    Integrates with HeartbeatMonitor for liveness detection and accepts
-    agent state via AgentInfo dataclass (no direct DB access). Checks for
-    stuck, orphaned, budget-exceeded, and circuit-broken agents, taking
-    appropriate recovery actions for each.
+    Accepts agent state via the AgentInfo dataclass (no direct DB access), so
+    liveness is read from ``AgentInfo.last_heartbeat_at`` — persisted by
+    ``PersistentHeartbeatService``. Checks for stuck, orphaned,
+    budget-exceeded, and circuit-broken agents, taking appropriate recovery
+    actions for each.
     """
 
     def __init__(
         self,
-        heartbeat_monitor: HeartbeatMonitor,
         config: WatchdogConfig | None = None,
     ) -> None:
         """Initialize the watchdog.
 
         Args:
-            heartbeat_monitor: Monitor used to check agent heartbeat health.
             config: Optional configuration for patrol behavior. Uses defaults if None.
         """
-        self._heartbeat_monitor = heartbeat_monitor
         self._config = config or WatchdogConfig()
         self._patrol_task: asyncio.Task[None] | None = None
         self._running = False

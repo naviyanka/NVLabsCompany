@@ -1,13 +1,25 @@
 """Skill Service - skill registry and agent skill management."""
 
 import uuid
-from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import select, delete
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from nexus.models.skill import AgentSkill, Skill
+
+
+class SkillAccessDeniedError(Exception):
+    """Raised when the company's skill policy refuses a skill assignment.
+
+    Carries the remediation string from the decision so the caller can tell the
+    operator what to do about it rather than just that it failed.
+    """
+
+    def __init__(self, reason: str, remediation: str = "") -> None:
+        super().__init__(reason)
+        self.reason = reason
+        self.remediation = remediation
 
 
 class SkillService:
@@ -19,6 +31,70 @@ class SkillService:
 
     def __init__(self, db: AsyncSession) -> None:
         self._db = db
+
+    async def _check_policy(self, agent_id: uuid.UUID, skill_id: uuid.UUID) -> None:
+        """Refuse the assignment if the company's skill policy denies it.
+
+        The policy document lives in ``CompanySettings.settings_json`` under
+        ``skill_policy``. A company with no document allows everything, so this
+        is a no-op until an operator writes one.
+
+        Raises:
+            SkillAccessDeniedError: When the policy denies the pairing.
+        """
+        from nexus.governance.skill_policy import SkillRef, SkillSubject, decision
+        from nexus.models.agent import Agent
+        from nexus.models.settings import CompanySettings
+
+        agent = (
+            await self._db.execute(select(Agent).where(Agent.id == agent_id))
+        ).scalar_one_or_none()
+        skill = (
+            await self._db.execute(select(Skill).where(Skill.id == skill_id))
+        ).scalar_one_or_none()
+        if agent is None or skill is None:
+            return
+
+        settings = (
+            await self._db.execute(
+                select(CompanySettings).where(
+                    CompanySettings.company_id == agent.company_id
+                )
+            )
+        ).scalar_one_or_none()
+        policy = (settings.settings_json or {}).get("skill_policy") if settings else None
+        if not policy:
+            return
+
+        verdict = decision(
+            policy,
+            SkillSubject(agent_id=str(agent_id), roles=(agent.role,)),
+            SkillRef(
+                id=str(skill_id),
+                key=skill.name,
+                source_type=skill.category or "",
+            ),
+        )
+        if verdict.allowed:
+            return
+
+        from nexus.governance.audit_service import record_audit
+
+        await record_audit(
+            company_id=agent.company_id,
+            action="skill.access_denied",
+            actor_type="system",
+            resource_type="skill",
+            resource_id=str(skill_id),
+            details={
+                "agent_id": str(agent_id),
+                "reason": verdict.reason,
+                "policy_revision": verdict.revision,
+                "matched_rule_index": verdict.matched_rule_index,
+            },
+            db=self._db,
+        )
+        raise SkillAccessDeniedError(verdict.reason, verdict.remediation)
 
     async def register_skill(
         self,
@@ -69,7 +145,12 @@ class SkillService:
 
         Returns:
             The newly created AgentSkill instance.
+
+        Raises:
+            SkillAccessDeniedError: When the company's skill policy denies the pairing.
         """
+        await self._check_policy(agent_id, skill_id)
+
         agent_skill = AgentSkill(
             agent_id=agent_id,
             skill_id=skill_id,

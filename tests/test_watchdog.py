@@ -11,7 +11,6 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from nexus.models.heartbeat_run import HeartbeatRun
-from nexus.runtime.heartbeat import HeartbeatMonitor
 from nexus.runtime.watchdog import (
     AgentInfo,
     PatrolReport,
@@ -23,19 +22,13 @@ from nexus.runtime.watchdog import (
 
 
 @pytest.fixture
-def heartbeat_monitor():
-    """Create a fresh HeartbeatMonitor for testing."""
-    return HeartbeatMonitor(default_threshold_seconds=60)
-
-
-@pytest.fixture
-def watchdog(heartbeat_monitor):
+def watchdog():
     """Create a Watchdog with default config for testing."""
     config = WatchdogConfig(
         patrol_interval_seconds=1,
         stuck_threshold_seconds=300,
     )
-    return Watchdog(heartbeat_monitor=heartbeat_monitor, config=config)
+    return Watchdog(config=config)
 
 
 @pytest.fixture
@@ -435,10 +428,10 @@ class TestBackgroundPatrol:
     """Tests for start/stop background patrol lifecycle."""
 
     @pytest.mark.asyncio
-    async def test_start_creates_task(self, heartbeat_monitor):
+    async def test_start_creates_task(self):
         """start_background_patrol creates an asyncio task."""
         config = WatchdogConfig(patrol_interval_seconds=1)
-        watchdog = Watchdog(heartbeat_monitor=heartbeat_monitor, config=config)
+        watchdog = Watchdog(config=config)
 
         task = watchdog.start_background_patrol()
 
@@ -448,10 +441,10 @@ class TestBackgroundPatrol:
         await watchdog.stop()
 
     @pytest.mark.asyncio
-    async def test_stop_cancels_task(self, heartbeat_monitor):
+    async def test_stop_cancels_task(self):
         """stop() cancels the background patrol task cleanly."""
         config = WatchdogConfig(patrol_interval_seconds=1)
-        watchdog = Watchdog(heartbeat_monitor=heartbeat_monitor, config=config)
+        watchdog = Watchdog(config=config)
 
         task = watchdog.start_background_patrol()
         assert not task.done()
@@ -462,10 +455,10 @@ class TestBackgroundPatrol:
         assert watchdog._patrol_task is None
 
     @pytest.mark.asyncio
-    async def test_patrol_loop_runs_with_provider(self, heartbeat_monitor):
+    async def test_patrol_loop_runs_with_provider(self):
         """Background patrol runs with an agents_provider function."""
         config = WatchdogConfig(patrol_interval_seconds=0)
-        watchdog = Watchdog(heartbeat_monitor=heartbeat_monitor, config=config)
+        watchdog = Watchdog(config=config)
 
         call_count = 0
         called = asyncio.Event()
@@ -488,10 +481,10 @@ class TestBackgroundPatrol:
         assert call_count >= 1
 
     @pytest.mark.asyncio
-    async def test_stop_is_idempotent(self, heartbeat_monitor):
+    async def test_stop_is_idempotent(self):
         """Calling stop() when no task is running does not raise."""
         config = WatchdogConfig(patrol_interval_seconds=1)
-        watchdog = Watchdog(heartbeat_monitor=heartbeat_monitor, config=config)
+        watchdog = Watchdog(config=config)
 
         # Should not raise even without starting
         await watchdog.stop()
@@ -589,12 +582,9 @@ class TestStalledRunDetection:
         watchdog.patrol([], [run])
         assert len(watchdog.patrol([], [run]).actions_taken) == 1
 
-    def test_stall_check_disabled(self, heartbeat_monitor, sample_agent_id):
+    def test_stall_check_disabled(self, sample_agent_id):
         """stall_check=False skips stall detection entirely."""
-        wd = Watchdog(
-            heartbeat_monitor=heartbeat_monitor,
-            config=WatchdogConfig(stall_check=False),
-        )
+        wd = Watchdog(config=WatchdogConfig(stall_check=False))
         run = self._run(
             sample_agent_id,
             last_output_at=datetime.now(timezone.utc) - timedelta(hours=6),
