@@ -4,8 +4,8 @@ from nexus.governance.approvals import ApprovalEngine
 from nexus.governance.budget_enforcer import BudgetEnforcer, BudgetDecision, WindowKind
 from nexus.governance.budget_incident import BudgetIncident, BudgetIncidentLog
 from nexus.governance.rbac import RBACManager
-from nexus.governance.audit import AuditLogger
-from nexus.governance.kill_switch import KillSwitch, CircuitBreaker
+from nexus.governance.persistent_kill_switch import PersistentKillSwitch
+from nexus.governance.persistent_circuit_breaker import PersistentCircuitBreaker
 from nexus.governance.policies import PolicyEngine
 from nexus.governance.secrets import SecretVault
 from nexus.governance.audit_persistent import PersistentAuditLogger
@@ -56,9 +56,8 @@ __all__ = [
     "BudgetIncidentLog",
     "WindowKind",
     "RBACManager",
-    "AuditLogger",
-    "KillSwitch",
-    "CircuitBreaker",
+    "PersistentKillSwitch",
+    "PersistentCircuitBreaker",
     "PolicyEngine",
     "SecretVault",
     "PersistentAuditLogger",
