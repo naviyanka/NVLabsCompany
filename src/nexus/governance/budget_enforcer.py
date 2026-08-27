@@ -404,6 +404,14 @@ class BudgetEnforcer:
             if dec == BudgetDecision.WARNING and worst_decision == BudgetDecision.ALLOWED:
                 worst_decision = BudgetDecision.WARNING
 
+        # Forget the dedupe key for any metric back under its limit, so a
+        # later crossing reports a fresh incident.
+        for dec, met in decisions:
+            if dec != BudgetDecision.DENIED:
+                self.incident_log.clear_dedupe_key(
+                    BudgetIncident.build_dedupe_key(scope_type, scope_id, met)
+                )
+
         # Handle hard-stop behavior
         if worst_decision == BudgetDecision.DENIED and self._hard_stop_enabled:
             self._handle_hard_stop(
@@ -451,7 +459,8 @@ class BudgetEnforcer:
             agent_id is not None and self._auto_pause_callback is not None
         )
 
-        # Create incident
+        # Create incident. The dedupe key means one hard-stop crossing for a
+        # (scope, metric) yields one incident no matter how often it re-checks.
         incident = BudgetIncident(
             scope_type=scope_type,
             scope_id=scope_id,
@@ -461,8 +470,13 @@ class BudgetEnforcer:
             actual_amount=actual,
             overage_amount=overage,
             was_agent_paused=was_paused,
+            dedupe_key=BudgetIncident.build_dedupe_key(
+                scope_type, scope_id, metric
+            ),
         )
-        self.incident_log.record(incident)
+        if not self.incident_log.record(incident):
+            # Already reported this crossing — don't re-fire the callbacks.
+            return
 
         # Auto-pause callback
         if agent_id is not None and self._auto_pause_callback is not None:

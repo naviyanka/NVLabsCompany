@@ -67,12 +67,19 @@ class DecisionQueue(SQLModel, table=True):
 
 
 class AuditLog(SQLModel, table=True):
-    """Immutable record of every significant action in the system."""
+    """Immutable record of every significant action in the system.
+
+    Append-only: a DB trigger rejects DELETE and any UPDATE other than
+    ``archived_at``. Rows carry a SHA-256 hash chain
+    (``previous_hash`` -> ``entry_hash``) ordered by ``sequence_number``.
+    """
 
     __tablename__ = "audit_log"
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
-    company_id: uuid.UUID = Field(foreign_key="companies.id", index=True)
+    company_id: Optional[uuid.UUID] = Field(
+        default=None, foreign_key="companies.id", index=True
+    )
     actor_type: str = Field(max_length=50)  # agent, user, system
     actor_id: Optional[str] = Field(default=None, max_length=255)
     action: str = Field(max_length=255)
@@ -81,3 +88,33 @@ class AuditLog(SQLModel, table=True):
     details: Optional[dict[str, Any]] = Field(default=None, sa_column=Column(JSON))
     ip_address: Optional[str] = Field(default=None, max_length=45)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+    # Hash-chain columns (Phase 0.1)
+    sequence_number: Optional[int] = Field(default=None, index=True, unique=True)
+    entry_hash: Optional[str] = Field(default=None, max_length=64)
+    previous_hash: Optional[str] = Field(default=None, max_length=64)
+    archived_at: Optional[datetime] = Field(default=None)
+
+
+class AuditLogArchive(SQLModel, table=True):
+    """Retention archive: copies of `audit_log` rows past their retention age.
+
+    The source row is never deleted — it stays in the verified chain and is
+    only marked with ``archived_at``.
+    """
+
+    __tablename__ = "audit_log_archive"
+
+    id: uuid.UUID = Field(primary_key=True)
+    company_id: Optional[uuid.UUID] = Field(default=None, index=True)
+    actor_type: str = Field(max_length=50)
+    actor_id: Optional[str] = Field(default=None, max_length=255)
+    action: str = Field(max_length=255)
+    resource_type: Optional[str] = Field(default=None, max_length=100)
+    resource_id: Optional[str] = Field(default=None, max_length=255)
+    details: Optional[dict[str, Any]] = Field(default=None, sa_column=Column(JSON))
+    ip_address: Optional[str] = Field(default=None, max_length=45)
+    created_at: datetime
+    sequence_number: Optional[int] = Field(default=None, index=True)
+    entry_hash: Optional[str] = Field(default=None, max_length=64)
+    previous_hash: Optional[str] = Field(default=None, max_length=64)
+    archived_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None))

@@ -12,24 +12,45 @@ from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy import select, update
 
+from cryptography.fernet import Fernet
+
 from nexus.api.deps import CurrentCompanyId, DbSession, require_permission
 from nexus.config import settings
-from nexus.governance.secrets.vault import _HAS_FERNET, _FernetEncryptor, _TestOnlyXOREncryptor
+from nexus.governance.secret_backend import FernetSecretBackend, _derive_fernet_key
 from nexus.models.secret import Secret, SecretBinding, SecretVersion
 
-# Use the application secret_key for stable encryption across restarts.
-# In production, use a dedicated SECRET_ENCRYPTION_KEY from a vault/KMS.
-# For Fernet, the key must be a URL-safe base64-encoded 32-byte key.
-_ENCRYPTION_KEY = settings.secret_key.encode("utf-8") if settings.secret_key else b"fallback-dev-key"
+_DEV_DEFAULT_SECRET_KEY = "dev-secret-key-change-in-production"
 
-if _HAS_FERNET:
-    import base64
-    import hashlib
-    # Derive a Fernet-compatible key from the app secret
-    _fernet_key = base64.urlsafe_b64encode(hashlib.sha256(_ENCRYPTION_KEY).digest())
-    _encryptor = _FernetEncryptor(_fernet_key)
-else:
-    _encryptor = _TestOnlyXOREncryptor(_ENCRYPTION_KEY)
+
+def _make_fernet() -> Fernet | None:
+    """Derive the row-encryption key from the app secret, or None if unsafe.
+
+    Fail-closed: an unset or still-default SECRET_KEY yields no encryptor, so
+    write endpoints reject rather than store secrets under a known key.
+    """
+    key = settings.secret_key
+    if not key or key == _DEV_DEFAULT_SECRET_KEY:
+        return None
+    return Fernet(
+        _derive_fernet_key(
+            key, FernetSecretBackend._SALT, FernetSecretBackend._ITERATIONS
+        )
+    )
+
+
+_fernet = _make_fernet()
+
+
+def _encrypt(plaintext: str) -> str:
+    if _fernet is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                "Secret encryption unavailable: SECRET_KEY is unset or still "
+                "the development default."
+            ),
+        )
+    return _fernet.encrypt(plaintext.encode("utf-8")).decode("utf-8")
 
 router = APIRouter(tags=["secrets"])
 
@@ -104,7 +125,7 @@ async def create_secret(
 
     The value is stored encrypted. Responses only include metadata.
     """
-    encrypted_value = _encryptor.encrypt(body.value).decode("utf-8")
+    encrypted_value = _encrypt(body.value)
 
     secret = Secret(
         company_id=company_id,
@@ -269,7 +290,7 @@ async def rotate_secret(
     new_version_number = secret.current_version + 1
 
     # Encrypt the new secret value before storage
-    encrypted_new_value = _encryptor.encrypt(body.new_value).decode("utf-8")
+    encrypted_new_value = _encrypt(body.new_value)
 
     # Revoke old version
     await db.execute(

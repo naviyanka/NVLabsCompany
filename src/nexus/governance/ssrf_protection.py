@@ -116,3 +116,38 @@ class SSRFGuard:
             return hostname in localhost_hosts
 
         return False
+
+
+def guard_url(url_str: str, field: str = "url") -> str:
+    """Reject a URL that violates SSRF policy (scheme or literal private IP).
+
+    Fails closed. DNS is not resolved here — hostname resolution happens at
+    request time, so use SSRFGuard.safe_resolve for that leg.
+
+    Args:
+        url_str: The URL to check.
+        field: Config key name, used in the error message.
+
+    Returns:
+        The URL unchanged, when it is allowed.
+
+    Raises:
+        ValueError: If the URL is blocked by SSRF policy.
+    """
+    guard = SSRFGuard()
+    if not guard.is_safe_url(url_str):
+        raise ValueError(f"{field} blocked by SSRF protection: {url_str}")
+
+    hostname = (urlparse(url_str).hostname or "").strip("[]")
+    # is_safe_url deliberately permits loopback (local dev backends such as
+    # Ollama); do not re-block it here.
+    if hostname in {"localhost", "127.0.0.1", "::1"}:
+        return url_str
+    # A literal IP in the URL skips DNS entirely, so check it now.
+    try:
+        ipaddress.ip_address(hostname)
+    except ValueError:
+        return url_str  # hostname, not a literal IP
+    if not guard.is_safe_ip(hostname):
+        raise ValueError(f"{field} blocked by SSRF protection: {url_str}")
+    return url_str

@@ -16,6 +16,10 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from nexus.governance.budget_enforcer import BudgetEnforcer
+    from nexus.governance.redis_state import StateBackend
+
+# Key under which alert dedupe state is stored in the state backend.
+_STATE_KEY = "cost_alerts:state"
 
 
 class AlertSeverity(StrEnum):
@@ -85,6 +89,17 @@ class CostAlert:
 AlertCallback = Callable[[CostAlert], None]
 
 
+def _encode_scope(scope: tuple[str, uuid.UUID]) -> str:
+    """Render a (scope_type, scope_id) tuple as a JSON-safe string key."""
+    return f"{scope[0]}:{scope[1]}"
+
+
+def _decode_scope(key: str) -> tuple[str, uuid.UUID]:
+    """Parse a scope string key back into a (scope_type, scope_id) tuple."""
+    scope_type, _, scope_id = key.rpartition(":")
+    return (scope_type, uuid.UUID(scope_id))
+
+
 class CostAlertService:
     """Service that monitors budgets and fires alerts on threshold crossings.
 
@@ -100,11 +115,18 @@ class CostAlertService:
         alerts = service.check_budgets()
     """
 
-    def __init__(self, budget_enforcer: BudgetEnforcer) -> None:
+    def __init__(
+        self,
+        budget_enforcer: BudgetEnforcer,
+        state_backend: StateBackend | None = None,
+    ) -> None:
         """Initialize the cost alert service.
 
         Args:
             budget_enforcer: The BudgetEnforcer instance to monitor.
+            state_backend: Optional Redis/file state backend. When provided,
+                fired alerts and per-scope severity survive a restart via
+                `load_state()` / `save_state()`.
         """
         self._enforcer = budget_enforcer
         self._thresholds: dict[tuple[str, uuid.UUID], AlertThreshold] = {}
@@ -113,6 +135,66 @@ class CostAlertService:
         self._last_severity: dict[
             tuple[str, uuid.UUID], AlertSeverity | None
         ] = {}
+        self._state_backend = state_backend
+
+    async def load_state(self) -> None:
+        """Restore fired alerts and severity state from the state backend.
+
+        No-op when no backend is configured or nothing is stored yet.
+        """
+        if self._state_backend is None:
+            return
+        stored = await self._state_backend.get(_STATE_KEY)
+        if not stored:
+            return
+
+        self._last_severity = {
+            _decode_scope(scope): (AlertSeverity(sev) if sev else None)
+            for scope, sev in stored.get("last_severity", {}).items()
+        }
+        self._fired_alerts = [
+            CostAlert(
+                id=uuid.UUID(raw["id"]),
+                agent_id=raw["agent_id"],
+                scope=_decode_scope(raw["scope"]),
+                current_spend=raw["current_spend"],
+                limit=raw["limit"],
+                severity=AlertSeverity(raw["severity"]),
+                timestamp=datetime.fromisoformat(raw["timestamp"]),
+                message=raw["message"],
+            )
+            for raw in stored.get("fired_alerts", [])
+        ]
+
+    async def save_state(self) -> None:
+        """Persist fired alerts and severity state to the state backend.
+
+        No-op when no backend is configured.
+        """
+        if self._state_backend is None:
+            return
+        await self._state_backend.set(
+            _STATE_KEY,
+            {
+                "last_severity": {
+                    _encode_scope(scope): (sev.value if sev else None)
+                    for scope, sev in self._last_severity.items()
+                },
+                "fired_alerts": [
+                    {
+                        "id": str(alert.id),
+                        "agent_id": alert.agent_id,
+                        "scope": _encode_scope(alert.scope),
+                        "current_spend": alert.current_spend,
+                        "limit": alert.limit,
+                        "severity": alert.severity.value,
+                        "timestamp": alert.timestamp.isoformat(),
+                        "message": alert.message,
+                    }
+                    for alert in self._fired_alerts
+                ],
+            },
+        )
 
     def set_threshold(
         self,
