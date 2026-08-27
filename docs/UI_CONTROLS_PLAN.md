@@ -93,7 +93,11 @@ unusable from UI; audit verify is a correctness lie). U4–U6 second. U7–U8 la
 
 ## Status
 
-- [ ] U1 Autonomy policy editor
+- [x] U1 Autonomy policy editor — verified round-trip (delete=3 persisted)
+- [x] U2 Triggers management — verified create/list/fire/history against real API
+      (NOTE: backend `compute_next_fire` computed next-fire ~now for a `0 9 * * *` cron
+      instead of the next 9am — a backend cron-parse issue to fix separately; UI stores the
+      correct config and displays whatever next_fire_at the backend returns.)
 - [ ] U2 Triggers management
 - [ ] U3 Audit chain verify (backend + UI)
 - [ ] U4 Secrets vault panel

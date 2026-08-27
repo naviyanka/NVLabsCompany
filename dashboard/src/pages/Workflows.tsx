@@ -1,22 +1,24 @@
-import { useState, useEffect, useMemo } from 'react';
-import {
-  Plus,
-  Clock,
-  CheckCircle2,
-  DollarSign,
-  Layers,
-  Search,
-  LayoutGrid,
-  GitMerge,
-} from 'lucide-react';
-import { Card } from '@/components/common/Card';
-import { Button } from '@/components/common/Button';
-import { Badge } from '@/components/common/Badge';
 import { apiClient } from '@/api/client';
+import { Badge } from '@/components/common/Badge';
+import { Button } from '@/components/common/Button';
+import { Card } from '@/components/common/Card';
+import { LaunchWorkflowModal } from '@/components/workflows/LaunchWorkflowModal';
+import { TriggersPanel } from '@/components/workflows/TriggersPanel';
+import { WorkflowDetailDrawer } from '@/components/workflows/WorkflowDetailDrawer';
 import { getActiveCompanyId } from '@/config';
 import type { WorkflowDAGItem } from '@/types/workflow';
-import { LaunchWorkflowModal } from '@/components/workflows/LaunchWorkflowModal';
-import { WorkflowDetailDrawer } from '@/components/workflows/WorkflowDetailDrawer';
+import {
+  CheckCircle2,
+  Clock,
+  DollarSign,
+  GitMerge,
+  Layers,
+  LayoutGrid,
+  Plus,
+  Search,
+  Zap
+} from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
 
 const INITIAL_WORKFLOWS: WorkflowDAGItem[] = [];
 
@@ -25,7 +27,7 @@ export function Workflows() {
   const [agents, setAgents] = useState<{ id: string; name: string; role: string }[]>([]);
   const [selectedWorkflow, setSelectedWorkflow] = useState<WorkflowDAGItem | null>(null);
   const [showLaunchModal, setShowLaunchModal] = useState(false);
-  const [viewMode, setViewMode] = useState<'grid' | 'flow' | 'analytics'>('grid');
+  const [viewMode, setViewMode] = useState<'grid' | 'flow' | 'analytics' | 'triggers'>('grid');
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
 
@@ -172,11 +174,10 @@ export function Workflows() {
             <button
               key={st}
               onClick={() => setStatusFilter(st)}
-              className={`px-2.5 py-1 rounded text-xs font-mono transition-colors cursor-pointer capitalize ${
-                statusFilter === st
-                  ? 'bg-[#FFB020] text-black font-bold'
-                  : 'bg-[#141416] text-[#6B6B6E] hover:text-white border border-white/[0.08]'
-              }`}
+              className={`px-2.5 py-1 rounded text-xs font-mono transition-colors cursor-pointer capitalize ${statusFilter === st
+                ? 'bg-[#FFB020] text-black font-bold'
+                : 'bg-[#141416] text-[#6B6B6E] hover:text-white border border-white/[0.08]'
+                }`}
             >
               {st}
             </button>
@@ -187,19 +188,24 @@ export function Workflows() {
         <div className="flex items-center bg-[#141416] border border-white/[0.08] rounded p-0.5">
           <button
             onClick={() => setViewMode('grid')}
-            className={`px-2.5 py-1 rounded text-xs font-mono flex items-center gap-1 transition-colors cursor-pointer ${
-              viewMode === 'grid' ? 'bg-[#FFB020] text-black font-bold' : 'text-gray-400 hover:text-white'
-            }`}
+            className={`px-2.5 py-1 rounded text-xs font-mono flex items-center gap-1 transition-colors cursor-pointer ${viewMode === 'grid' ? 'bg-[#FFB020] text-black font-bold' : 'text-gray-400 hover:text-white'
+              }`}
           >
             <LayoutGrid size={13} /> Grid
           </button>
           <button
             onClick={() => setViewMode('flow')}
-            className={`px-2.5 py-1 rounded text-xs font-mono flex items-center gap-1 transition-colors cursor-pointer ${
-              viewMode === 'flow' ? 'bg-[#FFB020] text-black font-bold' : 'text-gray-400 hover:text-white'
-            }`}
+            className={`px-2.5 py-1 rounded text-xs font-mono flex items-center gap-1 transition-colors cursor-pointer ${viewMode === 'flow' ? 'bg-[#FFB020] text-black font-bold' : 'text-gray-400 hover:text-white'
+              }`}
           >
             <GitMerge size={13} /> Flowchart
+          </button>
+          <button
+            onClick={() => setViewMode('triggers')}
+            className={`px-2.5 py-1 rounded text-xs font-mono flex items-center gap-1 transition-colors cursor-pointer ${viewMode === 'triggers' ? 'bg-[#FFB020] text-black font-bold' : 'text-gray-400 hover:text-white'
+              }`}
+          >
+            <Zap size={13} /> Triggers
           </button>
         </div>
       </div>
@@ -248,9 +254,8 @@ export function Workflows() {
                   </div>
                   <div className="w-full h-2 bg-[#101012] border border-white/[0.08] rounded-full overflow-hidden">
                     <div
-                      className={`h-full transition-all duration-300 ${
-                        wf.status === 'completed' ? 'bg-emerald-400' : 'bg-[#FFB020]'
-                      }`}
+                      className={`h-full transition-all duration-300 ${wf.status === 'completed' ? 'bg-emerald-400' : 'bg-[#FFB020]'
+                        }`}
                       style={{ width: `${progressPct}%` }}
                     />
                   </div>
@@ -262,13 +267,12 @@ export function Workflows() {
                     {(wf.steps || []).map((s, idx) => (
                       <span
                         key={idx}
-                        className={`px-2 py-0.5 rounded text-[10px] border ${
-                          s.status === 'completed'
-                            ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
-                            : s.status === 'running'
+                        className={`px-2 py-0.5 rounded text-[10px] border ${s.status === 'completed'
+                          ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                          : s.status === 'running'
                             ? 'bg-[#FFB020]/15 border-[#FFB020]/30 text-[#FFB020]'
                             : 'bg-white/[0.04] border-white/[0.06] text-gray-500'
-                        }`}
+                          }`}
                       >
                         {s.step_name}
                       </span>
@@ -302,11 +306,10 @@ export function Workflows() {
               <button
                 key={w.workflow_id}
                 onClick={() => setSelectedWorkflow(w)}
-                className={`px-3 py-1.5 rounded-[6px] text-xs font-mono border transition-all cursor-pointer ${
-                  selectedWorkflow?.workflow_id === w.workflow_id
-                    ? 'bg-[#FFB020] text-black font-bold border-[#FFB020]'
-                    : 'bg-[#141416] text-gray-300 hover:text-white border-white/[0.08]'
-                }`}
+                className={`px-3 py-1.5 rounded-[6px] text-xs font-mono border transition-all cursor-pointer ${selectedWorkflow?.workflow_id === w.workflow_id
+                  ? 'bg-[#FFB020] text-black font-bold border-[#FFB020]'
+                  : 'bg-[#141416] text-gray-300 hover:text-white border-white/[0.08]'
+                  }`}
               >
                 {w.title || w.objective} ({w.status})
               </button>
@@ -326,13 +329,12 @@ export function Workflows() {
                   return (
                     <div key={step.step_id} className="flex items-center gap-3 w-full md:w-auto">
                       <div
-                        className={`p-3 rounded-[8px] border min-w-[200px] space-y-1 ${
-                          isDone
-                            ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
-                            : isRunning
+                        className={`p-3 rounded-[8px] border min-w-[200px] space-y-1 ${isDone
+                          ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+                          : isRunning
                             ? 'bg-[#FFB020]/15 border-[#FFB020]/40 text-[#FFB020] animate-pulse'
                             : 'bg-[#0A0A0C] border-white/[0.08] text-gray-400'
-                        }`}
+                          }`}
                       >
                         <div className="font-bold text-white text-xs">{step.step_name}</div>
                         <div className="text-[10px] text-gray-400">{step.action}</div>
@@ -353,6 +355,9 @@ export function Workflows() {
           )}
         </div>
       )}
+
+      {/* VIEW 3: TRIGGERS */}
+      {viewMode === 'triggers' && <TriggersPanel agents={agents} />}
 
       {/* Drawer */}
       <WorkflowDetailDrawer
