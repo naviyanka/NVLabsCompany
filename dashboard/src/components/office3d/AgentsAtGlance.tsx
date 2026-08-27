@@ -4,10 +4,11 @@ import { mockAgents3D, managerAgent } from '@/config/office3dLayout';
 interface AgentsAtGlanceProps {
   onAgentClick: (agent: MockAgent3D) => void;
   selectedAgentId: string | null;
+  agents?: MockAgent3D[];
 }
 
-export function AgentsAtGlance({ onAgentClick, selectedAgentId }: AgentsAtGlanceProps) {
-  const allAgents = [...mockAgents3D, managerAgent];
+export function AgentsAtGlance({ onAgentClick, selectedAgentId, agents }: AgentsAtGlanceProps) {
+  const allAgents = agents && agents.length > 0 ? agents : [...mockAgents3D, managerAgent];
 
   return (
     <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-10 max-w-4xl w-[90%] bg-black/80 backdrop-blur-md border border-white/[0.08] rounded-xl p-2 flex items-center gap-2 overflow-x-auto">

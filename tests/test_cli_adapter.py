@@ -217,16 +217,16 @@ class TestCLIAdapterBuildArgs:
         return CLIAdapter()
 
     def test_build_args_claude(self, adapter):
-        """Claude backend uses --print flag, prompt via stdin."""
+        """Claude backend uses -p flag for non-interactive prompt execution."""
         backend = adapter._registry.get_backend("claude")
         args = adapter._build_args(backend, "test prompt")
-        assert args == ["claude", "--print"]
+        assert args == ["claude", "-p", "test prompt"]
 
     def test_build_args_claude_with_extra(self, adapter):
-        """Claude backend appends extra args after --print."""
+        """Claude backend appends extra args after -p prompt."""
         backend = adapter._registry.get_backend("claude")
         args = adapter._build_args(backend, "test prompt", ["--model", "sonnet"])
-        assert args == ["claude", "--print", "--model", "sonnet"]
+        assert args == ["claude", "-p", "test prompt", "--model", "sonnet"]
 
     def test_build_args_codex(self, adapter):
         """Codex backend uses --quiet and passes prompt as positional arg."""
@@ -362,7 +362,7 @@ class TestCLIAdapterExecution:
         call_args = mock_exec.call_args
         cmd_args = call_args[0]
         assert cmd_args[0] == "claude"
-        assert "--print" in cmd_args
+        assert "-p" in cmd_args
 
     @patch("asyncio.create_subprocess_exec")
     def test_execute_task_failure(self, mock_exec, adapter, agent_id, task_id):
@@ -645,7 +645,7 @@ class TestCLIBackendInfoBuildArgs:
         registry = CLIRegistry(auto_detect=False)
         backend = registry.get_backend("claude")
         args = backend.build_args("test prompt")
-        assert args == ["claude", "--print"]
+        assert args == ["claude", "-p", "test prompt"]
 
     def test_aider_backend_build_args_via_registry(self):
         """Aider backend build_args produces correct output via registry."""

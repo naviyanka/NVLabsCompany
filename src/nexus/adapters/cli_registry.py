@@ -58,8 +58,10 @@ class _ClaudeBackendInfo(CLIBackendInfo):
     """Claude Code backend with custom argument construction."""
 
     def build_args(self, prompt: str, extra_args: list[str] | None = None) -> list[str]:
-        """Claude Code: uses --print for non-interactive mode, prompt via stdin."""
-        cmd = [self.command, "--print"]
+        """Claude Code: uses -p for non-interactive prompt execution."""
+        cmd = [self.command]
+        if prompt:
+            cmd.extend(["-p", prompt])
         if extra_args:
             cmd.extend(extra_args)
         return cmd

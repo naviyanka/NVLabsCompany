@@ -16,6 +16,7 @@ import {
 import { ArchetypeGrid } from '@/components/agents/ArchetypeGrid';
 import { ManifestImport } from '@/components/agents/ManifestImport';
 import { TeamHireFlow } from '@/components/agents/TeamHireFlow';
+import { getRolePreset } from '@/components/agents/rolePresets';
 import { Button } from '@/components/common/Button';
 import { Modal } from '@/components/common/Modal';
 import { ArrowLeft, Circle, FileJson, LayoutTemplate, UserPlus, Users } from 'lucide-react';
@@ -283,12 +284,29 @@ export function HireAgentModal({ isOpen, onClose, onSuccess }: HireAgentModalPro
     }
   };
 
+  const handleRoleSelect = (selectedRole: string) => {
+    setRole(selectedRole);
+    if (!selectedRole) return;
+    const preset = getRolePreset(selectedRole);
+    setTitle(preset.title);
+    setCapabilities(preset.capabilities);
+    setResponsibilities(preset.responsibilities);
+    setObjectives(preset.objectives);
+    setPersonalityTraits(preset.personalityTraits);
+    setCommunicationStyle(preset.communicationStyle);
+    setAgentValues(preset.agentValues);
+    setAgentConstraints(preset.agentConstraints);
+    setTone(preset.tone);
+    setSoulDescription(preset.soulDescription);
+  };
+
   const handleTemplateSelect = (archetype: AgentArchetype) => {
-    // Pre-fill manual form with archetype data
-    setRole(archetype.role);
-    setCapabilities(archetype.capabilities.join(', '));
-    setSoulDescription(archetype.system_prompt);
-    setTitle(archetype.name);
+    // Auto-fill manual form with archetype and role preset defaults
+    handleRoleSelect(archetype.role);
+    if (archetype.name) setTitle(archetype.name);
+    if (archetype.capabilities?.length) setCapabilities(archetype.capabilities.join(', '));
+    if (archetype.system_prompt) setSoulDescription(archetype.system_prompt);
+    if (archetype.constraints?.length) setAgentConstraints(archetype.constraints.join('\n'));
 
     // Auto-select Hermes provider for Hermes archetypes
     if (archetype.role === 'ceo' && archetype.name.toLowerCase().includes('hermes')) {
@@ -524,7 +542,7 @@ export function HireAgentModal({ isOpen, onClose, onSuccess }: HireAgentModalPro
               </label>
               <select
                 value={role}
-                onChange={(e) => setRole(e.target.value)}
+                onChange={(e) => handleRoleSelect(e.target.value)}
                 className="w-full px-3 py-2 bg-[#141416] border border-white/[0.12] rounded-[6px] text-xs text-[#F2F1EE] focus:outline-none focus:border-[#FFB020]"
               >
                 <option value="">Select role...</option>

@@ -648,8 +648,9 @@ class TestCommandArgOrdering:
         _run(adapter.execute_task(session, task_id, payload))
 
         call_args = list(mock_exec.call_args[0])
-        # Command should be: claude --output-format stream-json --resume sess-prev --worktree --verbose
+        # Command should contain: claude -p prompt --output-format stream-json --verbose --resume sess-prev --worktree
         assert call_args[0] == "claude"
+        assert "-p" in call_args
         assert "--output-format" in call_args
         assert "stream-json" in call_args
         assert "--resume" in call_args
@@ -657,9 +658,8 @@ class TestCommandArgOrdering:
         assert "--worktree" in call_args
         assert "--verbose" in call_args
 
-        # Verify ordering: format before resume before worktree before extra
+        # Verify ordering: format before resume before worktree
         fmt_idx = call_args.index("--output-format")
         resume_idx = call_args.index("--resume")
         worktree_idx = call_args.index("--worktree")
-        verbose_idx = call_args.index("--verbose")
-        assert fmt_idx < resume_idx < worktree_idx < verbose_idx
+        assert fmt_idx < resume_idx < worktree_idx

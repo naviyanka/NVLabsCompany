@@ -1,6 +1,7 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import type { Agent2D, InteractivePOI, LightingMode, SimSpeed } from './types';
-import { INITIAL_AGENTS_2D } from './agentCharacters';
+import { INITIAL_AGENTS_2D, convertRealAgentsTo2D } from './agentCharacters';
+import type { Agent } from '@/types/agent';
 import { DESKS_2D } from './office2DMap';
 import { OpenOfficeToolbar } from './OpenOfficeToolbar';
 import { OpenOfficeCanvas } from './OpenOfficeCanvas';
@@ -19,10 +20,21 @@ import {
 interface OpenOffice2DViewProps {
   viewMode: '2d' | '3d';
   onViewModeChange: (mode: '2d' | '3d') => void;
+  realAgents?: Agent[];
 }
 
-export function OpenOffice2DView({ viewMode, onViewModeChange }: OpenOffice2DViewProps) {
-  const [agents, setAgents] = useState<Agent2D[]>(INITIAL_AGENTS_2D);
+export function OpenOffice2DView({ viewMode, onViewModeChange, realAgents }: OpenOffice2DViewProps) {
+  const [agents, setAgents] = useState<Agent2D[]>(() => {
+    return realAgents && realAgents.length > 0
+      ? convertRealAgentsTo2D(realAgents)
+      : INITIAL_AGENTS_2D;
+  });
+
+  useEffect(() => {
+    if (realAgents && realAgents.length > 0) {
+      setAgents(convertRealAgentsTo2D(realAgents));
+    }
+  }, [realAgents]);
   const [selectedAgent, setSelectedAgent] = useState<Agent2D | null>(null);
   const [selectedPoi, setSelectedPoi] = useState<InteractivePOI | null>(null);
 

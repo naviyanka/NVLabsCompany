@@ -1,8 +1,13 @@
 import { Users, Activity, Coffee, AlertCircle, WifiOff } from 'lucide-react';
+import type { MockAgent3D } from '@/config/office3dLayout';
 import { mockAgents3D, managerAgent } from '@/config/office3dLayout';
 
-export function StatsBar() {
-  const allAgents = [...mockAgents3D, managerAgent];
+interface StatsBarProps {
+  agents?: MockAgent3D[];
+}
+
+export function StatsBar({ agents }: StatsBarProps) {
+  const allAgents = agents && agents.length > 0 ? agents : [...mockAgents3D, managerAgent];
   const total = allAgents.length;
   const active = allAgents.filter((a) => a.status === 'working').length;
   const idle = allAgents.filter((a) => a.status === 'idle').length;

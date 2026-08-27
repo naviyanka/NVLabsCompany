@@ -6,14 +6,16 @@ interface OfficeSceneProps {
   onAgentClick: (agent: MockAgent3D) => void;
   onBackgroundClick: () => void;
   paused?: boolean;
+  agents?: MockAgent3D[];
 }
 
 export function OfficeScene({
   selectedAgent,
   onAgentClick,
   onBackgroundClick,
+  agents,
 }: OfficeSceneProps) {
-  const allAgents = [...mockAgents3D, managerAgent];
+  const allAgents = agents && agents.length > 0 ? agents : [...mockAgents3D, managerAgent];
 
   return (
     <div

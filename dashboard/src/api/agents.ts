@@ -204,3 +204,22 @@ export async function pauseAgent(agentId: string): Promise<Agent> {
 export async function deleteAgent(agentId: string): Promise<void> {
   return apiClient.delete<void>(`/api/v1/agents/${agentId}`);
 }
+
+export interface AgentUpdateRequest {
+  name?: string;
+  title?: string;
+  role?: string;
+  status?: string;
+  adapter_type?: string;
+  model?: string;
+  capabilities?: string[];
+  responsibilities?: string;
+  objectives?: string;
+  soul_description?: string;
+  budget_monthly_cents?: number;
+}
+
+/** Update an existing agent's configuration and soul. */
+export async function updateAgent(agentId: string, body: AgentUpdateRequest): Promise<Agent> {
+  return apiClient.patch<Agent>(companyPath(`/agents/${agentId}`), body);
+}

@@ -6,13 +6,15 @@ interface OfficeMobileFallbackProps {
   onAgentClick: (agent: MockAgent3D) => void;
   onCloseSidebar: () => void;
   onViewProfile: (agent: MockAgent3D) => void;
+  agents?: MockAgent3D[];
 }
 
 export function OfficeMobileFallback({
   onAgentClick,
   onViewProfile,
+  agents,
 }: OfficeMobileFallbackProps) {
-  const allAgents = [...mockAgents3D, managerAgent];
+  const allAgents = agents && agents.length > 0 ? agents : [...mockAgents3D, managerAgent];
 
   return (
     <div className="p-4 space-y-3 bg-[#08080A] min-h-screen text-white">

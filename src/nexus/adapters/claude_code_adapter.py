@@ -183,11 +183,13 @@ class ClaudeCodeAdapter(BaseAdapter):
         workspace = self._workspaces.get(session.session_id, ".")
         cli_command = session.metadata.get("cli_command", "claude")
 
-        # Build command
+        # Build command for non-interactive Claude Code CLI execution
         cmd = [cli_command]
+        if prompt:
+            cmd.extend(["-p", prompt])
 
-        # Always use stream-json output format for structured parsing
-        cmd.extend(["--output-format", "stream-json"])
+        # Always use stream-json output format with --verbose for structured parsing
+        cmd.extend(["--output-format", "stream-json", "--verbose"])
 
         # Add resume support
         resume_session_id = payload.get("resume_session_id")
@@ -205,22 +207,19 @@ class ClaudeCodeAdapter(BaseAdapter):
         pre_files = self._snapshot_workspace(workspace)
 
         try:
-            # Spawn subprocess
+            # Spawn subprocess with stdin redirected to DEVNULL to prevent stdin delays
             process = await asyncio.create_subprocess_exec(
                 *cmd,
-                stdin=asyncio.subprocess.PIPE,
+                stdin=asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=workspace,
             )
             self._processes[session.session_id] = process
 
-            # Send prompt via stdin
-            stdin_data = prompt.encode("utf-8")
-
             try:
                 stdout_bytes, stderr_bytes = await asyncio.wait_for(
-                    process.communicate(input=stdin_data),
+                    process.communicate(),
                     timeout=timeout,
                 )
             except asyncio.TimeoutError:

@@ -42,7 +42,7 @@ def test_legacy_mappings_preserved():
     cases = {
         "anthropic": "anthropic",
         "openai": "openai",
-        "claude": "anthropic",  # historical: claude meant the Anthropic API
+        "claude": "claude_code",  # claude maps to the pre-configured Claude Code CLI
         "claude_code": "claude_code",
         "cli": "cli",
         "ollama": "ollama",

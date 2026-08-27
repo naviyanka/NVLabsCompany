@@ -13,9 +13,12 @@ class RetroAudioEngine {
       const saved = localStorage.getItem('nexus_office2d_muted');
       if (saved !== null) {
         this.muted = saved === 'true';
+      } else {
+        // Default to muted so users aren't startled by synthesized 8-bit sound
+        this.muted = true;
       }
     } catch {
-      this.muted = false;
+      this.muted = true;
     }
   }
 

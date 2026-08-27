@@ -4,6 +4,8 @@
  * for the Three.js isometric office view.
  */
 
+import type { Agent } from '@/types/agent';
+
 export interface Zone3D {
   id: string;
   name: string;
@@ -375,3 +377,38 @@ export const managerAgent: MockAgent3D = {
   currentTask: 'Delegating sprint tasks to team',
   sparklineData: [50, 55, 58, 60, 62, 60, 61, 62],
 };
+
+/** Convert real backend Agent entities into 3D layout agents */
+export function convertRealAgentsTo3D(realAgents: Agent[]): MockAgent3D[] {
+  const ALL_DESKS_3D = zones3D.flatMap((z) => z.desks.map((d) => ({ ...d, zoneId: z.id })));
+
+  return realAgents.map((agent, index) => {
+    const desk = ALL_DESKS_3D[index % ALL_DESKS_3D.length]!;
+    const statusLower = (agent.status || 'idle').toLowerCase();
+    const status3D: 'working' | 'idle' | 'review' | 'offline' =
+      statusLower === 'active' || statusLower === 'running' || statusLower === 'working'
+        ? 'working'
+        : statusLower === 'idle'
+        ? 'idle'
+        : statusLower === 'review' || statusLower === 'evaluating'
+        ? 'review'
+        : 'offline';
+
+    return {
+      id: agent.id,
+      name: agent.name,
+      role: agent.role || agent.title || 'Autonomous Agent',
+      model: agent.model || 'Claude Code',
+      status: status3D,
+      zoneId: desk.zoneId,
+      deskId: desk.id,
+      capabilities: agent.capabilities && agent.capabilities.length > 0 ? agent.capabilities : ['Autonomous Execution'],
+      cpu: Math.floor(35 + ((index * 13) % 45)),
+      memory: Math.floor(40 + ((index * 17) % 45)),
+      tokensUsed: (agent.spent_monthly_cents || 0) * 100,
+      taskProgress: 100,
+      currentTask: agent.objectives || agent.responsibilities || 'Active in workspace',
+      sparklineData: [45, 52, 60, 68, 72, 78, 85, 90],
+    };
+  });
+}

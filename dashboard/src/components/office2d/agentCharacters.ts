@@ -1,4 +1,6 @@
+import type { Agent } from '@/types/agent';
 import type { Agent2D } from './types';
+import { DESKS_2D } from './office2DMap';
 
 export const INITIAL_AGENTS_2D: Agent2D[] = [
   // 1. Architect (Executive Manager)
@@ -670,3 +672,74 @@ export const INITIAL_AGENTS_2D: Agent2D[] = [
     },
   },
 ];
+
+/** Convert real backend Agent entities into 2D pixel layout agents */
+export function convertRealAgentsTo2D(realAgents: Agent[]): Agent2D[] {
+  const hairColors = ['#1E293B', '#D1D5DB', '#F59E0B', '#EF4444', '#10B981', '#6366F1', '#EC4899', '#8B5CF6'];
+  const outfitColors = ['#2563EB', '#059669', '#D97706', '#DC2626', '#7C3AED', '#DB2777', '#4F46E5', '#0284C7'];
+  const hairStyles: Array<'short' | 'long' | 'messy' | 'spiky' | 'bob'> = ['short', 'messy', 'spiky', 'long', 'bob'];
+
+  return realAgents.map((agent, index) => {
+    const desk = DESKS_2D[index % DESKS_2D.length]!;
+    const hairColor = hairColors[index % hairColors.length]!;
+    const outfitColor = outfitColors[index % outfitColors.length]!;
+    const hairStyle = hairStyles[index % hairStyles.length]!;
+
+    const statusLower = (agent.status || 'idle').toLowerCase();
+    const status2D: 'working' | 'idle' | 'review' | 'offline' =
+      statusLower === 'active' || statusLower === 'running' || statusLower === 'working'
+        ? 'working'
+        : statusLower === 'idle'
+        ? 'idle'
+        : statusLower === 'review' || statusLower === 'evaluating'
+        ? 'review'
+        : 'idle';
+
+    return {
+      id: agent.id,
+      name: agent.name,
+      role: agent.role || agent.title || 'Autonomous Agent',
+      model: agent.model || 'Claude Code',
+      zoneId: desk.zoneId || 'development',
+      deskId: desk.id,
+      status: status2D,
+      state2D: 'working_at_desk',
+      x: desk.seatX,
+      y: desk.seatY,
+      targetX: desk.seatX,
+      targetY: desk.seatY,
+      path: [],
+      facing: 'down',
+      walkFrame: 0,
+      isMoving: false,
+      speed: 1.6,
+      nextRoamDecisionTime: Date.now() + 8000 + index * 1200,
+      currentActionDuration: 12000,
+      actionStartTime: Date.now(),
+      currentTask: agent.objectives || agent.responsibilities || 'Monitoring workspace',
+      taskProgress: 100,
+      capabilities: agent.capabilities && agent.capabilities.length > 0 ? agent.capabilities : ['Autonomous Orchestration'],
+      cpu: Math.floor(35 + ((index * 13) % 45)),
+      memory: Math.floor(40 + ((index * 17) % 45)),
+      tokensUsed: (agent.spent_monthly_cents || 0) * 100,
+      energy: 95,
+      sparklineData: [40, 48, 55, 62, 70, 75, 82, 88],
+      sprite: {
+        hairColor,
+        hairStyle,
+        skinTone: '#FCD34D',
+        outfitColor,
+        pantsColor: '#0F172A',
+        accessory: index % 2 === 0 ? 'glasses' : 'headphones',
+        accessoryColor: '#F59E0B',
+        auraColor: outfitColor,
+      },
+      bubble: {
+        text: `${agent.name} (${agent.role || 'Agent'}) online`,
+        emoji: '⚡',
+        expiresAt: Date.now() + 6000,
+        type: 'thought',
+      },
+    };
+  });
+}

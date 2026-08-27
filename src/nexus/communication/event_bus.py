@@ -32,13 +32,17 @@ class EventBus:
         db: Optional async database session for event persistence.
     """
 
-    def __init__(self, db: Optional[Any] = None) -> None:
+    def __init__(
+        self, db: Optional[Any] = None, company_id: Optional[Any] = None
+    ) -> None:
         """Initialize the EventBus.
 
         Args:
             db: Optional AsyncSession for database persistence.
+            company_id: Optional UUID for multi-tenant isolation.
         """
         self.db = db
+        self.company_id = company_id
         # Handlers registry: event_type -> list of (handler, is_async) tuples
         self._handlers: dict[str, list[tuple[Callable[..., Any], bool]]] = {}
         # Persisted events for replay

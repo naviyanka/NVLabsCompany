@@ -129,12 +129,16 @@ PROVIDERS: dict[str, dict[str, Any]] = {
     },
 }
 
-# Aliases for backward compatibility. "claude" historically resolved to the
-# Anthropic API adapter in chat routing (NOT the Claude Code CLI), so it stays
-# an alias here to avoid silently switching existing agents to subprocesses.
+# Provider aliases mapping user-facing provider strings to internal registry keys.
+# "claude" maps to the Claude Code CLI adapter ("claude_code") as configured on the platform.
+# Direct Anthropic API calls are accessible via "anthropic".
 PROVIDER_ALIASES: dict[str, str] = {
     "langchain": "anthropic",
-    "claude": "anthropic",
+    "claude": "claude_code",
+    "claude-code": "claude_code",
+    "claude_code": "claude_code",
+    "claude-cli": "claude_code",
+    "claude_cli": "claude_code",
     "antigravity": "agy",
 }
 
