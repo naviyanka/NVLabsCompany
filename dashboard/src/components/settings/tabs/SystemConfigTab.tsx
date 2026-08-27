@@ -1,17 +1,18 @@
-import { useState, useEffect } from 'react';
+import { apiClient } from '@/api/client';
+import { Button } from '@/components/common/Button';
+import { RuntimeControlPanel } from '@/components/settings/RuntimeControlPanel';
+import { getActiveCompanyId } from '@/config';
 import {
-  Settings2,
-  Save,
-  ShieldAlert,
-  Sliders,
   Cpu,
-  Zap,
   DollarSign,
   RotateCcw,
+  Save,
+  Settings2,
+  ShieldAlert,
+  Sliders,
+  Zap,
 } from 'lucide-react';
-import { Button } from '@/components/common/Button';
-import { apiClient } from '@/api/client';
-import { getActiveCompanyId } from '@/config';
+import { useEffect, useState } from 'react';
 import type { SystemConfigData } from '../types';
 
 interface SystemConfigTabProps {
@@ -58,7 +59,7 @@ export function SystemConfigTab({ onSaveToast }: SystemConfigTabProps) {
         if (res && res.defaultModel) {
           setConfig((prev) => ({ ...prev, ...res }));
         }
-      } catch {}
+      } catch { }
     }
     loadConfig();
   }, []);
@@ -135,13 +136,15 @@ export function SystemConfigTab({ onSaveToast }: SystemConfigTabProps) {
         </div>
       </div>
 
+      {/* Backend runtime control (supervisor) */}
+      <RuntimeControlPanel onSaveToast={onSaveToast} />
+
       {/* Emergency Kill Switch Banner */}
       <div
-        className={`p-4 rounded-xl border flex items-center justify-between gap-4 transition-colors ${
-          config.killSwitchEngaged
-            ? 'bg-rose-500/15 border-rose-500/40 text-rose-300'
-            : 'bg-[#101012] border-white/[0.08] text-gray-300'
-        }`}
+        className={`p-4 rounded-xl border flex items-center justify-between gap-4 transition-colors ${config.killSwitchEngaged
+          ? 'bg-rose-500/15 border-rose-500/40 text-rose-300'
+          : 'bg-[#101012] border-white/[0.08] text-gray-300'
+          }`}
       >
         <div className="flex items-center gap-3">
           <ShieldAlert size={24} className={config.killSwitchEngaged ? 'text-rose-400' : 'text-[#6B6B6E]'} />
@@ -158,11 +161,10 @@ export function SystemConfigTab({ onSaveToast }: SystemConfigTabProps) {
         <button
           type="button"
           onClick={() => setConfig((prev) => ({ ...prev, killSwitchEngaged: !prev.killSwitchEngaged }))}
-          className={`px-3 py-1.5 rounded font-mono font-bold text-xs cursor-pointer transition-colors ${
-            config.killSwitchEngaged
-              ? 'bg-rose-500 text-white hover:bg-rose-600'
-              : 'bg-white/[0.08] text-rose-400 border border-rose-500/30 hover:bg-rose-500/20'
-          }`}
+          className={`px-3 py-1.5 rounded font-mono font-bold text-xs cursor-pointer transition-colors ${config.killSwitchEngaged
+            ? 'bg-rose-500 text-white hover:bg-rose-600'
+            : 'bg-white/[0.08] text-rose-400 border border-rose-500/30 hover:bg-rose-500/20'
+            }`}
         >
           {config.killSwitchEngaged ? 'DISENGAGE & RESUME' : 'ENGAGE KILL SWITCH'}
         </button>

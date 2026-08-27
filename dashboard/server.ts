@@ -1,8 +1,8 @@
-import express from 'express';
-import type { Request, Response, NextFunction } from 'express';
-import path from 'path';
-import fs from 'fs';
 import crypto from 'crypto';
+import type { NextFunction, Request, Response } from 'express';
+import express from 'express';
+import fs from 'fs';
+import path from 'path';
 import { createServer as createViteServer } from 'vite';
 
 const app = express();
@@ -20,6 +20,7 @@ const PORT = Number(process.env.PORT) || 3000;
 // request stream, and a proxied body has to reach the backend byte for byte.
 
 const NEXUS_API_URL = process.env.NEXUS_API_URL || 'http://localhost:8000';
+const SUPERVISOR_URL = process.env.SUPERVISOR_URL || 'http://127.0.0.1:8001';
 const PROXY_ALL_API = process.env.PROXY_API === 'true';
 
 function shouldProxy(url: string): boolean {
@@ -71,6 +72,35 @@ function readSetCookie(headers: Headers): string[] {
   const single = headers.get('set-cookie');
   return single ? [single] : [];
 }
+
+// Supervisor proxy — the backend lifecycle daemon lives on its own port (8001),
+// separate from the API. `/api/supervisor/<action>` -> `SUPERVISOR_URL/<action>`.
+// It is always forwarded (even without PROXY_API) because there is no mock for
+// process control, and it must work precisely when the backend is down.
+app.use(async (req: Request, res: Response, next: NextFunction) => {
+  if (!req.url.startsWith('/api/supervisor/')) {
+    next();
+    return;
+  }
+  const target = req.url.replace('/api/supervisor', '');
+  const hasBody = req.method !== 'GET' && req.method !== 'HEAD';
+  try {
+    const raw = hasBody ? await readRawBody(req) : undefined;
+    const upstream = await fetch(new URL(target, SUPERVISOR_URL), {
+      method: req.method,
+      headers: { 'content-type': 'application/json' },
+      body: raw && raw.length > 0 ? new Uint8Array(raw) : undefined,
+    });
+    const contentType = upstream.headers.get('content-type');
+    if (contentType) res.setHeader('content-type', contentType);
+    res.status(upstream.status);
+    res.end(Buffer.from(await upstream.arrayBuffer()));
+  } catch {
+    res.status(502).json({
+      detail: `Cannot reach the supervisor at ${SUPERVISOR_URL}. Start it with "python -m nexus.supervisor" from the src/ directory.`,
+    });
+  }
+});
 
 app.use(async (req: Request, res: Response, next: NextFunction) => {
   if (!shouldProxy(req.url)) {
@@ -452,8 +482,8 @@ function findAgentById(idOrSlug: string): any {
 
 function handleAutonomousCEOActions(agent: any, prompt: string, rawResponse: string = ''): string {
   const isCeo = agent?.role === 'nvlabs-master-orchestrator' ||
-                agent?.role === 'ceo' ||
-                (agent?.name && agent.name.toLowerCase() === 'navi');
+    agent?.role === 'ceo' ||
+    (agent?.name && agent.name.toLowerCase() === 'navi');
 
   const lowerPrompt = prompt.toLowerCase().trim();
 
@@ -471,7 +501,7 @@ function handleAutonomousCEOActions(agent: any, prompt: string, rawResponse: str
     const totalAgents = agents.length;
     const activeAgents = agents.filter((a: any) => a.status === 'active' || !a.status).length;
     const rosterLines = agents.map((a: any, idx: number) =>
-      `${idx + 1}. **${a.name}** (\`${a.title || a.role}\`) — ${ (a.status || 'active').toUpperCase() }`
+      `${idx + 1}. **${a.name}** (\`${a.title || a.role}\`) — ${(a.status || 'active').toUpperCase()}`
     ).join('\n');
 
     return `There are **${totalAgents} total agents** (${activeAgents} active):\n\n${rosterLines}`;
@@ -801,7 +831,7 @@ function getBackupsManifest(): any[] {
       const raw = fs.readFileSync(manifestPath, 'utf-8');
       return JSON.parse(raw);
     }
-  } catch {}
+  } catch { }
   return [];
 }
 
@@ -2183,7 +2213,7 @@ if (!githubState.token && process.env.GITHUB_TOKEN) {
         console.log(`[GitHub Connector] Auto-authenticated from GITHUB_TOKEN as @${userData.login}`);
       }
     })
-    .catch(() => {});
+    .catch(() => { });
 }
 
 const REPOS_CONFIG_FILE = path.resolve(process.cwd(), 'data', 'imported_repos.json');
@@ -2685,7 +2715,7 @@ app.get('/api/v1/companies/:companyId/activity/stream', (req, res) => {
     const randomActions = ['task.heartbeat', 'cache.hit', 'token.counted', 'route.optimized'];
     const randAgent = randomAgents[Math.floor(Math.random() * randomAgents.length)];
     const randAction = randomActions[Math.floor(Math.random() * randomActions.length)];
-    
+
     const event = {
       id: `act-${Date.now()}`,
       type: randAction,
@@ -3197,7 +3227,7 @@ app.post('/api/v1/companies/:companyId/backups/create', (req, res) => {
           try {
             const raw = fs.readFileSync(path.join(dataDir, file), 'utf-8');
             snapshotContent[file] = JSON.parse(raw);
-          } catch {}
+          } catch { }
         }
       }
     }
@@ -4672,11 +4702,11 @@ app.post('/api/v1/companies/:companyId/github/repos/:owner/:repo/contents', asyn
 app.post('/api/v1/companies/:companyId/repos/:repoId/prs', (req, res) => {
   const repo = repos.find((r) => r.id === req.params.repoId);
   if (!repo) return res.status(404).json({ detail: 'Repository not found' });
-  
+
   const prNumber = (repo.prs.length ? Math.max(...repo.prs.map((p) => p.number)) : 100) + 1;
   const authorAgent = req.body.author || 'Bolt-03';
   const sourceBranch = req.body.source_branch || `agent/${authorAgent.toLowerCase().replace(/[^a-z0-9]/g, '-')}/patch-${Date.now().toString(36)}`;
-  
+
   const newPR = {
     id: `pr-${prNumber}`,
     number: prNumber,
@@ -4948,7 +4978,7 @@ app.get('/api/v1/agent-archetypes', (req, res) => {
 app.get('/api/v1/agent-providers', async (req, res) => {
   // Detect which CLIs are actually installed on the system
   const { execSync } = await import('child_process') as any;
-  
+
   function isInstalled(command: string): { installed: boolean; path: string | null; version: string | null } {
     try {
       // Use 'where' on Windows, 'which' on Unix
@@ -5076,59 +5106,71 @@ app.get('/api/v1/agent-templates', (req, res) => {
 // Team Templates
 app.get('/api/v1/team-templates', (req, res) => {
   res.json([
-    { id: 'startup-mvp', name: 'Startup MVP Squad', description: 'Ship a product from zero to production. Full-stack team with architecture, implementation, quality, and deployment.', icon: 'ðŸš€', tags: ['full-stack', 'startup', 'mvp'], agent_count: 5, agents: [
-      { archetype: 'Software Architect', suggested_name: 'Arch-01', default_provider: 'claude', default_model: '', reports_to_index: -1, title_override: 'Lead Architect' },
-      { archetype: 'Backend Engineer', suggested_name: 'Bolt-02', default_provider: 'claude', default_model: '', reports_to_index: 0, title_override: '' },
-      { archetype: 'Frontend Engineer', suggested_name: 'Pixel-03', default_provider: 'claude', default_model: '', reports_to_index: 0, title_override: '' },
-      { archetype: 'QA Engineer', suggested_name: 'Shield-04', default_provider: 'claude', default_model: '', reports_to_index: 0, title_override: '' },
-      { archetype: 'DevOps Engineer', suggested_name: 'Forge-05', default_provider: 'claude', default_model: '', reports_to_index: 0, title_override: '' },
-    ]},
-    { id: 'core-product', name: 'Core Product Team', description: 'Feature development team with product thinking, design, full-stack engineering, and quality assurance.', icon: 'ðŸ“¦', tags: ['product', 'features', 'design'], agent_count: 5, agents: [
-      { archetype: 'Product Manager', suggested_name: 'Compass-01', default_provider: 'claude', default_model: '', reports_to_index: -1, title_override: 'Product Lead' },
-      { archetype: 'Designer', suggested_name: 'Prism-02', default_provider: 'claude', default_model: '', reports_to_index: 0, title_override: '' },
-      { archetype: 'Frontend Engineer', suggested_name: 'Pixel-03', default_provider: 'claude', default_model: '', reports_to_index: 0, title_override: '' },
-      { archetype: 'Backend Engineer', suggested_name: 'Bolt-04', default_provider: 'claude', default_model: '', reports_to_index: 0, title_override: '' },
-      { archetype: 'QA Engineer', suggested_name: 'Shield-05', default_provider: 'claude', default_model: '', reports_to_index: 0, title_override: '' },
-    ]},
-    { id: 'platform-infra', name: 'Platform & Infrastructure', description: 'Reliability, security, and infrastructure team. Handles CI/CD, monitoring, databases, and security posture.', icon: 'ðŸ—ï¸', tags: ['infra', 'platform', 'reliability', 'security'], agent_count: 4, agents: [
-      { archetype: 'DevOps Engineer', suggested_name: 'Forge-01', default_provider: 'claude', default_model: '', reports_to_index: -1, title_override: 'Platform Lead' },
-      { archetype: 'Site Reliability Engineer', suggested_name: 'Uptime-02', default_provider: 'claude', default_model: '', reports_to_index: 0, title_override: '' },
-      { archetype: 'Database Administrator', suggested_name: 'Vault-03', default_provider: 'claude', default_model: '', reports_to_index: 0, title_override: '' },
-      { archetype: 'Security Engineer', suggested_name: 'Sentinel-04', default_provider: 'claude', default_model: '', reports_to_index: 0, title_override: '' },
-    ]},
-    { id: 'ml-data', name: 'ML & Data Team', description: 'Machine learning and data infrastructure. Covers model development, data pipelines, and research experimentation.', icon: 'ðŸ§ ', tags: ['ml', 'data', 'research', 'ai'], agent_count: 3, agents: [
-      { archetype: 'ML Engineer', suggested_name: 'Sage-01', default_provider: 'claude', default_model: '', reports_to_index: -1, title_override: 'ML Lead' },
-      { archetype: 'Data Engineer', suggested_name: 'Flow-02', default_provider: 'claude', default_model: '', reports_to_index: 0, title_override: '' },
-      { archetype: 'Researcher', suggested_name: 'Lens-03', default_provider: 'claude', default_model: '', reports_to_index: 0, title_override: '' },
-    ]},
-    { id: 'leadership', name: 'Leadership & Coordination', description: 'Strategy and coordination layer. Architecture decisions, project management, agile practices, and technical leadership.', icon: 'ðŸ‘”', tags: ['leadership', 'management', 'strategy'], agent_count: 4, agents: [
-      { archetype: 'Team Lead', suggested_name: 'Atlas-01', default_provider: 'claude', default_model: '', reports_to_index: -1, title_override: 'Engineering Director' },
-      { archetype: 'Software Architect', suggested_name: 'Blueprint-02', default_provider: 'claude', default_model: '', reports_to_index: 0, title_override: '' },
-      { archetype: 'Project Manager', suggested_name: 'Compass-03', default_provider: 'claude', default_model: '', reports_to_index: 0, title_override: '' },
-      { archetype: 'Scrum Master', suggested_name: 'Sprint-04', default_provider: 'claude', default_model: '', reports_to_index: 0, title_override: '' },
-    ]},
-    { id: 'full-company', name: 'Full Company (8 Agents)', description: 'Complete autonomous organization: executive leadership, engineering, research, operations, and quality.', icon: 'ðŸ¢', tags: ['full', 'company', 'complete', 'demo'], agent_count: 8, agents: [
-      { archetype: 'Team Lead', suggested_name: 'Atlas', default_provider: 'claude', default_model: '', reports_to_index: -1, title_override: 'Chief Executive Officer' },
-      { archetype: 'Software Architect', suggested_name: 'Nova', default_provider: 'claude', default_model: '', reports_to_index: 0, title_override: 'Chief Technology Officer' },
-      { archetype: 'Backend Engineer', suggested_name: 'Bolt', default_provider: 'claude', default_model: '', reports_to_index: 1, title_override: '' },
-      { archetype: 'Frontend Engineer', suggested_name: 'Pixel', default_provider: 'claude', default_model: '', reports_to_index: 1, title_override: '' },
-      { archetype: 'Researcher', suggested_name: 'Sage', default_provider: 'claude', default_model: '', reports_to_index: 0, title_override: 'AI Research Lead' },
-      { archetype: 'Project Manager', suggested_name: 'Compass', default_provider: 'claude', default_model: '', reports_to_index: 0, title_override: '' },
-      { archetype: 'QA Engineer', suggested_name: 'Shield', default_provider: 'claude', default_model: '', reports_to_index: 1, title_override: '' },
-      { archetype: 'DevOps Engineer', suggested_name: 'Forge', default_provider: 'claude', default_model: '', reports_to_index: 1, title_override: '' },
-    ]},
+    {
+      id: 'startup-mvp', name: 'Startup MVP Squad', description: 'Ship a product from zero to production. Full-stack team with architecture, implementation, quality, and deployment.', icon: 'ðŸš€', tags: ['full-stack', 'startup', 'mvp'], agent_count: 5, agents: [
+        { archetype: 'Software Architect', suggested_name: 'Arch-01', default_provider: 'claude', default_model: '', reports_to_index: -1, title_override: 'Lead Architect' },
+        { archetype: 'Backend Engineer', suggested_name: 'Bolt-02', default_provider: 'claude', default_model: '', reports_to_index: 0, title_override: '' },
+        { archetype: 'Frontend Engineer', suggested_name: 'Pixel-03', default_provider: 'claude', default_model: '', reports_to_index: 0, title_override: '' },
+        { archetype: 'QA Engineer', suggested_name: 'Shield-04', default_provider: 'claude', default_model: '', reports_to_index: 0, title_override: '' },
+        { archetype: 'DevOps Engineer', suggested_name: 'Forge-05', default_provider: 'claude', default_model: '', reports_to_index: 0, title_override: '' },
+      ]
+    },
+    {
+      id: 'core-product', name: 'Core Product Team', description: 'Feature development team with product thinking, design, full-stack engineering, and quality assurance.', icon: 'ðŸ“¦', tags: ['product', 'features', 'design'], agent_count: 5, agents: [
+        { archetype: 'Product Manager', suggested_name: 'Compass-01', default_provider: 'claude', default_model: '', reports_to_index: -1, title_override: 'Product Lead' },
+        { archetype: 'Designer', suggested_name: 'Prism-02', default_provider: 'claude', default_model: '', reports_to_index: 0, title_override: '' },
+        { archetype: 'Frontend Engineer', suggested_name: 'Pixel-03', default_provider: 'claude', default_model: '', reports_to_index: 0, title_override: '' },
+        { archetype: 'Backend Engineer', suggested_name: 'Bolt-04', default_provider: 'claude', default_model: '', reports_to_index: 0, title_override: '' },
+        { archetype: 'QA Engineer', suggested_name: 'Shield-05', default_provider: 'claude', default_model: '', reports_to_index: 0, title_override: '' },
+      ]
+    },
+    {
+      id: 'platform-infra', name: 'Platform & Infrastructure', description: 'Reliability, security, and infrastructure team. Handles CI/CD, monitoring, databases, and security posture.', icon: 'ðŸ—ï¸', tags: ['infra', 'platform', 'reliability', 'security'], agent_count: 4, agents: [
+        { archetype: 'DevOps Engineer', suggested_name: 'Forge-01', default_provider: 'claude', default_model: '', reports_to_index: -1, title_override: 'Platform Lead' },
+        { archetype: 'Site Reliability Engineer', suggested_name: 'Uptime-02', default_provider: 'claude', default_model: '', reports_to_index: 0, title_override: '' },
+        { archetype: 'Database Administrator', suggested_name: 'Vault-03', default_provider: 'claude', default_model: '', reports_to_index: 0, title_override: '' },
+        { archetype: 'Security Engineer', suggested_name: 'Sentinel-04', default_provider: 'claude', default_model: '', reports_to_index: 0, title_override: '' },
+      ]
+    },
+    {
+      id: 'ml-data', name: 'ML & Data Team', description: 'Machine learning and data infrastructure. Covers model development, data pipelines, and research experimentation.', icon: 'ðŸ§ ', tags: ['ml', 'data', 'research', 'ai'], agent_count: 3, agents: [
+        { archetype: 'ML Engineer', suggested_name: 'Sage-01', default_provider: 'claude', default_model: '', reports_to_index: -1, title_override: 'ML Lead' },
+        { archetype: 'Data Engineer', suggested_name: 'Flow-02', default_provider: 'claude', default_model: '', reports_to_index: 0, title_override: '' },
+        { archetype: 'Researcher', suggested_name: 'Lens-03', default_provider: 'claude', default_model: '', reports_to_index: 0, title_override: '' },
+      ]
+    },
+    {
+      id: 'leadership', name: 'Leadership & Coordination', description: 'Strategy and coordination layer. Architecture decisions, project management, agile practices, and technical leadership.', icon: 'ðŸ‘”', tags: ['leadership', 'management', 'strategy'], agent_count: 4, agents: [
+        { archetype: 'Team Lead', suggested_name: 'Atlas-01', default_provider: 'claude', default_model: '', reports_to_index: -1, title_override: 'Engineering Director' },
+        { archetype: 'Software Architect', suggested_name: 'Blueprint-02', default_provider: 'claude', default_model: '', reports_to_index: 0, title_override: '' },
+        { archetype: 'Project Manager', suggested_name: 'Compass-03', default_provider: 'claude', default_model: '', reports_to_index: 0, title_override: '' },
+        { archetype: 'Scrum Master', suggested_name: 'Sprint-04', default_provider: 'claude', default_model: '', reports_to_index: 0, title_override: '' },
+      ]
+    },
+    {
+      id: 'full-company', name: 'Full Company (8 Agents)', description: 'Complete autonomous organization: executive leadership, engineering, research, operations, and quality.', icon: 'ðŸ¢', tags: ['full', 'company', 'complete', 'demo'], agent_count: 8, agents: [
+        { archetype: 'Team Lead', suggested_name: 'Atlas', default_provider: 'claude', default_model: '', reports_to_index: -1, title_override: 'Chief Executive Officer' },
+        { archetype: 'Software Architect', suggested_name: 'Nova', default_provider: 'claude', default_model: '', reports_to_index: 0, title_override: 'Chief Technology Officer' },
+        { archetype: 'Backend Engineer', suggested_name: 'Bolt', default_provider: 'claude', default_model: '', reports_to_index: 1, title_override: '' },
+        { archetype: 'Frontend Engineer', suggested_name: 'Pixel', default_provider: 'claude', default_model: '', reports_to_index: 1, title_override: '' },
+        { archetype: 'Researcher', suggested_name: 'Sage', default_provider: 'claude', default_model: '', reports_to_index: 0, title_override: 'AI Research Lead' },
+        { archetype: 'Project Manager', suggested_name: 'Compass', default_provider: 'claude', default_model: '', reports_to_index: 0, title_override: '' },
+        { archetype: 'QA Engineer', suggested_name: 'Shield', default_provider: 'claude', default_model: '', reports_to_index: 1, title_override: '' },
+        { archetype: 'DevOps Engineer', suggested_name: 'Forge', default_provider: 'claude', default_model: '', reports_to_index: 1, title_override: '' },
+      ]
+    },
   ]);
 });
 
 // Soul Templates
 app.get('/api/v1/soul-templates', (req, res) => {
   res.json([
-    { template_id: 'engineer', name: 'Software Engineer', description: 'Detail-oriented engineer focused on code quality and implementation.', soul: { role: 'senior_software_engineer', personality_traits: ['detail-oriented', 'methodical', 'pragmatic', 'collaborative'], communication_style: 'Concise and technical. Prefers code examples over lengthy explanations. Uses precise terminology and references documentation when relevant.', expertise: ['software architecture', 'code review', 'debugging', 'performance optimization', 'testing strategies'], values: ['code quality', 'maintainability', 'test coverage', 'clear documentation', 'incremental delivery'], constraints: ['Always write tests for new functionality', 'Follow existing codebase conventions', 'Prefer simple solutions over clever ones', 'Document non-obvious design decisions'], background: 'Experienced software engineer with years of building production systems. Values clean code and robust testing.', tone: 'professional' }},
-    { template_id: 'researcher', name: 'Research Analyst', description: 'Analytical researcher focused on thorough investigation and evidence.', soul: { role: 'research_analyst', personality_traits: ['analytical', 'thorough', 'curious', 'skeptical', 'systematic'], communication_style: 'Structured and evidence-based. Presents findings with supporting data, cites sources, and clearly distinguishes between facts, inferences, and speculation.', expertise: ['literature review', 'data analysis', 'methodology design', 'technical writing', 'comparative analysis'], values: ['accuracy', 'thoroughness', 'intellectual honesty', 'reproducibility', 'clear methodology'], constraints: ['Always cite sources for claims', 'Distinguish between facts and inferences', 'Acknowledge limitations in findings', 'Provide confidence levels for conclusions'], background: 'Experienced research professional skilled at synthesizing complex information and producing actionable insights.', tone: 'professional' }},
-    { template_id: 'manager', name: 'Project Manager', description: 'Strategic manager focused on delegation, coordination, and delivery.', soul: { role: 'project_manager', personality_traits: ['strategic', 'delegating', 'communicative', 'decisive', 'organized'], communication_style: 'Clear and action-oriented. Uses bullet points for tasks, sets explicit deadlines, and provides context for decisions. Focuses on outcomes and blockers.', expertise: ['project planning', 'team coordination', 'risk management', 'stakeholder communication', 'resource allocation'], values: ['timely delivery', 'team productivity', 'clear communication', 'risk mitigation', 'continuous improvement'], constraints: ['Always provide clear acceptance criteria', 'Track blockers and dependencies explicitly', 'Escalate risks early rather than late', 'Respect team members expertise and autonomy'], background: 'Experienced project manager skilled at breaking complex objectives into actionable tasks and coordinating teams.', tone: 'professional' }},
-    { template_id: 'qa_engineer', name: 'QA Engineer', description: 'Meticulous QA engineer focused on testing and quality assurance.', soul: { role: 'qa_engineer', personality_traits: ['meticulous', 'systematic', 'skeptical', 'persistent', 'observant'], communication_style: 'Precise and detail-focused. Reports issues with clear reproduction steps, expected vs actual behavior, and severity classification.', expertise: ['test strategy', 'test automation', 'regression testing', 'edge case identification', 'bug reporting', 'performance testing'], values: ['product quality', 'user experience', 'thorough coverage', 'reproducible results', 'early detection'], constraints: ['Always verify fixes with regression tests', 'Document test cases with clear steps', 'Report severity and impact of issues found', 'Never approve without adequate test coverage'], background: 'Quality-focused engineer who believes in breaking things before users do.', tone: 'professional' }},
-    { template_id: 'architect', name: 'System Architect', description: 'Big-picture architect focused on system design and technical strategy.', soul: { role: 'system_architect', personality_traits: ['visionary', 'analytical', 'pragmatic', 'communicative', 'patient'], communication_style: 'Uses diagrams and high-level descriptions. Explains trade-offs between approaches, considers scalability and maintainability, and relates decisions to business requirements.', expertise: ['system design', 'distributed systems', 'API design', 'scalability patterns', 'technology evaluation', 'technical debt management'], values: ['simplicity', 'scalability', 'separation of concerns', 'evolutionary architecture', 'informed trade-offs'], constraints: ['Consider scalability implications of design decisions', 'Document architectural decisions and their rationale', 'Evaluate at least two alternatives before recommending', 'Balance ideal design with practical delivery constraints'], background: 'Systems thinker with deep experience designing large-scale architectures. Balances elegance with pragmatism.', tone: 'professional' }},
-    { template_id: 'hr_manager', name: 'HR Manager', description: 'People-focused HR leader who handles hiring, onboarding, team composition, and workforce planning.', soul: { role: 'hr_manager', personality_traits: ['empathetic', 'strategic', 'organized', 'persuasive', 'fair-minded', 'perceptive'], communication_style: 'Warm yet professional. Asks clarifying questions about team needs, proposes role definitions with clear responsibilities, and thinks holistically about team dynamics and culture fit.', expertise: ['talent acquisition', 'agent onboarding', 'team composition', 'workforce planning', 'performance management', 'role definition', 'organizational design', 'compensation strategy'], values: ['team balance', 'clear role definition', 'skills diversity', 'growth potential', 'cultural alignment', 'fair evaluation'], constraints: ['Always define clear responsibilities and objectives before hiring', 'Ensure new hires complement existing team capabilities', 'Consider budget implications of every hire', 'Document hiring rationale and expected impact', 'Recommend structured onboarding for every new agent'], background: 'Experienced HR leader who builds high-performing teams by understanding organizational needs, defining roles precisely, and matching the right agents to the right positions. Expert at scaling teams without sacrificing quality or culture.', tone: 'professional' }},
+    { template_id: 'engineer', name: 'Software Engineer', description: 'Detail-oriented engineer focused on code quality and implementation.', soul: { role: 'senior_software_engineer', personality_traits: ['detail-oriented', 'methodical', 'pragmatic', 'collaborative'], communication_style: 'Concise and technical. Prefers code examples over lengthy explanations. Uses precise terminology and references documentation when relevant.', expertise: ['software architecture', 'code review', 'debugging', 'performance optimization', 'testing strategies'], values: ['code quality', 'maintainability', 'test coverage', 'clear documentation', 'incremental delivery'], constraints: ['Always write tests for new functionality', 'Follow existing codebase conventions', 'Prefer simple solutions over clever ones', 'Document non-obvious design decisions'], background: 'Experienced software engineer with years of building production systems. Values clean code and robust testing.', tone: 'professional' } },
+    { template_id: 'researcher', name: 'Research Analyst', description: 'Analytical researcher focused on thorough investigation and evidence.', soul: { role: 'research_analyst', personality_traits: ['analytical', 'thorough', 'curious', 'skeptical', 'systematic'], communication_style: 'Structured and evidence-based. Presents findings with supporting data, cites sources, and clearly distinguishes between facts, inferences, and speculation.', expertise: ['literature review', 'data analysis', 'methodology design', 'technical writing', 'comparative analysis'], values: ['accuracy', 'thoroughness', 'intellectual honesty', 'reproducibility', 'clear methodology'], constraints: ['Always cite sources for claims', 'Distinguish between facts and inferences', 'Acknowledge limitations in findings', 'Provide confidence levels for conclusions'], background: 'Experienced research professional skilled at synthesizing complex information and producing actionable insights.', tone: 'professional' } },
+    { template_id: 'manager', name: 'Project Manager', description: 'Strategic manager focused on delegation, coordination, and delivery.', soul: { role: 'project_manager', personality_traits: ['strategic', 'delegating', 'communicative', 'decisive', 'organized'], communication_style: 'Clear and action-oriented. Uses bullet points for tasks, sets explicit deadlines, and provides context for decisions. Focuses on outcomes and blockers.', expertise: ['project planning', 'team coordination', 'risk management', 'stakeholder communication', 'resource allocation'], values: ['timely delivery', 'team productivity', 'clear communication', 'risk mitigation', 'continuous improvement'], constraints: ['Always provide clear acceptance criteria', 'Track blockers and dependencies explicitly', 'Escalate risks early rather than late', 'Respect team members expertise and autonomy'], background: 'Experienced project manager skilled at breaking complex objectives into actionable tasks and coordinating teams.', tone: 'professional' } },
+    { template_id: 'qa_engineer', name: 'QA Engineer', description: 'Meticulous QA engineer focused on testing and quality assurance.', soul: { role: 'qa_engineer', personality_traits: ['meticulous', 'systematic', 'skeptical', 'persistent', 'observant'], communication_style: 'Precise and detail-focused. Reports issues with clear reproduction steps, expected vs actual behavior, and severity classification.', expertise: ['test strategy', 'test automation', 'regression testing', 'edge case identification', 'bug reporting', 'performance testing'], values: ['product quality', 'user experience', 'thorough coverage', 'reproducible results', 'early detection'], constraints: ['Always verify fixes with regression tests', 'Document test cases with clear steps', 'Report severity and impact of issues found', 'Never approve without adequate test coverage'], background: 'Quality-focused engineer who believes in breaking things before users do.', tone: 'professional' } },
+    { template_id: 'architect', name: 'System Architect', description: 'Big-picture architect focused on system design and technical strategy.', soul: { role: 'system_architect', personality_traits: ['visionary', 'analytical', 'pragmatic', 'communicative', 'patient'], communication_style: 'Uses diagrams and high-level descriptions. Explains trade-offs between approaches, considers scalability and maintainability, and relates decisions to business requirements.', expertise: ['system design', 'distributed systems', 'API design', 'scalability patterns', 'technology evaluation', 'technical debt management'], values: ['simplicity', 'scalability', 'separation of concerns', 'evolutionary architecture', 'informed trade-offs'], constraints: ['Consider scalability implications of design decisions', 'Document architectural decisions and their rationale', 'Evaluate at least two alternatives before recommending', 'Balance ideal design with practical delivery constraints'], background: 'Systems thinker with deep experience designing large-scale architectures. Balances elegance with pragmatism.', tone: 'professional' } },
+    { template_id: 'hr_manager', name: 'HR Manager', description: 'People-focused HR leader who handles hiring, onboarding, team composition, and workforce planning.', soul: { role: 'hr_manager', personality_traits: ['empathetic', 'strategic', 'organized', 'persuasive', 'fair-minded', 'perceptive'], communication_style: 'Warm yet professional. Asks clarifying questions about team needs, proposes role definitions with clear responsibilities, and thinks holistically about team dynamics and culture fit.', expertise: ['talent acquisition', 'agent onboarding', 'team composition', 'workforce planning', 'performance management', 'role definition', 'organizational design', 'compensation strategy'], values: ['team balance', 'clear role definition', 'skills diversity', 'growth potential', 'cultural alignment', 'fair evaluation'], constraints: ['Always define clear responsibilities and objectives before hiring', 'Ensure new hires complement existing team capabilities', 'Consider budget implications of every hire', 'Document hiring rationale and expected impact', 'Recommend structured onboarding for every new agent'], background: 'Experienced HR leader who builds high-performing teams by understanding organizational needs, defining roles precisely, and matching the right agents to the right positions. Expert at scaling teams without sacrificing quality or culture.', tone: 'professional' } },
   ]);
 });
 
