@@ -1,14 +1,14 @@
 """Skill API endpoints - skill registry and agent-skill assignments."""
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy import select
 
-from nexus.api.deps import CurrentCompanyId, DbSession, PathCompanyId
+from nexus.api.deps import CurrentCompanyId, DbSession, PathCompanyId, RequireAdmin
 from nexus.models.skill import AgentSkill, Skill
 
 router = APIRouter(tags=["skills"])
@@ -180,3 +180,77 @@ async def delete_skill(skill_id: uuid.UUID, db: DbSession, company_id: CurrentCo
     from sqlalchemy import delete as sa_delete
     stmt = sa_delete(Skill).where(Skill.id == skill_id, Skill.company_id == company_id)
     await db.execute(stmt)
+
+
+# --- Skill access policy (stored in CompanySettings.settings_json["skill_policy"]) ---
+
+
+class SkillPolicyBody(BaseModel):
+    """A skill access policy document.
+
+    See `nexus.governance.skill_policy` for evaluation semantics. Rules are
+    evaluated in order; the first match wins, else `default_effect` applies.
+    """
+
+    schemaVersion: int = 1
+    revision: int = 0
+    defaultEffect: str = "allow"
+    rules: list[dict[str, Any]] = []
+
+
+@router.get("/api/v1/companies/{company_id}/skill-policy")
+async def get_skill_policy(company_id: PathCompanyId, db: DbSession) -> dict[str, Any]:
+    """Return the company's skill access policy document.
+
+    An absent document means "allow everything" — the default this returns.
+    """
+    from nexus.models.settings import CompanySettings
+
+    result = await db.execute(
+        select(CompanySettings).where(CompanySettings.company_id == company_id)
+    )
+    settings = result.scalar_one_or_none()
+    policy = (settings.settings_json or {}).get("skill_policy") if settings else None
+    if not policy:
+        return {"schemaVersion": 1, "revision": 0, "defaultEffect": "allow", "rules": []}
+    return policy
+
+
+@router.put("/api/v1/companies/{company_id}/skill-policy")
+async def put_skill_policy(
+    company_id: PathCompanyId, body: SkillPolicyBody, db: DbSession, principal: RequireAdmin
+) -> dict[str, Any]:
+    """Replace the company's skill access policy document.
+
+    The revision is bumped so changes are auditable. The document is validated
+    by the policy engine's own `decision()` on the next skill assignment.
+    """
+    from nexus.models.settings import CompanySettings
+
+    result = await db.execute(
+        select(CompanySettings).where(CompanySettings.company_id == company_id)
+    )
+    settings = result.scalar_one_or_none()
+    if settings is None:
+        settings = CompanySettings(company_id=company_id)
+        db.add(settings)
+        await db.flush()
+
+    effect = (body.defaultEffect or "allow").lower()
+    if effect not in ("allow", "deny"):
+        raise HTTPException(status_code=400, detail="defaultEffect must be 'allow' or 'deny'")
+
+    existing = dict(settings.settings_json or {})
+    prior = existing.get("skill_policy") or {}
+    doc = {
+        "schemaVersion": 1,
+        "revision": int(prior.get("revision", 0)) + 1,
+        "defaultEffect": effect,
+        "rules": body.rules or [],
+    }
+    existing["skill_policy"] = doc
+    # Reassign a fresh dict so SQLAlchemy detects the JSON column mutation.
+    settings.settings_json = existing
+    settings.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+    await db.flush()
+    return doc

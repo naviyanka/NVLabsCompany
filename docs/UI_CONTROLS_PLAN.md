@@ -59,7 +59,7 @@ The button today fakes success client-side.
 - **Check:** create → appears with version 1; rotate → version 2; value never shown after
   creation.
 
-### Phase U5 — Skill access policy editor · UI only · MEDIUM
+### Phase U5 — Skill access policy editor · small backend + UI · MEDIUM · DONE
 - U5.1 On the Skills page, a "Access Policy" panel: `defaultEffect` allow/deny + an ordered
   rule list (`effect`, subject match, resource match).
 - U5.2 Load/save the `skill_policy` document in company settings; bump `revision` on save.
@@ -109,7 +109,11 @@ unusable from UI; audit verify is a correctness lie). U4–U6 second. U7–U8 la
 - [x] U4 Secrets vault panel — new Settings tab; verified create (201), rotate (v1→v2),
       list. Backend needs SECRET_KEY set (not dev default) or create/rotate return 503,
       which the UI surfaces as a clear message.
-- [ ] U5 Skill access policy editor
+- [x] U5 Skill access policy editor — the general /settings endpoint does NOT expose
+      settings_json, so added dedicated GET/PUT /api/v1/companies/{id}/skill-policy (stores
+      under settings_json["skill_policy"], bumps revision). Added an "Access Policy" view to
+      the Skills page. Verified round-trip: rev 0→1, deny rule {roles:[contractor],
+      keys:[deploy-*]} persisted.
 - [ ] U6 Watchdog / heartbeat panel (backend + UI)
 - [ ] U7 Company export/import
 - [ ] U8 Adapter coverage / MCP surface

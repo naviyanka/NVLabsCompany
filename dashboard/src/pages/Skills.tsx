@@ -1,28 +1,29 @@
-import { useState, useEffect } from 'react';
-import {
-  Sparkles,
-  Search,
-  Plus,
-  Users,
-  ShieldCheck,
-  Zap,
-  CheckCircle2,
-  FileArchive,
-  Terminal,
-  Github,
-  Code2,
-  LayoutGrid,
-  List,
-  SlidersHorizontal,
-} from 'lucide-react';
-import { Card } from '@/components/common/Card';
-import { Button } from '@/components/common/Button';
-import { Badge } from '@/components/common/Badge';
 import { apiClient } from '@/api/client';
-import { getActiveCompanyId } from '@/config';
-import type { SkillItem } from '@/types/skill';
+import { Badge } from '@/components/common/Badge';
+import { Button } from '@/components/common/Button';
+import { Card } from '@/components/common/Card';
 import { AddSkillModal } from '@/components/skills/AddSkillModal';
 import { SkillDetailDrawer } from '@/components/skills/SkillDetailDrawer';
+import { SkillPolicyPanel } from '@/components/skills/SkillPolicyPanel';
+import { getActiveCompanyId } from '@/config';
+import type { SkillItem } from '@/types/skill';
+import {
+  CheckCircle2,
+  Code2,
+  FileArchive,
+  Github,
+  LayoutGrid,
+  List,
+  Plus,
+  Search,
+  ShieldCheck,
+  SlidersHorizontal,
+  Sparkles,
+  Terminal,
+  Users,
+  Zap,
+} from 'lucide-react';
+import { useEffect, useState } from 'react';
 
 export function Skills() {
   const [skills, setSkills] = useState<SkillItem[]>([]);
@@ -33,7 +34,7 @@ export function Skills() {
   const [search, setSearch] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [selectedSource, setSelectedSource] = useState<string>('all');
-  const [viewMode, setViewMode] = useState<'grid' | 'table'>('grid');
+  const [viewMode, setViewMode] = useState<'grid' | 'table' | 'policy'>('grid');
 
   // Modals & Drawers
   const [showAddModal, setShowAddModal] = useState(false);
@@ -234,11 +235,10 @@ export function Skills() {
             <button
               key={cat}
               onClick={() => setSelectedCategory(cat)}
-              className={`px-2.5 py-1 rounded-[4px] text-xs font-mono transition-colors cursor-pointer capitalize whitespace-nowrap ${
-                selectedCategory.toLowerCase() === cat.toLowerCase()
-                  ? 'bg-[#FFB020] text-[#0A0A0B] font-bold'
-                  : 'bg-[#141416] text-[#6B6B6E] hover:text-[#F2F1EE] border border-white/[0.08]'
-              }`}
+              className={`px-2.5 py-1 rounded-[4px] text-xs font-mono transition-colors cursor-pointer capitalize whitespace-nowrap ${selectedCategory.toLowerCase() === cat.toLowerCase()
+                ? 'bg-[#FFB020] text-[#0A0A0B] font-bold'
+                : 'bg-[#141416] text-[#6B6B6E] hover:text-[#F2F1EE] border border-white/[0.08]'
+                }`}
             >
               {cat}
             </button>
@@ -265,21 +265,27 @@ export function Skills() {
           <div className="flex items-center gap-1 bg-[#141416] p-1 border border-white/[0.08] rounded">
             <button
               onClick={() => setViewMode('grid')}
-              className={`p-1 rounded cursor-pointer ${
-                viewMode === 'grid' ? 'bg-[#FFB020] text-black' : 'text-gray-400 hover:text-white'
-              }`}
+              className={`p-1 rounded cursor-pointer ${viewMode === 'grid' ? 'bg-[#FFB020] text-black' : 'text-gray-400 hover:text-white'
+                }`}
               title="Grid View"
             >
               <LayoutGrid size={14} />
             </button>
             <button
               onClick={() => setViewMode('table')}
-              className={`p-1 rounded cursor-pointer ${
-                viewMode === 'table' ? 'bg-[#FFB020] text-black' : 'text-gray-400 hover:text-white'
-              }`}
+              className={`p-1 rounded cursor-pointer ${viewMode === 'table' ? 'bg-[#FFB020] text-black' : 'text-gray-400 hover:text-white'
+                }`}
               title="Table View"
             >
               <List size={14} />
+            </button>
+            <button
+              onClick={() => setViewMode('policy')}
+              className={`p-1 rounded cursor-pointer ${viewMode === 'policy' ? 'bg-[#FFB020] text-black' : 'text-gray-400 hover:text-white'
+                }`}
+              title="Access Policy"
+            >
+              <ShieldCheck size={14} />
             </button>
           </div>
         </div>
@@ -381,6 +387,9 @@ export function Skills() {
           </table>
         </div>
       )}
+
+      {/* Skills ACCESS POLICY VIEW */}
+      {viewMode === 'policy' && <SkillPolicyPanel />}
 
       {/* Add Skill Modal */}
       <AddSkillModal
