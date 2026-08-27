@@ -448,6 +448,22 @@ async def seed_database(session) -> dict[str, int]:
         session.add(Task(**task_data))
         counts["tasks"] += 1
 
+    # Default Admin API Key
+    import hashlib
+    from nexus.models.api_key import ApiKey
+    default_key = "nv_12e45ab9221819d98994f44ae273592d4b95437464f19640"
+    session.add(ApiKey(
+        company_id=COMPANY_ID,
+        name="Admin Development Key",
+        description="Default admin API key",
+        key_prefix=default_key[:10],
+        key_hash=hashlib.sha256(default_key.encode()).hexdigest(),
+        environment="development",
+        status="active",
+        role="admin",
+        created_at=utcnow(),
+    ))
+
     await session.commit()
     return counts
 
