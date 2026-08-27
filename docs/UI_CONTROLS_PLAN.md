@@ -67,7 +67,7 @@ The button today fakes success client-side.
   backend evaluate call).
 - **Check:** add a deny rule, save, reload — the document round-trips and revision bumps.
 
-### Phase U6 — Watchdog / heartbeat panel · small backend + UI · MEDIUM
+### Phase U6 — Watchdog / heartbeat panel · small backend + UI · MEDIUM · DONE
 - U6.1 Backend: `GET /api/v1/companies/{id}/runs/liveness` returning active `HeartbeatRun`
   rows with `last_output_at`, liveness state, and stalled flag.
 - U6.2 UI: a read-only panel (Activity page section or Settings) listing runs, their
@@ -114,6 +114,10 @@ unusable from UI; audit verify is a correctness lie). U4–U6 second. U7–U8 la
       under settings_json["skill_policy"], bumps revision). Added an "Access Policy" view to
       the Skills page. Verified round-trip: rev 0→1, deny rule {roles:[contractor],
       keys:[deploy-*]} persisted.
-- [ ] U6 Watchdog / heartbeat panel (backend + UI)
+- [x] U6 Watchdog / heartbeat panel — added GET /api/v1/companies/{id}/runs/liveness
+      (new routes/runs.py; joins HeartbeatRun→Agent for company scope, derives stalled from
+      silence > 1h). Added a "Liveness" view to the Activity page with summary cards
+      (active/healthy/stalled/confirmed-dead) + per-run rows. Verified with seeded runs:
+      healthy (silent 1m) and stalled (silent 2h, attempt 2) rendered correctly.
 - [ ] U7 Company export/import
 - [ ] U8 Adapter coverage / MCP surface

@@ -1,7 +1,13 @@
 import { apiClient } from '@/api/client';
+import { RunLivenessPanel } from '@/components/activity/RunLivenessPanel';
 import { Drawer } from '@/components/common/Drawer';
 import { StatCard } from '@/components/common/StatCard';
 import { getActiveCompanyId } from '@/config';
+import {
+  COMPLETION_REASONS,
+  COMPLETION_REASON_LABELS,
+  type CompletionReason,
+} from '@/types/task';
 import {
   Activity as ActivityIcon,
   AlertTriangle,
@@ -16,6 +22,7 @@ import {
   Download,
   Filter,
   GitCommit,
+  HeartPulse,
   Layers,
   LayoutList,
   Pause,
@@ -39,11 +46,6 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-import {
-  COMPLETION_REASONS,
-  COMPLETION_REASON_LABELS,
-  type CompletionReason,
-} from '@/types/task';
 
 export type ActivitySeverity = 'info' | 'warning' | 'error' | 'critical';
 export type ActivityStatus = 'success' | 'failed' | 'in_progress';
@@ -83,7 +85,7 @@ export function Activity() {
   const [selectedReason, setSelectedReason] = useState<string>('all');
   const [selectedLog, setSelectedLog] = useState<ActivityLog | null>(null);
   const [isLive, setIsLive] = useState<boolean>(true);
-  const [viewMode, setViewMode] = useState<'list' | 'terminal' | 'analytics'>('list');
+  const [viewMode, setViewMode] = useState<'list' | 'terminal' | 'analytics' | 'liveness'>('list');
   const [copiedId, setCopiedId] = useState<boolean>(false);
 
   // Fetch initial activity logs from API if available
@@ -284,8 +286,8 @@ export function Activity() {
           <button
             onClick={() => setIsLive(!isLive)}
             className={`px-3 py-1.5 rounded-[6px] text-xs font-mono font-medium border flex items-center gap-2 transition-all cursor-pointer ${isLive
-                ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20'
-                : 'bg-white/[0.04] border-white/[0.1] text-gray-300 hover:bg-white/[0.08]'
+              ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20'
+              : 'bg-white/[0.04] border-white/[0.1] text-gray-300 hover:bg-white/[0.08]'
               }`}
           >
             {isLive ? <Pause size={14} /> : <Play size={14} />}
@@ -320,6 +322,15 @@ export function Activity() {
             >
               <BarChart3 size={13} />
               <span className="hidden sm:inline">Analytics</span>
+            </button>
+            <button
+              onClick={() => setViewMode('liveness')}
+              className={`px-2.5 py-1 rounded-[4px] text-xs font-mono flex items-center gap-1.5 transition-colors cursor-pointer ${viewMode === 'liveness' ? 'bg-[#FFB020] text-black font-semibold' : 'text-gray-400 hover:text-white'
+                }`}
+              title="Run Liveness (watchdog / heartbeat)"
+            >
+              <HeartPulse size={13} />
+              <span className="hidden sm:inline">Liveness</span>
             </button>
           </div>
 
@@ -406,8 +417,8 @@ export function Activity() {
                   key={type}
                   onClick={() => setSelectedType(type)}
                   className={`px-2 py-0.5 rounded-[4px] text-[11px] font-mono transition-colors cursor-pointer ${selectedType.toLowerCase() === type.toLowerCase()
-                      ? 'bg-[#FFB020] text-[#0A0A0B] font-bold'
-                      : 'bg-[#141416] text-[#A8A8AB] hover:text-white border border-white/[0.08]'
+                    ? 'bg-[#FFB020] text-[#0A0A0B] font-bold'
+                    : 'bg-[#141416] text-[#A8A8AB] hover:text-white border border-white/[0.08]'
                     }`}
                 >
                   {type}
@@ -428,8 +439,8 @@ export function Activity() {
                 key={sev}
                 onClick={() => setSelectedSeverity(sev)}
                 className={`px-2 py-0.5 rounded text-[10px] uppercase transition-colors cursor-pointer ${selectedSeverity === sev
-                    ? 'bg-white/20 text-white font-bold border border-white/30'
-                    : 'text-[#6B6B6E] hover:text-gray-300'
+                  ? 'bg-white/20 text-white font-bold border border-white/30'
+                  : 'text-[#6B6B6E] hover:text-gray-300'
                   }`}
               >
                 {sev}
@@ -444,8 +455,8 @@ export function Activity() {
                 key={st}
                 onClick={() => setSelectedStatus(st)}
                 className={`px-2 py-0.5 rounded text-[10px] uppercase transition-colors cursor-pointer ${selectedStatus === st
-                    ? 'bg-[#FFB020]/20 text-[#FFB020] border border-[#FFB020]/30 font-bold'
-                    : 'text-[#6B6B6E] hover:text-gray-300'
+                  ? 'bg-[#FFB020]/20 text-[#FFB020] border border-[#FFB020]/30 font-bold'
+                  : 'text-[#6B6B6E] hover:text-gray-300'
                   }`}
               >
                 {st.replace('_', ' ')}
@@ -460,8 +471,8 @@ export function Activity() {
           <button
             onClick={() => setSelectedReason('all')}
             className={`px-2 py-0.5 rounded text-[10px] uppercase transition-colors cursor-pointer ${selectedReason === 'all'
-                ? 'bg-white/20 text-white font-bold border border-white/30'
-                : 'text-[#6B6B6E] hover:text-gray-300'
+              ? 'bg-white/20 text-white font-bold border border-white/30'
+              : 'text-[#6B6B6E] hover:text-gray-300'
               }`}
           >
             all
@@ -471,8 +482,8 @@ export function Activity() {
               key={reason}
               onClick={() => setSelectedReason(reason)}
               className={`px-2 py-0.5 rounded text-[10px] uppercase transition-colors cursor-pointer ${selectedReason === reason
-                  ? 'bg-[#FFB020]/20 text-[#FFB020] border border-[#FFB020]/30 font-bold'
-                  : 'text-[#6B6B6E] hover:text-gray-300'
+                ? 'bg-[#FFB020]/20 text-[#FFB020] border border-[#FFB020]/30 font-bold'
+                : 'text-[#6B6B6E] hover:text-gray-300'
                 }`}
             >
               {COMPLETION_REASON_LABELS[reason]}
@@ -554,8 +565,8 @@ export function Activity() {
               >
                 <span className="text-gray-500 select-none">[{log.time}]</span>
                 <span className={`uppercase font-bold shrink-0 ${log.severity === 'critical' ? 'text-red-400' :
-                    log.severity === 'error' ? 'text-rose-400' :
-                      log.severity === 'warning' ? 'text-amber-400' : 'text-blue-400'
+                  log.severity === 'error' ? 'text-rose-400' :
+                    log.severity === 'warning' ? 'text-amber-400' : 'text-blue-400'
                   }`}>
                   [{log.severity}]
                 </span>
@@ -643,6 +654,9 @@ export function Activity() {
           </div>
         </div>
       )}
+
+      {/* Run Liveness View (watchdog / heartbeat) */}
+      {viewMode === 'liveness' && <RunLivenessPanel />}
 
       {/* Raw Trace Drawer */}
       <Drawer

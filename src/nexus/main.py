@@ -58,6 +58,7 @@ from nexus.api.routes.sso import router as sso_router
 from nexus.api.routes.tasks import router as tasks_router
 from nexus.api.routes.telegram_bot import router as telegram_bot_router
 from nexus.api.routes.tools import router as tools_router
+from nexus.api.routes.runs import router as runs_router
 from nexus.api.routes.triggers import router as triggers_router
 from nexus.api.routes.webhooks import router as webhooks_router
 from nexus.api.routes.workflows import router as workflows_router
@@ -426,6 +427,7 @@ app.include_router(approvals_router)
 app.include_router(budgets_router)
 app.include_router(memory_router)
 app.include_router(triggers_router)
+app.include_router(runs_router)
 # Public: authenticated by a per-trigger secret, not a session.
 app.include_router(webhooks_router)
 app.include_router(communication_router)
