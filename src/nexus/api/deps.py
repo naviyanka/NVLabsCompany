@@ -55,6 +55,25 @@ def get_principal(request: Request) -> Principal:
     return principal
 
 
+def require_run(
+    principal: Annotated[Principal, Depends(get_principal)],
+) -> Principal:
+    """Admit only a caller holding a valid run token (Phase 5.1).
+
+    The middleware already turned an expired or forged token into an anonymous
+    request, which :func:`get_principal` answers with 401 — so by the time this
+    runs the token is known good. What is left to decide is that the caller is a
+    run at all: an endpoint meant for an agent mid-run has no meaning for a
+    human session or a company-wide API key, both of which outlive the run.
+    """
+    if principal.kind != "run":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This endpoint requires a run token, not a session or API key",
+        )
+    return principal
+
+
 def get_current_company_id(
     principal: Annotated[Principal, Depends(get_principal)],
 ) -> uuid.UUID:
@@ -161,3 +180,4 @@ CurrentCompanyId = Annotated[uuid.UUID, Depends(get_current_company_id)]
 PathCompanyId = Annotated[uuid.UUID, Depends(get_scoped_company_id)]
 RequireAdmin = Annotated[Principal, Depends(require_admin)]
 RequireUser = Annotated[Principal, Depends(require_user)]
+RequireRun = Annotated[Principal, Depends(require_run)]

@@ -24,7 +24,7 @@ class ToolInvocation(SQLModel, table=True):
     tool_name: str = Field(max_length=255)
     arguments_scrubbed: dict | None = Field(default=None, sa_column=Column(JSON))
     result_summary: str | None = Field(default=None)
-    status: str = Field(max_length=50)  # success, error, timeout, denied, rate_limited
+    status: str = Field(max_length=50)  # success, error, timeout, denied, rate_limited, guardrail_blocked
     duration_ms: int = Field(default=0)
     cost_cents: int = Field(default=0)
     approval_state: str = Field(

@@ -57,9 +57,23 @@ class Settings(BaseSettings):
     # Data directory for JSON-persisted runtime state (control registry, etc.)
     data_dir: str = "./data"
 
+    # Secret vault backend: "fernet" (encrypted rows in the `secrets` table),
+    # "keyring" (OS keychain, requires the `keyring` package), or "env"
+    # (read-only, values come from NEXUS_SECRET_<REF> environment variables).
+    secret_backend: str = "fernet"
+
     # API Keys
     openai_api_key: str = ""
     anthropic_api_key: str = ""
+
+    # Code sandbox (Phase 3.1): "local", "e2b", or "judge0".
+    sandbox_backend: str = "local"
+    # Local subprocess execution runs untrusted code with host privileges.
+    # Must be opted into explicitly; every local run refuses while False.
+    allow_unsafe_local_execution: bool = False
+    e2b_api_key: str = ""
+    judge0_base_url: str = "https://judge0-ce.p.rapidapi.com"
+    judge0_api_key: str = ""
 
     # Application
     app_name: str = "NEXUS"

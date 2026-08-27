@@ -20,9 +20,11 @@ import logging
 import os
 import re
 import uuid
+from datetime import UTC
 from typing import Any
 
 from nexus.adapters.base import BaseAdapter
+from nexus.governance.ssrf_protection import guard_url as _guard_url
 from nexus.runtime.adapter import AgentSession, TaskResult
 
 logger = logging.getLogger(__name__)
@@ -118,7 +120,10 @@ class HermesAdapter(BaseAdapter):
         """
         # At minimum, we need a model specified or will use defaults
         # Either ollama_host or openrouter_api_key should be set
-        pass  # Hermes is flexible — will auto-detect available backend
+        # Hermes is flexible — will auto-detect available backend, but any
+        # caller-supplied host must still pass SSRF policy.
+        if config.get("ollama_host"):
+            _guard_url(config["ollama_host"], "ollama_host")
 
     def register_tool(self, name: str, handler: Any, schema: dict[str, Any] | None = None) -> None:
         """Register a tool that Hermes can call.
@@ -214,7 +219,6 @@ class HermesAdapter(BaseAdapter):
         Returns:
             TaskResult with the model's response and any tool execution results.
         """
-        import httpx
 
         prompt = payload.get("prompt", "")
         max_tool_rounds = payload.get("max_tool_rounds", 5)
@@ -456,10 +460,10 @@ class HermesAdapter(BaseAdapter):
             # Check expiry (basic check)
             expires_at = nous_provider.get("expires_at", "")
             if expires_at:
-                from datetime import datetime, timezone
+                from datetime import datetime
                 try:
                     exp = datetime.fromisoformat(expires_at)
-                    if exp < datetime.now(timezone.utc):
+                    if exp < datetime.now(UTC):
                         logger.warning("Nous Portal token expired at %s", expires_at)
                         return ""
                 except (ValueError, TypeError):
@@ -567,6 +571,15 @@ class HermesAdapter(BaseAdapter):
         """
         if name not in self._tool_registry:
             return {"error": f"Tool '{name}' not registered", "status": "not_found"}
+
+        # This loop is a real tool dispatch path, so it has to clear the same
+        # guardrails the ToolExecutor applies. A refusal is returned as a normal
+        # tool error so the model can see it and adapt.
+        from nexus.tools.factory import guard_tool_call
+
+        refusal = await guard_tool_call(name, arguments)
+        if refusal is not None:
+            return refusal
 
         handler = self._tool_registry[name]["handler"]
         try:

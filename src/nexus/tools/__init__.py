@@ -3,6 +3,18 @@
 from nexus.tools.registry import ToolRegistry, ToolDefinition
 from nexus.tools.mcp_client import MCPClient
 from nexus.tools.executor import ToolExecutor, ToolResult
+from nexus.tools.factory import (
+    build_autonomy_gate,
+    build_guardrail_chain,
+    build_tool_executor,
+)
+from nexus.tools.autonomy import (
+    AutonomyDecision,
+    AutonomyGate,
+    classify_action,
+    correlation_id,
+    db_policy_loader,
+)
 from nexus.tools.tool_catalog import (
     ToolKind,
     ToolSpec,
@@ -31,6 +43,14 @@ __all__ = [
     "MCPClient",
     "ToolExecutor",
     "ToolResult",
+    "build_autonomy_gate",
+    "build_guardrail_chain",
+    "build_tool_executor",
+    "AutonomyDecision",
+    "AutonomyGate",
+    "classify_action",
+    "correlation_id",
+    "db_policy_loader",
     "ToolKind",
     "ToolSpec",
     "BASE_TOOLS",

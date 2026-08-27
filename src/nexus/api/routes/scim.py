@@ -43,6 +43,25 @@ SCIM_SCHEMA_LIST = "urn:ietf:params:scim:api:messages:2.0:ListResponse"
 SCIM_DEFAULT_ROLE = "viewer"
 
 
+async def _scim_company_id(db: Any) -> uuid.UUID:
+    """The tenant SCIM operates on.
+
+    ``SCIM_BEARER_TOKEN`` is one global credential with no company in it, so the
+    tenant has to come from somewhere else — and the only defensible answer is
+    the same one :func:`create_user` already used to place provisioned users:
+    :func:`pick_setup_company`. Reading it here and filtering every query by it
+    is what keeps the read and write endpoints in the same tenant as the create
+    endpoint. Without the filter, ``GET /scim/v2/Users`` hands an IdP every
+    user row in the deployment, and ``PATCH`` could deactivate a user in a
+    company the IdP does not provision for.
+
+    A multi-tenant SCIM deployment needs a per-tenant token; that is a larger
+    change than Phase 5.2, and until it lands this keeps the endpoints honest
+    about operating on exactly one company.
+    """
+    return (await pick_setup_company(db)).id
+
+
 def _verify_scim_token(request: Request) -> None:
     expected = os.environ.get("SCIM_BEARER_TOKEN", "")
     if not expected:
@@ -100,8 +119,9 @@ async def list_users(
     filter: Optional[str] = None,
 ) -> dict[str, Any]:
     _verify_scim_token(request)
+    company_id = await _scim_company_id(db)
 
-    stmt = select(UserProfile)
+    stmt = select(UserProfile).where(UserProfile.company_id == company_id)
 
     if filter and 'userName eq' in filter:
         email = filter.split('"')[1] if '"' in filter else ""
@@ -133,7 +153,12 @@ async def get_user(
     db: DbSession,
 ) -> dict[str, Any]:
     _verify_scim_token(request)
-    result = await db.execute(select(UserProfile).where(UserProfile.id == user_id))
+    company_id = await _scim_company_id(db)
+    result = await db.execute(
+        select(UserProfile).where(
+            UserProfile.id == user_id, UserProfile.company_id == company_id
+        )
+    )
     user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -195,8 +220,13 @@ async def replace_user(
     db: DbSession,
 ) -> dict[str, Any]:
     _verify_scim_token(request)
+    company_id = await _scim_company_id(db)
 
-    result = await db.execute(select(UserProfile).where(UserProfile.id == user_id))
+    result = await db.execute(
+        select(UserProfile).where(
+            UserProfile.id == user_id, UserProfile.company_id == company_id
+        )
+    )
     user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -220,8 +250,13 @@ async def patch_user(
     db: DbSession,
 ) -> dict[str, Any]:
     _verify_scim_token(request)
+    company_id = await _scim_company_id(db)
 
-    result = await db.execute(select(UserProfile).where(UserProfile.id == user_id))
+    result = await db.execute(
+        select(UserProfile).where(
+            UserProfile.id == user_id, UserProfile.company_id == company_id
+        )
+    )
     user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -263,8 +298,13 @@ async def delete_user(
     db: DbSession,
 ) -> None:
     _verify_scim_token(request)
+    company_id = await _scim_company_id(db)
 
-    result = await db.execute(select(UserProfile).where(UserProfile.id == user_id))
+    result = await db.execute(
+        select(UserProfile).where(
+            UserProfile.id == user_id, UserProfile.company_id == company_id
+        )
+    )
     user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
