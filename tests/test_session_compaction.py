@@ -408,6 +408,18 @@ class TestModelCapabilityResolver:
         assert ModelCapabilityResolver.resolve("who-knows-1") == DEFAULT_LIMITS
         assert ModelCapabilityResolver.resolve(None) == DEFAULT_LIMITS
 
+    def test_small_window_models_do_not_inherit_the_128k_default(self) -> None:
+        """Models this repo's own adapters can call must not resolve larger than
+        they are -- the fallback is 128k, so a miss here silently lets compaction
+        keep more history than the model accepts and the call fails at dispatch.
+        """
+        for model, window in (
+            ("gpt-35-turbo", 16_385),          # azure_adapter.MODEL_PRICING key
+            ("gpt-3.5-turbo", 16_385),         # cost_tracker._MODEL_PRICING key
+            ("amazon.titan-text-express", 8_192),  # bedrock_adapter.MODEL_PRICING key
+        ):
+            assert ModelCapabilityResolver.resolve(model).context_window == window
+
 
 class TestResolveCompactionBudget:
     """Tests for budget derivation from a model's context window."""
