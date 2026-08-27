@@ -8,14 +8,22 @@ available context window. Supports three approaches:
   messages within the remaining budget.
 - SLIDING_WINDOW: Keeps the last N messages plus a context snippet from
   older messages limited to an overlap token budget.
+
+On top of those message-list strategies this module resolves the budget from
+the *model's* real context window (:func:`resolve_compaction_budget`) and
+supports incremental, multi-pass compaction with a monotonic message-ID
+watermark (:meth:`SessionCompactor.compact_incremental`). Oversized single
+messages raise :class:`MessageTooLargeError` rather than being silently
+truncated — losing part of a message without saying so corrupts the thread.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 
 from nexus.memory.token_counter import TokenCounter
+from nexus.models_router.capabilities import ModelCapabilityResolver
 
 
 class CompactionStrategy(Enum):
@@ -50,6 +58,123 @@ class CompactionConfig:
     window_size: int = 10
     overlap_tokens: int = 256
     summary_ratio: float = 0.3
+
+
+# Default reserve for the model's own response when resolving a budget from
+# the model's context window.
+DEFAULT_OUTPUT_RESERVE_TOKENS = 4096
+
+# Fraction of the usable window compaction is allowed to fill. Leaves headroom
+# for the estimator being wrong — it is a character-ratio approximation.
+DEFAULT_THRESHOLD_RATIO = 0.8
+
+
+class MessageTooLargeError(Exception):
+    """A single message does not fit in the compaction budget.
+
+    Raised instead of truncating, so the caller decides how to handle content
+    loss rather than discovering it downstream.
+    """
+
+    def __init__(self, index: int, message_tokens: int, budget: int) -> None:
+        self.index = index
+        self.message_tokens = message_tokens
+        self.budget = budget
+        super().__init__(
+            f"Message at index {index} needs {message_tokens} tokens but the "
+            f"compaction budget is {budget}; it cannot be summarized without "
+            f"silent truncation."
+        )
+
+
+def resolve_compaction_budget(
+    model: str | None,
+    *,
+    system_prompt_tokens: int = 0,
+    tool_schema_tokens: int = 0,
+    output_reserve_tokens: int = DEFAULT_OUTPUT_RESERVE_TOKENS,
+    threshold_ratio: float = DEFAULT_THRESHOLD_RATIO,
+) -> int:
+    """Resolve the token budget available to conversation history.
+
+    ``(context_window - system_prompt - tool_schemas - reserve) * ratio``. The
+    reserve is clamped to the model's own ``max_output`` — reserving more than
+    the model can ever emit only wastes history room.
+
+    Args:
+        model: Model identifier; resolved via ``ModelCapabilityResolver``.
+        system_prompt_tokens: Tokens consumed by the system prompt.
+        tool_schema_tokens: Tokens consumed by tool/function schemas.
+        output_reserve_tokens: Tokens held back for the response.
+        threshold_ratio: Fraction of the remainder to actually use (0-1].
+
+    Returns:
+        The history budget in tokens, never negative.
+    """
+    limits = ModelCapabilityResolver.resolve(model)
+    reserve = min(max(0, output_reserve_tokens), limits.max_output)
+    usable = (
+        limits.context_window
+        - max(0, system_prompt_tokens)
+        - max(0, tool_schema_tokens)
+        - reserve
+    )
+    if usable <= 0:
+        return 0
+    return int(usable * max(0.0, min(1.0, threshold_ratio)))
+
+
+@dataclass
+class CompactionSummary:
+    """Structured five-field summary of one batch of compacted messages.
+
+    Attributes:
+        topics: What the batch was about.
+        decisions: Conclusions reached.
+        actions: Work performed or tools invoked.
+        open_items: Unresolved questions or pending work.
+        facts: Concrete details worth carrying forward.
+    """
+
+    topics: list[str] = field(default_factory=list)
+    decisions: list[str] = field(default_factory=list)
+    actions: list[str] = field(default_factory=list)
+    open_items: list[str] = field(default_factory=list)
+    facts: list[str] = field(default_factory=list)
+
+    def render(self) -> str:
+        """Render the summary as a labelled block for injection as a message."""
+        sections = (
+            ("Topics", self.topics),
+            ("Decisions", self.decisions),
+            ("Actions", self.actions),
+            ("Open", self.open_items),
+            ("Facts", self.facts),
+        )
+        lines = [
+            f"{label}: {'; '.join(values)}"
+            for label, values in sections
+            if values
+        ]
+        if not lines:
+            return "[Summary] (no salient content)"
+        return "[Summary]\n" + "\n".join(lines)
+
+
+@dataclass
+class CompactionPass:
+    """One incremental compaction pass.
+
+    Attributes:
+        summary: The five-field summary of the messages in this pass.
+        watermark: ID of the last message covered by this pass. Monotonically
+            increasing across passes.
+        message_count: Number of messages folded into this pass.
+    """
+
+    summary: CompactionSummary
+    watermark: str
+    message_count: int
 
 
 class SessionCompactor:
@@ -100,6 +225,147 @@ class SessionCompactor:
             )
         else:
             return list(messages)
+
+    def compact_incremental(
+        self,
+        messages: list[dict],
+        budget: int,
+        *,
+        since_watermark: str | None = None,
+    ) -> list[CompactionPass]:
+        """Compact a thread into successive batches, each fitting the budget.
+
+        Greedily fills a batch until the next message would push it over
+        ``budget``, emits a five-field summary for that batch, advances the
+        watermark to the batch's last message ID, and repeats with the
+        remainder. A thread far larger than the budget therefore yields several
+        passes with a monotonically increasing watermark.
+
+        Message IDs come from the ``"id"`` key; messages without one get their
+        positional index as ID so the watermark stays well defined.
+
+        Args:
+            messages: Full ordered message list.
+            budget: Token budget per batch (see :func:`resolve_compaction_budget`).
+            since_watermark: Resume point. Messages up to and including this ID
+                are skipped; passing an unknown ID processes nothing.
+
+        Returns:
+            One :class:`CompactionPass` per batch, in order.
+
+        Raises:
+            MessageTooLargeError: A single message exceeds ``budget``.
+            ValueError: ``budget`` is not positive.
+        """
+        if budget <= 0:
+            raise ValueError(f"budget must be positive, got {budget}")
+        if not messages:
+            return []
+
+        indexed = [
+            (str(msg.get("id", i)), i, msg) for i, msg in enumerate(messages)
+        ]
+
+        if since_watermark is not None:
+            resume_at = len(indexed)
+            for mid, i, _ in indexed:
+                if mid == since_watermark:
+                    resume_at = i + 1
+                    break
+            indexed = indexed[resume_at:]
+
+        passes: list[CompactionPass] = []
+        batch: list[tuple[str, int, dict]] = []
+        batch_tokens = 0
+
+        for mid, i, msg in indexed:
+            msg_tokens = self._counter.estimate_tokens(msg.get("content", ""))
+            if msg_tokens > budget:
+                raise MessageTooLargeError(i, msg_tokens, budget)
+
+            if batch and batch_tokens + msg_tokens > budget:
+                passes.append(self._make_pass(batch))
+                batch = []
+                batch_tokens = 0
+
+            batch.append((mid, i, msg))
+            batch_tokens += msg_tokens
+
+        if batch:
+            passes.append(self._make_pass(batch))
+
+        return passes
+
+    def _make_pass(self, batch: list[tuple[str, int, dict]]) -> CompactionPass:
+        """Build a pass from a filled batch, watermarked at its last message."""
+        batch_messages = [msg for _, _, msg in batch]
+        return CompactionPass(
+            summary=self.summarize_structured(batch_messages),
+            watermark=batch[-1][0],
+            message_count=len(batch),
+        )
+
+    def summarize_structured(self, messages: list[dict]) -> CompactionSummary:
+        """Build a five-field summary from messages without calling an LLM.
+
+        Classifies each message's leading sentence by keyword into decisions,
+        actions, open items, or facts, and uses user-turn openers as topics.
+
+        Args:
+            messages: Messages to summarize.
+
+        Returns:
+            The populated :class:`CompactionSummary`.
+        """
+        # ponytail: keyword heuristic, no LLM. Swap in an LLM summarizer here if
+        # summary quality ever matters more than determinism and zero cost.
+        summary = CompactionSummary()
+
+        for msg in messages:
+            content = (msg.get("content") or "").strip()
+            if not content:
+                continue
+
+            excerpt = self._leading_sentence(content)
+            lowered = excerpt.lower()
+            role = msg.get("role", "")
+
+            if any(
+                k in lowered
+                for k in ("decided", "decision", "we will", "agreed", "chose")
+            ):
+                summary.decisions.append(excerpt)
+            elif any(
+                k in lowered
+                for k in ("ran ", "created", "updated", "deleted", "called", "fixed")
+            ):
+                summary.actions.append(excerpt)
+            elif excerpt.endswith("?") or any(
+                k in lowered for k in ("todo", "pending", "blocked", "unresolved")
+            ):
+                summary.open_items.append(excerpt)
+            elif role == "user":
+                summary.topics.append(excerpt)
+            else:
+                summary.facts.append(excerpt)
+
+        return summary
+
+    @staticmethod
+    def _leading_sentence(content: str, max_chars: int = 160) -> str:
+        """Return the first sentence of ``content``, capped at ``max_chars``."""
+        cut = min(
+            (pos for pos in (content.find(c) for c in ".!?") if pos != -1),
+            default=-1,
+        )
+        if 0 <= cut < max_chars:
+            return content[: cut + 1].strip()
+
+        excerpt = content[:max_chars]
+        last_space = excerpt.rfind(" ")
+        if last_space > 20:
+            excerpt = excerpt[:last_space]
+        return excerpt.strip()
 
     def _truncate(self, messages: list[dict], max_tokens: int) -> list[dict]:
         """Keep the newest messages that fit within the token budget.

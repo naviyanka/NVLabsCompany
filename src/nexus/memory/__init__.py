@@ -14,6 +14,7 @@ from nexus.memory.layered import (
     LayeredMemoryStore,
     MemoryLayer,
 )
+from nexus.memory.layered_persistent import PersistentLayeredMemory
 from nexus.memory.extract import ExtractionRule, FactExtractor
 from nexus.memory.dedup import (
     jaccard_similarity,
@@ -25,8 +26,12 @@ from nexus.memory.semantic import EmbeddingModel, SemanticMemoryManager
 from nexus.memory.token_counter import TokenCounter
 from nexus.memory.compaction import (
     CompactionConfig,
+    CompactionPass,
     CompactionStrategy,
+    CompactionSummary,
+    MessageTooLargeError,
     SessionCompactor,
+    resolve_compaction_budget,
 )
 
 __all__ = [
@@ -40,6 +45,7 @@ __all__ = [
     "LayeredMemoryConfig",
     "LayeredMemoryStore",
     "MemoryLayer",
+    "PersistentLayeredMemory",
     "ExtractionRule",
     "FactExtractor",
     "jaccard_similarity",
@@ -51,6 +57,10 @@ __all__ = [
     "SemanticMemoryManager",
     "TokenCounter",
     "CompactionConfig",
+    "CompactionPass",
     "CompactionStrategy",
+    "CompactionSummary",
+    "MessageTooLargeError",
     "SessionCompactor",
+    "resolve_compaction_budget",
 ]
