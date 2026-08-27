@@ -18,12 +18,10 @@ import {
 } from './movementEngine';
 
 interface OpenOffice2DViewProps {
-  viewMode: '2d' | '3d';
-  onViewModeChange: (mode: '2d' | '3d') => void;
   realAgents?: Agent[];
 }
 
-export function OpenOffice2DView({ viewMode, onViewModeChange, realAgents }: OpenOffice2DViewProps) {
+export function OpenOffice2DView({ realAgents }: OpenOffice2DViewProps) {
   const [agents, setAgents] = useState<Agent2D[]>(() => {
     return realAgents && realAgents.length > 0
       ? convertRealAgentsTo2D(realAgents)
@@ -215,8 +213,6 @@ export function OpenOffice2DView({ viewMode, onViewModeChange, realAgents }: Ope
     <div className="h-full flex flex-col relative bg-[#070709] overflow-hidden">
       {/* Top Toolbar */}
       <OpenOfficeToolbar
-        viewMode={viewMode}
-        onViewModeChange={onViewModeChange}
         simSpeed={simSpeed}
         onSimSpeedChange={setSimSpeed}
         lighting={lighting}

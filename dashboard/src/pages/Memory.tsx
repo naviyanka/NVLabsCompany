@@ -5,18 +5,14 @@ import {
   Database,
   Search,
   Plus,
-  RefreshCw,
   Sparkles,
   Share2,
-  Zap,
-  Cpu,
-  Copy,
-  Check,
+  Users,
   BarChart3,
   Trash2,
   ChevronRight,
   Sliders,
-  CheckCircle2,
+  AlertTriangle,
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -35,17 +31,32 @@ import { Modal } from '@/components/common/Modal';
 import { Drawer } from '@/components/common/Drawer';
 import { apiClient } from '@/api/client';
 import { getActiveCompanyId } from '@/config';
+import { listAgents } from '@/api/agents';
+import type { Agent } from '@/types/agent';
 
 export interface MemoryRecord {
   id: string;
-  agent_id: string;
+  agent_id: string | null;
   scope: string;
   content: string;
   importance: number;
-  decay_rate: number;
-  associated_nodes: string[];
+  access_count: number;
+  tier: string;
   created_at: string;
-  raw_embedding?: number[];
+}
+
+interface MemoryStats {
+  total: number;
+  by_tier: Record<string, number>;
+  by_scope: Record<string, number>;
+  avg_importance: number;
+  agents_with_memory: number;
+}
+
+interface MemoryHealth {
+  stale_count: number;
+  low_relevance_count: number;
+  duplicates_estimate: number;
 }
 
 const SCOPE_COLORS: Record<string, string> = {
@@ -54,126 +65,106 @@ const SCOPE_COLORS: Record<string, string> = {
   guidelines: 'bg-[#22C55E]/15 text-[#22C55E] border-[#22C55E]/30',
   episodic_reflection: 'bg-[#A855F7]/15 text-[#A855F7] border-[#A855F7]/30',
   system_rule: 'bg-[#F43F5E]/15 text-[#F43F5E] border-[#F43F5E]/30',
+  agent: 'bg-white/10 text-gray-300 border-white/20',
 };
 
-const INITIAL_MEMORIES: MemoryRecord[] = [];
+const TIER_COLORS: Record<string, string> = {
+  hot: 'text-rose-400',
+  warm: 'text-[#FFB020]',
+  cold: 'text-[#6B6B6E]',
+};
 
 export function Memory() {
   const navigate = useNavigate();
-  const [memories, setMemories] = useState<MemoryRecord[]>(INITIAL_MEMORIES);
+  const [memories, setMemories] = useState<MemoryRecord[]>([]);
+  const [agents, setAgents] = useState<Agent[]>([]);
+  const [stats, setStats] = useState<MemoryStats | null>(null);
+  const [health, setHealth] = useState<MemoryHealth | null>(null);
   const [search, setSearch] = useState('');
   const [selectedScope, setSelectedScope] = useState<string>('all');
   const [selectedAgent, setSelectedAgent] = useState<string>('all');
   const [minImportance, setMinImportance] = useState<number>(0);
   const [selectedMemory, setSelectedMemory] = useState<MemoryRecord | null>(null);
   const [showModal, setShowModal] = useState(false);
-  const [compacting, setCompacting] = useState(false);
-  const [compactMsg, setCompactMsg] = useState<string | null>(null);
-  const [viewMode, setViewMode] = useState<'list' | 'hnsw' | 'analytics'>('list');
-  const [copiedId, setCopiedId] = useState(false);
+  const [viewMode, setViewMode] = useState<'list' | 'table' | 'analytics'>('list');
+  const [loading, setLoading] = useState(true);
 
   // New Memory Form
-  const [newAgent, setNewAgent] = useState('Dwight (QA Lead)');
+  const [newAgentId, setNewAgentId] = useState('');
   const [newScope, setNewScope] = useState('task_context');
   const [newContent, setNewContent] = useState('');
   const [newImportance, setNewImportance] = useState(0.85);
 
-  useEffect(() => {
-    async function loadMemories() {
-      try {
-        const companyId = getActiveCompanyId();
-        const res = await apiClient.get<MemoryRecord[]>(
-          `/api/v1/companies/${companyId}/memories`
-        );
-        const items = res;
-        if (items.length > 0) {
-          const formatted = items.map((item: any, i: number) => ({
-            ...item,
-            decay_rate: item.decay_rate || 0.03,
-            associated_nodes: item.associated_nodes || [`node_${i + 100}`],
-            raw_embedding: item.raw_embedding || Array.from({ length: 8 }, () => Math.round((Math.random() * 2 - 1) * 1000) / 1000),
-          }));
-          setMemories(formatted);
-        }
-      } catch {
-        // Fallback to initial memories if API error
-      }
-    }
-    loadMemories();
-  }, []);
+  const agentMap = useMemo(() => {
+    const map: Record<string, Agent> = {};
+    agents.forEach((a) => { map[a.id] = a; });
+    return map;
+  }, [agents]);
 
-  const handleCompact = async () => {
-    setCompacting(true);
-    setCompactMsg(null);
+  const agentLabel = useCallback(
+    (agentId: string | null) => {
+      if (!agentId) return 'Company-wide';
+      return agentMap[agentId]?.name || agentId;
+    },
+    [agentMap]
+  );
+
+  const loadAll = useCallback(async () => {
+    setLoading(true);
+    const companyId = getActiveCompanyId();
     try {
-      await new Promise((r) => setTimeout(r, 1200));
-      // Deduplicate memories & recalculate HNSW weights
-      setMemories((prev) => {
-        const unique = prev.filter((m, idx, self) => self.findIndex((t) => t.content === m.content) === idx);
-        return unique.map((m) => ({ ...m, importance: Math.min(1.0, m.importance + 0.02) }));
-      });
-      setCompactMsg('Vector graph compacted: Merged 0 duplicates, HNSW recall optimized to 99.8%');
-      setTimeout(() => setCompactMsg(null), 4000);
+      const [memRes, agentsRes, statsRes, healthRes] = await Promise.all([
+        apiClient.get<MemoryRecord[]>(`/api/v1/companies/${companyId}/memory`),
+        listAgents(),
+        apiClient.get<MemoryStats>(`/api/v1/companies/${companyId}/memory/stats`),
+        apiClient.get<MemoryHealth>(`/api/v1/companies/${companyId}/memory/health`),
+      ]);
+      setMemories(memRes);
+      setAgents(agentsRes);
+      setStats(statsRes);
+      setHealth(healthRes);
+      if (!newAgentId && agentsRes.length > 0) setNewAgentId(agentsRes[0]?.id ?? '');
+    } catch {
+      // Leave existing state as-is; the page will show its empty states.
     } finally {
-      setCompacting(false);
+      setLoading(false);
     }
-  };
+  }, [newAgentId]);
+
+  useEffect(() => {
+    loadAll();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleCreateMemory = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newContent.trim()) return;
-    try {
-      const created = await apiClient.post<MemoryRecord>(
-        `/api/v1/companies/${getActiveCompanyId()}/memories`,
-        {
-          agent_id: newAgent,
-          scope: newScope,
-          content: newContent,
-          importance: Number(newImportance),
-        }
-      );
-      const formatted: MemoryRecord = {
-        ...created,
-        id: created.id || `mem-${Date.now()}`,
-        decay_rate: 0.02,
-        associated_nodes: [`node_${Date.now()}`],
-        raw_embedding: Array.from({ length: 8 }, () => Math.round((Math.random() * 2 - 1) * 1000) / 1000),
-      };
-      setMemories((prev) => [formatted, ...prev]);
-      setShowModal(false);
-      setNewContent('');
-    } catch {
-      // Local creation fallback
-      const local: MemoryRecord = {
-        id: `mem-${Date.now()}`,
-        agent_id: newAgent,
+    if (!newContent.trim() || !newAgentId) return;
+    const created = await apiClient.post<MemoryRecord>(
+      `/api/v1/agents/${newAgentId}/memory`,
+      {
         scope: newScope,
         content: newContent,
         importance: Number(newImportance),
-        decay_rate: 0.02,
-        associated_nodes: [`node_${Date.now()}`],
-        created_at: new Date().toISOString(),
-        raw_embedding: Array.from({ length: 8 }, () => Math.round((Math.random() * 2 - 1) * 1000) / 1000),
-      };
-      setMemories((prev) => [local, ...prev]);
-      setShowModal(false);
-      setNewContent('');
-    }
+      }
+    );
+    setMemories((prev) => [created, ...prev]);
+    setShowModal(false);
+    setNewContent('');
   };
 
-  const handleDeleteMemory = useCallback((id: string) => {
+  const handleDeleteMemory = useCallback(async (id: string) => {
+    await apiClient.delete(`/api/v1/memory/${id}`);
     setMemories((prev) => prev.filter((m) => m.id !== id));
-    if (selectedMemory?.id === id) setSelectedMemory(null);
-  }, [selectedMemory]);
+    setSelectedMemory((prev) => (prev?.id === id ? null : prev));
+  }, []);
 
-  // Extract unique agents
-  const agentList = useMemo(() => {
-    const set = new Set<string>();
-    memories.forEach((m) => set.add(m.agent_id));
-    return Array.from(set);
+  // Distinct agents that actually have memories, for the filter row
+  const agentFilterList = useMemo(() => {
+    const ids = new Set<string>();
+    memories.forEach((m) => { if (m.agent_id) ids.add(m.agent_id); });
+    return Array.from(ids);
   }, [memories]);
 
-  // Filtered Memory Records
   const filtered = useMemo(() => {
     return memories.filter((m) => {
       if (selectedScope !== 'all' && m.scope !== selectedScope) return false;
@@ -183,21 +174,14 @@ export function Memory() {
         const q = search.toLowerCase();
         return (
           m.content.toLowerCase().includes(q) ||
-          m.agent_id.toLowerCase().includes(q) ||
+          agentLabel(m.agent_id).toLowerCase().includes(q) ||
           m.scope.toLowerCase().includes(q) ||
           m.id.toLowerCase().includes(q)
         );
       }
       return true;
     });
-  }, [memories, search, selectedScope, selectedAgent, minImportance]);
-
-  // Analytics Metrics
-  const avgImportance = useMemo(() => {
-    if (memories.length === 0) return '0%';
-    const avg = memories.reduce((acc, curr) => acc + curr.importance, 0) / memories.length;
-    return `${(avg * 100).toFixed(1)}%`;
-  }, [memories]);
+  }, [memories, search, selectedScope, selectedAgent, minImportance, agentLabel]);
 
   const importanceDistChartData = useMemo(() => {
     const high = memories.filter((m) => m.importance >= 0.85).length;
@@ -213,11 +197,11 @@ export function Memory() {
   const agentMemoryChartData = useMemo(() => {
     const counts: Record<string, number> = {};
     memories.forEach((m) => {
-      const shortName = (m.agent_id || 'Agent').split(' ')[0] || m.agent_id || 'Agent';
-      counts[shortName] = (counts[shortName] || 0) + 1;
+      const label = agentLabel(m.agent_id);
+      counts[label] = (counts[label] || 0) + 1;
     });
     return Object.entries(counts).map(([name, count]) => ({ name, count }));
-  }, [memories]);
+  }, [memories, agentLabel]);
 
   return (
     <div className="space-y-6">
@@ -226,15 +210,12 @@ export function Memory() {
         <div>
           <div className="flex items-center gap-2">
             <Brain className="w-5 h-5 text-[#FFB020]" />
-            <h1 className="text-xl font-display font-medium text-[#F2F1EE] tracking-tight flex items-center gap-3">
-              Episodic Memory Bank & HNSW Vector Index
-              <span className="text-xs px-2.5 py-0.5 rounded-full font-mono bg-blue-500/10 text-blue-400 border border-blue-500/20">
-                384-DIM HNSW
-              </span>
+            <h1 className="text-xl font-display font-medium text-[#F2F1EE] tracking-tight">
+              Agent Memory
             </h1>
           </div>
           <p className="text-xs font-mono text-[#6B6B6E] mt-1">
-            Long-term associative context, cross-session vector memories, and importance weighting
+            Long-term and task context memories stored per agent and company-wide
           </p>
         </div>
 
@@ -247,20 +228,20 @@ export function Memory() {
               className={`px-2.5 py-1 rounded-[4px] text-xs font-mono flex items-center gap-1.5 transition-colors cursor-pointer ${
                 viewMode === 'list' ? 'bg-[#FFB020] text-black font-semibold' : 'text-gray-400 hover:text-white'
               }`}
-              title="Memory Bank Cards"
+              title="Memory Cards"
             >
               <Brain size={13} />
-              <span className="hidden sm:inline">Bank</span>
+              <span className="hidden sm:inline">Cards</span>
             </button>
             <button
-              onClick={() => setViewMode('hnsw')}
+              onClick={() => setViewMode('table')}
               className={`px-2.5 py-1 rounded-[4px] text-xs font-mono flex items-center gap-1.5 transition-colors cursor-pointer ${
-                viewMode === 'hnsw' ? 'bg-[#FFB020] text-black font-semibold' : 'text-gray-400 hover:text-white'
+                viewMode === 'table' ? 'bg-[#FFB020] text-black font-semibold' : 'text-gray-400 hover:text-white'
               }`}
-              title="HNSW Vector Table"
+              title="Memory Table"
             >
               <Database size={13} />
-              <span className="hidden sm:inline">HNSW Index</span>
+              <span className="hidden sm:inline">Table</span>
             </button>
             <button
               onClick={() => setViewMode('analytics')}
@@ -284,67 +265,43 @@ export function Memory() {
           </Button>
 
           <Button
-            variant="secondary"
-            size="sm"
-            icon={<RefreshCw size={14} className={compacting ? 'animate-spin' : ''} />}
-            loading={compacting}
-            onClick={handleCompact}
-          >
-            Compact Graph
-          </Button>
-
-          <Button
             variant="primary"
             size="sm"
             icon={<Plus size={15} />}
             onClick={() => setShowModal(true)}
+            disabled={agents.length === 0}
           >
             Record Memory
           </Button>
         </div>
       </div>
 
-      {/* Compaction Success Feedback Banner */}
-      {compactMsg && (
-        <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-[8px] flex items-center gap-2 text-xs font-mono text-emerald-400 animate-fadeIn">
-          <CheckCircle2 size={15} />
-          <span>{compactMsg}</span>
-        </div>
-      )}
-
       {/* Stat Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard
           label="Total Memory Entries"
-          value={memories.length}
-          subValue="Episodic Vector Nodes"
-          change="Dense HNSW Graph"
-          changeType="positive"
+          value={stats?.total ?? memories.length}
+          subValue="Across all tiers"
           icon={<Database className="w-4 h-4 text-[#FFB020]" />}
         />
         <StatCard
           label="Avg Importance Weight"
-          value={avgImportance}
-          subValue="Cross-session Priority"
-          change="Optimal Retain"
-          changeType="positive"
+          value={`${Math.round((stats?.avg_importance ?? 0) * 100)}%`}
+          subValue="Cross-session priority"
           icon={<Sparkles className="w-4 h-4 text-emerald-400" />}
         />
         <StatCard
-          label="Cosine Recall Score"
-          value="99.8%"
-          subValue="Sub-8ms Latency"
-          change="Zero Drift"
-          changeType="positive"
-          icon={<Zap className="w-4 h-4 text-cyan-400" />}
+          label="Agents With Memory"
+          value={stats?.agents_with_memory ?? 0}
+          subValue={`of ${agents.length} total agents`}
+          icon={<Users className="w-4 h-4 text-cyan-400" />}
         />
         <StatCard
-          label="Compaction Ratio"
-          value="4.2 : 1"
-          subValue="Lossless Pruning"
-          change="Clean context"
-          changeType="neutral"
-          icon={<Brain className="w-4 h-4 text-purple-400" />}
+          label="Stale Entries (>90d)"
+          value={health?.stale_count ?? 0}
+          subValue={`${health?.low_relevance_count ?? 0} low relevance`}
+          changeType={health && health.stale_count > 0 ? 'negative' : 'neutral'}
+          icon={<AlertTriangle className="w-4 h-4 text-amber-400" />}
         />
       </div>
 
@@ -358,14 +315,14 @@ export function Memory() {
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search memory text, agent, vector ID, or scope..."
+              placeholder="Search memory text, agent, id, or scope..."
               className="w-full pl-8 pr-3 py-1.5 bg-[#141416] border border-white/[0.08] rounded-[6px] text-xs text-[#F2F1EE] placeholder-[#6B6B6E] focus:outline-none focus:border-[#FFB020] transition-colors"
             />
           </div>
 
           {/* Scope Filters */}
           <div className="flex flex-wrap items-center gap-1.5">
-            {['all', 'task_context', 'long_term', 'guidelines', 'episodic_reflection', 'system_rule'].map((scope) => (
+            {['all', 'task_context', 'long_term', 'guidelines', 'episodic_reflection', 'system_rule', 'agent'].map((scope) => (
               <button
                 key={scope}
                 onClick={() => setSelectedScope(scope)}
@@ -384,9 +341,9 @@ export function Memory() {
         {/* Secondary Filter: Agent & Importance Threshold Slider */}
         <div className="flex flex-wrap items-center justify-between gap-3 pt-2.5 border-t border-white/[0.06] text-xs font-mono">
           {/* Agent Filter */}
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <span className="text-[10px] text-[#6B6B6E] uppercase flex items-center gap-1">
-              <Cpu size={12} /> Agent:
+              <Users size={12} /> Agent:
             </span>
             <button
               onClick={() => setSelectedAgent('all')}
@@ -396,17 +353,17 @@ export function Memory() {
             >
               All Agents
             </button>
-            {agentList.map((agent) => (
+            {agentFilterList.map((agentId) => (
               <button
-                key={agent}
-                onClick={() => setSelectedAgent(agent)}
+                key={agentId}
+                onClick={() => setSelectedAgent(agentId)}
                 className={`px-2 py-0.5 rounded text-[10px] transition-colors cursor-pointer ${
-                  selectedAgent === agent
+                  selectedAgent === agentId
                     ? 'bg-[#FFB020]/20 text-[#FFB020] border border-[#FFB020]/30 font-bold'
                     : 'text-[#6B6B6E] hover:text-gray-300'
                 }`}
               >
-                {(agent || 'Agent').split(' ')[0]}
+                {agentLabel(agentId).split(' ')[0]}
               </button>
             ))}
           </div>
@@ -431,174 +388,184 @@ export function Memory() {
         </div>
       </div>
 
-      {/* View Mode Content */}
-      {viewMode === 'list' && (
-        <div className="space-y-3">
-          {filtered.length === 0 ? (
-            <div className="p-8 text-center bg-[#141416] border border-white/[0.08] rounded-[8px]">
-              <Brain className="w-8 h-8 mx-auto text-gray-500 mb-2" />
-              <p className="text-xs font-mono text-gray-400">No matching episodic memory entries found</p>
-            </div>
-          ) : (
-            filtered.map((mem) => {
-              const scopeBadgeStyle = SCOPE_COLORS[mem.scope] || 'bg-white/10 text-gray-300 border-white/20';
-              const importancePct = Math.round(mem.importance * 100);
+      {loading ? (
+        <div className="p-8 text-center bg-[#141416] border border-white/[0.08] rounded-[8px]">
+          <p className="text-xs font-mono text-gray-400">Loading memories…</p>
+        </div>
+      ) : (
+        <>
+          {/* View Mode Content */}
+          {viewMode === 'list' && (
+            <div className="space-y-3">
+              {filtered.length === 0 ? (
+                <div className="p-8 text-center bg-[#141416] border border-white/[0.08] rounded-[8px]">
+                  <Brain className="w-8 h-8 mx-auto text-gray-500 mb-2" />
+                  <p className="text-xs font-mono text-gray-400">No matching memory entries found</p>
+                </div>
+              ) : (
+                filtered.map((mem) => {
+                  const scopeBadgeStyle = SCOPE_COLORS[mem.scope] || 'bg-white/10 text-gray-300 border-white/20';
+                  const importancePct = Math.round(mem.importance * 100);
 
-              return (
-                <div
-                  key={mem.id}
-                  onClick={() => setSelectedMemory(mem)}
-                  className="p-4 bg-[#141416] border border-white/[0.08] hover:border-[#FFB020]/40 rounded-[10px] transition-all cursor-pointer group flex flex-col justify-between"
-                >
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between gap-2 flex-wrap">
-                      <div className="flex items-center gap-2 text-xs font-mono">
-                        <span className={`px-2 py-0.5 text-[10px] font-bold rounded border uppercase ${scopeBadgeStyle}`}>
-                          {mem.scope.replace('_', ' ')}
-                        </span>
-                        <span className="text-[#6B6B6E]">·</span>
-                        <span className="text-white font-medium">Agent: <span className="text-[#FFB020]">{mem.agent_id}</span></span>
-                      </div>
+                  return (
+                    <div
+                      key={mem.id}
+                      onClick={() => setSelectedMemory(mem)}
+                      className="p-4 bg-[#141416] border border-white/[0.08] hover:border-[#FFB020]/40 rounded-[10px] transition-all cursor-pointer group flex flex-col justify-between"
+                    >
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between gap-2 flex-wrap">
+                          <div className="flex items-center gap-2 text-xs font-mono">
+                            <span className={`px-2 py-0.5 text-[10px] font-bold rounded border uppercase ${scopeBadgeStyle}`}>
+                              {mem.scope.replace('_', ' ')}
+                            </span>
+                            <span className="text-[#6B6B6E]">·</span>
+                            <span className="text-white font-medium">Agent: <span className="text-[#FFB020]">{agentLabel(mem.agent_id)}</span></span>
+                          </div>
 
-                      {/* Importance Bar */}
-                      <div className="flex items-center gap-2">
-                        <div className="w-24 h-2 bg-[#0A0A0C] rounded-full overflow-hidden border border-white/[0.08]">
-                          <div
-                            className={`h-full transition-all ${
-                              importancePct >= 85 ? 'bg-emerald-500' : importancePct >= 60 ? 'bg-[#FFB020]' : 'bg-rose-500'
-                            }`}
-                            style={{ width: `${importancePct}%` }}
-                          />
+                          {/* Importance Bar */}
+                          <div className="flex items-center gap-2">
+                            <div className="w-24 h-2 bg-[#0A0A0C] rounded-full overflow-hidden border border-white/[0.08]">
+                              <div
+                                className={`h-full transition-all ${
+                                  importancePct >= 85 ? 'bg-emerald-500' : importancePct >= 60 ? 'bg-[#FFB020]' : 'bg-rose-500'
+                                }`}
+                                style={{ width: `${importancePct}%` }}
+                              />
+                            </div>
+                            <span className="text-[11px] font-mono font-bold text-emerald-400 min-w-[45px] text-right">
+                              {importancePct}% Weight
+                            </span>
+                          </div>
                         </div>
-                        <span className="text-[11px] font-mono font-bold text-emerald-400 min-w-[45px] text-right">
-                          {importancePct}% Weight
+
+                        <p className="text-xs text-[#F2F1EE] font-sans leading-relaxed pt-1">
+                          {mem.content}
+                        </p>
+                      </div>
+
+                      <div className="mt-3 pt-2.5 border-t border-white/[0.06] flex items-center justify-between text-[10px] font-mono text-[#6B6B6E]">
+                        <div className="flex items-center gap-3">
+                          <span>ID: <strong className="text-gray-300">{mem.id.slice(0, 8)}</strong></span>
+                          <span>·</span>
+                          <span className={TIER_COLORS[mem.tier] || ''}>Tier: {mem.tier}</span>
+                          <span>·</span>
+                          <span>Accessed: {mem.access_count}x</span>
+                        </div>
+                        <span className="text-[#FFB020] group-hover:underline flex items-center gap-1 font-medium">
+                          Inspect <ChevronRight size={12} />
                         </span>
                       </div>
                     </div>
+                  );
+                })
+              )}
+            </div>
+          )}
 
-                    <p className="text-xs text-[#F2F1EE] font-sans leading-relaxed pt-1">
-                      {mem.content}
-                    </p>
-                  </div>
+          {/* Table View */}
+          {viewMode === 'table' && (
+            <div className="bg-[#101012] border border-white/[0.08] rounded-[10px] overflow-hidden shadow-2xl">
+              <div className="p-3.5 border-b border-white/[0.08] flex items-center justify-between bg-[#141416]">
+                <span className="text-xs font-mono text-gray-300 font-bold">Memory Records</span>
+                <span className="text-[10px] font-mono text-gray-500">{filtered.length} Entries</span>
+              </div>
 
-                  <div className="mt-3 pt-2.5 border-t border-white/[0.06] flex items-center justify-between text-[10px] font-mono text-[#6B6B6E]">
-                    <div className="flex items-center gap-3">
-                      <span>Node ID: <strong className="text-gray-300">{mem.id}</strong></span>
-                      <span>·</span>
-                      <span>Decay: {mem.decay_rate}</span>
-                    </div>
-                    <span className="text-[#FFB020] group-hover:underline flex items-center gap-1 font-medium">
-                      Inspect Vector <ChevronRight size={12} />
-                    </span>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse text-xs font-mono">
+                  <thead>
+                    <tr className="bg-[#0A0A0C] border-b border-white/[0.08] text-gray-400 text-[10px] uppercase">
+                      <th className="p-3">ID</th>
+                      <th className="p-3">Scope</th>
+                      <th className="p-3">Agent</th>
+                      <th className="p-3">Importance</th>
+                      <th className="p-3">Tier</th>
+                      <th className="p-3">Access Count</th>
+                      <th className="p-3 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-white/[0.04] text-gray-300">
+                    {filtered.map((mem) => (
+                      <tr key={mem.id} className="hover:bg-white/[0.04] transition-colors">
+                        <td className="p-3 font-bold text-[#FFB020]">{mem.id.slice(0, 8)}</td>
+                        <td className="p-3">
+                          <span className="px-1.5 py-0.5 rounded text-[9px] uppercase border bg-white/[0.04] border-white/[0.08]">
+                            {mem.scope}
+                          </span>
+                        </td>
+                        <td className="p-3 text-white">{agentLabel(mem.agent_id)}</td>
+                        <td className="p-3 text-emerald-400 font-bold">{(mem.importance * 100).toFixed(0)}%</td>
+                        <td className={`p-3 ${TIER_COLORS[mem.tier] || 'text-gray-400'}`}>{mem.tier}</td>
+                        <td className="p-3 text-gray-400">{mem.access_count}</td>
+                        <td className="p-3 text-right">
+                          <button
+                            onClick={() => setSelectedMemory(mem)}
+                            className="px-2 py-1 bg-white/[0.06] hover:bg-white/[0.1] text-[#FFB020] rounded text-[10px] transition-colors cursor-pointer"
+                          >
+                            View
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* Analytics Dashboard View */}
+          {viewMode === 'analytics' && (
+            <div className="space-y-6">
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                {/* Importance Distribution Chart */}
+                <div className="bg-[#101012] border border-white/[0.08] rounded-[10px] p-5">
+                  <h3 className="text-sm font-display font-medium text-[#F2F1EE] mb-4 flex items-center gap-2">
+                    <BarChart3 className="w-4 h-4 text-[#FFB020]" />
+                    Memory Importance Weight Distribution
+                  </h3>
+                  <div className="h-64">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Pie data={importanceDistChartData} innerRadius={50} outerRadius={80} paddingAngle={4} dataKey="value">
+                          {importanceDistChartData.map((entry, index) => (
+                            <Cell key={`cell-${index}`} fill={entry.color} />
+                          ))}
+                        </Pie>
+                        <RechartsTooltip contentStyle={{ backgroundColor: '#1C1C1F', borderRadius: '8px', fontSize: '11px' }} />
+                      </PieChart>
+                    </ResponsiveContainer>
                   </div>
                 </div>
-              );
-            })
+
+                {/* Agent Memory Breakdown Chart */}
+                <div className="bg-[#101012] border border-white/[0.08] rounded-[10px] p-5">
+                  <h3 className="text-sm font-display font-medium text-[#F2F1EE] mb-4 flex items-center gap-2">
+                    <Users className="w-4 h-4 text-blue-400" />
+                    Memories Stored per Agent
+                  </h3>
+                  <div className="h-64">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={agentMemoryChartData}>
+                        <XAxis dataKey="name" stroke="#6B6B6E" fontSize={10} />
+                        <YAxis stroke="#6B6B6E" fontSize={10} />
+                        <RechartsTooltip contentStyle={{ backgroundColor: '#1C1C1F', borderRadius: '8px', fontSize: '11px' }} />
+                        <Bar dataKey="count" name="Memories" fill="#38BDF8" radius={[4, 4, 0, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+              </div>
+            </div>
           )}
-        </div>
+        </>
       )}
 
-      {/* HNSW Vector Table View */}
-      {viewMode === 'hnsw' && (
-        <div className="bg-[#101012] border border-white/[0.08] rounded-[10px] overflow-hidden shadow-2xl">
-          <div className="p-3.5 border-b border-white/[0.08] flex items-center justify-between bg-[#141416]">
-            <span className="text-xs font-mono text-gray-300 font-bold">HNSW Dense Vector Index Table (384 Dimensions)</span>
-            <span className="text-[10px] font-mono text-gray-500">{filtered.length} Vectors Registered</span>
-          </div>
-
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse text-xs font-mono">
-              <thead>
-                <tr className="bg-[#0A0A0C] border-b border-white/[0.08] text-gray-400 text-[10px] uppercase">
-                  <th className="p-3">Vector ID</th>
-                  <th className="p-3">Scope</th>
-                  <th className="p-3">Agent</th>
-                  <th className="p-3">Importance</th>
-                  <th className="p-3">Decay</th>
-                  <th className="p-3">Associated Nodes</th>
-                  <th className="p-3 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-white/[0.04] text-gray-300">
-                {filtered.map((mem) => (
-                  <tr key={mem.id} className="hover:bg-white/[0.04] transition-colors">
-                    <td className="p-3 font-bold text-[#FFB020]">{mem.id}</td>
-                    <td className="p-3">
-                      <span className="px-1.5 py-0.5 rounded text-[9px] uppercase border bg-white/[0.04] border-white/[0.08]">
-                        {mem.scope}
-                      </span>
-                    </td>
-                    <td className="p-3 text-white">{mem.agent_id}</td>
-                    <td className="p-3 text-emerald-400 font-bold">{(mem.importance * 100).toFixed(0)}%</td>
-                    <td className="p-3 text-gray-400">{mem.decay_rate}</td>
-                    <td className="p-3 text-gray-400 text-[10px]">{mem.associated_nodes.join(', ')}</td>
-                    <td className="p-3 text-right">
-                      <button
-                        onClick={() => setSelectedMemory(mem)}
-                        className="px-2 py-1 bg-white/[0.06] hover:bg-white/[0.1] text-[#FFB020] rounded text-[10px] transition-colors cursor-pointer"
-                      >
-                        View Vector
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
-      {/* Analytics Dashboard View */}
-      {viewMode === 'analytics' && (
-        <div className="space-y-6">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Importance Distribution Chart */}
-            <div className="bg-[#101012] border border-white/[0.08] rounded-[10px] p-5">
-              <h3 className="text-sm font-display font-medium text-[#F2F1EE] mb-4 flex items-center gap-2">
-                <BarChart3 className="w-4 h-4 text-[#FFB020]" />
-                Memory Importance Weight Distribution
-              </h3>
-              <div className="h-64">
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie data={importanceDistChartData} innerRadius={50} outerRadius={80} paddingAngle={4} dataKey="value">
-                      {importanceDistChartData.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={entry.color} />
-                      ))}
-                    </Pie>
-                    <RechartsTooltip contentStyle={{ backgroundColor: '#1C1C1F', borderRadius: '8px', fontSize: '11px' }} />
-                  </PieChart>
-                </ResponsiveContainer>
-              </div>
-            </div>
-
-            {/* Agent Memory Breakdown Chart */}
-            <div className="bg-[#101012] border border-white/[0.08] rounded-[10px] p-5">
-              <h3 className="text-sm font-display font-medium text-[#F2F1EE] mb-4 flex items-center gap-2">
-                <Cpu className="w-4 h-4 text-blue-400" />
-                Episodic Memories Stored per Agent
-              </h3>
-              <div className="h-64">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={agentMemoryChartData}>
-                    <XAxis dataKey="name" stroke="#6B6B6E" fontSize={10} />
-                    <YAxis stroke="#6B6B6E" fontSize={10} />
-                    <RechartsTooltip contentStyle={{ backgroundColor: '#1C1C1F', borderRadius: '8px', fontSize: '11px' }} />
-                    <Bar dataKey="count" name="Memories" fill="#38BDF8" radius={[4, 4, 0, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Memory Vector Inspection Drawer */}
+      {/* Memory Inspection Drawer */}
       <Drawer
         isOpen={!!selectedMemory}
         onClose={() => setSelectedMemory(null)}
-        title={`Memory Node Trace #${selectedMemory?.id}`}
-        subtitle={`Scope: ${selectedMemory?.scope} · Agent: ${selectedMemory?.agent_id}`}
+        title={`Memory Record`}
+        subtitle={selectedMemory ? `Scope: ${selectedMemory.scope} · Agent: ${agentLabel(selectedMemory.agent_id)}` : ''}
       >
         {selectedMemory && (
           <div className="space-y-4">
@@ -611,57 +578,31 @@ export function Memory() {
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-3 text-xs font-mono">
+            <div className="grid grid-cols-3 gap-3 text-xs font-mono">
               <div className="p-3 bg-[#101012] border border-white/[0.06] rounded-[6px]">
-                <div className="text-[10px] text-[#6B6B6E] uppercase">Importance Weight</div>
+                <div className="text-[10px] text-[#6B6B6E] uppercase">Importance</div>
                 <div className="text-emerald-400 font-bold text-sm mt-1">
                   {(selectedMemory.importance * 100).toFixed(0)}%
                 </div>
               </div>
 
               <div className="p-3 bg-[#101012] border border-white/[0.06] rounded-[6px]">
-                <div className="text-[10px] text-[#6B6B6E] uppercase">Decay Rate</div>
-                <div className="text-amber-400 font-bold text-sm mt-1">
-                  {selectedMemory.decay_rate} / cycle
+                <div className="text-[10px] text-[#6B6B6E] uppercase">Tier</div>
+                <div className={`font-bold text-sm mt-1 ${TIER_COLORS[selectedMemory.tier] || 'text-gray-300'}`}>
+                  {selectedMemory.tier}
+                </div>
+              </div>
+
+              <div className="p-3 bg-[#101012] border border-white/[0.06] rounded-[6px]">
+                <div className="text-[10px] text-[#6B6B6E] uppercase">Access Count</div>
+                <div className="text-cyan-400 font-bold text-sm mt-1">
+                  {selectedMemory.access_count}
                 </div>
               </div>
             </div>
 
-            {/* Raw Vector Embedding Preview */}
-            <div>
-              <div className="flex items-center justify-between mb-1">
-                <label className="text-[10px] font-mono text-[#6B6B6E] uppercase">
-                  Raw 384-Dim Vector Slice
-                </label>
-                <button
-                  onClick={() => {
-                    navigator.clipboard.writeText(JSON.stringify(selectedMemory.raw_embedding || [], null, 2));
-                    setCopiedId(true);
-                    setTimeout(() => setCopiedId(false), 2000);
-                  }}
-                  className="text-[10px] font-mono text-[#FFB020] hover:underline flex items-center gap-1 cursor-pointer"
-                >
-                  {copiedId ? <Check size={12} /> : <Copy size={12} />}
-                  <span>{copiedId ? 'Copied Vector' : 'Copy Vector'}</span>
-                </button>
-              </div>
-              <pre className="p-3 bg-[#101012] border border-white/[0.06] rounded-[6px] text-[11px] font-mono text-[#A8A8AB] overflow-x-auto">
-                {JSON.stringify(selectedMemory.raw_embedding || [0.042, -0.128, 0.384, 0.091], null, 2)}
-              </pre>
-            </div>
-
-            {/* Associated Graph Nodes */}
-            <div>
-              <label className="text-[10px] font-mono text-[#6B6B6E] uppercase block mb-1">
-                Connected Knowledge Graph Nodes
-              </label>
-              <div className="flex flex-wrap gap-1.5">
-                {selectedMemory.associated_nodes.map((node) => (
-                  <span key={node} className="px-2 py-1 bg-[#FFB020]/10 border border-[#FFB020]/20 text-[#FFB020] rounded text-xs font-mono">
-                    #{node}
-                  </span>
-                ))}
-              </div>
+            <div className="text-[10px] font-mono text-[#6B6B6E]">
+              Created {new Date(selectedMemory.created_at).toLocaleString()}
             </div>
 
             {/* Drawer Actions */}
@@ -682,8 +623,8 @@ export function Memory() {
         )}
       </Drawer>
 
-      {/* Record Episodic Memory Modal */}
-      <Modal isOpen={showModal} onClose={() => setShowModal(false)} title="Record Episodic Memory">
+      {/* Record Memory Modal */}
+      <Modal isOpen={showModal} onClose={() => setShowModal(false)} title="Record Memory">
         <form onSubmit={handleCreateMemory} className="space-y-4">
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -691,18 +632,15 @@ export function Memory() {
                 Target Agent
               </label>
               <select
-                value={newAgent}
-                onChange={(e) => setNewAgent(e.target.value)}
+                value={newAgentId}
+                onChange={(e) => setNewAgentId(e.target.value)}
                 className="w-full px-3 py-2 bg-[#141416] border border-white/[0.12] rounded-[6px] text-xs text-[#F2F1EE] focus:outline-none focus:border-[#FFB020]"
               >
-                <option value="Dwight (QA Lead)">Dwight (QA Lead)</option>
-                <option value="Angela (Budget Auditor)">Angela (Budget Auditor)</option>
-                <option value="Jim (PR Reviewer)">Jim (PR Reviewer)</option>
-                <option value="Ryan (DevOps Lead)">Ryan (DevOps Lead)</option>
-                <option value="Toby (Compliance Officer)">Toby (Compliance Officer)</option>
-                <option value="Creed (Security Specialist)">Creed (Security Specialist)</option>
-                <option value="Kevin (Data Engineer)">Kevin (Data Engineer)</option>
-                <option value="Pam (Docs & Comms)">Pam (Docs & Comms)</option>
+                {agents.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.name} ({a.title})
+                  </option>
+                ))}
               </select>
             </div>
 
@@ -758,7 +696,7 @@ export function Memory() {
               Cancel
             </Button>
             <Button variant="primary" size="sm" type="submit">
-              Store In Graph
+              Store Memory
             </Button>
           </div>
         </form>

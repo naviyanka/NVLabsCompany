@@ -15,13 +15,9 @@ import {
   ZoomIn,
   ZoomOut,
   Search,
-  Box,
-  Layout,
 } from 'lucide-react';
 
 interface OpenOfficeToolbarProps {
-  viewMode: '2d' | '3d';
-  onViewModeChange: (mode: '2d' | '3d') => void;
   simSpeed: SimSpeed;
   onSimSpeedChange: (speed: SimSpeed) => void;
   lighting: LightingMode;
@@ -40,8 +36,6 @@ interface OpenOfficeToolbarProps {
 }
 
 export function OpenOfficeToolbar({
-  viewMode,
-  onViewModeChange,
   simSpeed,
   onSimSpeedChange,
   lighting,
@@ -67,34 +61,7 @@ export function OpenOfficeToolbar({
 
   return (
     <header className="h-14 px-4 bg-[#0A0A0B]/95 backdrop-blur border-b border-white/[0.08] flex items-center justify-between gap-3 shrink-0 z-20 select-none">
-      {/* Left: View Mode Switcher (2D Pixel vs 3D Isometric) & Title */}
       <div className="flex items-center gap-3">
-        <div className="flex items-center p-1 rounded-lg bg-white/[0.04] border border-white/[0.08]">
-          <button
-            onClick={() => onViewModeChange('2d')}
-            className={`px-3 py-1 rounded-md text-xs font-mono font-bold flex items-center gap-1.5 transition-all ${
-              viewMode === '2d'
-                ? 'bg-[#FFB020] text-black shadow-sm'
-                : 'text-[#9C9C9F] hover:text-white hover:bg-white/[0.04]'
-            }`}
-          >
-            <Layout className="w-3.5 h-3.5" />
-            2D OpenOffice (Pixel)
-          </button>
-          <button
-            onClick={() => onViewModeChange('3d')}
-            className={`px-3 py-1 rounded-md text-xs font-mono font-bold flex items-center gap-1.5 transition-all ${
-              viewMode === '3d'
-                ? 'bg-[#FFB020] text-black shadow-sm'
-                : 'text-[#9C9C9F] hover:text-white hover:bg-white/[0.04]'
-            }`}
-          >
-            <Box className="w-3.5 h-3.5" />
-            3D Studio
-          </button>
-        </div>
-
-        {/* Global Dispatch Orchestration Actions */}
         <div className="hidden lg:flex items-center gap-1.5 pl-2 border-l border-white/[0.08]">
           <button
             onClick={onAllHands}

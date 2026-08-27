@@ -10,8 +10,6 @@
     "lint": "tsc --noEmit"
   },
   "dependencies": {
-    "@react-three/drei": "^10.7.8",
-    "@react-three/fiber": "^9.7.0",
     "@types/d3": "^7.4.3",
     "d3": "^7.9.0",
     "express": "^4.21.2",
@@ -21,8 +19,7 @@
     "react-dom": "^19.0.0",
     "react-router-dom": "^7.0.0",
     "reactflow": "^11.11.4",
-    "recharts": "^2.13.0",
-    "three": "^0.185.1"
+    "recharts": "^2.13.0"
   },
   "devDependencies": {
     "@types/express": "^5.0.0",
