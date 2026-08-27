@@ -80,7 +80,7 @@ The button today fakes success client-side.
 - U7.2 UI: buttons in Settings → Backup/Restore (or a new tab).
 - **Check:** export → import into a fresh company reproduces it with no secret leakage.
 
-### Phase U8 — Adapter coverage / MCP server surface · UI later · LOW
+### Phase U8 — Adapter coverage / MCP server surface · UI · LOW · DONE
 - U8.1 A read-only "Adapters" view listing the 11 registered adapters and which the cascade
   router covers.
 - U8.2 (Optional) MCP-server exposure toggle + per-company tool scoping.
@@ -125,4 +125,7 @@ unusable from UI; audit verify is a correctness lie). U4–U6 second. U7–U8 la
       secret values scrubbed, downloads JSON). Import works into a FRESH db (its design); into
       the same db it returns a graceful 409 (unique constraint, e.g. user email) rather than a
       500. NOTE: dev DB needed 2 more columns reconciled (tasks.goal_id, tasks.completion_reason).
-- [ ] U8 Adapter coverage / MCP surface
+- [x] U8 Adapter coverage — read-only Adapters view added to the Tools page, wired to the
+      existing GET /api/v1/adapters and GET /api/v1/adapters/cli-backends. Verified 200:
+      shows 11 execution adapters + 5/8 CLI backends installed. (MCP-server self-expose
+      toggle deferred — the MCP server module exists but is run standalone, not toggled here.)

@@ -1,31 +1,33 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
-import {
-  Wrench,
-  Plus,
-  ShieldCheck,
-  Terminal,
-  Search,
-  Download,
-  Play,
-  CheckCircle2,
-  Server,
-  Code,
-  Database,
-  Activity,
-  FileCode,
-  Lock,
-  Github,
-} from 'lucide-react';
-import { Card } from '@/components/common/Card';
-import { StatCard } from '@/components/common/StatCard';
-import { Button } from '@/components/common/Button';
+import { apiClient } from '@/api/client';
 import { Badge } from '@/components/common/Badge';
-import { Modal } from '@/components/common/Modal';
+import { Button } from '@/components/common/Button';
+import { Card } from '@/components/common/Card';
 import { Drawer } from '@/components/common/Drawer';
+import { Modal } from '@/components/common/Modal';
+import { StatCard } from '@/components/common/StatCard';
 import { Table } from '@/components/common/Table';
 import { GitHubConnectorModal } from '@/components/git/GitHubConnectorModal';
-import { apiClient } from '@/api/client';
+import { AdaptersPanel } from '@/components/tools/AdaptersPanel';
 import { getActiveCompanyId } from '@/config';
+import {
+  Activity,
+  Boxes,
+  CheckCircle2,
+  Code,
+  Database,
+  Download,
+  FileCode,
+  Github,
+  Lock,
+  Play,
+  Plus,
+  Search,
+  Server,
+  ShieldCheck,
+  Terminal,
+  Wrench,
+} from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 export interface ExtendedToolItem {
   id: string;
@@ -48,7 +50,7 @@ export function Tools() {
   const [tools, setTools] = useState<ExtendedToolItem[]>(DEFAULT_TOOLS);
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
-  const [viewMode, setViewMode] = useState<'grid' | 'testbench' | 'security'>('grid');
+  const [viewMode, setViewMode] = useState<'grid' | 'testbench' | 'security' | 'adapters'>('grid');
   const [showModal, setShowModal] = useState(false);
   const [isGitHubModalOpen, setIsGitHubModalOpen] = useState(false);
   const [selectedTool, setSelectedTool] = useState<ExtendedToolItem | null>(null);
@@ -230,9 +232,8 @@ export function Tools() {
           <div className="flex items-center bg-[#101012] border border-white/[0.08] rounded-[6px] p-0.5">
             <button
               onClick={() => setViewMode('grid')}
-              className={`px-2.5 py-1 rounded-[4px] text-xs font-mono flex items-center gap-1.5 transition-colors cursor-pointer ${
-                viewMode === 'grid' ? 'bg-[#FFB020] text-black font-semibold' : 'text-gray-400 hover:text-white'
-              }`}
+              className={`px-2.5 py-1 rounded-[4px] text-xs font-mono flex items-center gap-1.5 transition-colors cursor-pointer ${viewMode === 'grid' ? 'bg-[#FFB020] text-black font-semibold' : 'text-gray-400 hover:text-white'
+                }`}
               title="Connectors Grid"
             >
               <Wrench size={13} />
@@ -240,9 +241,8 @@ export function Tools() {
             </button>
             <button
               onClick={() => setViewMode('testbench')}
-              className={`px-2.5 py-1 rounded-[4px] text-xs font-mono flex items-center gap-1.5 transition-colors cursor-pointer ${
-                viewMode === 'testbench' ? 'bg-[#FFB020] text-black font-semibold' : 'text-gray-400 hover:text-white'
-              }`}
+              className={`px-2.5 py-1 rounded-[4px] text-xs font-mono flex items-center gap-1.5 transition-colors cursor-pointer ${viewMode === 'testbench' ? 'bg-[#FFB020] text-black font-semibold' : 'text-gray-400 hover:text-white'
+                }`}
               title="Interactive Test Bench"
             >
               <Terminal size={13} />
@@ -250,13 +250,21 @@ export function Tools() {
             </button>
             <button
               onClick={() => setViewMode('security')}
-              className={`px-2.5 py-1 rounded-[4px] text-xs font-mono flex items-center gap-1.5 transition-colors cursor-pointer ${
-                viewMode === 'security' ? 'bg-[#FFB020] text-black font-semibold' : 'text-gray-400 hover:text-white'
-              }`}
+              className={`px-2.5 py-1 rounded-[4px] text-xs font-mono flex items-center gap-1.5 transition-colors cursor-pointer ${viewMode === 'security' ? 'bg-[#FFB020] text-black font-semibold' : 'text-gray-400 hover:text-white'
+                }`}
               title="Sandbox Security Policies"
             >
               <ShieldCheck size={13} />
               <span className="hidden sm:inline">Security</span>
+            </button>
+            <button
+              onClick={() => setViewMode('adapters')}
+              className={`px-2.5 py-1 rounded-[4px] text-xs font-mono flex items-center gap-1.5 transition-colors cursor-pointer ${viewMode === 'adapters' ? 'bg-[#FFB020] text-black font-semibold' : 'text-gray-400 hover:text-white'
+                }`}
+              title="Execution Adapters & CLI Backends"
+            >
+              <Boxes size={13} />
+              <span className="hidden sm:inline">Adapters</span>
             </button>
           </div>
 
@@ -345,11 +353,10 @@ export function Tools() {
             <button
               key={cat}
               onClick={() => setCategoryFilter(cat)}
-              className={`px-2.5 py-1 rounded-[4px] text-xs font-mono transition-colors cursor-pointer ${
-                categoryFilter === cat
-                  ? 'bg-[#FFB020] text-black font-bold'
-                  : 'bg-[#141416] text-[#6B6B6E] hover:text-[#F2F1EE] border border-white/[0.08]'
-              }`}
+              className={`px-2.5 py-1 rounded-[4px] text-xs font-mono transition-colors cursor-pointer ${categoryFilter === cat
+                ? 'bg-[#FFB020] text-black font-bold'
+                : 'bg-[#141416] text-[#6B6B6E] hover:text-[#F2F1EE] border border-white/[0.08]'
+                }`}
             >
               {cat}
             </button>
@@ -366,10 +373,10 @@ export function Tools() {
                 <div className="flex items-center gap-2.5">
                   <div className="w-9 h-9 rounded-[6px] bg-white/[0.04] border border-white/[0.08] flex items-center justify-center text-[#FFB020]">
                     {tool.category === 'Source Control' ? <Code size={16} /> :
-                     tool.category === 'Database' ? <Database size={16} /> :
-                     tool.category === 'Monitoring' ? <Activity size={16} /> :
-                     tool.category === 'DevOps' ? <Server size={16} /> :
-                     <FileCode size={16} />}
+                      tool.category === 'Database' ? <Database size={16} /> :
+                        tool.category === 'Monitoring' ? <Activity size={16} /> :
+                          tool.category === 'DevOps' ? <Server size={16} /> :
+                            <FileCode size={16} />}
                   </div>
                   <div>
                     <h3 className="text-sm font-medium text-[#F2F1EE] line-clamp-1">{tool.name}</h3>
@@ -602,6 +609,9 @@ export function Tools() {
           </div>
         )}
       </Drawer>
+
+      {/* Execution Adapters & CLI Backends View */}
+      {viewMode === 'adapters' && <AdaptersPanel />}
 
       {/* Configure Tool Modal */}
       <Modal isOpen={showModal} onClose={() => setShowModal(false)} title="Configure Tool / MCP Connector">
