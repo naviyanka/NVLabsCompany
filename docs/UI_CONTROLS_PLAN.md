@@ -51,7 +51,7 @@ The button today fakes success client-side.
 - U3.2 UI: `handleVerifyMerkleChain` calls it and shows the real verdict (green/red).
 - **Check:** verify passes on a clean chain; a tampered row reports the break point.
 
-### Phase U4 — Secrets vault panel · UI only · MEDIUM
+### Phase U4 — Secrets vault panel · UI only · MEDIUM · DONE
 - U4.1 New Settings tab "Secrets Vault": list secrets (metadata only — name, category,
   version, expiry, revoked).
 - U4.2 Create secret (name, category, value, optional expiry) → POST `/api/v1/secrets`.
@@ -106,7 +106,9 @@ unusable from UI; audit verify is a correctness lie). U4–U6 second. U7–U8 la
       previous_hash/archived_at) via ALTER TABLE to reconcile schema with models.
 - [ ] U2 Triggers management
 - [ ] U3 Audit chain verify (backend + UI)
-- [ ] U4 Secrets vault panel
+- [x] U4 Secrets vault panel — new Settings tab; verified create (201), rotate (v1→v2),
+      list. Backend needs SECRET_KEY set (not dev default) or create/rotate return 503,
+      which the UI surfaces as a clear message.
 - [ ] U5 Skill access policy editor
 - [ ] U6 Watchdog / heartbeat panel (backend + UI)
 - [ ] U7 Company export/import

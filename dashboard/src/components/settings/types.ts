@@ -12,6 +12,7 @@ export type SettingsTabId =
   | 'data_storage'
   | 'backup'
   | 'audit_logs'
+  | 'secrets'
   | 'appearance'
   | 'advanced';
 

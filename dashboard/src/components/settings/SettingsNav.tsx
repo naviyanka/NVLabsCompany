@@ -1,22 +1,23 @@
-import { useState } from 'react';
 import {
-  Sliders,
-  User,
-  Shield,
-  Key,
-  Boxes,
-  Users,
-  ShieldCheck,
-  CreditCard,
-  Settings2,
   Bell,
+  Boxes,
+  CreditCard,
   Database,
-  RotateCcw,
   FileText,
+  Key,
+  Lock,
   Palette,
-  Terminal,
+  RotateCcw,
   Search,
+  Settings2,
+  Shield,
+  ShieldCheck,
+  Sliders,
+  Terminal,
+  User,
+  Users
 } from 'lucide-react';
+import { useState } from 'react';
 import type { SettingsTabId } from './types';
 
 interface SettingsNavProps {
@@ -68,6 +69,7 @@ const categoryGroups: NavCategoryGroup[] = [
       { id: 'data_storage', label: 'Data & Storage', icon: Database },
       { id: 'backup', label: 'Backup & Restore', icon: RotateCcw },
       { id: 'audit_logs', label: 'Audit Logs', icon: FileText },
+      { id: 'secrets', label: 'Secrets Vault', icon: Lock, badge: 'Live' },
       { id: 'appearance', label: 'Theme & Appearance', icon: Palette },
       { id: 'advanced', label: 'Advanced CLI & Tools', icon: Terminal },
     ],
@@ -118,20 +120,18 @@ export function SettingsNav({ activeTab, onSelectTab }: SettingsNavProps) {
                     id={`settings-tab-${cat.id}`}
                     type="button"
                     onClick={() => onSelectTab(cat.id)}
-                    className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-all duration-150 text-left cursor-pointer group relative ${
-                      isActive
-                        ? 'bg-[#1C1C1F] text-[#FFB020] shadow-sm border border-[#FFB020]/30 font-semibold'
-                        : 'text-[#A8A8AB] hover:text-[#F2F1EE] hover:bg-white/[0.03] border border-transparent'
-                    }`}
+                    className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-all duration-150 text-left cursor-pointer group relative ${isActive
+                      ? 'bg-[#1C1C1F] text-[#FFB020] shadow-sm border border-[#FFB020]/30 font-semibold'
+                      : 'text-[#A8A8AB] hover:text-[#F2F1EE] hover:bg-white/[0.03] border border-transparent'
+                      }`}
                   >
                     {isActive && (
                       <span className="absolute left-0 top-1.5 bottom-1.5 w-0.5 bg-[#FFB020] rounded-r" />
                     )}
                     <Icon
                       size={15}
-                      className={`shrink-0 transition-colors ${
-                        isActive ? 'text-[#FFB020]' : 'text-[#6B6B6E] group-hover:text-[#A8A8AB]'
-                      }`}
+                      className={`shrink-0 transition-colors ${isActive ? 'text-[#FFB020]' : 'text-[#6B6B6E] group-hover:text-[#A8A8AB]'
+                        }`}
                     />
                     <span className="flex-1 truncate">{cat.label}</span>
                     {cat.badge && (

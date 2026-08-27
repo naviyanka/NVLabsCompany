@@ -1,18 +1,19 @@
-import type { SettingsTabId } from './types';
-import { GeneralTab } from './tabs/GeneralTab';
-import { SecurityTab } from './tabs/SecurityTab';
-import { ApiKeysTab } from './tabs/ApiKeysTab';
-import { SystemConfigTab } from './tabs/SystemConfigTab';
-import { IntegrationsTab } from './tabs/IntegrationsTab';
-import { NotificationsTab } from './tabs/NotificationsTab';
-import { DataAuditTab } from './tabs/DataAuditTab';
-import { DataStorageTab } from './tabs/DataStorageTab';
-import { BackupRestoreTab } from './tabs/BackupRestoreTab';
-import { AuditLogsTab } from './tabs/AuditLogsTab';
+import { ProfileSettingsTab } from './ProfileSettingsTab';
 import { AdvancedCliToolsTab } from './tabs/AdvancedCliToolsTab';
 import { AgentBudgetsBillingTab } from './tabs/AgentBudgetsBillingTab';
+import { ApiKeysTab } from './tabs/ApiKeysTab';
+import { AuditLogsTab } from './tabs/AuditLogsTab';
+import { BackupRestoreTab } from './tabs/BackupRestoreTab';
+import { DataAuditTab } from './tabs/DataAuditTab';
+import { DataStorageTab } from './tabs/DataStorageTab';
+import { GeneralTab } from './tabs/GeneralTab';
+import { IntegrationsTab } from './tabs/IntegrationsTab';
+import { NotificationsTab } from './tabs/NotificationsTab';
+import { SecretsVaultTab } from './tabs/SecretsVaultTab';
+import { SecurityTab } from './tabs/SecurityTab';
+import { SystemConfigTab } from './tabs/SystemConfigTab';
 import { ThemeTab } from './tabs/ThemeTab';
-import { ProfileSettingsTab } from './ProfileSettingsTab';
+import type { SettingsTabId } from './types';
 
 interface OtherSettingsTabProps {
   activeTab: SettingsTabId;
@@ -41,6 +42,8 @@ export function OtherSettingsTabs({ activeTab, onSaveToast }: OtherSettingsTabPr
       return <BackupRestoreTab onSaveToast={onSaveToast} />;
     case 'audit_logs':
       return <AuditLogsTab onSaveToast={onSaveToast} />;
+    case 'secrets':
+      return <SecretsVaultTab onSaveToast={onSaveToast} />;
     case 'advanced':
       return <AdvancedCliToolsTab onSaveToast={onSaveToast} />;
     case 'billing':
