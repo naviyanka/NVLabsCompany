@@ -1,7 +1,7 @@
 """Persistent heartbeat service — DB-backed liveness with a Redis last-beat cache.
 
-Phase 1.3. Replaces the in-memory ``HeartbeatMonitor``/``HeartbeatService``
-dicts with rows in ``heartbeat_runs`` (``models/heartbeat_run.py``), a
+Phase 1.3. The only heartbeat implementation: liveness lives in
+``heartbeat_runs`` rows (``models/heartbeat_run.py``), with a
 state-backend cache for the hot last-beat read, wakeup coalescing so a burst
 of wakeups produces one run, and orphan reclaim on startup so a run whose
 process died is not left ``active`` forever.
