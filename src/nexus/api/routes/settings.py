@@ -8,7 +8,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 from sqlalchemy import select
 
-from nexus.api.deps import DbSession
+from nexus.api.deps import DbSession, PathCompanyId, RequireAdmin
 from nexus.models.settings import CompanySettings
 
 router = APIRouter(tags=["settings"])
@@ -62,7 +62,7 @@ class CompanySettingsUpdate(BaseModel):
 
 
 @router.get("/api/v1/companies/{company_id}/settings", response_model=CompanySettingsResponse)
-async def get_company_settings(company_id: uuid.UUID, db: DbSession) -> Any:
+async def get_company_settings(company_id: PathCompanyId, db: DbSession) -> Any:
     """Get company settings (creates defaults if none exist)."""
     stmt = select(CompanySettings).where(CompanySettings.company_id == company_id)
     result = await db.execute(stmt)
@@ -75,7 +75,9 @@ async def get_company_settings(company_id: uuid.UUID, db: DbSession) -> Any:
 
 
 @router.put("/api/v1/companies/{company_id}/settings", response_model=CompanySettingsResponse)
-async def update_company_settings(company_id: uuid.UUID, body: CompanySettingsUpdate, db: DbSession) -> Any:
+async def update_company_settings(
+    company_id: PathCompanyId, body: CompanySettingsUpdate, db: DbSession, principal: RequireAdmin
+) -> Any:
     """Update company settings."""
     stmt = select(CompanySettings).where(CompanySettings.company_id == company_id)
     result = await db.execute(stmt)

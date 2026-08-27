@@ -18,9 +18,9 @@ import {
 import { Card } from '@/components/common/Card';
 import { Button } from '@/components/common/Button';
 import { Badge } from '@/components/common/Badge';
-import { apiClient, unwrapItems } from '@/api/client';
+import { apiClient } from '@/api/client';
 import { getActiveCompanyId } from '@/config';
-import type { SkillItem, SkillSourceType } from '@/types/skill';
+import type { SkillItem } from '@/types/skill';
 import { AddSkillModal } from '@/components/skills/AddSkillModal';
 import { SkillDetailDrawer } from '@/components/skills/SkillDetailDrawer';
 
@@ -38,32 +38,33 @@ export function Skills() {
   // Modals & Drawers
   const [showAddModal, setShowAddModal] = useState(false);
   const [selectedSkill, setSelectedSkill] = useState<SkillItem | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     async function loadData() {
       try {
         const companyId = getActiveCompanyId();
-        const skillsRes = await apiClient.get<SkillItem[] | { items: SkillItem[] }>(
+        const skillsRes = await apiClient.get<SkillItem[]>(
           `/api/v1/companies/${companyId}/skills`
         );
-        const skillItems = unwrapItems(skillsRes);
+        const skillItems = skillsRes;
         if (skillItems.length) setSkills(skillItems);
 
-        const agentsRes = await apiClient.get<any[] | { items: any[] }>(
+        const agentsRes = await apiClient.get<any[]>(
           `/api/v1/companies/${companyId}/agents`
         );
-        const agentItems = unwrapItems(agentsRes);
+        const agentItems = agentsRes;
         if (agentItems.length) setAgents(agentItems);
 
-        const reposRes = await apiClient.get<any[] | { items: any[] }>(
+        const reposRes = await apiClient.get<any[]>(
           `/api/v1/companies/${companyId}/github/user-repos`
         ).catch(() => null);
         if (reposRes) {
-          const repoItems = unwrapItems(reposRes);
+          const repoItems = reposRes;
           if (repoItems.length) setGithubRepos(repoItems);
         }
-      } catch (err) {
-        console.error('Failed to load skills workspace data', err);
+      } catch (err: any) {
+        setLoadError(err?.detail || err?.message || 'Failed to load skills');
       }
     }
     loadData();
@@ -84,7 +85,7 @@ export function Skills() {
   };
 
   const filteredSkills = skills.filter((s) => {
-    if (selectedCategory !== 'all' && s.category.toLowerCase() !== selectedCategory.toLowerCase()) {
+    if (selectedCategory !== 'all' && (s.category ?? '').toLowerCase() !== selectedCategory.toLowerCase()) {
       return false;
     }
     if (selectedSource !== 'all' && s.source_type !== selectedSource) {
@@ -94,9 +95,9 @@ export function Skills() {
       const q = search.toLowerCase();
       return (
         s.name.toLowerCase().includes(q) ||
-        s.description.toLowerCase().includes(q) ||
-        s.category.toLowerCase().includes(q) ||
-        (s.author && s.author.toLowerCase().includes(q))
+        (s.description ?? '').toLowerCase().includes(q) ||
+        (s.category ?? '').toLowerCase().includes(q) ||
+        (s.author ?? '').toLowerCase().includes(q)
       );
     }
     return true;
@@ -104,11 +105,14 @@ export function Skills() {
 
   // Calculate top analytics stats
   const totalSkills = skills.length;
-  const equippedCount = skills.reduce((acc, s) => acc + (s.equipped_agents?.length || s.call_count_30d ? 1 : 0), 0);
-  const totalCalls30d = skills.reduce((acc, s) => acc + (s.call_count_30d || 0), 0);
+  const equippedCount = skills.reduce(
+    (acc, s) => acc + ((s.equipped_agents?.length ?? 0) > 0 ? 1 : 0),
+    0
+  );
+  const totalCalls30d = skills.reduce((acc, s) => acc + (s.call_count_30d ?? 0), 0);
   const avgSuccessRate = '99.4%';
 
-  const getSourceBadge = (source: SkillSourceType) => {
+  const getSourceBadge = (source: string) => {
     switch (source) {
       case 'zip':
         return (
@@ -162,6 +166,12 @@ export function Skills() {
           Add / Install Skill
         </Button>
       </div>
+
+      {loadError && (
+        <div className="p-3 rounded-[8px] bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs font-mono">
+          {loadError}
+        </div>
+      )}
 
       {/* Top Analytics Stats Grid */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
@@ -279,7 +289,7 @@ export function Skills() {
       {viewMode === 'grid' && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {filteredSkills.map((skill) => {
-            const agentCount = skill.equipped_agents?.length || skill.call_count_30d ? Math.max(1, skill.equipped_agents?.length || 2) : 0;
+            const agentCount = skill.equipped_agents?.length ?? 0;
             return (
               <Card
                 key={skill.id}
@@ -294,15 +304,15 @@ export function Skills() {
                         {skill.name}
                       </h3>
                       <div className="flex items-center gap-2">
-                        <Badge variant="active">{skill.category}</Badge>
-                        {getSourceBadge(skill.source_type)}
+                        <Badge variant="active">{skill.category ?? 'Uncategorized'}</Badge>
+                        {getSourceBadge(skill.source_type ?? '')}
                       </div>
                     </div>
                     <span className="text-[10px] font-mono text-[#6B6B6E]">v{skill.version}</span>
                   </div>
 
                   <p className="text-xs text-[#9C9C9F] mt-3 font-sans leading-relaxed line-clamp-3">
-                    {skill.description}
+                    {skill.description ?? 'No description provided.'}
                   </p>
                 </div>
 
@@ -311,7 +321,7 @@ export function Skills() {
                     <Users size={12} className="text-cyan-400" /> {agentCount} Agents Equipped
                   </span>
                   <span className="text-emerald-400 flex items-center gap-1 font-bold">
-                    <CheckCircle2 size={12} /> {skill.success_rate || '99.4%'}
+                    <CheckCircle2 size={12} /> {skill.success_rate ?? '—'}
                   </span>
                 </div>
               </Card>
@@ -343,20 +353,22 @@ export function Skills() {
                 >
                   <td className="py-3 px-4">
                     <div className="font-medium text-white group-hover:text-[#FFB020]">{skill.name}</div>
-                    <div className="text-[10px] text-gray-500 font-mono mt-0.5">{skill.category}</div>
+                    <div className="text-[10px] text-gray-500 font-mono mt-0.5">
+                      {skill.category ?? 'Uncategorized'}
+                    </div>
                   </td>
-                  <td className="py-3 px-4">{getSourceBadge(skill.source_type)}</td>
+                  <td className="py-3 px-4">{getSourceBadge(skill.source_type ?? '')}</td>
                   <td className="py-3 px-4 font-mono text-[11px]">
                     <div>v{skill.version}</div>
-                    <div className="text-[10px] text-gray-500">by {skill.author}</div>
+                    <div className="text-[10px] text-gray-500">by {skill.author ?? 'unknown'}</div>
                   </td>
                   <td className="py-3 px-4 font-mono text-cyan-400">
                     <span className="flex items-center gap-1">
-                      <Users size={12} /> {skill.equipped_agents?.length || 2} Agents
+                      <Users size={12} /> {skill.equipped_agents?.length ?? 0} Agents
                     </span>
                   </td>
                   <td className="py-3 px-4 font-mono text-[#FFB020]">
-                    {(skill.call_count_30d || 1420).toLocaleString()}
+                    {(skill.call_count_30d ?? 0).toLocaleString()}
                   </td>
                   <td className="py-3 px-4 text-right">
                     <Button variant="secondary" size="xs">

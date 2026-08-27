@@ -52,11 +52,10 @@ export function AuditLogsTab({ onSaveToast }: AuditLogsTabProps) {
   useEffect(() => {
     async function loadLogs() {
       try {
-        const res = await apiClient.get<{ items: AuditLogEntry[] }>(
+        const res = await apiClient.get<AuditLogEntry[]>(
           `/api/v1/companies/${getActiveCompanyId()}/audit-logs`
         );
-        const items = Array.isArray(res) ? res : (res?.items || []);
-        setLogs(items);
+        setLogs(res || []);
       } catch { }
     }
     loadLogs();
