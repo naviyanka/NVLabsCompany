@@ -5,13 +5,14 @@ import pytest
 from nexus.models_router.pricing import (
     DEFAULT_PRICE,
     GEMINI,
+    GEMINI_FLASH,
     GPT4O,
     GPT4O_MINI,
     HAIKU,
-    ModelPrice,
     O1,
     OPUS,
     SONNET,
+    ModelPrice,
     TokenSplit,
     estimate_cost_usd,
     normalize_model,
@@ -124,8 +125,12 @@ class TestPriceFor:
         assert price_for("o3") is O1
 
     def test_gemini(self) -> None:
-        assert price_for("gemini-2.0-flash") is GEMINI
         assert price_for("Gemini 3.1 Pro (High)") is GEMINI
+
+    def test_gemini_flash_is_cheaper_than_pro(self) -> None:
+        """Flash is an order of magnitude cheaper, so it needs its own row."""
+        assert price_for("gemini-2.0-flash") is GEMINI_FLASH
+        assert price_for("gemini-1.5-flash") is GEMINI_FLASH
 
     def test_unknown_fallback(self) -> None:
         assert price_for("unknown-model-xyz") is DEFAULT_PRICE

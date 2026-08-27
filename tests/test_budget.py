@@ -4,20 +4,14 @@ Tests real budget enforcement logic: threshold checks, spending limits,
 and cost computation based on model pricing tables.
 """
 
-import uuid
 import math
-from datetime import datetime, timezone
-
-import pytest
+import uuid
 
 from nexus.governance.budget_enforcer import (
-    BudgetEnforcer,
     BudgetDecision,
-    BudgetCheckResult,
-    CostEventRecord,
+    BudgetEnforcer,
 )
 from nexus.models_router.cost_tracker import CostTracker, InvocationRecord
-
 
 # ============================================================
 # BudgetEnforcer Tests
@@ -193,7 +187,13 @@ class TestCostTrackerPricing:
         assert cost == math.ceil(0.25 + 1.0)
 
     def test_get_cost_for_unknown_model(self):
-        """Unknown model uses default conservative pricing."""
+        """An unknown model falls through to the shared pricing table.
+
+        It used to get a local default of 0.1/0.3 cents per 1K, which was
+        cheaper than what the pre-flight budget guard charges for the same call,
+        so a refused call could still be recorded as affordable. It now resolves
+        through pricing.py, whose unknown-model fallback is Sonnet.
+        """
         tracker = CostTracker()
 
         cost = tracker.get_cost_for_invocation(
@@ -203,9 +203,9 @@ class TestCostTrackerPricing:
             output_tokens=1000,
         )
 
-        # Default: input=0.1, output=0.3 per 1000 tokens
-        # Expected: 0.1 + 0.3 = 0.4, ceil = 1 cent
-        assert cost == math.ceil(0.1 + 0.3)
+        # pricing.py's fallback is Sonnet at $3/M input, $15/M output:
+        # 1000 tokens each is $0.003 + $0.015 = $0.018, or 1.8 cents, ceil = 2
+        assert cost == 2
 
     def test_get_cost_for_free_model(self):
         """Local models (llama3, mistral) have zero cost."""

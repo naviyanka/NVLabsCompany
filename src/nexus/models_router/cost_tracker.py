@@ -2,9 +2,7 @@
 
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Any
-
+from datetime import UTC, datetime
 
 # Pricing per 1000 tokens in cents (USD)
 # Input/Output pricing for common models
@@ -56,7 +54,7 @@ class InvocationRecord:
     task_id: uuid.UUID | None = None
     company_id: uuid.UUID | None = None
     timestamp: datetime = field(
-        default_factory=lambda: datetime.now(timezone.utc)
+        default_factory=lambda: datetime.now(UTC)
     )
 
 
@@ -99,18 +97,26 @@ class CostTracker:
         Returns:
             Cost in cents (rounded up to nearest cent).
         """
-        model_pricing = self._pricing.get(model)
-        if not model_pricing:
-            # Default to a conservative estimate if model is unknown
-            model_pricing = {"input": 0.1, "output": 0.3}
-
-        input_cost = (input_tokens / 1000.0) * model_pricing["input"]
-        output_cost = (output_tokens / 1000.0) * model_pricing["output"]
-        total = input_cost + output_cost
-
-        # Round up to nearest cent
         import math
-        return int(math.ceil(total))
+
+        model_pricing = self._pricing.get(model)
+        if model_pricing:
+            input_cost = (input_tokens / 1000.0) * model_pricing["input"]
+            output_cost = (output_tokens / 1000.0) * model_pricing["output"]
+            return int(math.ceil(input_cost + output_cost))
+
+        # Unknown to this table: fall through to pricing.py, which matches by
+        # model family and is what the pre-flight budget check uses. Keeping a
+        # separate default here is how the two ended up disagreeing — the old
+        # one charged $1/M for input where pricing.py charges $3/M, so a call
+        # the guard refused could still be recorded as affordable.
+        from nexus.models_router.pricing import TokenSplit, estimate_cost_usd
+
+        usd = estimate_cost_usd(
+            model,
+            TokenSplit(input_tokens=input_tokens, output_tokens=output_tokens),
+        )
+        return int(math.ceil(usd * 100))
 
     def record_invocation(
         self,

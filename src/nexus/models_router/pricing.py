@@ -12,7 +12,7 @@ matched per model family. This is the ONE place per-model pricing lives.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
@@ -68,6 +68,18 @@ O1: ModelPrice = ModelPrice(
     cache_read_per_m=7.5,
     cache_write_per_m=0,
 )
+GPT4_TURBO: ModelPrice = ModelPrice(
+    input_per_m=10,
+    output_per_m=30,
+    cache_read_per_m=0,
+    cache_write_per_m=0,
+)
+GPT35_TURBO: ModelPrice = ModelPrice(
+    input_per_m=0.5,
+    output_per_m=1.5,
+    cache_read_per_m=0,
+    cache_write_per_m=0,
+)
 
 # ---------------------------------------------------------------------------
 # Google Gemini list prices (USD per million tokens)
@@ -76,6 +88,28 @@ GEMINI: ModelPrice = ModelPrice(
     input_per_m=1.25,
     output_per_m=5,
     cache_read_per_m=0.315,
+    cache_write_per_m=0,
+)
+# Priced at the 2.0 rate, which is the higher of the two Flash generations
+# (1.5 is $0.075/$0.30). One row covering both over-estimates 1.5 slightly, and
+# that is the safe direction: the budget guard refuses a little early rather
+# than admitting a call it cannot afford.
+GEMINI_FLASH: ModelPrice = ModelPrice(
+    input_per_m=0.1,
+    output_per_m=0.4,
+    cache_read_per_m=0.025,
+    cache_write_per_m=0,
+)
+
+# ---------------------------------------------------------------------------
+# Locally hosted (Ollama and similar): no per-token charge, but not free to run.
+# Priced at zero because that is what the provider bills; the budget guard is
+# about provider spend, not compute.
+# ---------------------------------------------------------------------------
+LOCAL: ModelPrice = ModelPrice(
+    input_per_m=0,
+    output_per_m=0,
+    cache_read_per_m=0,
     cache_write_per_m=0,
 )
 
@@ -112,10 +146,21 @@ def price_for(model: str | None) -> ModelPrice:
         return GPT4O_MINI
     if "gpt-4o" in m:
         return GPT4O
+    if "gpt-4" in m:
+        return GPT4_TURBO
+    # Azure's deployment id drops the dot, so both spellings have to match.
+    if "gpt-3.5" in m or "gpt-35" in m:
+        return GPT35_TURBO
     if "o1" in m or "o3" in m:
         return O1
+    # Flash before the general Gemini row: it is an order of magnitude cheaper,
+    # and "gemini-1.5-flash" contains "gemini".
+    if "flash" in m:
+        return GEMINI_FLASH
     if "gemini" in m:
         return GEMINI
+    if any(name in m for name in ("llama", "mistral", "mixtral", "qwen", "phi", "gemma")):
+        return LOCAL
     return DEFAULT_PRICE
 
 
