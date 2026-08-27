@@ -4,8 +4,12 @@ import uuid
 from datetime import timezone, datetime
 from typing import Any, Optional
 
+from pgvector.sqlalchemy import Vector
 from sqlalchemy import JSON
 from sqlmodel import Column, Field, SQLModel
+
+# OpenAI text-embedding-3-small width; the JSON variant is the SQLite dev fallback.
+EMBEDDING_DIM = 1536
 
 
 class KnowledgePage(SQLModel, table=True):
@@ -51,7 +55,8 @@ class KnowledgeChunk(SQLModel, table=True):
     chunk_index: int = Field(default=0)
     chunk_metadata: Optional[dict[str, Any]] = Field(default=None, sa_column=Column(JSON, name="metadata"))
     embedding_vector: Optional[list[float]] = Field(
-        default=None, sa_column=Column(JSON)
+        default=None,
+        sa_column=Column(Vector(EMBEDDING_DIM).with_variant(JSON(), "sqlite")),
     )
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
 

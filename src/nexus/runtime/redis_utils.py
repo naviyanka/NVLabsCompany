@@ -24,6 +24,41 @@ def get_redis_url() -> str | None:
     return os.environ.get("REDIS_URL")
 
 
+# Prefix for every key holding one tenant's data (Phase 5.2.3). One database is
+# shared by all tenants, so the prefix is the only thing separating them.
+TENANT_PREFIX = "tenant"
+
+
+def tenant_key(company_id: Any, *parts: Any) -> str:
+    """Build a Redis key namespaced to one company.
+
+    ``tenant_key(company_id, "ratelimit", "minute")`` gives
+    ``tenant:<company_id>:ratelimit:minute``.
+
+    Putting the company first rather than last is what makes the namespace
+    usable: ``SCAN tenant:<id>:*`` finds everything one tenant owns, which is
+    what deleting a company or debugging one tenant's limiter needs. With the
+    company buried mid-key, neither is possible without walking every key in the
+    database.
+
+    Args:
+        company_id: The tenant. Stringified, so a UUID or a str both work.
+        *parts: Further key segments, joined with ``:``.
+
+    Returns:
+        The full key.
+
+    Raises:
+        ValueError: If ``company_id`` is falsy. A key reading ``tenant:None:``
+            would be one shared bucket every tenant writes into, which is the
+            exact failure the prefix exists to prevent -- and it would look like
+            a working cache.
+    """
+    if not company_id:
+        raise ValueError("tenant_key() needs a company_id; refusing to build a shared key")
+    return ":".join([TENANT_PREFIX, str(company_id), *(str(p) for p in parts)])
+
+
 async def get_redis() -> Any:
     """Get the Redis async client, or None if Redis is not available.
 

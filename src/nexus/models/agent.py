@@ -60,6 +60,11 @@ class Agent(SQLModel, table=True):
     permissions: Optional[dict[str, Any]] = Field(
         default=None, sa_column=Column(JSON)
     )
+    # Phase 3.4 — per-action autonomy: {action_type: 1|2|3}, plus the optional
+    # "spend_above_cents" threshold below which a spending call is not gated.
+    autonomy_policy: Optional[dict[str, Any]] = Field(
+        default=None, sa_column=Column(JSON)
+    )
     soul_description: Optional[str] = Field(default=None)
 
     # Budget and performance

@@ -11,6 +11,7 @@ Supports pluggable components via optional constructor parameters:
 
 from __future__ import annotations
 
+import logging
 import re
 import uuid
 from datetime import datetime, timezone
@@ -21,7 +22,9 @@ from sqlmodel import select
 
 from nexus.knowledge.embeddings import cosine_similarity
 from nexus.memory.retriever import search as bm25_search, tokenize
-from nexus.models.knowledge import KnowledgeChunk
+from nexus.models.knowledge import EMBEDDING_DIM, KnowledgeChunk
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from nexus.knowledge.embeddings import EmbeddingProvider
@@ -358,6 +361,28 @@ class RAGPipeline:
         if self.embedding_provider is not None and chunks:
             embeddings = await self.embedding_provider.embed_batch(chunks)
 
+            # On PostgreSQL the column is a fixed-width pgvector, so a provider
+            # of a different width (Ollama is 768, the local stub 256, OpenAI's
+            # large model 3072) is rejected at INSERT with a DBAPI error far from
+            # its cause. Drop the vectors instead and let retrieval fall back to
+            # BM25, which still works. SQLite uses the JSON variant, which takes
+            # any width, so this does not apply there.
+            try:
+                on_postgres = self.db.get_bind().dialect.name == "postgresql"
+            except Exception:  # unbound session or a test double
+                on_postgres = False
+            widths = {len(vector) for vector in embeddings if vector}
+            if on_postgres and widths - {EMBEDDING_DIM}:
+                logger.warning(
+                    "Embedding provider returned width(s) %s but the column is "
+                    "%d-dimensional; storing chunks without vectors and relying "
+                    "on keyword search. Reindex with a %d-dimensional provider.",
+                    sorted(widths),
+                    EMBEDDING_DIM,
+                    EMBEDDING_DIM,
+                )
+                embeddings = None
+
         records: list[KnowledgeChunk] = []
         for idx, chunk_content in enumerate(chunks):
             embedding_vector = embeddings[idx] if embeddings is not None else None
@@ -398,12 +423,21 @@ class RAGPipeline:
         Returns:
             List of dicts with keys: 'chunk', 'bm25_score', 'vector_score', 'combined_score'.
         """
-        # Fetch all chunks for the company
-        statement = select(KnowledgeChunk).where(
-            KnowledgeChunk.company_id == company_id
-        )
-        result = await self.db.exec(statement)
-        chunks = list(result.all())
+        # Compute query embedding once if provider is available
+        query_embedding: Optional[list[float]] = None
+        if self.embedding_provider is not None:
+            query_embedding = await self.embedding_provider.embed(query)
+
+        # On PostgreSQL/pgvector, let the index pick candidates by `<=>` distance
+        # instead of fetching every row and doing cosine in Python.
+        sql_distances: dict[Any, float] = {}
+        chunks = await self._vector_candidates(company_id, query_embedding, top_k, sql_distances)
+        if chunks is None:
+            statement = select(KnowledgeChunk).where(
+                KnowledgeChunk.company_id == company_id
+            )
+            result = await self.db.exec(statement)
+            chunks = list(result.all())
 
         if not chunks:
             return []
@@ -412,19 +446,17 @@ class RAGPipeline:
         memories = [c.content for c in chunks]
         bm25_results = bm25_search(query, memories, top_k=top_k)
 
-        # Compute query embedding once if provider is available
-        query_embedding: Optional[list[float]] = None
-        if self.embedding_provider is not None:
-            query_embedding = await self.embedding_provider.embed(query)
-
         # Build results with hybrid scoring
         results: list[dict] = []
         for idx, bm25_score_val in bm25_results:
             chunk = chunks[idx]
             # Compute vector similarity
-            vector_score = self._compute_vector_similarity(
-                query, chunk.content, query_embedding, chunk.embedding_vector
-            )
+            if chunk.id in sql_distances:
+                vector_score = max(0.0, 1.0 - sql_distances[chunk.id])
+            else:
+                vector_score = self._compute_vector_similarity(
+                    query, chunk.content, query_embedding, chunk.embedding_vector
+                )
             # Combined score: weighted average (BM25 dominant, vector as supplement)
             combined_score = 0.7 * bm25_score_val + 0.3 * vector_score
 
@@ -438,6 +470,50 @@ class RAGPipeline:
         # Sort by combined score
         results.sort(key=lambda x: x["combined_score"], reverse=True)
         return results[:top_k]
+
+    async def _vector_candidates(
+        self,
+        company_id: uuid.UUID,
+        query_embedding: Optional[list[float]],
+        top_k: int,
+        distances: dict[Any, float],
+    ) -> Optional[list[KnowledgeChunk]]:
+        """Fetch nearest chunks with a SQL `<=>` cosine distance query.
+
+        Only usable on PostgreSQL with pgvector and an embedding whose width
+        matches the column. Returns None when the caller should fall back to
+        loading all company chunks and scoring in Python (SQLite dev, no
+        provider, dimension mismatch).
+
+        Populates `distances` with chunk id -> cosine distance for the rows it
+        returns. The candidate pool is intentionally wider than top_k so BM25
+        still has a corpus to rank over.
+        """
+        if query_embedding is None or len(query_embedding) != EMBEDDING_DIM:
+            return None
+        try:
+            if self.db.get_bind().dialect.name != "postgresql":
+                return None
+        except Exception:  # unbound session or a test double
+            return None
+
+        pool = max(top_k * 10, 100)
+        distance = KnowledgeChunk.embedding_vector.cosine_distance(query_embedding)  # type: ignore[attr-defined]
+        statement = (
+            select(KnowledgeChunk, distance)
+            .where(
+                KnowledgeChunk.company_id == company_id,
+                KnowledgeChunk.embedding_vector.is_not(None),  # type: ignore[attr-defined]
+            )
+            .order_by(distance)
+            .limit(pool)
+        )
+        rows = (await self.db.exec(statement)).all()
+        chunks = []
+        for chunk, dist in rows:
+            distances[chunk.id] = float(dist)
+            chunks.append(chunk)
+        return chunks
 
     def _compute_vector_similarity(
         self,

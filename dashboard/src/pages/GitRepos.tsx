@@ -1,4 +1,4 @@
-import { apiClient, unwrapItems } from '@/api/client';
+import { apiClient } from '@/api/client';
 import { Button } from '@/components/common/Button';
 import { StatCard } from '@/components/common/StatCard';
 import { FileExplorer } from '@/components/files/FileExplorer';
@@ -55,10 +55,10 @@ export function GitRepos() {
   const loadRepos = async () => {
     try {
       setIsLoading(true);
-      const res = await apiClient.get<GitRepoItem[] | { items: GitRepoItem[] }>(
+      const res = await apiClient.get<GitRepoItem[]>(
         `/api/v1/companies/${getActiveCompanyId()}/repos`
       );
-      const repoItems = unwrapItems(res);
+      const repoItems = res;
       if (repoItems.length) {
         setRepos(repoItems);
         // Refresh selectedRepo if currently open

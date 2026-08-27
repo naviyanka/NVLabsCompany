@@ -10,6 +10,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from nexus.models.heartbeat_run import HeartbeatRun
 from nexus.runtime.heartbeat import HeartbeatMonitor
 from nexus.runtime.watchdog import (
     AgentInfo,
@@ -17,6 +18,7 @@ from nexus.runtime.watchdog import (
     RecoveryAction,
     Watchdog,
     WatchdogConfig,
+    stop_fingerprint,
 )
 
 
@@ -466,17 +468,22 @@ class TestBackgroundPatrol:
         watchdog = Watchdog(heartbeat_monitor=heartbeat_monitor, config=config)
 
         call_count = 0
+        called = asyncio.Event()
 
         def provider():
             nonlocal call_count
             call_count += 1
+            called.set()
             return []
 
         watchdog.start_background_patrol(agents_provider=provider)
 
-        # Give it a moment to run
-        await asyncio.sleep(0.1)
-        await watchdog.stop()
+        # Wait for the first patrol rather than sleeping a fixed interval: a
+        # fixed sleep races the loop's own scheduling and flakes under load.
+        try:
+            await asyncio.wait_for(called.wait(), timeout=5)
+        finally:
+            await watchdog.stop()
 
         assert call_count >= 1
 
@@ -488,3 +495,133 @@ class TestBackgroundPatrol:
 
         # Should not raise even without starting
         await watchdog.stop()
+
+
+class TestStalledRunDetection:
+    """Tests for silent stall detection on heartbeat runs (Phase 1.4)."""
+
+    def _run(self, agent_id, last_output_at=None, started_at=None):
+        return HeartbeatRun(
+            agent_id=agent_id,
+            started_at=started_at or datetime.now(timezone.utc),
+            last_output_at=last_output_at,
+        )
+
+    def test_flags_run_silent_past_suspicion_threshold(
+        self, watchdog, sample_agent_id
+    ):
+        """A run with no output for over an hour is flagged as stalled."""
+        run = self._run(
+            sample_agent_id,
+            last_output_at=datetime.now(timezone.utc) - timedelta(hours=2),
+        )
+        # First patrol records the fingerprint baseline.
+        assert watchdog.patrol([], [run]).actions_taken == []
+        report = watchdog.patrol([], [run])
+        assert len(report.actions_taken) == 1
+        action = report.actions_taken[0]
+        assert action["action"] == RecoveryAction.FLAG_STALLED.value
+        assert action["run_id"] == str(run.id)
+        assert action["liveness_state"] == "suspected_stale"
+
+    def test_ignores_legitimately_idle_run(self, watchdog, sample_agent_id):
+        """A quiet run that still makes progress is not flagged."""
+        run = self._run(
+            sample_agent_id,
+            last_output_at=datetime.now(timezone.utc) - timedelta(hours=2),
+        )
+        assert watchdog.patrol([], [run]).actions_taken == []
+        # Forward progress changes the stop-fingerprint.
+        run.continuation_attempt += 1
+        assert watchdog.patrol([], [run]).actions_taken == []
+
+    def test_ignores_run_within_suspicion_window(self, watchdog, sample_agent_id):
+        """A run that emitted output recently is not flagged."""
+        run = self._run(
+            sample_agent_id,
+            last_output_at=datetime.now(timezone.utc) - timedelta(minutes=5),
+        )
+        watchdog.patrol([], [run])
+        assert watchdog.patrol([], [run]).actions_taken == []
+
+    def test_escalates_to_human_past_critical_threshold(
+        self, watchdog, sample_agent_id
+    ):
+        """A run silent beyond four hours escalates to a human decision."""
+        run = self._run(
+            sample_agent_id,
+            last_output_at=datetime.now(timezone.utc) - timedelta(hours=5),
+        )
+        watchdog.patrol([], [run])
+        action = watchdog.patrol([], [run]).actions_taken[0]
+        assert action["action"] == RecoveryAction.ESCALATE_HUMAN.value
+        assert action["action"] != RecoveryAction.REASSIGN.value
+        assert action["liveness_state"] == "confirmed_dead"
+
+    def test_rearm_suppresses_repeat_flag(self, watchdog, sample_agent_id):
+        """The same stalled run is not re-flagged inside the rearm window."""
+        run = self._run(
+            sample_agent_id,
+            last_output_at=datetime.now(timezone.utc) - timedelta(hours=2),
+        )
+        watchdog.patrol([], [run])
+        assert len(watchdog.patrol([], [run]).actions_taken) == 1
+        assert watchdog.patrol([], [run]).actions_taken == []
+
+    def test_finished_run_never_flagged(self, watchdog, sample_agent_id):
+        """A finished run is out of scope for stall detection."""
+        run = self._run(
+            sample_agent_id,
+            last_output_at=datetime.now(timezone.utc) - timedelta(hours=6),
+        )
+        run.finished_at = datetime.now(timezone.utc)
+        watchdog.patrol([], [run])
+        assert watchdog.patrol([], [run]).actions_taken == []
+
+    def test_falls_back_to_started_at_when_no_output(
+        self, watchdog, sample_agent_id
+    ):
+        """A run that never emitted output is measured from started_at."""
+        run = self._run(
+            sample_agent_id,
+            started_at=datetime.now(timezone.utc) - timedelta(hours=2),
+        )
+        watchdog.patrol([], [run])
+        assert len(watchdog.patrol([], [run]).actions_taken) == 1
+
+    def test_stall_check_disabled(self, heartbeat_monitor, sample_agent_id):
+        """stall_check=False skips stall detection entirely."""
+        wd = Watchdog(
+            heartbeat_monitor=heartbeat_monitor,
+            config=WatchdogConfig(stall_check=False),
+        )
+        run = self._run(
+            sample_agent_id,
+            last_output_at=datetime.now(timezone.utc) - timedelta(hours=6),
+        )
+        wd.patrol([], [run])
+        assert wd.patrol([], [run]).actions_taken == []
+
+
+class TestStopFingerprint:
+    """Tests for the stop-fingerprint helper."""
+
+    def test_stable_for_unchanged_run(self):
+        """The same run state produces the same fingerprint."""
+        run = HeartbeatRun(agent_id=uuid.uuid4())
+        assert stop_fingerprint(run) == stop_fingerprint(run)
+
+    def test_changes_on_new_output(self):
+        """New output changes the fingerprint."""
+        run = HeartbeatRun(agent_id=uuid.uuid4())
+        before = stop_fingerprint(run)
+        run.stdout_excerpt = "progress"
+        run.last_output_at = datetime.now(timezone.utc)
+        assert stop_fingerprint(run) != before
+
+    def test_changes_on_continuation(self):
+        """A new continuation attempt changes the fingerprint."""
+        run = HeartbeatRun(agent_id=uuid.uuid4())
+        before = stop_fingerprint(run)
+        run.continuation_attempt += 1
+        assert stop_fingerprint(run) != before

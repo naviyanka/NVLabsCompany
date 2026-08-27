@@ -11,7 +11,7 @@ import { StatCard } from '@/components/common/StatCard';
 import { Button } from '@/components/common/Button';
 import { Badge } from '@/components/common/Badge';
 import { EmptyState } from '@/components/common/EmptyState';
-import { apiClient, unwrapItems } from '@/api/client';
+import { apiClient } from '@/api/client';
 import { getActiveCompanyId } from '@/config';
 
 interface GovernanceApproval {
@@ -55,11 +55,11 @@ export function Approvals() {
     let isMounted = true;
     async function loadApprovals() {
       try {
-        const res = await apiClient.get<Record<string, unknown>[] | { items: Record<string, unknown>[] }>(
+        const res = await apiClient.get<Record<string, unknown>[]>(
           `/api/v1/companies/${getActiveCompanyId()}/approvals/pending`
         );
         if (isMounted) {
-          setApprovals(unwrapItems(res).map(mapApproval));
+          setApprovals(res.map(mapApproval));
           setLoadError(null);
         }
       } catch (err) {

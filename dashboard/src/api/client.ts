@@ -162,16 +162,3 @@ export const apiClient = {
   },
 };
 
-/**
- * Normalize a list response from the API.
- *
- * The mock Express server wraps arrays in `{ items: T[] }` while the real
- * FastAPI backend returns plain arrays. This helper accepts either shape and
- * always returns the items array, making frontend code backend-agnostic.
- */
-export function unwrapItems<T>(data: T[] | { items: T[] } | null | undefined): T[] {
-  if (!data) return [];
-  if (Array.isArray(data)) return data;
-  if (Array.isArray((data as { items: T[] }).items)) return (data as { items: T[] }).items;
-  return [];
-}

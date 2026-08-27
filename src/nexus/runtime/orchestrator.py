@@ -28,6 +28,8 @@ from typing import Any
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from nexus.models.task import RunCompletionReason
+
 logger = logging.getLogger(__name__)
 
 _orchestrator_task: asyncio.Task[None] | None = None
@@ -42,6 +44,28 @@ MAX_GOALS_PER_TICK = 5
 
 # Max iterations per goal per tick
 MAX_ITERATIONS_PER_GOAL = 3
+
+# Max subtasks a goal may accumulate across decomposition rounds before the
+# goal is given up on as non-converging (MAX_ITERATIONS_PER_GOAL rounds of the
+# planner's 5 subtasks).
+MAX_SUBTASKS_PER_GOAL = MAX_ITERATIONS_PER_GOAL * 5
+
+# Wall-clock budget for one subtask's LLM call (seconds)
+SUBTASK_TIMEOUT_SECONDS = 300
+
+# Agents emit this marker to hand a subtask back to a human.
+NEEDS_HELP_MARKER = "[NEEDS_HELP"
+
+
+def _finish(row: Any, status: str, reason: str) -> None:
+    """Mark a goal or task terminal with an explicit completion reason.
+
+    Single funnel for every terminal path so a run can never end without a
+    reason recorded (Phase 1.1).
+    """
+    row.status = status
+    row.completion_reason = reason
+    row.updated_at = datetime.now(timezone.utc)
 
 
 async def _tick(session_factory: async_sessionmaker[AsyncSession]) -> None:
@@ -143,7 +167,7 @@ async def _drive_goal(db: AsyncSession, goal: Any) -> None:
     # Check for existing subtasks of this goal
     subtask_stmt = select(Task).where(
         Task.company_id == company_id,
-        Task.parent_id == goal.id,
+        Task.goal_id == goal.id,
     )
     result = await db.execute(subtask_stmt)
     subtasks = list(result.scalars().all())
@@ -171,28 +195,47 @@ async def _drive_goal(db: AsyncSession, goal: Any) -> None:
             iteration=1,
         )
         if verdict.is_complete:
-            goal.status = "completed"
-            goal.updated_at = datetime.now(timezone.utc)
+            _finish(goal, "completed", RunCompletionReason.goal)
             db.add(goal)
             logger.info("Goal %s completed (judge confirmed: %s)", goal.id, verdict.reasoning)
             await _broadcast_orchestrator_event("goal_completed", {
                 "goal_id": str(goal.id), "title": goal.title, "reasoning": verdict.reasoning,
+                "completion_reason": RunCompletionReason.goal.value,
             })
+        elif len(subtasks) >= MAX_SUBTASKS_PER_GOAL:
+            # Re-decomposing again would just add another round of subtasks the
+            # judge already rejected — that is the doom loop.
+            _finish(goal, "blocked", RunCompletionReason.doom_loop)
+            db.add(goal)
+            logger.warning(
+                "Goal %s: judge still rejects after %d subtasks — doom loop, giving up",
+                goal.id, len(subtasks),
+            )
         else:
             # Judge says not complete — decompose again for another iteration
             logger.info("Goal %s: subtasks done but judge says incomplete (%s) — redecomposing", goal.id, verdict.reasoning)
             await _decompose_goal(db, goal, company_id)
         return
 
+    # An agent asked for a human — escalate the whole goal, don't retry.
+    escalated = [t for t in subtasks if t.completion_reason == RunCompletionReason.needs_help]
+    if escalated:
+        _finish(goal, "blocked", RunCompletionReason.needs_help)
+        db.add(goal)
+        logger.warning("Goal %s escalated: %d subtasks need human help", goal.id, len(escalated))
+        return
+
     # If there are failed subtasks, attempt retry or escalation
     failed_subtasks = [t for t in subtasks if t.status == "failed"]
     if failed_subtasks and not active_subtasks:
-        # Too many failures — mark goal as blocked
+        # Too many failures — mark goal as blocked, carrying the reason the
+        # subtasks themselves recorded when they all agree.
         if len(failed_subtasks) >= 3:
-            goal.status = "blocked"
-            goal.updated_at = datetime.now(timezone.utc)
+            reasons = {t.completion_reason for t in failed_subtasks if t.completion_reason}
+            reason = reasons.pop() if len(reasons) == 1 else RunCompletionReason.error
+            _finish(goal, "blocked", reason)
             db.add(goal)
-            logger.warning("Goal %s blocked after %d failures", goal.id, len(failed_subtasks))
+            logger.warning("Goal %s blocked after %d failures (%s)", goal.id, len(failed_subtasks), reason)
             return
 
     # If no subtasks exist yet, decompose the goal
@@ -232,7 +275,7 @@ async def _decompose_goal(db: AsyncSession, goal: Any, company_id: uuid.UUID) ->
             title=st.description[:500],
             description=f"Auto-decomposed from goal: {goal.title}",
             priority=1,
-            parent_id=goal.id,
+            goal_id=goal.id,
             status="pending",
         )
         db.add(task)
@@ -295,7 +338,14 @@ async def _execute_subtasks(db: AsyncSession, tasks: list[Any], company_id: uuid
     from nexus.models.agent import Agent
     from nexus.api.routes.chat import _build_system_prompt, _call_llm, _fetch_agent_memories
 
-    for task in tasks[:MAX_ITERATIONS_PER_GOAL]:  # Limit per tick
+    for index, task in enumerate(tasks):
+        if index >= MAX_ITERATIONS_PER_GOAL:
+            # Out of iterations for this tick — the rest stay pending and are
+            # picked up next tick, but record why they didn't run now.
+            _finish(task, "pending", RunCompletionReason.max_iterations)
+            db.add(task)
+            continue
+
         if not task.assigned_agent_id:
             continue
 
@@ -304,9 +354,25 @@ async def _execute_subtasks(db: AsyncSession, tasks: list[Any], company_id: uuid
         result = await db.execute(agent_stmt)
         agent = result.scalar_one_or_none()
         if not agent:
-            task.status = "failed"
-            task.updated_at = datetime.now(timezone.utc)
+            _finish(task, "failed", RunCompletionReason.error)
+            task.error = f"Assigned agent {task.assigned_agent_id} not found"
             db.add(task)
+            continue
+
+        # Pre-flight budget check — don't start work we cannot pay for.
+        if agent.budget_monthly_cents and agent.spent_monthly_cents >= agent.budget_monthly_cents:
+            _finish(task, "failed", RunCompletionReason.budget_exhausted)
+            task.error = (
+                f"Agent {agent.name} has spent {agent.spent_monthly_cents} of "
+                f"{agent.budget_monthly_cents} cents"
+            )
+            db.add(task)
+            await _broadcast_orchestrator_event("subtask_failed", {
+                "task_id": str(task.id), "title": task.title[:60],
+                "error": "budget exhausted",
+                "completion_reason": RunCompletionReason.budget_exhausted.value,
+            })
+            logger.warning("Subtask '%s' skipped: agent %s budget exhausted", task.title[:40], agent.name)
             continue
 
         try:
@@ -319,31 +385,68 @@ async def _execute_subtasks(db: AsyncSession, tasks: list[Any], company_id: uuid
                 "task_id": str(task.id), "title": task.title[:60], "agent": agent.name,
             })
 
-            response_text, model_used, tokens_used = await _call_llm(
-                agent, system_prompt, prompt, []
+            response_text, model_used, tokens_used = await asyncio.wait_for(
+                _call_llm(agent, system_prompt, prompt, []),
+                timeout=SUBTASK_TIMEOUT_SECONDS,
             )
 
+            if NEEDS_HELP_MARKER in (response_text or ""):
+                # The agent decided it cannot finish without a human.
+                _finish(task, "blocked", RunCompletionReason.needs_help)
+                task.result = response_text
+                db.add(task)
+                await _broadcast_orchestrator_event("subtask_blocked", {
+                    "task_id": str(task.id), "title": task.title[:60], "agent": agent.name,
+                    "completion_reason": RunCompletionReason.needs_help.value,
+                })
+                logger.warning("Subtask '%s' needs human help (%s)", task.title[:40], agent.name)
+                continue
+
+            if not (response_text or "").strip():
+                # Nothing actionable came back — an empty turn is not success.
+                _finish(task, "failed", RunCompletionReason.no_tool_calls)
+                task.error = "Agent produced no output"
+                db.add(task)
+                await _broadcast_orchestrator_event("subtask_failed", {
+                    "task_id": str(task.id), "title": task.title[:60], "error": "no output",
+                    "completion_reason": RunCompletionReason.no_tool_calls.value,
+                })
+                logger.warning("Subtask '%s' produced no output (%s)", task.title[:40], agent.name)
+                continue
+
             # Mark as completed
-            task.status = "completed"
-            task.updated_at = datetime.now(timezone.utc)
+            _finish(task, "completed", RunCompletionReason.goal)
             db.add(task)
 
             await _broadcast_orchestrator_event("subtask_completed", {
                 "task_id": str(task.id), "title": task.title[:60],
                 "agent": agent.name, "tokens": tokens_used,
+                "completion_reason": RunCompletionReason.goal.value,
             })
             logger.info("Subtask '%s' completed by %s (%d tokens)", task.title[:40], agent.name, tokens_used)
 
             # Self-adaptive trigger: parse [SCHEDULE:] patterns from LLM output
             await _parse_adaptive_triggers(db, agent, response_text, company_id)
 
+        except (asyncio.TimeoutError, TimeoutError) as e:
+            _finish(task, "failed", RunCompletionReason.timeout)
+            task.error = f"Timed out after {SUBTASK_TIMEOUT_SECONDS}s"
+            db.add(task)
+
+            await _broadcast_orchestrator_event("subtask_failed", {
+                "task_id": str(task.id), "title": task.title[:60], "error": task.error,
+                "completion_reason": RunCompletionReason.timeout.value,
+            })
+            logger.error("Subtask '%s' timed out: %s", task.title[:40], e)
+
         except Exception as e:
-            task.status = "failed"
-            task.updated_at = datetime.now(timezone.utc)
+            _finish(task, "failed", RunCompletionReason.error)
+            task.error = str(e)[:2000]
             db.add(task)
 
             await _broadcast_orchestrator_event("subtask_failed", {
                 "task_id": str(task.id), "title": task.title[:60], "error": str(e)[:100],
+                "completion_reason": RunCompletionReason.error.value,
             })
             logger.error("Subtask '%s' execution failed: %s", task.title[:40], e)
 

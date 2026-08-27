@@ -1,4 +1,4 @@
-import { apiClient, unwrapItems } from '@/api/client';
+import { apiClient } from '@/api/client';
 import { Badge } from '@/components/common/Badge';
 import { Button } from '@/components/common/Button';
 import { Table } from '@/components/common/Table';
@@ -6,7 +6,7 @@ import { AddTaskModal } from '@/components/tasks/AddTaskModal';
 import { TaskDetailDrawer } from '@/components/tasks/TaskDetailDrawer';
 import { getActiveCompanyId } from '@/config';
 import type { Agent } from '@/types/agent';
-import type { Task } from '@/types/task';
+import { COMPLETION_REASONS, COMPLETION_REASON_LABELS, type Task } from '@/types/task';
 import {
   BarChart3,
   Bot,
@@ -32,6 +32,7 @@ export function Tasks() {
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [priorityFilter, setPriorityFilter] = useState('all');
+  const [reasonFilter, setReasonFilter] = useState('all');
 
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
@@ -41,16 +42,16 @@ export function Tasks() {
       try {
         const companyId = getActiveCompanyId();
         const [tasksRes, agentsRes] = await Promise.allSettled([
-          apiClient.get<Task[] | { items: Task[] }>(`/api/v1/companies/${companyId}/tasks`),
-          apiClient.get<Agent[] | { items: Agent[] }>(`/api/v1/companies/${companyId}/agents`),
+          apiClient.get<Task[]>(`/api/v1/companies/${companyId}/tasks`),
+          apiClient.get<Agent[]>(`/api/v1/companies/${companyId}/agents`),
         ]);
 
         if (tasksRes.status === 'fulfilled') {
-          const items = unwrapItems(tasksRes.value);
+          const items = tasksRes.value;
           if (items.length) setTasks(items);
         }
         if (agentsRes.status === 'fulfilled') {
-          const items = unwrapItems(agentsRes.value);
+          const items = agentsRes.value;
           if (items.length) setAgents(items);
         }
       } catch (err) {
@@ -105,6 +106,7 @@ export function Tasks() {
     return tasks.filter((t) => {
       if (statusFilter !== 'all' && t.status !== statusFilter) return false;
       if (priorityFilter !== 'all' && t.priority !== Number(priorityFilter)) return false;
+      if (reasonFilter !== 'all' && t.completion_reason !== reasonFilter) return false;
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
         return (
@@ -115,7 +117,7 @@ export function Tasks() {
       }
       return true;
     });
-  }, [tasks, statusFilter, priorityFilter, searchQuery]);
+  }, [tasks, statusFilter, priorityFilter, reasonFilter, searchQuery]);
 
   const pendingTasks = filteredTasks.filter((t) => t.status === 'pending');
   const inProgressTasks = filteredTasks.filter((t) => t.status === 'in_progress');
@@ -251,6 +253,21 @@ export function Tasks() {
             <option value="1">P1 - Critical</option>
             <option value="2">P2 - Standard</option>
             <option value="3">P3 - Background</option>
+          </select>
+
+          {/* Completion Reason Filter */}
+          <select
+            value={reasonFilter}
+            onChange={(e) => setReasonFilter(e.target.value)}
+            aria-label="Filter by completion reason"
+            className="px-2.5 py-1.5 bg-[#141416] border border-white/[0.08] rounded-[6px] text-xs font-mono text-[#F2F1EE] focus:outline-none focus:border-[#FFB020]"
+          >
+            <option value="all">All Reasons</option>
+            {COMPLETION_REASONS.map((r) => (
+              <option key={r} value={r}>
+                {COMPLETION_REASON_LABELS[r]}
+              </option>
+            ))}
           </select>
         </div>
 
@@ -456,6 +473,19 @@ export function Tasks() {
               header: 'Status',
               sortable: true,
               render: (t) => <Badge variant={t.status as any}>{t.status}</Badge>,
+            },
+            {
+              key: 'completion_reason',
+              header: 'Reason',
+              sortable: true,
+              render: (t) =>
+                t.completion_reason ? (
+                  <span className="font-mono text-[11px] text-[#A8A8AB]">
+                    {COMPLETION_REASON_LABELS[t.completion_reason]}
+                  </span>
+                ) : (
+                  <span className="font-mono text-[11px] text-[#6B6B6E]">—</span>
+                ),
             },
             {
               key: 'priority',

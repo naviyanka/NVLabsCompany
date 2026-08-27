@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy import select
 
-from nexus.api.deps import CurrentCompanyId, DbSession
+from nexus.api.deps import CurrentCompanyId, DbSession, PathCompanyId
 from nexus.models.skill import AgentSkill, Skill
 
 router = APIRouter(tags=["skills"])
@@ -60,7 +60,7 @@ class AgentSkillResponse(BaseModel):
     response_model=SkillResponse,
 )
 async def create_skill(
-    company_id: uuid.UUID, body: SkillCreate, db: DbSession
+    company_id: PathCompanyId, body: SkillCreate, db: DbSession
 ) -> Any:
     """Register a new skill in the company."""
     skill = Skill(
@@ -81,7 +81,7 @@ async def create_skill(
     response_model=list[SkillResponse],
 )
 async def list_skills(
-    company_id: uuid.UUID,
+    company_id: PathCompanyId,
     db: DbSession,
     category: str | None = None,
     limit: int = 100,
@@ -115,6 +115,15 @@ async def assign_skill_to_agent(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Agent {agent_id} not found",
+        )
+
+    # Verify skill belongs to company
+    skill_stmt = select(Skill).where(Skill.id == body.skill_id, Skill.company_id == company_id)
+    skill_result = await db.execute(skill_stmt)
+    if skill_result.scalar_one_or_none() is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Skill {body.skill_id} not found",
         )
 
     agent_skill = AgentSkill(

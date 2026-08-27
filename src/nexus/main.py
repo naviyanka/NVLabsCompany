@@ -183,6 +183,20 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             exc,
         )
 
+    # Secret vault: DB-backed by default so stored secrets survive a restart
+    try:
+        from nexus.api.routes.rotation import set_backend
+        from nexus.governance.secret_backend import make_secret_backend
+
+        secret_backend = make_secret_backend(async_session_factory)
+        app.state.secret_backend = secret_backend
+        set_backend(secret_backend)
+        _logger.info(
+            "Secret backend initialized (%s)", type(secret_backend).__name__
+        )
+    except Exception as exc:
+        _logger.warning("Could not initialize secret backend: %s", exc)
+
     # Initialize Plugin SDK (empty registry - plugins are not auto-loaded)
     from nexus.plugins import PluginRegistry, HookManager
 
@@ -196,6 +210,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     from nexus.config_validator import validate_config
     await validate_config()
 
+    # Reclaim heartbeat runs whose process died while we were down (Phase 1.3.4)
+    try:
+        from nexus.runtime.heartbeat_persistent import PersistentHeartbeatService
+        reclaimed = await PersistentHeartbeatService(async_session_factory).reclaim_orphans()
+        if reclaimed:
+            _logger.warning("Reclaimed %d orphaned heartbeat run(s)", len(reclaimed))
+    except Exception as exc:
+        _logger.warning("Heartbeat orphan reclaim failed: %s", exc)
+
     # Start the background scheduler for cron/schedule triggers
     from nexus.runtime.scheduler import start_scheduler, stop_scheduler
     await start_scheduler(async_session_factory)
@@ -203,6 +226,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Start the autonomous orchestration coordinator
     from nexus.runtime.orchestrator import start_orchestrator, stop_orchestrator
     await start_orchestrator(async_session_factory)
+
+    # The watchdog patrol rides the scheduler tick (see runtime/scheduler.py); it
+    # detects stuck agents and silently stalled runs, and files a human decision
+    # for stalls it cannot explain (Phase 1.4). Only shutdown needs wiring here.
+    from nexus.runtime.watchdog_service import stop_watchdog
 
     # Register event bridge handlers (connects EventBus → orchestration)
     try:
@@ -218,6 +246,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Shutdown: stop orchestrator, stop scheduler, persist state, close connections
     await stop_orchestrator()
     await stop_scheduler()
+    await stop_watchdog()
 
     # Flush accumulated budget spend to DB
     try:

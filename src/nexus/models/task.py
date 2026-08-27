@@ -2,9 +2,27 @@
 
 import uuid
 from datetime import timezone, datetime
+from enum import Enum
 from typing import Optional
 
 from sqlmodel import Field, SQLModel
+
+
+class RunCompletionReason(str, Enum):
+    """Why a run (goal drive or subtask execution) reached a terminal state.
+
+    Every terminal path in ``runtime/orchestrator.py`` sets exactly one of
+    these, so "why did this stop?" is answerable without reading logs.
+    """
+
+    goal = "goal"  # judge confirmed the goal was achieved
+    no_tool_calls = "no_tool_calls"  # model produced no actionable output
+    max_iterations = "max_iterations"  # iteration cap hit before completion
+    timeout = "timeout"  # wall-clock budget for the step expired
+    budget_exhausted = "budget_exhausted"  # no spend headroom left
+    doom_loop = "doom_loop"  # repeated re-decomposition without progress
+    needs_help = "needs_help"  # agent explicitly escalated to a human
+    error = "error"  # unhandled failure
 
 
 class Goal(SQLModel, table=True):
@@ -22,6 +40,7 @@ class Goal(SQLModel, table=True):
     owner_agent_id: Optional[uuid.UUID] = Field(
         default=None, foreign_key="agents.id"
     )
+    completion_reason: Optional[str] = Field(default=None, max_length=32, index=True)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
 
@@ -65,8 +84,14 @@ class Task(SQLModel, table=True):
     parent_task_id: Optional[uuid.UUID] = Field(
         default=None, foreign_key="tasks.id"
     )
+    # Set when the task was decomposed out of a goal. Distinct from
+    # parent_task_id, which points at another task.
+    goal_id: Optional[uuid.UUID] = Field(
+        default=None, foreign_key="goals.id", index=True
+    )
     result: Optional[str] = Field(default=None)
     error: Optional[str] = Field(default=None)
+    completion_reason: Optional[str] = Field(default=None, max_length=32, index=True)
     started_at: Optional[datetime] = Field(default=None)
     completed_at: Optional[datetime] = Field(default=None)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None))

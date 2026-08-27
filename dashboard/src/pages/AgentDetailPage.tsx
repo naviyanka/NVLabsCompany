@@ -1,5 +1,5 @@
 import { deleteAgent } from '@/api/agents';
-import { apiClient, unwrapItems } from '@/api/client';
+import { apiClient } from '@/api/client';
 import { FireAgentModal } from '@/components/agents/FireAgentModal';
 import { Badge } from '@/components/common/Badge';
 import { Button } from '@/components/common/Button';
@@ -77,7 +77,7 @@ export function AgentDetailPage() {
         const [agentData, chatData, memoryData] = await Promise.allSettled([
           apiClient.get<Agent>(`/api/v1/companies/${companyId}/agents/${id}`),
           apiClient.get<ChatMessage[]>(`/api/v1/agents/${id}/chat`),
-          apiClient.get<AgentMemory[] | { items: AgentMemory[] }>(`/api/v1/agents/${id}/memory`),
+          apiClient.get<AgentMemory[]>(`/api/v1/agents/${id}/memory`),
         ]);
         if (!isMounted) return;
         if (agentData.status === 'fulfilled' && agentData.value) {
@@ -87,7 +87,7 @@ export function AgentDetailPage() {
           setChatMessages(chatData.value);
         }
         if (memoryData.status === 'fulfilled') {
-          const memItems = unwrapItems(memoryData.value);
+          const memItems = memoryData.value;
           if (memItems.length) setMemories(memItems);
         }
       } catch (err) {

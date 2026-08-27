@@ -297,3 +297,144 @@ class TestEdgeCases:
         decoded = base64.b64decode(data["my-ref"])
         assert isinstance(decoded, bytes)
         assert len(decoded) > 0
+
+
+# --- Phase 0.3: database-backed store ---------------------------------------
+
+
+@pytest.fixture
+async def secret_db(tmp_path: Path):
+    """A fresh SQLite-backed `secrets` table, yielding a session factory."""
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    from sqlmodel import SQLModel
+    from sqlmodel.ext.asyncio.session import AsyncSession
+
+    from nexus.models.secret import Secret
+
+    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'secrets.db'}")
+    async with engine.begin() as conn:
+        await conn.run_sync(SQLModel.metadata.create_all, tables=[Secret.__table__])
+    try:
+        yield async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    finally:
+        await engine.dispose()
+
+
+class TestDatabasePersistence:
+    """The `secrets` table replaces the in-memory dict and JSON file."""
+
+    async def test_secret_survives_restart(self, secret_key: str, secret_db) -> None:
+        """Store a secret, rebuild the backend, read it back."""
+        backend = FernetSecretBackend(secret_key, session_factory=secret_db)
+        assert backend.encrypt("api-key", "super-secret-value")
+
+        restarted = FernetSecretBackend(secret_key, session_factory=secret_db)
+        assert restarted.has("api-key")
+        assert restarted.decrypt("api-key") == "super-secret-value"
+
+    async def test_delete_removes_row(self, secret_key: str, secret_db) -> None:
+        """A deleted secret does not come back after a restart."""
+        backend = FernetSecretBackend(secret_key, session_factory=secret_db)
+        backend.encrypt("gone", "value")
+        backend.delete("gone")
+
+        assert not FernetSecretBackend(secret_key, session_factory=secret_db).has("gone")
+
+    async def test_overwrite_bumps_version(self, secret_key: str, secret_db) -> None:
+        """Re-encrypting an existing ref updates the row and its version."""
+        from sqlalchemy import select
+
+        from nexus.models.secret import Secret
+
+        backend = FernetSecretBackend(secret_key, session_factory=secret_db)
+        backend.encrypt("rotating", "v1")
+        backend.encrypt("rotating", "v2")
+
+        async with secret_db() as session:
+            rows = list((await session.execute(select(Secret))).scalars())
+        assert len(rows) == 1
+        assert rows[0].current_version == 2
+        assert backend.decrypt("rotating") == "v2"
+
+    async def test_rotate_key_reencrypts_persisted_rows(
+        self, secret_key: str, secret_db
+    ) -> None:
+        """After rotate_key, the new key reads the DB and the old one cannot."""
+        backend = FernetSecretBackend(secret_key, session_factory=secret_db)
+        backend.encrypt("k1", "v1")
+        backend.encrypt("k2", "v2")
+
+        assert backend.rotate_key("a-brand-new-application-secret") == 2
+
+        rotated = FernetSecretBackend(
+            "a-brand-new-application-secret", session_factory=secret_db
+        )
+        assert rotated.decrypt("k1") == "v1"
+        assert rotated.decrypt("k2") == "v2"
+        assert FernetSecretBackend(secret_key, session_factory=secret_db).decrypt("k1") is None
+
+    async def test_session_factory_wins_over_persist_path(
+        self, secret_key: str, secret_db, tmp_path: Path
+    ) -> None:
+        """With a session factory, no JSON file is written."""
+        json_path = tmp_path / "unused" / "secrets.json"
+        backend = FernetSecretBackend(
+            secret_key, persist_path=json_path, session_factory=secret_db
+        )
+        backend.encrypt("key", "value")
+
+        assert not json_path.exists()
+        assert FernetSecretBackend(secret_key, session_factory=secret_db).decrypt("key") == "value"
+
+
+class TestKdfMemoization:
+    """PBKDF2 runs once per key per process (0.3.2)."""
+
+    def test_derivation_is_cached_per_key(self, secret_key: str) -> None:
+        """A second backend with the same key does not re-derive."""
+        from nexus.governance import secret_backend as mod
+
+        mod._KDF_CACHE.clear()
+        with patch.object(
+            mod.hashlib, "pbkdf2_hmac", wraps=mod.hashlib.pbkdf2_hmac
+        ) as spy:
+            FernetSecretBackend(secret_key)
+            FernetSecretBackend(secret_key)
+            FernetSecretBackend(secret_key)
+        assert spy.call_count == 1
+
+    def test_iteration_count_is_600k(self) -> None:
+        """The KDF cost matches the Phase 0.3 target."""
+        assert FernetSecretBackend._ITERATIONS == 600_000
+
+
+class TestBackendSelector:
+    """SECRET_BACKEND chooses the implementation (0.3.3)."""
+
+    @pytest.mark.parametrize(
+        "choice,expected",
+        [
+            ("fernet", "FernetSecretBackend"),
+            ("keyring", "KeyringSecretBackend"),
+            ("env", "EnvSecretBackend"),
+            ("nonsense", "FernetSecretBackend"),
+        ],
+    )
+    def test_selector_returns_expected_backend(self, choice: str, expected: str) -> None:
+        """Each selector value maps to its backend; unknown falls back to fernet."""
+        from nexus.config import settings
+        from nexus.governance.secret_backend import make_secret_backend
+
+        with patch.object(settings, "secret_backend", choice):
+            assert type(make_secret_backend()).__name__ == expected
+
+    def test_env_backend_reads_env_and_refuses_writes(self) -> None:
+        """The env backend is read-only and maps refs to NEXUS_SECRET_* names."""
+        from nexus.governance.secret_backend import EnvSecretBackend
+
+        backend = EnvSecretBackend()
+        with patch.dict(os.environ, {"NEXUS_SECRET_GITHUB_TOKEN": "ghp_x"}):
+            assert backend.has("github-token")
+            assert backend.decrypt("github-token") == "ghp_x"
+        assert not backend.has("github-token")
+        assert backend.encrypt("github-token", "nope") is False

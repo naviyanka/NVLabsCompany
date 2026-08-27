@@ -11,13 +11,42 @@ with no direct database access (receives agent state via AgentInfo dataclass).
 """
 
 import asyncio
+import hashlib
+import logging
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 
+from nexus.models.heartbeat_run import HeartbeatRun
 from nexus.runtime.heartbeat import HeartbeatMonitor
+
+logger = logging.getLogger(__name__)
+
+
+def stop_fingerprint(run: HeartbeatRun) -> str:
+    """Build a stable fingerprint of a run's observable progress.
+
+    Two patrols that see the same fingerprint saw no forward progress: no new
+    output, no new continuation attempt, no session change. A run that is
+    merely quiet but still advancing changes at least one of these, so the
+    fingerprint distinguishes "quiet but fine" from "stalled".
+
+    Args:
+        run: The heartbeat run to fingerprint.
+
+    Returns:
+        Hex digest of the run's progress-bearing fields.
+    """
+    parts = [
+        str(run.last_output_at),
+        str(run.continuation_attempt),
+        str(run.session_id_after),
+        str(run.stdout_excerpt),
+        str(run.stderr_excerpt),
+    ]
+    return hashlib.sha256("\x1f".join(parts).encode()).hexdigest()
 
 
 class RecoveryAction(str, Enum):
@@ -36,6 +65,8 @@ class RecoveryAction(str, Enum):
     MARK_FAILED = "mark_failed"
     PAUSE = "pause"
     HALF_OPEN_TEST = "half_open_test"
+    FLAG_STALLED = "flag_stalled"
+    ESCALATE_HUMAN = "escalate_human"
 
 
 @dataclass
@@ -49,6 +80,10 @@ class WatchdogConfig:
         orphan_check: Whether to check for orphaned tasks.
         budget_check: Whether to check for budget-exceeded agents.
         circuit_check: Whether to check for circuit-broken agents.
+        stall_check: Whether to check heartbeat runs for silent stalls.
+        stall_suspicion_seconds: No output for this long makes a run suspect.
+        stall_critical_seconds: No output for this long escalates to a human.
+        stall_rearm_seconds: Minimum gap before the same run is flagged again.
     """
 
     patrol_interval_seconds: int = 30
@@ -56,6 +91,10 @@ class WatchdogConfig:
     orphan_check: bool = True
     budget_check: bool = True
     circuit_check: bool = True
+    stall_check: bool = True
+    stall_suspicion_seconds: int = 3600
+    stall_critical_seconds: int = 14400
+    stall_rearm_seconds: int = 1800
 
 
 @dataclass
@@ -124,6 +163,8 @@ class Watchdog:
         self._patrol_task: asyncio.Task[None] | None = None
         self._running = False
         self._circuit_states: dict[uuid.UUID, dict[str, Any]] = {}
+        # run_id -> {'fingerprint': str, 'flagged_at': datetime | None}
+        self._stall_states: dict[uuid.UUID, dict[str, Any]] = {}
 
     def set_circuit_states(self, states: dict[uuid.UUID, dict[str, Any]]) -> None:
         """Set circuit breaker states for patrol checks.
@@ -135,7 +176,11 @@ class Watchdog:
         """
         self._circuit_states = states
 
-    def patrol(self, agents: list[AgentInfo]) -> PatrolReport:
+    def patrol(
+        self,
+        agents: list[AgentInfo],
+        runs: list[HeartbeatRun] | None = None,
+    ) -> PatrolReport:
         """Perform a single patrol run across all provided agents.
 
         Checks each agent for health issues and takes recovery actions:
@@ -143,9 +188,11 @@ class Watchdog:
         2. Orphaned tasks (agent in terminated/error with tasks) -> MARK_FAILED
         3. Budget-exceeded agents (spent > budget) -> PAUSE
         4. Circuit-broken agents (open circuit, cooldown elapsed) -> HALF_OPEN_TEST
+        5. Silently stalled runs -> FLAG_STALLED, then ESCALATE_HUMAN
 
         Args:
             agents: List of AgentInfo representing current agent states.
+            runs: Optional active HeartbeatRun list for stall detection.
 
         Returns:
             PatrolReport summarizing all actions taken during this patrol.
@@ -173,6 +220,11 @@ class Watchdog:
                 circuit_actions = self._check_circuit(agent, now)
                 actions.extend(circuit_actions)
 
+        # Check 5: silently stalled runs
+        if self._config.stall_check and runs:
+            for run in runs:
+                actions.extend(self._check_stalled(run, now))
+
         return PatrolReport(
             timestamp=now,
             actions_taken=actions,
@@ -181,20 +233,22 @@ class Watchdog:
         )
 
     def start_background_patrol(
-        self, agents_provider: Any = None
+        self, agents_provider: Any = None, runs_provider: Any = None
     ) -> asyncio.Task[None]:
         """Start periodic background patrol as an asyncio task.
 
         Args:
             agents_provider: Optional callable that returns list[AgentInfo].
                 If None, patrols with an empty list (useful for testing lifecycle).
+            runs_provider: Optional callable that returns list[HeartbeatRun]
+                for stall detection.
 
         Returns:
             The created asyncio.Task running the patrol loop.
         """
         self._running = True
         self._patrol_task = asyncio.create_task(
-            self._patrol_loop(agents_provider)
+            self._patrol_loop(agents_provider, runs_provider)
         )
         return self._patrol_task
 
@@ -212,7 +266,19 @@ class Watchdog:
                 pass
             self._patrol_task = None
 
-    async def _patrol_loop(self, agents_provider: Any) -> None:
+        # Hand the lease back. Without this it lingers for its full TTL and no
+        # replica can patrol until it expires, so a restart leaves the fleet
+        # unwatched for up to DEFAULT_LEASE_TTL_SECONDS.
+        try:
+            from nexus.governance.leader_election import get_leader_election
+
+            await get_leader_election().release("watchdog-standalone")
+        except Exception as exc:  # noqa: BLE001 - shutdown must not raise
+            logger.warning("Could not release watchdog leader lease: %s", exc)
+
+    async def _patrol_loop(
+        self, agents_provider: Any, runs_provider: Any = None
+    ) -> None:
         """Internal patrol loop running at configured interval.
 
         Lease-gated so replicas don't double-patrol; the no-Redis fallback
@@ -220,17 +286,22 @@ class Watchdog:
 
         Args:
             agents_provider: Callable returning current agent states, or None.
+            runs_provider: Callable returning active heartbeat runs, or None.
         """
         from nexus.governance.leader_election import is_leader
 
+        # A distinct lease from the scheduler-hosted patrol in watchdog_service.
+        # Sharing "watchdog" would mean whichever driver acquired first starved
+        # the other for the lease TTL.
         try:
             while self._running:
-                if await is_leader("watchdog"):
+                if await is_leader("watchdog-standalone"):
                     if agents_provider is not None:
                         agents = agents_provider()
                     else:
                         agents = []
-                    self.patrol(agents)
+                    runs = runs_provider() if runs_provider is not None else None
+                    self.patrol(agents, runs)
                 await asyncio.sleep(self._config.patrol_interval_seconds)
         except asyncio.CancelledError:
             return
@@ -280,6 +351,82 @@ class Watchdog:
             ]
 
         return []
+
+    def _check_stalled(
+        self, run: HeartbeatRun, now: datetime
+    ) -> list[dict[str, Any]]:
+        """Check whether an active run has silently stalled.
+
+        A run is silent when nothing has been observed since
+        `last_output_at` (or `started_at` if it never emitted). Silence alone
+        is not a stall: the stop-fingerprint must also be unchanged since the
+        previous patrol, which is what separates a legitimately idle run from
+        a stalled one. Past the critical threshold the run escalates to a
+        human decision rather than being auto-reassigned. Rearm suppresses
+        repeat flags for the same run within `stall_rearm_seconds`.
+
+        Args:
+            run: The heartbeat run to check.
+            now: Current timestamp.
+
+        Returns:
+            List of action dicts if the run is stalled, empty otherwise.
+        """
+        if run.finished_at is not None:
+            self._stall_states.pop(run.id, None)
+            return []
+
+        reference = run.last_output_at or run.started_at
+        if reference is None:
+            return []
+        if reference.tzinfo is None:
+            reference = reference.replace(tzinfo=timezone.utc)
+        silent_for = (now - reference).total_seconds()
+
+        fingerprint = stop_fingerprint(run)
+        state = self._stall_states.get(run.id)
+        self._stall_states[run.id] = {
+            "fingerprint": fingerprint,
+            "flagged_at": state.get("flagged_at") if state else None,
+        }
+
+        if silent_for < self._config.stall_suspicion_seconds:
+            return []
+
+        # Forward progress since the last patrol: quiet but fine, not stalled.
+        if state is None or state.get("fingerprint") != fingerprint:
+            return []
+
+        flagged_at = state.get("flagged_at")
+        if (
+            flagged_at is not None
+            and (now - flagged_at).total_seconds() < self._config.stall_rearm_seconds
+        ):
+            return []
+
+        self._stall_states[run.id]["flagged_at"] = now
+
+        critical = silent_for >= self._config.stall_critical_seconds
+        action = (
+            RecoveryAction.ESCALATE_HUMAN if critical else RecoveryAction.FLAG_STALLED
+        )
+        return [
+            {
+                "action": action.value,
+                "agent_id": str(run.agent_id),
+                "run_id": str(run.id),
+                "liveness_state": (
+                    "confirmed_dead" if critical else "suspected_stale"
+                ),
+                "stop_fingerprint": fingerprint,
+                "reason": (
+                    f"Run silent for {silent_for:.0f}s with an unchanged "
+                    f"stop-fingerprint (threshold "
+                    f"{self._config.stall_critical_seconds if critical else self._config.stall_suspicion_seconds}s)"
+                ),
+                "timestamp": now.isoformat(),
+            }
+        ]
 
     def _check_orphaned(
         self, agent: AgentInfo, now: datetime

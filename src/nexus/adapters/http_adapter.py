@@ -12,6 +12,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from nexus.adapters.base import BaseAdapter
+from nexus.governance.ssrf_protection import guard_url as _guard_url
 from nexus.runtime.adapter import AgentSession, TaskResult
 
 
@@ -60,6 +61,9 @@ class HTTPAdapter(BaseAdapter):
         """
         if "base_url" not in config:
             raise ValueError("HTTP adapter requires 'base_url' in config")
+        _guard_url(config["base_url"], "base_url")
+        if config.get("webhook_url"):
+            _guard_url(config["webhook_url"], "webhook_url")
 
     async def _do_create_session(self, session: AgentSession) -> None:
         """Initialize HTTP session with endpoint configuration.

@@ -8,7 +8,7 @@ import {
 import { StatCard } from '@/components/common/StatCard';
 import { Button } from '@/components/common/Button';
 import { Badge } from '@/components/common/Badge';
-import { apiClient, unwrapItems } from '@/api/client';
+import { apiClient } from '@/api/client';
 import { getActiveCompanyId } from '@/config';
 
 interface NotificationItem {
@@ -28,10 +28,10 @@ export function Notifications() {
   useEffect(() => {
     async function loadNotifications() {
       try {
-        const res = await apiClient.get<NotificationItem[] | { items: NotificationItem[] }>(
+        const res = await apiClient.get<NotificationItem[]>(
           `/api/v1/companies/${getActiveCompanyId()}/notifications`
         );
-        const items = unwrapItems(res);
+        const items = res;
         if (items.length) setNotifications(items);
       } catch (err) {
         console.error('Failed to load notifications', err);

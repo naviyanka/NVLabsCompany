@@ -13,6 +13,38 @@ from enum import Enum
 
 from nexus.runtime.cycle_guard import CycleGuard, CycleGuardError  # noqa: F401
 
+# Stable namespace for deterministic A2A identifiers (Phase 4.1).
+A2A_NAMESPACE = uuid.UUID("6f1c9a2e-6b3d-5f4a-8c7b-1d2e3f4a5b6c")
+
+
+def correlation_id_for(source_run_id: object, tool_call_id: object) -> str:
+    """Derive a deterministic correlation ID from a run and tool call.
+
+    Replaying the same workflow step yields the same correlation ID, which is
+    what makes delegation dedupe possible.
+
+    Args:
+        source_run_id: Identifier of the run issuing the delegation.
+        tool_call_id: Identifier of the tool call inside that run.
+
+    Returns:
+        The UUIDv5 correlation ID as a string.
+    """
+    return str(uuid.uuid5(A2A_NAMESPACE, f"corr:{source_run_id}:{tool_call_id}"))
+
+
+def execution_id_for(source_run_id: object, tool_call_id: object) -> uuid.UUID:
+    """Derive a deterministic execution ID from a run and tool call.
+
+    Args:
+        source_run_id: Identifier of the run issuing the delegation.
+        tool_call_id: Identifier of the tool call inside that run.
+
+    Returns:
+        The UUIDv5 execution ID.
+    """
+    return uuid.uuid5(A2A_NAMESPACE, f"exec:{source_run_id}:{tool_call_id}")
+
 
 class CommunicationMode(Enum):
     """Supported communication modes for A2A messaging."""
@@ -83,6 +115,7 @@ class A2ARouter:
         )
         self._pending_consults: dict[str, A2AMessage] = {}
         self._execution_chain: list[tuple[uuid.UUID, uuid.UUID]] = []
+        self._delegations: dict[str, A2AMessage] = {}
 
     def send(self, message: A2AMessage) -> A2AMessage:
         """Route a message based on its communication mode.
@@ -114,12 +147,16 @@ class A2ARouter:
             message.status = "pending"
             self._pending_consults[message.correlation_id] = message
         elif message.mode == CommunicationMode.delegate:
+            existing = self._delegations.get(message.correlation_id)
+            if existing is not None:
+                return existing
             if self._cycle_guard is not None:
                 self._cycle_guard.check_delegation(
                     message.sender, message.recipient, self._execution_chain
                 )
             self._execution_chain.append((message.sender, message.recipient))
             message.status = "delivered"
+            self._delegations[message.correlation_id] = message
 
         return message
 

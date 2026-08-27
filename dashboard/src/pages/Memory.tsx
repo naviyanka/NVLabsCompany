@@ -33,7 +33,7 @@ import { StatCard } from '@/components/common/StatCard';
 import { Button } from '@/components/common/Button';
 import { Modal } from '@/components/common/Modal';
 import { Drawer } from '@/components/common/Drawer';
-import { apiClient, unwrapItems } from '@/api/client';
+import { apiClient } from '@/api/client';
 import { getActiveCompanyId } from '@/config';
 
 export interface MemoryRecord {
@@ -82,10 +82,10 @@ export function Memory() {
     async function loadMemories() {
       try {
         const companyId = getActiveCompanyId();
-        const res = await apiClient.get<MemoryRecord[] | { items: MemoryRecord[] }>(
+        const res = await apiClient.get<MemoryRecord[]>(
           `/api/v1/companies/${companyId}/memories`
         );
-        const items = unwrapItems(res);
+        const items = res;
         if (items.length > 0) {
           const formatted = items.map((item: any, i: number) => ({
             ...item,

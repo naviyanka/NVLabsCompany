@@ -20,7 +20,7 @@ import { Badge } from '@/components/common/Badge';
 import { Modal } from '@/components/common/Modal';
 import { Drawer } from '@/components/common/Drawer';
 import { Table } from '@/components/common/Table';
-import { apiClient, unwrapItems } from '@/api/client';
+import { apiClient } from '@/api/client';
 import { getActiveCompanyId } from '@/config';
 import type { Agent } from '@/types/agent';
 
@@ -64,10 +64,10 @@ export function HRRoom() {
   useEffect(() => {
     async function loadAgents() {
       try {
-        const res = await apiClient.get<Agent[] | { items: Agent[] }>(
+        const res = await apiClient.get<Agent[]>(
           `/api/v1/companies/${getActiveCompanyId()}/agents`
         );
-        const items = unwrapItems(res);
+        const items = res;
         if (items.length > 0) {
           setAgents(items.map((apiAgent) => ({ ...apiAgent })));
         }
@@ -82,9 +82,9 @@ export function HRRoom() {
     async function loadCurricula() {
       try {
         const res = await apiClient.get<
-          Array<TrainingCurriculum & { target_agent_id: string }> | { items: Array<TrainingCurriculum & { target_agent_id: string }> }
+          Array<TrainingCurriculum & { target_agent_id: string }>
         >(`/api/v1/companies/${getActiveCompanyId()}/hr/curricula`);
-        const rows = unwrapItems(res);
+        const rows = res;
         const nameById = new Map(agents.map((a) => [a.id, a.name]));
         setCurricula(
           rows.map((row) => ({

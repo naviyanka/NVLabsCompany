@@ -1,4 +1,4 @@
-import { apiClient, unwrapItems } from '@/api/client';
+import { apiClient } from '@/api/client';
 import { Drawer } from '@/components/common/Drawer';
 import { StatCard } from '@/components/common/StatCard';
 import { getActiveCompanyId } from '@/config';
@@ -39,6 +39,11 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
+import {
+  COMPLETION_REASONS,
+  COMPLETION_REASON_LABELS,
+  type CompletionReason,
+} from '@/types/task';
 
 export type ActivitySeverity = 'info' | 'warning' | 'error' | 'critical';
 export type ActivityStatus = 'success' | 'failed' | 'in_progress';
@@ -56,6 +61,7 @@ export interface ActivityLog {
   severity: ActivitySeverity;
   latency_ms?: number;
   metadata?: string;
+  completion_reason?: CompletionReason | null;
   raw_payload?: Record<string, unknown>;
 }
 
@@ -74,6 +80,7 @@ export function Activity() {
   const [selectedType, setSelectedType] = useState<string>('all');
   const [selectedSeverity, setSelectedSeverity] = useState<string>('all');
   const [selectedStatus, setSelectedStatus] = useState<string>('all');
+  const [selectedReason, setSelectedReason] = useState<string>('all');
   const [selectedLog, setSelectedLog] = useState<ActivityLog | null>(null);
   const [isLive, setIsLive] = useState<boolean>(true);
   const [viewMode, setViewMode] = useState<'list' | 'terminal' | 'analytics'>('list');
@@ -83,10 +90,10 @@ export function Activity() {
   useEffect(() => {
     async function loadActivity() {
       try {
-        const res = await apiClient.get<ActivityLog[] | { items: ActivityLog[] }>(
+        const res = await apiClient.get<ActivityLog[]>(
           `/api/v1/companies/${getActiveCompanyId()}/activity`
         );
-        const items = unwrapItems(res);
+        const items = res;
         if (items.length > 0) {
           const formatted = items.map((item, i) => ({
             ...item,
@@ -109,10 +116,10 @@ export function Activity() {
     const interval = setInterval(async () => {
       try {
         const companyId = getActiveCompanyId();
-        const res = await apiClient.get<ActivityLog[] | { items: ActivityLog[] }>(
+        const res = await apiClient.get<ActivityLog[]>(
           `/api/v1/companies/${companyId}/activity`
         );
-        const items = unwrapItems(res);
+        const items = res;
         if (items.length > 0) {
           setLogs(items.slice(0, 50));
         }
@@ -130,6 +137,7 @@ export function Activity() {
       if (selectedType !== 'all' && log.type.toLowerCase() !== selectedType.toLowerCase()) return false;
       if (selectedSeverity !== 'all' && log.severity !== selectedSeverity) return false;
       if (selectedStatus !== 'all' && log.status !== selectedStatus) return false;
+      if (selectedReason !== 'all' && log.completion_reason !== selectedReason) return false;
       if (search.trim()) {
         const q = search.toLowerCase();
         return (
@@ -141,7 +149,7 @@ export function Activity() {
       }
       return true;
     });
-  }, [logs, search, selectedType, selectedSeverity, selectedStatus]);
+  }, [logs, search, selectedType, selectedSeverity, selectedStatus, selectedReason]);
 
   // Metric Computations
   const totalEvents = logs.length;
@@ -444,6 +452,32 @@ export function Activity() {
               </button>
             ))}
           </div>
+        </div>
+
+        {/* Completion Reason Filter (Phase 1.1 taxonomy) */}
+        <div className="flex flex-wrap items-center gap-2 pt-2.5 border-t border-white/[0.06] text-xs font-mono">
+          <span className="text-[10px] text-[#6B6B6E] uppercase">Reason:</span>
+          <button
+            onClick={() => setSelectedReason('all')}
+            className={`px-2 py-0.5 rounded text-[10px] uppercase transition-colors cursor-pointer ${selectedReason === 'all'
+                ? 'bg-white/20 text-white font-bold border border-white/30'
+                : 'text-[#6B6B6E] hover:text-gray-300'
+              }`}
+          >
+            all
+          </button>
+          {COMPLETION_REASONS.map((reason) => (
+            <button
+              key={reason}
+              onClick={() => setSelectedReason(reason)}
+              className={`px-2 py-0.5 rounded text-[10px] uppercase transition-colors cursor-pointer ${selectedReason === reason
+                  ? 'bg-[#FFB020]/20 text-[#FFB020] border border-[#FFB020]/30 font-bold'
+                  : 'text-[#6B6B6E] hover:text-gray-300'
+                }`}
+            >
+              {COMPLETION_REASON_LABELS[reason]}
+            </button>
+          ))}
         </div>
       </div>
 

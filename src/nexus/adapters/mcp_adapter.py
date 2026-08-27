@@ -9,7 +9,9 @@ import uuid
 from typing import Any
 
 from nexus.adapters.base import BaseAdapter
+from nexus.governance.ssrf_protection import guard_url as _guard_url
 from nexus.runtime.adapter import AgentSession, TaskResult
+from nexus.tools.factory import guard_tool_call
 
 try:
     from nexus.tools.mcp_client import MCPClient, MCPResult, MCPTool
@@ -62,6 +64,7 @@ class MCPAgentAdapter(BaseAdapter):
         """
         if "server_url" not in config:
             raise ValueError("MCP adapter requires 'server_url' in config")
+        _guard_url(config["server_url"], "server_url")
 
     async def _do_create_session(self, session: AgentSession) -> None:
         """Initialize MCP session by connecting to the server.
@@ -156,6 +159,23 @@ class MCPAgentAdapter(BaseAdapter):
                 session.session_id,
                 f"Calling MCP tool: {tool_name}({arguments})",
             )
+
+            # This loop dispatches tools directly, so it has to clear the same
+            # guardrails a ToolExecutor applies. A refusal is recorded as an
+            # ordinary tool error so the model sees it and can adapt.
+            refusal = await guard_tool_call(
+                tool_name, arguments, agent_id=session.agent_id
+            )
+            if refusal is not None:
+                self._add_log(session.session_id, f"[{tool_name}] {refusal['error']}")
+                results.append({
+                    "tool_name": tool_name,
+                    "content": refusal["error"],
+                    "is_error": True,
+                    "metadata": {"status": refusal["status"]},
+                })
+                combined_output.append(f"[{tool_name}] ERROR: {refusal['error']}")
+                continue
 
             try:
                 result: MCPResult = await client.call_tool(tool_name, arguments)

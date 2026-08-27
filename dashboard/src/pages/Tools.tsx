@@ -24,7 +24,7 @@ import { Modal } from '@/components/common/Modal';
 import { Drawer } from '@/components/common/Drawer';
 import { Table } from '@/components/common/Table';
 import { GitHubConnectorModal } from '@/components/git/GitHubConnectorModal';
-import { apiClient, unwrapItems } from '@/api/client';
+import { apiClient } from '@/api/client';
 import { getActiveCompanyId } from '@/config';
 
 export interface ExtendedToolItem {
@@ -68,10 +68,10 @@ export function Tools() {
   useEffect(() => {
     async function loadTools() {
       try {
-        const res = await apiClient.get<ExtendedToolItem[] | { items: ExtendedToolItem[] }>(
+        const res = await apiClient.get<ExtendedToolItem[]>(
           `/api/v1/companies/${getActiveCompanyId()}/tools`
         );
-        const items = unwrapItems(res);
+        const items = res;
         if (items.length > 0) {
           const merged = items.map((apiTool) => {
             const match = DEFAULT_TOOLS.find((d) => d.id === apiTool.id || d.name === apiTool.name);

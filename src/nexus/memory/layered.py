@@ -7,6 +7,11 @@ MemoryStore. Layers represent different scopes of knowledge:
 - L1 (Session): Ring buffer of session summaries for recent context.
 - L2 (Agent): Per-agent fact store with deduplication.
 - L3 (Shared): Organizational knowledge promoted from L2.
+
+Every layer here lives in the process, optionally mirrored to a JSON file via
+``persist_path``. For durable L2/L3 backed by ``memory_records`` rows, use
+:class:`nexus.memory.layered_persistent.PersistentLayeredMemory`; its module
+docstring explains why L0 and L1 stay in memory by design.
 """
 
 from __future__ import annotations

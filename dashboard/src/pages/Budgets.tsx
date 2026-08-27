@@ -27,7 +27,7 @@ import { Button } from '@/components/common/Button';
 import { Table } from '@/components/common/Table';
 import { Modal } from '@/components/common/Modal';
 import { Drawer } from '@/components/common/Drawer';
-import { apiClient, unwrapItems } from '@/api/client';
+import { apiClient } from '@/api/client';
 import { getActiveCompanyId } from '@/config';
 import type { Agent } from '@/types/agent';
 
@@ -57,10 +57,10 @@ export function Budgets() {
   useEffect(() => {
     async function loadAgents() {
       try {
-        const res = await apiClient.get<Agent[] | { items: Agent[] }>(
+        const res = await apiClient.get<Agent[]>(
           `/api/v1/companies/${getActiveCompanyId()}/agents`
         );
-        const items = unwrapItems(res);
+        const items = res;
         if (items.length > 0) {
           const formatted = items.map((a) => ({ ...a }));
           setAgents(formatted);

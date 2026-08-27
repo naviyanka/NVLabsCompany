@@ -282,10 +282,12 @@ async def test_list_users_filters_on_quoted_username():
 
     assert body["totalResults"] == 1
     page_stmt = str(session.execute.await_args_list[0].args[0])
-    assert "WHERE user_profiles.email" in page_stmt
+    assert "user_profiles.email" in page_stmt
+    assert "user_profiles.company_id" in page_stmt
     count_stmt = str(session.execute.await_args_list[1].args[0])
     assert "count(" in count_stmt
-    assert "WHERE user_profiles.email" in count_stmt
+    assert "user_profiles.email" in count_stmt
+    assert "user_profiles.company_id" in count_stmt
 
 
 @pytest.mark.asyncio
@@ -294,7 +296,12 @@ async def test_list_users_ignores_unquoted_filter():
 
     await scim_routes.list_users(_Request(), session, filter="userName eq ada@example.com")
 
-    assert "WHERE" not in str(session.execute.await_args_list[0].args[0])
+    # An unparseable filter is dropped, but the tenant scope is not: the
+    # statement still carries company_id, and nothing else.
+    page_stmt = str(session.execute.await_args_list[0].args[0])
+    where = page_stmt.split("WHERE", 1)[1]
+    assert "user_profiles.company_id" in where
+    assert "user_profiles.email" not in where
 
 
 @pytest.mark.asyncio
@@ -310,7 +317,9 @@ async def test_list_users_ignores_unsupported_filter_attribute():
 
     body = await scim_routes.list_users(_Request(), session, filter='active eq "false"')
 
-    assert "WHERE" not in str(session.execute.await_args_list[0].args[0])
+    page_stmt = str(session.execute.await_args_list[0].args[0])
+    assert "user_profiles.email" not in page_stmt.split("WHERE", 1)[1]
+    assert "user_profiles.company_id" in page_stmt
     assert body["totalResults"] == 2
 
 
@@ -344,22 +353,21 @@ async def test_get_user_unknown_id_is_404():
 
 
 @pytest.mark.asyncio
-async def test_get_user_is_not_tenant_scoped():
-    """A SCIM token reads a user from any company.
+async def test_get_user_is_tenant_scoped():
+    """A SCIM token reads users only from its own company.
 
-    The select filters on ``id`` alone (``scim.py:123``) and the handler takes
-    no ``CurrentCompanyId``, so one identity provider's token reaches every
-    tenant's users. Documented here; changing it alters who can call the API.
+    This previously filtered on ``id`` alone, so one identity provider's token
+    reached every tenant's users. The select now carries a ``company_id``
+    predicate; this test is what keeps it there.
     """
     foreign = _user(company_id=OTHER_COMPANY_ID, email="outsider@other.example")
     session = _session()
     session.execute = AsyncMock(return_value=_OneResult(foreign))
 
-    body = await scim_routes.get_user(foreign.id, _Request(), session)
+    await scim_routes.get_user(foreign.id, _Request(), session)
 
-    assert body["userName"] == "outsider@other.example"
     where = str(session.execute.await_args.args[0]).split("WHERE", 1)[1]
-    assert "company_id" not in where
+    assert "company_id" in where
 
 
 # --------------------------------------------------------------------------

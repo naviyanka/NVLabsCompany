@@ -24,11 +24,12 @@ Context: {context}
 Evaluate how well the result satisfies the criterion on a scale from 0.0 (worst) to 1.0 (best).
 
 Output ONLY a JSON object with:
+- "verdict": "pass" or "fail"
 - "score": a float between 0.0 and 1.0
-- "reasoning": a brief explanation of the score
+- "reason": a brief explanation of the score
 
 Example output:
-{{"score": 0.85, "reasoning": "The result addresses most aspects of the criterion with minor gaps."}}
+{{"verdict": "pass", "score": 0.85, "reason": "The result addresses most aspects of the criterion with minor gaps."}}
 """
 
 
@@ -55,6 +56,7 @@ class LLMCriticEvaluator:
         quality_threshold: float = 0.7,
         criteria: list[EvaluationCriteria] | None = None,
         prompt_templates: dict[str, str] | None = None,
+        max_consecutive_parse_failures: int = 3,
     ) -> None:
         """Initialize the LLM-enhanced critic evaluator.
 
@@ -65,9 +67,14 @@ class LLMCriticEvaluator:
             prompt_templates: Optional dict of prompt templates keyed by criterion name.
                              Each template should have {task_description}, {criterion_name},
                              {criterion_description}, {result}, and {context} placeholders.
+            max_consecutive_parse_failures: Consecutive judge failures tolerated
+                before evaluate() returns verdict "paused" so the caller stops
+                rather than spinning on a broken judge.
         """
         self._llm_callable = llm_callable
         self._quality_threshold = quality_threshold
+        self._max_consecutive_parse_failures = max_consecutive_parse_failures
+        self._consecutive_parse_failures = 0
         self._criteria = criteria or [
             EvaluationCriteria(
                 name="completeness",
@@ -121,12 +128,19 @@ class LLMCriticEvaluator:
         context = context or {}
         criteria_scores: dict[str, float] = {}
         feedback_parts: list[str] = []
+        judge_failed = False
 
         for criterion in self._criteria:
-            score = await self._llm_evaluate_criterion(
+            score, ok = await self._llm_evaluate_criterion(
                 criterion, task_id, task_description, result, context
             )
+            judge_failed = judge_failed or not ok
             criteria_scores[criterion.name] = score
+
+        if judge_failed:
+            self._consecutive_parse_failures += 1
+        else:
+            self._consecutive_parse_failures = 0
 
         # Compute weighted composite
         total_weight = sum(c.weight for c in self._criteria)
@@ -138,6 +152,29 @@ class LLMCriticEvaluator:
             composite = 0.0
 
         passed = composite >= self._quality_threshold
+
+        # Judge error: fail open to "continue", or pause once the failure cap is hit.
+        if judge_failed:
+            if self._consecutive_parse_failures >= self._max_consecutive_parse_failures:
+                return EvaluationResult(
+                    task_id=task_id,
+                    score=composite,
+                    passed=True,
+                    feedback=(
+                        f"Judge unusable for {self._consecutive_parse_failures} "
+                        f"consecutive evaluations — pausing quality gate."
+                    ),
+                    criteria_scores=criteria_scores,
+                    verdict="paused",
+                )
+            return EvaluationResult(
+                task_id=task_id,
+                score=composite,
+                passed=True,
+                feedback="Judge error — quality gate failed open (heuristic fallback scores).",
+                criteria_scores=criteria_scores,
+                verdict="continue",
+            )
 
         if passed:
             feedback_parts.append("Output meets quality threshold.")
@@ -159,6 +196,7 @@ class LLMCriticEvaluator:
             passed=passed,
             feedback=" ".join(feedback_parts),
             criteria_scores=criteria_scores,
+            verdict="pass" if passed else "fail",
         )
 
     async def _llm_evaluate_criterion(
@@ -168,7 +206,7 @@ class LLMCriticEvaluator:
         task_description: str,
         result: Any,
         context: dict[str, Any],
-    ) -> float:
+    ) -> tuple[float, bool]:
         """Evaluate a single criterion using the LLM.
 
         Checks cache first, then calls the LLM. Caches successful results.
@@ -182,14 +220,14 @@ class LLMCriticEvaluator:
             context: Additional context.
 
         Returns:
-            Score from 0.0 to 1.0.
+            Tuple of (score in 0.0-1.0, whether the LLM judge succeeded).
         """
         # Check cache
         result_hash = hashlib.sha256(str(result).encode()).hexdigest()
         cache_key = (str(task_id), result_hash, criterion.name)
 
         if cache_key in self._cache:
-            return self._cache[cache_key]
+            return self._cache[cache_key], True
 
         try:
             # Get the prompt template for this criterion
@@ -210,13 +248,14 @@ class LLMCriticEvaluator:
 
             # Cache successful result
             self._cache[cache_key] = score
-            return score
+            return score, True
 
         except Exception:
             # Fall back to heuristic evaluation
-            return await self._fallback_evaluator._evaluate_criterion(
+            fallback = await self._fallback_evaluator._evaluate_criterion(
                 criterion, task_description, result, context
             )
+            return fallback, False
 
     def _parse_criterion_response(self, response: str) -> float:
         """Parse the LLM response for a criterion evaluation.
@@ -245,3 +284,35 @@ class LLMCriticEvaluator:
             raise ValueError(f"Score must be between 0.0 and 1.0, got {score}")
 
         return score
+
+
+def make_critic(
+    llm_callable: Callable[[str], Awaitable[str]] | None = None,
+    quality_threshold: float = 0.7,
+    use_llm: bool | None = None,
+    criteria: list[EvaluationCriteria] | None = None,
+) -> "LLMCriticEvaluator | CriticEvaluator":
+    """Build the default quality gate.
+
+    The LLM critic is the default. The heuristic CriticEvaluator is returned
+    only when explicitly requested (use_llm=False) or when no model is
+    available (llm_callable is None).
+
+    Args:
+        llm_callable: Async judge callable, or None if no model is available.
+        quality_threshold: Minimum composite score to pass.
+        use_llm: Explicit override. None means "use the LLM if available".
+        criteria: Optional criteria list.
+
+    Returns:
+        An evaluator exposing .evaluate() and .quality_threshold.
+    """
+    if use_llm is False or llm_callable is None:
+        return CriticEvaluator(
+            quality_threshold=quality_threshold, criteria=criteria
+        )
+    return LLMCriticEvaluator(
+        llm_callable=llm_callable,
+        quality_threshold=quality_threshold,
+        criteria=criteria,
+    )

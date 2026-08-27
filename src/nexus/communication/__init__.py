@@ -15,10 +15,16 @@ This module provides the full communication infrastructure for the NEXUS platfor
 """
 
 from nexus.communication.a2a import A2AProtocol
-from nexus.communication.a2a_router import A2AMessage, A2ARouter, CommunicationMode
+from nexus.communication.a2a_router import (
+    A2AMessage,
+    A2ARouter,
+    CommunicationMode,
+    correlation_id_for,
+    execution_id_for,
+)
 from nexus.communication.channels import ChannelRouter
 from nexus.communication.event_bus import EventBus
-from nexus.communication.group import GroupManager
+from nexus.communication.group import GroupManager, HandoffIntent
 from nexus.communication.hive_manager import HiveManager
 from nexus.communication.hive_protocol import (
     HOP_CAP,
@@ -30,6 +36,7 @@ from nexus.communication.hive_protocol import (
     requires_reply_for_act,
 )
 from nexus.communication.hive_router import HiveRouter
+from nexus.communication.permits import DEFAULT_SUBAGENT_CAP, SubagentPermits
 from nexus.communication.hive_task import HiveTask, TaskStatus
 
 __all__ = [
@@ -38,6 +45,11 @@ __all__ = [
     "A2AMessage",
     "CommunicationMode",
     "GroupManager",
+    "HandoffIntent",
+    "SubagentPermits",
+    "DEFAULT_SUBAGENT_CAP",
+    "correlation_id_for",
+    "execution_id_for",
     "ChannelRouter",
     "EventBus",
     "HiveMessage",

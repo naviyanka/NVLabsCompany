@@ -3,7 +3,6 @@
 from nexus.governance.approvals import ApprovalEngine
 from nexus.governance.budget_enforcer import BudgetEnforcer, BudgetDecision, WindowKind
 from nexus.governance.budget_incident import BudgetIncident, BudgetIncidentLog
-from nexus.governance.guardrails import GuardrailChain
 from nexus.governance.rbac import RBACManager
 from nexus.governance.audit import AuditLogger
 from nexus.governance.kill_switch import KillSwitch, CircuitBreaker
@@ -18,7 +17,10 @@ from nexus.governance.incidents import IncidentManager
 from nexus.governance.retention import RetentionManager
 from nexus.governance.health import HealthMonitor
 from nexus.governance.config_governance import ConfigGovernance
-from nexus.governance.decision_queue import DecisionQueueManager, DecisionQueueItem, RetentionPolicy
+from nexus.governance.decision_queue_persistent import (
+    PersistentDecisionQueueManager,
+    RetentionPolicy,
+)
 from nexus.governance.breaker_types import (
     AgentUsageSample,
     BreakerAction,
@@ -29,9 +31,22 @@ from nexus.governance.breaker_types import (
     BreakerState,
 )
 from nexus.governance.circuit_breaker_advanced import AdvancedCircuitBreaker
-from nexus.governance.ssrf_protection import SSRFGuard
-from nexus.governance.secret_backend import SecretBackend, FernetSecretBackend
+from nexus.governance.ssrf_protection import SSRFGuard, guard_url
+from nexus.governance.secret_backend import (
+    EnvSecretBackend,
+    FernetSecretBackend,
+    KeyringSecretBackend,
+    SecretBackend,
+    make_secret_backend,
+)
 from nexus.governance.integration_registry import IntegrationRecord, IntegrationRegistry
+from nexus.governance.skill_policy import (
+    SCHEMA_VERSION as SKILL_POLICY_SCHEMA_VERSION,
+    SkillDecision,
+    SkillRef,
+    SkillSubject,
+    decision as skill_policy_decision,
+)
 
 __all__ = [
     "ApprovalEngine",
@@ -40,7 +55,6 @@ __all__ = [
     "BudgetIncident",
     "BudgetIncidentLog",
     "WindowKind",
-    "GuardrailChain",
     "RBACManager",
     "AuditLogger",
     "KillSwitch",
@@ -56,8 +70,7 @@ __all__ = [
     "RetentionManager",
     "HealthMonitor",
     "ConfigGovernance",
-    "DecisionQueueManager",
-    "DecisionQueueItem",
+    "PersistentDecisionQueueManager",
     "RetentionPolicy",
     "AgentUsageSample",
     "BreakerAction",
@@ -68,8 +81,17 @@ __all__ = [
     "BreakerState",
     "AdvancedCircuitBreaker",
     "SSRFGuard",
+    "guard_url",
     "SecretBackend",
     "FernetSecretBackend",
+    "KeyringSecretBackend",
+    "EnvSecretBackend",
+    "make_secret_backend",
     "IntegrationRecord",
     "IntegrationRegistry",
+    "SKILL_POLICY_SCHEMA_VERSION",
+    "SkillDecision",
+    "SkillRef",
+    "SkillSubject",
+    "skill_policy_decision",
 ]

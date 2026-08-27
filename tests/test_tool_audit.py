@@ -586,3 +586,124 @@ class TestExecutorAuditIntegration:
         records = audit_store.query()
         assert len(records) == 1
         assert records[0].tool_name == ""
+
+
+class TestExecutorGuardrailWiring:
+    """Phase 3.3 — guardrails wired into live tool dispatch."""
+
+    @pytest.fixture
+    def chain(self):
+        from nexus.guardrails import GuardrailChain, PolicyGuardrail
+
+        return GuardrailChain(
+            guardrails=[
+                PolicyGuardrail(
+                    dangerous_commands=["rm -rf"],
+                    sensitive_paths=["/etc/shadow"],
+                )
+            ]
+        )
+
+    @pytest.fixture
+    def ids(self) -> dict:
+        return {
+            "agent_id": uuid.uuid4(),
+            "tool_id": uuid.uuid4(),
+            "company_id": uuid.uuid4(),
+        }
+
+    def test_blocked_command_in_tool_arg_is_refused(self, chain, ids: dict) -> None:
+        """A dangerous command in a tool argument never reaches execute_fn."""
+        audit_store = ToolAuditStore()
+        executor = ToolExecutor(
+            timeout_seconds=1.0, audit_store=audit_store, guardrails=chain
+        )
+        called = []
+
+        async def run():
+            async def fn(args):
+                called.append(args)
+                return "ran"
+
+            return await executor.execute(
+                agent_id=ids["agent_id"],
+                tool_id=ids["tool_id"],
+                arguments={"cmd": "rm -rf /"},
+                execute_fn=fn,
+                company_id=ids["company_id"],
+                tool_name="shell",
+            )
+
+        result = asyncio.run(run())
+
+        assert called == []
+        assert result.success is False
+        assert "Guardrail blocked" in (result.error or "")
+        records = audit_store.query()
+        assert len(records) == 1
+        assert records[0].status == "guardrail_blocked"
+
+    def test_safe_tool_call_passes_through(self, chain, ids: dict) -> None:
+        """A clean tool call still executes with guardrails attached."""
+        executor = ToolExecutor(timeout_seconds=1.0, guardrails=chain)
+
+        async def run():
+            async def fn(args):
+                return "ok"
+
+            return await executor.execute(
+                agent_id=ids["agent_id"],
+                tool_id=ids["tool_id"],
+                arguments={"path": "report.pdf"},
+                execute_fn=fn,
+                company_id=ids["company_id"],
+                tool_name="read_file",
+            )
+
+        result = asyncio.run(run())
+        assert result.success is True
+        assert result.output == "ok"
+
+    def test_blocked_output_is_refused_after_retry_cap(self, chain, ids: dict) -> None:
+        """Output post-processing blocks, retrying up to the cap."""
+        executor = ToolExecutor(
+            timeout_seconds=1.0, guardrails=chain, guardrail_max_retries=2
+        )
+        attempts = []
+
+        async def run():
+            async def fn(args):
+                attempts.append(1)
+                return "here is /etc/shadow"
+
+            return await executor.execute(
+                agent_id=ids["agent_id"],
+                tool_id=ids["tool_id"],
+                arguments={"path": "notes.txt"},
+                execute_fn=fn,
+                company_id=ids["company_id"],
+                tool_name="read_file",
+            )
+
+        result = asyncio.run(run())
+        assert len(attempts) == 3  # 1 initial + 2 retries
+        assert result.success is False
+        assert "Guardrail blocked output" in (result.error or "")
+
+    def test_no_guardrails_unchanged(self, ids: dict) -> None:
+        """Executor without a chain behaves exactly as before."""
+        executor = ToolExecutor(timeout_seconds=1.0)
+
+        async def run():
+            async def fn(args):
+                return "rm -rf /"
+
+            return await executor.execute(
+                agent_id=ids["agent_id"],
+                tool_id=ids["tool_id"],
+                arguments={"cmd": "rm -rf /"},
+                execute_fn=fn,
+            )
+
+        result = asyncio.run(run())
+        assert result.success is True

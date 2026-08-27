@@ -15,7 +15,13 @@ from nexus.models.evolution import (
     EvolutionProposal,
     SkillVersion,
 )
-from nexus.models.governance import Approval, AuditLog, Decision, DecisionQueue
+from nexus.models.governance import (
+    Approval,
+    AuditLog,
+    AuditLogArchive,
+    Decision,
+    DecisionQueue,
+)
 from nexus.models.incident import Incident, IncidentAction, IncidentEvent
 from nexus.models.knowledge import ExperienceRecord, KnowledgeChunk, KnowledgePage
 from nexus.models.meeting import ActionItem, Meeting, MeetingMinutes, MeetingParticipant
@@ -38,6 +44,7 @@ from nexus.models.tool_invocation import ToolInvocation
 from nexus.models.trigger import Trigger, TriggerExecution
 from nexus.governance.kill_switch_model import KillSwitchRecord
 from nexus.governance.circuit_breaker_model import CircuitBreakerRecord
+from nexus.governance.decision_queue_model import DecisionQueueItemRecord
 from nexus.models.api_key import ApiKey
 from nexus.models.user_profile import UserProfile, UserSession
 from nexus.models.heartbeat_run import HeartbeatRun
@@ -71,6 +78,7 @@ __all__ = [
     "Decision",
     "DecisionQueue",
     "AuditLog",
+    "AuditLogArchive",
     # Policies
     "Policy",
     "PolicyRule",
@@ -123,6 +131,7 @@ __all__ = [
     # Governance persistence
     "KillSwitchRecord",
     "CircuitBreakerRecord",
+    "DecisionQueueItemRecord",
     # Runtime persistence
     "ExecutionCheckpoint",
     "HeartbeatRun",

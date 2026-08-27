@@ -1,0 +1,8 @@
+{
+  "_comment": "Pre-existing architecture violations, each owned by a phase that removes it. Entries print as WARN and do not fail the build. Regenerate with: python scripts/arch_guard.py --baseline. Adding an entry by hand requires a phase reference in its reason.",
+  "violations": {
+    "R1 governance/config_governance.py:_fernet": "lazy cipher handle, not state; Phase 0.3 moves it behind the vault",
+    "R1 governance/leader_election.py:_election": "process-local lease client; the lease itself is in Redis",
+    "R1 governance/leader_election.py:_initialized": "init latch for the above"
+  }
+}

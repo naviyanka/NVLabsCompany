@@ -70,7 +70,7 @@ async def start_goal_workflow(
     if client is None:
         return None
 
-    from nexus.temporal.workflows import goal_pursuit_workflow, GoalPursuitInput
+    from nexus.temporal.workflows import GoalPursuitInput, GoalPursuitWorkflow
 
     try:
         workflow_input = GoalPursuitInput(
@@ -81,7 +81,7 @@ async def start_goal_workflow(
             owner_agent_id=owner_agent_id,
         )
         handle = await client.start_workflow(
-            goal_pursuit_workflow,
+            GoalPursuitWorkflow.run,
             workflow_input,
             id=f"goal-{goal_id}",
             task_queue=TASK_QUEUE,
@@ -107,7 +107,7 @@ async def start_pipeline_workflow(
     if client is None:
         return None
 
-    from nexus.temporal.workflows import pipeline_execution_workflow, PipelineExecutionInput
+    from nexus.temporal.workflows import PipelineExecutionInput, PipelineExecutionWorkflow
 
     try:
         workflow_input = PipelineExecutionInput(
@@ -117,7 +117,7 @@ async def start_pipeline_workflow(
             stages=stages,
         )
         handle = await client.start_workflow(
-            pipeline_execution_workflow,
+            PipelineExecutionWorkflow.run,
             workflow_input,
             id=f"pipeline-{run_id}",
             task_queue=TASK_QUEUE,

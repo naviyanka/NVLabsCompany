@@ -28,7 +28,7 @@ import {
 import { StatCard } from '@/components/common/StatCard';
 import { Button } from '@/components/common/Button';
 import { Modal } from '@/components/common/Modal';
-import { apiClient, unwrapItems } from '@/api/client';
+import { apiClient } from '@/api/client';
 import { getActiveCompanyId } from '@/config';
 
 export interface KnowledgeDoc {
@@ -112,10 +112,10 @@ export function KnowledgeBase() {
   useEffect(() => {
     async function loadDocs() {
       try {
-        const res = await apiClient.get<KnowledgeDoc[] | { items: KnowledgeDoc[] }>(
+        const res = await apiClient.get<KnowledgeDoc[]>(
           `/api/v1/companies/${getActiveCompanyId()}/knowledge`
         );
-        setDocs(unwrapItems(res).map(normalizeDoc));
+        setDocs(res.map(normalizeDoc));
         setLoadError(null);
       } catch {
         setDocs([]);

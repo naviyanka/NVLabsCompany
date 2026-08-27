@@ -5,11 +5,13 @@ reading a header. It is produced once per request by
 :mod:`nexus.auth.middleware` and reaches route handlers through
 ``nexus.api.deps.CurrentPrincipal``.
 
-Two kinds exist. A ``"user"`` principal comes from a session cookie and carries
-the human's identity. A ``"service"`` principal comes from an API key in the
-``Authorization`` header and has no user behind it. Both are scoped to exactly
-one company, and both carry a role, so authorization does not care which kind it
-is looking at.
+Three kinds exist. A ``"user"`` principal comes from a session cookie and
+carries the human's identity. A ``"service"`` principal comes from an API key in
+the ``Authorization`` header and has no user behind it. A ``"run"`` principal
+comes from a short-lived run JWT (:mod:`nexus.auth.run_tokens`) and names the
+agent acting inside one run. All three are scoped to exactly one company, and
+all three carry a role, so authorization does not care which kind it is looking
+at.
 """
 
 import uuid
@@ -18,7 +20,7 @@ from typing import Literal
 
 from nexus.governance.rbac import role_allows
 
-PrincipalKind = Literal["user", "service"]
+PrincipalKind = Literal["user", "service", "run"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,6 +39,11 @@ class Principal:
     email: str = ""
     session_id: uuid.UUID | None = None
     api_key_id: uuid.UUID | None = None
+    # Set only on a ``"run"`` principal: which run the token was minted for and
+    # which agent it names. A handler can refuse work aimed at a different run
+    # without re-parsing the token.
+    run_id: uuid.UUID | None = None
+    agent_id: uuid.UUID | None = None
 
     @property
     def is_service(self) -> bool:
@@ -48,6 +55,8 @@ class Principal:
         """A short label for audit lines."""
         if self.kind == "service":
             return f"service:{self.api_key_id}"
+        if self.kind == "run":
+            return f"run:{self.run_id}:agent:{self.agent_id}"
         return self.email or f"user:{self.user_id}"
 
     def has_permission(self, action: str, resource_type: str, resource_id: str = "*") -> bool:

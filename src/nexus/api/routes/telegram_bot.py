@@ -50,6 +50,20 @@ async def _handle_status(chat_id: str) -> None:
         await _reply(chat_id, f"Error fetching status: {exc}")
 
 
+async def _telegram_company_id(db: Any) -> uuid.UUID:
+    """The tenant the bot acts on.
+
+    ``TELEGRAM_BOT_TOKEN`` names a bot, not a company, so the webhook has no
+    tenant in its payload. Resolving it the same way first-run setup does keeps
+    the bot in one company instead of reading across all of them — and replaces
+    the hardcoded seeded-development UUID ``/task`` used to write, which points
+    at a row that does not exist on a deployment that was never seeded.
+    """
+    from nexus.auth.users import pick_setup_company
+
+    return (await pick_setup_company(db)).id
+
+
 async def _handle_agents(chat_id: str) -> None:
     try:
         from nexus.database import async_session_factory
@@ -57,7 +71,12 @@ async def _handle_agents(chat_id: str) -> None:
         from sqlmodel import select
 
         async with async_session_factory() as db:
-            result = await db.execute(select(Agent).where(Agent.status == "active").limit(20))
+            company_id = await _telegram_company_id(db)
+            result = await db.execute(
+                select(Agent)
+                .where(Agent.company_id == company_id, Agent.status == "active")
+                .limit(20)
+            )
             agents = result.scalars().all()
 
         if not agents:
@@ -82,7 +101,7 @@ async def _handle_task(chat_id: str, description: str) -> None:
 
         async with async_session_factory() as db:
             task = Task(
-                company_id=uuid.UUID("00000000-0000-4000-8000-000000000001"),
+                company_id=await _telegram_company_id(db),
                 title=description[:200],
                 description=f"Created via Telegram remote control",
                 status="pending",

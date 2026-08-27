@@ -12,6 +12,8 @@ import time
 import uuid
 from dataclasses import dataclass, field
 
+from nexus.runtime.redis_utils import tenant_key
+
 logger = logging.getLogger(__name__)
 
 
@@ -121,6 +123,25 @@ class RedisRateLimiter:
                 remaining_hour=config.requests_per_hour,
             )
 
+    @staticmethod
+    def _window_keys(
+        entity_type: str, entity_id: uuid.UUID, config: RedisRateLimitConfig
+    ) -> tuple[str, str]:
+        """The minute and hour keys for one entity's windows.
+
+        A company's windows go under the ``tenant:{company_id}:`` namespace
+        (Phase 5.2.3) so one tenant's counters can be scanned or dropped without
+        touching another's. Other entity types keep the flat layout: the limiter
+        is handed an agent or resource id with no company alongside it, and
+        inventing a tenant for a key would put the counter in the wrong bucket
+        rather than in no bucket, which is worse.
+        """
+        if entity_type == "company":
+            base = tenant_key(entity_id, "ratelimit")
+        else:
+            base = f"{config.key_prefix}:{entity_type}:{entity_id}"
+        return f"{base}:minute", f"{base}:hour"
+
     async def _check_with_redis(
         self,
         entity_type: str,
@@ -131,8 +152,7 @@ class RedisRateLimiter:
         now = time.time()
         member = f"{now:.6f}:{uuid.uuid4().hex[:8]}"
 
-        minute_key = f"{config.key_prefix}:{entity_type}:{entity_id}:minute"
-        hour_key = f"{config.key_prefix}:{entity_type}:{entity_id}:hour"
+        minute_key, hour_key = self._window_keys(entity_type, entity_id, config)
 
         minute_window_start = now - 60
         hour_window_start = now - 3600
@@ -214,8 +234,7 @@ class RedisRateLimiter:
 
         try:
             now = time.time()
-            minute_key = f"{config.key_prefix}:{entity_type}:{entity_id}:minute"
-            hour_key = f"{config.key_prefix}:{entity_type}:{entity_id}:hour"
+            minute_key, hour_key = self._window_keys(entity_type, entity_id, config)
 
             pipe = self._redis.pipeline()
             pipe.zremrangebyscore(minute_key, 0, now - 60)
@@ -248,8 +267,7 @@ class RedisRateLimiter:
             return
 
         try:
-            minute_key = f"{config.key_prefix}:{entity_type}:{entity_id}:minute"
-            hour_key = f"{config.key_prefix}:{entity_type}:{entity_id}:hour"
+            minute_key, hour_key = self._window_keys(entity_type, entity_id, config)
             await self._redis.delete(minute_key, hour_key)
         except Exception as exc:
             logger.warning("Failed to reset rate limit keys: %s", exc)

@@ -5,9 +5,17 @@ detection, data classification rules, and report generation.
 """
 
 import asyncio
+import importlib.util
 import sys
 import uuid
+from datetime import timedelta
 from pathlib import Path
+
+import pytest
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlmodel import SQLModel
+from sqlmodel.ext.asyncio.session import AsyncSession
 
 # Add src to path for direct execution
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
@@ -20,11 +28,69 @@ from nexus.governance.compliance import (
     DataHandlingRule,
 )
 from nexus.governance.audit_persistent import PersistentAuditLogger
+from nexus.models.governance import AuditLog, AuditLogArchive
 
 
 def run_async(coro):
     """Helper to run async coroutines in tests."""
     return asyncio.run(coro)
+
+
+_MIGRATION = (
+    Path(__file__).parent.parent
+    / "alembic"
+    / "versions"
+    / "e1a7b4c93d20_audit_log_hash_chain.py"
+)
+
+
+def _load_migration():
+    """Load the Phase 0.1 migration so tests use its real guard SQL."""
+    spec = importlib.util.spec_from_file_location("_audit_chain_mig", _MIGRATION)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+async def _make_audit_db(db_path: Path):
+    """Create a SQLite audit DB with the append-only guard installed.
+
+    Returns an (engine, session_factory) pair. The guard SQL is taken from the
+    migration module so the test exercises the shipped statements.
+    """
+    engine = create_async_engine(f"sqlite+aiosqlite:///{db_path}")
+    mig = _load_migration()
+
+    async with engine.begin() as conn:
+        await conn.run_sync(
+            SQLModel.metadata.create_all,
+            tables=[AuditLog.__table__, AuditLogArchive.__table__],
+        )
+        await conn.execute(
+            text(mig._SQLITE_GUARD_UPDATE.format(
+                conditions=mig._sqlite_update_conditions()
+            ))
+        )
+        await conn.execute(text(mig._SQLITE_GUARD_DELETE))
+
+    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    return engine, factory
+
+
+@pytest.fixture
+async def audit_db(tmp_path):
+    """A fresh file-backed audit database per test."""
+    engine, factory = await _make_audit_db(tmp_path / "audit.db")
+    try:
+        yield factory
+    finally:
+        await engine.dispose()
+
+
+@pytest.fixture
+async def audit_logger(audit_db):
+    """A PersistentAuditLogger bound to the test database."""
+    return PersistentAuditLogger(session_factory=audit_db)
 
 
 class TestComplianceFramework:
@@ -218,121 +284,188 @@ class TestComplianceFramework:
 class TestPersistentAuditLogger:
     """Tests for PersistentAuditLogger hash chain and operations."""
 
-    def test_log_entry_creates_hash_chain(self):
-        logger = PersistentAuditLogger()
-        e1 = run_async(logger.log_entry("agent", "a1", "action1"))
-        e2 = run_async(logger.log_entry("agent", "a1", "action2"))
+    async def test_log_entry_creates_hash_chain(self, audit_logger):
+        e1 = await audit_logger.log_entry("agent", "a1", "action1")
+        e2 = await audit_logger.log_entry("agent", "a1", "action2")
 
         assert e1.entry_hash != ""
         assert e2.entry_hash != ""
         assert e2.previous_hash == e1.entry_hash
         assert e1.previous_hash == "genesis"
 
-    def test_hash_chain_integrity_valid(self):
-        logger = PersistentAuditLogger()
-        run_async(logger.log_entry("agent", "a1", "action1"))
-        run_async(logger.log_entry("agent", "a1", "action2"))
-        run_async(logger.log_entry("user", "u1", "action3"))
+    async def test_hash_chain_integrity_valid(self, audit_logger):
+        await audit_logger.log_entry("agent", "a1", "action1")
+        await audit_logger.log_entry("agent", "a1", "action2")
+        await audit_logger.log_entry("user", "u1", "action3")
+        await audit_logger.flush_buffer()
 
-        assert logger.verify_chain_integrity() is True
+        assert await audit_logger.verify_chain_integrity() is True
 
-    def test_hash_chain_detects_tampering(self):
-        logger = PersistentAuditLogger()
-        run_async(logger.log_entry("agent", "a1", "action1"))
-        e2 = run_async(logger.log_entry("agent", "a1", "action2"))
+    async def test_hash_chain_detects_tampering(self, audit_db, audit_logger):
+        await audit_logger.log_entry("agent", "a1", "action1")
+        e2 = await audit_logger.log_entry("agent", "a1", "action2")
+        await audit_logger.flush_buffer()
 
-        # Tamper with an entry
-        e2.action = "tampered_action"
+        # Tamper at the storage layer. The guard blocks a normal UPDATE, so
+        # simulate an attacker with direct table access by rewriting the row
+        # with the trigger dropped.
+        async with audit_db() as session:
+            await session.execute(text("DROP TRIGGER audit_log_no_update"))
+            await session.execute(
+                text("UPDATE audit_log SET action = 'tampered' WHERE id = :i"),
+                {"i": e2.id.hex},
+            )
+            await session.commit()
 
-        # Force flush to move from buffer to entries for verification
-        run_async(logger.flush_buffer())
-        assert logger.verify_chain_integrity() is False
+        assert await audit_logger.verify_chain_integrity() is False
 
-    def test_buffer_flushes_at_capacity(self):
-        logger = PersistentAuditLogger(buffer_size=3)
-        run_async(logger.log_entry("agent", "a1", "action1"))
-        run_async(logger.log_entry("agent", "a1", "action2"))
+    async def test_buffer_flushes_at_capacity(self, audit_db):
+        logger = PersistentAuditLogger(buffer_size=3, session_factory=audit_db)
+        await logger.log_entry("agent", "a1", "action1")
+        await logger.log_entry("agent", "a1", "action2")
         assert logger.buffer_count == 2
-        assert logger.total_entries == 0
+        assert await logger.total_entries() == 0
 
-        run_async(logger.log_entry("agent", "a1", "action3"))
+        await logger.log_entry("agent", "a1", "action3")
         # Buffer should have flushed
         assert logger.buffer_count == 0
-        assert logger.total_entries == 3
+        assert await logger.total_entries() == 3
 
-    def test_query_by_actor(self):
-        logger = PersistentAuditLogger()
-        run_async(logger.log_entry("agent", "agent-1", "deploy"))
-        run_async(logger.log_entry("agent", "agent-2", "build"))
-        run_async(logger.log_entry("agent", "agent-1", "test"))
+    async def test_query_by_actor(self, audit_logger):
+        await audit_logger.log_entry("agent", "agent-1", "deploy")
+        await audit_logger.log_entry("agent", "agent-2", "build")
+        await audit_logger.log_entry("agent", "agent-1", "test")
+        await audit_logger.flush_buffer()
 
-        results = logger.query_by_actor("agent-1")
+        results = await audit_logger.query_by_actor("agent-1")
         assert len(results) == 2
         assert all(e.actor_id == "agent-1" for e in results)
 
-    def test_query_by_time_range(self):
-        logger = PersistentAuditLogger()
-        from datetime import datetime, timedelta, timezone
+    async def test_query_by_time_range(self, audit_logger):
+        from datetime import datetime, timezone
         now = datetime.now(timezone.utc)
 
-        run_async(logger.log_entry("agent", "a1", "action1"))
-        run_async(logger.log_entry("agent", "a1", "action2"))
+        await audit_logger.log_entry("agent", "a1", "action1")
+        await audit_logger.log_entry("agent", "a1", "action2")
+        await audit_logger.flush_buffer()
 
         start = now - timedelta(minutes=1)
         end = now + timedelta(minutes=1)
-        results = logger.query_by_time_range(start, end)
+        results = await audit_logger.query_by_time_range(start, end)
         assert len(results) == 2
 
-    def test_export_json(self):
+    async def test_export_json(self, audit_logger):
         import json
-        logger = PersistentAuditLogger()
-        run_async(logger.log_entry("agent", "a1", "deploy"))
+        await audit_logger.log_entry("agent", "a1", "deploy")
+        await audit_logger.flush_buffer()
 
-        exported = logger.export_json()
+        exported = await audit_logger.export_json()
         data = json.loads(exported)
         assert len(data) == 1
         assert data[0]["actor_id"] == "a1"
         assert data[0]["action"] == "deploy"
 
-    def test_export_csv(self):
-        logger = PersistentAuditLogger()
-        run_async(logger.log_entry("agent", "a1", "deploy"))
+    async def test_export_csv(self, audit_logger):
+        await audit_logger.log_entry("agent", "a1", "deploy")
+        await audit_logger.flush_buffer()
 
-        csv = logger.export_csv()
+        csv = await audit_logger.export_csv()
         lines = csv.strip().split("\n")
         assert len(lines) == 2  # header + 1 entry
         assert "actor_type" in lines[0]
         assert "a1" in lines[1]
 
-    def test_retention_policy_archives_old(self):
-        from datetime import timedelta
-        logger = PersistentAuditLogger(buffer_size=100)
-        # Create an old entry
-        e1 = run_async(logger.log_entry("agent", "a1", "old_action"))
-        e1.timestamp = e1.timestamp - timedelta(days=100)
+    async def test_retention_copies_and_keeps_the_chain(self, audit_db):
+        """Retention archives old rows without breaking verification."""
+        logger = PersistentAuditLogger(buffer_size=100, session_factory=audit_db)
 
-        # Create a recent entry
-        run_async(logger.log_entry("agent", "a1", "new_action"))
+        old = await logger.log_entry("agent", "a1", "old_action")
+        old.timestamp = old.timestamp - timedelta(days=100)
+        # Rehash so the backdated timestamp still matches its chain hash.
+        old.entry_hash = logger.compute_entry_hash(old, old.previous_hash)
+        logger._last_hash = old.entry_hash
 
-        # Flush to storage
-        run_async(logger.flush_buffer())
+        await logger.log_entry("agent", "a1", "new_action")
+        await logger.flush_buffer()
 
-        # Set retention to 30 days
         logger.set_retention_policy(max_age_days=30)
-        archived = run_async(logger.enforce_retention())
-        assert archived == 1
-        assert logger.total_entries == 1
-        assert len(logger.get_archived_entries()) == 1
+        archived = await logger.enforce_retention()
 
-    def test_sequence_numbers_increment(self):
-        logger = PersistentAuditLogger()
-        e1 = run_async(logger.log_entry("agent", "a1", "action1"))
-        e2 = run_async(logger.log_entry("agent", "a1", "action2"))
-        e3 = run_async(logger.log_entry("agent", "a1", "action3"))
+        assert archived == 1
+        assert len(await logger.get_archived_entries()) == 1
+        # The source row stays in audit_log — only flagged, never removed.
+        assert await logger.total_entries() == 2
+        assert await logger.active_entries() == 1
+        assert await logger.verify_chain_integrity() is True
+
+    async def test_sequence_numbers_increment(self, audit_logger):
+        e1 = await audit_logger.log_entry("agent", "a1", "action1")
+        e2 = await audit_logger.log_entry("agent", "a1", "action2")
+        e3 = await audit_logger.log_entry("agent", "a1", "action3")
 
         assert e1.sequence_number == 1
         assert e2.sequence_number == 2
         assert e3.sequence_number == 3
+
+    async def test_chain_survives_restart(self, audit_db):
+        """Phase 0.1 acceptance: 100 entries, new process, chain still valid."""
+        logger = PersistentAuditLogger(buffer_size=10, session_factory=audit_db)
+        for i in range(100):
+            await logger.log_entry("agent", "a1", f"action{i}")
+        await logger.flush_buffer()
+
+        # A fresh logger stands in for a restarted process.
+        restarted = PersistentAuditLogger(session_factory=audit_db)
+        assert await restarted.resume() == 100
+        assert await restarted.verify_chain_integrity() is True
+        assert await restarted.total_entries() == 100
+
+        # Logging continues from the persisted tail rather than restarting.
+        entry = await restarted.log_entry("agent", "a1", "after_restart")
+        assert entry.sequence_number == 101
+        await restarted.flush_buffer()
+        assert await restarted.verify_chain_integrity() is True
+
+    async def test_update_is_rejected_by_the_database(self, audit_db, audit_logger):
+        """A manual UPDATE against a chain column fails."""
+        entry = await audit_logger.log_entry("agent", "a1", "action1")
+        await audit_logger.flush_buffer()
+
+        async with audit_db() as session:
+            with pytest.raises(Exception, match="append-only"):
+                await session.execute(
+                    text("UPDATE audit_log SET action = 'x' WHERE id = :i"),
+                    {"i": entry.id.hex},
+                )
+                await session.commit()
+
+    async def test_delete_is_rejected_by_the_database(self, audit_db, audit_logger):
+        """A manual DELETE fails — the chain cannot be truncated."""
+        entry = await audit_logger.log_entry("agent", "a1", "action1")
+        await audit_logger.flush_buffer()
+
+        async with audit_db() as session:
+            with pytest.raises(Exception, match="append-only"):
+                await session.execute(
+                    text("DELETE FROM audit_log WHERE id = :i"), {"i": entry.id.hex}
+                )
+                await session.commit()
+
+        assert await audit_logger.total_entries() == 1
+
+    async def test_archived_at_remains_writable(self, audit_db, audit_logger):
+        """The guard allows the one column retention needs to stamp."""
+        entry = await audit_logger.log_entry("agent", "a1", "action1")
+        await audit_logger.flush_buffer()
+
+        async with audit_db() as session:
+            await session.execute(
+                text("UPDATE audit_log SET archived_at = :t WHERE id = :i"),
+                {"t": "2026-01-01 00:00:00", "i": entry.id.hex},
+            )
+            await session.commit()
+
+        assert await audit_logger.active_entries() == 0
 
 
 if __name__ == "__main__":

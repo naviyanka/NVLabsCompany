@@ -11,9 +11,13 @@ import pytest
 from nexus.memory.token_counter import TokenCounter
 from nexus.memory.compaction import (
     CompactionConfig,
+    CompactionSummary,
+    MessageTooLargeError,
+    resolve_compaction_budget,
     CompactionStrategy,
     SessionCompactor,
 )
+from nexus.models_router.capabilities import DEFAULT_LIMITS, ModelCapabilityResolver
 
 
 # --- Fixtures ---
@@ -374,3 +378,185 @@ class TestSessionCompactor:
         assert result[0]["role"] == "system"
         # Summary should contain extracted content
         assert len(result[0]["content"]) > 0
+
+
+# --- Phase 2.2: budget-aware compaction ---
+
+
+class TestModelCapabilityResolver:
+    """Tests for per-model context window / max output resolution."""
+
+    def test_registered_model_uses_registry_window(self) -> None:
+        limits = ModelCapabilityResolver.resolve("gpt-4o")
+        assert limits.context_window == 128000
+        assert limits.max_output == 16384
+
+    def test_family_match_for_unregistered_model(self) -> None:
+        limits = ModelCapabilityResolver.resolve("claude-opus-4-6")
+        assert limits.context_window == 200000
+        assert limits.max_output == 32000
+
+    def test_variant_suffix_is_stripped(self) -> None:
+        assert ModelCapabilityResolver.resolve(
+            "claude-sonnet-4-20250514[1m]"
+        ) == ModelCapabilityResolver.resolve("claude-sonnet-4-20250514")
+
+    def test_more_specific_family_wins(self) -> None:
+        assert ModelCapabilityResolver.resolve("gpt-4o-mini").max_output == 16384
+
+    def test_unknown_model_falls_back(self) -> None:
+        assert ModelCapabilityResolver.resolve("who-knows-1") == DEFAULT_LIMITS
+        assert ModelCapabilityResolver.resolve(None) == DEFAULT_LIMITS
+
+
+class TestResolveCompactionBudget:
+    """Tests for budget derivation from a model's context window."""
+
+    def test_subtracts_overheads_and_applies_ratio(self) -> None:
+        # gpt-4o: 128000 window, reserve 4096
+        budget = resolve_compaction_budget(
+            "gpt-4o",
+            system_prompt_tokens=1000,
+            tool_schema_tokens=2000,
+            output_reserve_tokens=4096,
+            threshold_ratio=0.5,
+        )
+        assert budget == int((128000 - 1000 - 2000 - 4096) * 0.5)
+
+    def test_reserve_is_capped_at_model_max_output(self) -> None:
+        # gpt-4-turbo max_output is 4096, so a 100k reserve clamps to 4096.
+        budget = resolve_compaction_budget(
+            "gpt-4-turbo",
+            output_reserve_tokens=100_000,
+            threshold_ratio=1.0,
+        )
+        assert budget == 128000 - 4096
+
+    def test_overheads_exceeding_window_yield_zero(self) -> None:
+        assert (
+            resolve_compaction_budget("gpt-4o", system_prompt_tokens=500_000) == 0
+        )
+
+    def test_ratio_is_clamped(self) -> None:
+        big = resolve_compaction_budget("gpt-4o", threshold_ratio=5.0)
+        assert big == 128000 - 4096
+
+
+class TestCompactIncremental:
+    """Tests for multi-pass incremental compaction with a watermark."""
+
+    @staticmethod
+    def _thread(count: int) -> list[dict]:
+        return [
+            {
+                "id": f"m{i}",
+                "role": "user" if i % 2 == 0 else "assistant",
+                "content": f"Message number {i} about topic {i % 7} with filler text.",
+            }
+            for i in range(count)
+        ]
+
+    def test_two_hundred_messages_compact_in_multiple_monotonic_passes(
+        self, compactor: SessionCompactor
+    ) -> None:
+        messages = self._thread(200)
+        passes = compactor.compact_incremental(messages, budget=100)
+
+        assert len(passes) > 1
+        # Watermark is monotonic in thread order.
+        order = {f"m{i}": i for i in range(200)}
+        marks = [order[p.watermark] for p in passes]
+        assert marks == sorted(marks)
+        assert len(set(marks)) == len(marks)
+        # Every message is accounted for exactly once.
+        assert sum(p.message_count for p in passes) == 200
+        assert passes[-1].watermark == "m199"
+
+    def test_each_pass_fits_the_budget(self, compactor: SessionCompactor) -> None:
+        messages = self._thread(60)
+        budget = 120
+        passes = compactor.compact_incremental(messages, budget=budget)
+
+        consumed = 0
+        for p in passes:
+            batch = messages[consumed : consumed + p.message_count]
+            assert compactor.get_token_count(batch) <= budget
+            consumed += p.message_count
+
+    def test_resume_from_watermark_skips_covered_messages(
+        self, compactor: SessionCompactor
+    ) -> None:
+        messages = self._thread(40)
+        first = compactor.compact_incremental(messages, budget=100)[0]
+
+        resumed = compactor.compact_incremental(
+            messages, budget=100, since_watermark=first.watermark
+        )
+        assert sum(p.message_count for p in resumed) == 40 - first.message_count
+
+    def test_oversized_message_raises(self, compactor: SessionCompactor) -> None:
+        messages = [
+            {"id": "a", "role": "user", "content": "short"},
+            {"id": "b", "role": "user", "content": "x " * 5000},
+        ]
+        with pytest.raises(MessageTooLargeError) as exc:
+            compactor.compact_incremental(messages, budget=50)
+        assert exc.value.index == 1
+        assert exc.value.budget == 50
+
+    def test_non_positive_budget_raises(self, compactor: SessionCompactor) -> None:
+        with pytest.raises(ValueError):
+            compactor.compact_incremental(self._thread(3), budget=0)
+
+    def test_empty_thread_yields_no_passes(
+        self, compactor: SessionCompactor
+    ) -> None:
+        assert compactor.compact_incremental([], budget=100) == []
+
+    def test_messages_without_ids_use_index_watermark(
+        self, compactor: SessionCompactor
+    ) -> None:
+        messages = [{"role": "user", "content": f"item {i}"} for i in range(5)]
+        passes = compactor.compact_incremental(messages, budget=1000)
+        assert passes[-1].watermark == "4"
+
+
+class TestCompactionSummary:
+    """Tests for the structured five-field summary."""
+
+    def test_classifies_into_five_fields(
+        self, compactor: SessionCompactor
+    ) -> None:
+        messages = [
+            {"role": "user", "content": "We need a caching layer for the API."},
+            {"role": "assistant", "content": "We decided to use Redis for it."},
+            {"role": "assistant", "content": "Created the cache module and wired it."},
+            {"role": "user", "content": "What about invalidation?"},
+            {"role": "assistant", "content": "Redis runs on port 6379 in staging."},
+        ]
+        s = compactor.summarize_structured(messages)
+
+        assert s.decisions and "Redis" in s.decisions[0]
+        assert s.actions
+        assert s.open_items and s.open_items[0].endswith("?")
+        assert s.topics
+        assert s.facts
+
+    def test_render_includes_populated_labels_only(
+        self, compactor: SessionCompactor
+    ) -> None:
+        s = CompactionSummary(decisions=["use Redis"])
+        rendered = s.render()
+        assert "Decisions: use Redis" in rendered
+        assert "Topics:" not in rendered
+
+    def test_render_of_empty_summary(self) -> None:
+        assert CompactionSummary().render() == "[Summary] (no salient content)"
+
+    def test_blank_messages_are_skipped(
+        self, compactor: SessionCompactor
+    ) -> None:
+        s = compactor.summarize_structured(
+            [{"role": "user", "content": "   "}, {"role": "user", "content": ""}]
+        )
+        assert s == CompactionSummary()

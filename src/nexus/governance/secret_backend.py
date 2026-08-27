@@ -8,20 +8,74 @@ silently refuse when no encryption key is configured.
 
 from __future__ import annotations
 
+import asyncio
 import base64
+import concurrent.futures
 import hashlib
 import json
 import logging
 import os
 import tempfile
+import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from cryptography.fernet import Fernet, InvalidToken
 
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
 logger = logging.getLogger(__name__)
+
+# Company that owns process-level integration secrets (matches the default
+# company seeded at startup). `secrets.company_id` is NOT NULL.
+DEFAULT_SECRET_COMPANY_ID = uuid.UUID("00000000-0000-4000-8000-000000000001")
+
+# Derived Fernet keys, memoized per process so the 600k-iteration PBKDF2 runs
+# once per (key, salt, iterations) rather than on every backend construction.
+_KDF_CACHE: dict[tuple[bytes, bytes, int], bytes] = {}
+
+
+def _derive_fernet_key(secret_key: str, salt: bytes, iterations: int) -> bytes:
+    """Derive a Fernet key from an application secret via PBKDF2-HMAC-SHA256.
+
+    The result is memoized for the lifetime of the process: deriving at 600,000
+    iterations costs ~0.3s, and backends are constructed per request in some
+    call paths.
+
+    Args:
+        secret_key: Application secret to stretch.
+        salt: PBKDF2 salt.
+        iterations: PBKDF2 iteration count.
+
+    Returns:
+        A urlsafe-base64 Fernet key.
+    """
+    cache_key = (secret_key.encode(), salt, iterations)
+    key = _KDF_CACHE.get(cache_key)
+    if key is None:
+        derived = hashlib.pbkdf2_hmac(
+            "sha256", secret_key.encode(), salt=salt, iterations=iterations
+        )
+        key = base64.urlsafe_b64encode(derived[:32])
+        _KDF_CACHE[cache_key] = key
+    return key
+
+
+def _run_sync(coro):
+    """Run a coroutine from sync code, whether or not a loop is running.
+
+    The SecretBackend protocol is synchronous and its callers (IntegrationRegistry,
+    rotation routes) are sync, while the database layer is async.
+    """
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        return pool.submit(asyncio.run, coro).result(timeout=30)
 
 
 @dataclass
@@ -107,10 +161,14 @@ class FernetSecretBackend:
     # attacks on the PBKDF2 output; deployment isolation comes from the per-deployment
     # secret_key parameter, which is unique to each environment.
     _SALT = b"nexus-integration-secrets"
-    _ITERATIONS = 480_000
+    _ITERATIONS = 600_000
 
     def __init__(
-        self, secret_key: str | None, persist_path: str | Path | None = None
+        self,
+        secret_key: str | None,
+        persist_path: str | Path | None = None,
+        session_factory: async_sessionmaker[AsyncSession] | None = None,
+        company_id: uuid.UUID | None = None,
     ) -> None:
         """Initialize the Fernet secret backend.
 
@@ -120,26 +178,32 @@ class FernetSecretBackend:
             persist_path: Optional path to a JSON file for persisting encrypted
                 secrets. If None, secrets are stored in-memory only.
                 Parent directories are created automatically.
+            session_factory: Optional async session factory. When given, the
+                `secrets` table is the store and secrets survive a restart;
+                `persist_path` is ignored.
+            company_id: Owning company for DB-backed rows. Defaults to the
+                default company.
         """
         self._fernet: Fernet | None = None
         self._store: dict[str, bytes] = {}
+        # Refs deleted through this instance but not yet flushed to the DB. The
+        # DB sync removes only these, never rows merely absent from _store.
+        self._pending_deletes: set[str] = set()
         self._persist_path: Path | None = None
+        self._session_factory = session_factory
+        self._company_id = company_id or DEFAULT_SECRET_COMPANY_ID
         self._rotation_policies: dict[str, RotationPolicy] = {}
         self.rotation_history: dict[str, datetime] = {}
 
-        if persist_path is not None:
+        if persist_path is not None and session_factory is None:
             self._persist_path = Path(persist_path)
             self._persist_path.parent.mkdir(parents=True, exist_ok=True)
 
         if secret_key is not None:
             try:
-                derived = hashlib.pbkdf2_hmac(
-                    "sha256",
-                    secret_key.encode(),
-                    salt=self._SALT,
-                    iterations=self._ITERATIONS,
+                fernet_key = _derive_fernet_key(
+                    secret_key, self._SALT, self._ITERATIONS
                 )
-                fernet_key = base64.urlsafe_b64encode(derived[:32])
                 self._fernet = Fernet(fernet_key)
             except Exception:
                 logger.warning(
@@ -150,6 +214,44 @@ class FernetSecretBackend:
 
         if self._persist_path is not None:
             self._load_from_file()
+        elif self._session_factory is not None:
+            self._load_from_db()
+
+    # --- Database-backed store (Phase 0.3) -------------------------------
+
+    def _load_from_db(self) -> None:
+        """Load encrypted secrets for this company from the `secrets` table."""
+        try:
+            self._store = _run_sync(self._async_load_from_db())
+        except Exception:
+            logger.warning(
+                "Failed to load secrets from database; starting with empty store."
+            )
+            self._store = {}
+
+    async def _async_load_from_db(self) -> dict[str, bytes]:
+        """Read all non-revoked secret rows for this company.
+
+        Returns:
+            Mapping of secret name to ciphertext bytes.
+        """
+        from sqlalchemy import select
+
+        from nexus.models.secret import Secret
+
+        assert self._session_factory is not None
+        async with self._session_factory() as session:
+            rows = (
+                await session.execute(
+                    select(Secret).where(
+                        Secret.company_id == self._company_id,
+                        Secret.is_revoked == False,  # noqa: E712
+                    )
+                )
+            ).scalars()
+            return {
+                row.name: row.encrypted_value.encode("ascii") for row in rows
+            }
 
     def _load_from_file(self) -> None:
         """Load encrypted secrets from the persistence file.
@@ -178,6 +280,68 @@ class FernetSecretBackend:
                 self._persist_path,
             )
             self._store = {}
+
+    async def _async_sync_store(self) -> None:
+        """Make the `secrets` table match `self._store` exactly.
+
+        Upserts every ref currently held and deletes rows this company owns
+        that are no longer in the store. One seam serves encrypt, delete, and
+        rotate_key.
+        """
+        from sqlalchemy import delete, select
+
+        from nexus.models.secret import Secret
+
+        assert self._session_factory is not None
+        async with self._session_factory() as session:
+            rows = list(
+                (
+                    await session.execute(
+                        select(Secret).where(Secret.company_id == self._company_id)
+                    )
+                ).scalars()
+            )
+            existing = {row.name: row for row in rows}
+            now = datetime.now(UTC).replace(tzinfo=None)
+
+            for ref, ciphertext in self._store.items():
+                encoded = ciphertext.decode("ascii")
+                row = existing.get(ref)
+                if row is None:
+                    session.add(
+                        Secret(
+                            company_id=self._company_id,
+                            name=ref,
+                            encrypted_value=encoded,
+                        )
+                    )
+                elif row.encrypted_value != encoded or row.is_revoked:
+                    row.encrypted_value = encoded
+                    row.is_revoked = False
+                    row.current_version += 1
+                    row.updated_at = now
+
+            # Only rows this instance explicitly deleted are removed. Absence
+            # from self._store is NOT treated as a deletion: another process (or
+            # another backend instance) may have written a secret this instance
+            # never loaded, and mirroring the local store would silently drop it.
+            pending = [name for name in self._pending_deletes if name in existing]
+            if pending:
+                await session.execute(
+                    delete(Secret).where(
+                        Secret.company_id == self._company_id,
+                        Secret.name.in_(pending),
+                    )
+                )
+            await session.commit()
+            self._pending_deletes.clear()
+
+    def _persist(self) -> None:
+        """Write the store to whichever backing store is configured (if any)."""
+        if self._session_factory is not None:
+            _run_sync(self._async_sync_store())
+        else:
+            self._save_to_file()
 
     def _save_to_file(self) -> None:
         """Persist encrypted secrets to disk atomically.
@@ -236,7 +400,7 @@ class FernetSecretBackend:
             return False
         assert self._fernet is not None
         self._store[ref] = self._fernet.encrypt(plaintext.encode("utf-8"))
-        self._save_to_file()
+        self._persist()
         return True
 
     def decrypt(self, ref: str) -> str | None:
@@ -286,7 +450,8 @@ class FernetSecretBackend:
             ref: Reference key to remove.
         """
         self._store.pop(ref, None)
-        self._save_to_file()
+        self._pending_deletes.add(ref)
+        self._persist()
 
     def rotate_key(self, new_secret_key: str) -> int:
         """Rotate the encryption key, re-encrypting all stored secrets.
@@ -312,14 +477,9 @@ class FernetSecretBackend:
             plaintext_map[ref] = self._fernet.decrypt(ciphertext).decode("utf-8")
 
         # Derive new Fernet key
-        derived = hashlib.pbkdf2_hmac(
-            "sha256",
-            new_secret_key.encode(),
-            salt=self._SALT,
-            iterations=self._ITERATIONS,
+        new_fernet = Fernet(
+            _derive_fernet_key(new_secret_key, self._SALT, self._ITERATIONS)
         )
-        fernet_key = base64.urlsafe_b64encode(derived[:32])
-        new_fernet = Fernet(fernet_key)
 
         # Re-encrypt all secrets with new key
         new_store: dict[str, bytes] = {}
@@ -329,7 +489,7 @@ class FernetSecretBackend:
         # Update state
         self._fernet = new_fernet
         self._store = new_store
-        self._save_to_file()
+        self._persist()
 
         return len(plaintext_map)
 
@@ -393,3 +553,185 @@ class FernetSecretBackend:
             if ref in self._store and self.check_rotation_needed(ref):
                 needing.append(ref)
         return needing
+
+
+class KeyringSecretBackend:
+    """Secret backend backed by the OS keychain via the `keyring` package.
+
+    Storage and encryption are the operating system's responsibility, so there
+    is no application-level key. Fail-closed: if `keyring` is not installed or
+    the platform has no usable backend, every operation refuses.
+    """
+
+    SERVICE = "nexus-integration-secrets"
+
+    def __init__(self) -> None:
+        """Import `keyring` lazily; stay unavailable if it is missing."""
+        try:
+            import keyring
+
+            self._keyring = keyring
+        except Exception:
+            logger.warning(
+                "keyring package unavailable; secret backend is fail-closed."
+            )
+            self._keyring = None
+
+    def encrypt(self, ref: str, plaintext: str) -> bool:
+        """Store a secret in the OS keychain.
+
+        Args:
+            ref: Reference key for the secret.
+            plaintext: Value to store.
+
+        Returns:
+            True if stored, False if the keyring is unavailable or errored.
+        """
+        if self._keyring is None:
+            return False
+        try:
+            self._keyring.set_password(self.SERVICE, ref, plaintext)
+            return True
+        except Exception:
+            logger.warning("Failed to store secret '%s' in keyring.", ref)
+            return False
+
+    def decrypt(self, ref: str) -> str | None:
+        """Read a secret from the OS keychain.
+
+        Args:
+            ref: Reference key to look up.
+
+        Returns:
+            The value, or None if absent or unavailable.
+        """
+        if self._keyring is None:
+            return None
+        try:
+            return self._keyring.get_password(self.SERVICE, ref)
+        except Exception:
+            logger.warning("Failed to read secret '%s' from keyring.", ref)
+            return None
+
+    def has(self, ref: str) -> bool:
+        """Whether a secret exists for `ref`.
+
+        Args:
+            ref: Reference key to check.
+
+        Returns:
+            True if the keychain holds a value for this reference.
+        """
+        return self.decrypt(ref) is not None
+
+    def delete(self, ref: str) -> None:
+        """Remove a secret from the keychain (idempotent).
+
+        Args:
+            ref: Reference key to remove.
+        """
+        if self._keyring is None:
+            return
+        try:
+            self._keyring.delete_password(self.SERVICE, ref)
+        except Exception:
+            pass
+
+
+class EnvSecretBackend:
+    """Read-only secret backend reading `NEXUS_SECRET_<REF>` env variables.
+
+    For deployments where secrets are injected by the platform (Kubernetes
+    secrets, ECS task definitions, systemd credentials). Writes always refuse:
+    the environment is owned by the deployer, not the application.
+    """
+
+    PREFIX = "NEXUS_SECRET_"
+
+    def _env_name(self, ref: str) -> str:
+        """Map a secret reference to its environment variable name.
+
+        Args:
+            ref: Reference key, e.g. "github-token".
+
+        Returns:
+            The env var name, e.g. "NEXUS_SECRET_GITHUB_TOKEN".
+        """
+        return self.PREFIX + ref.upper().replace("-", "_").replace(".", "_")
+
+    def encrypt(self, ref: str, plaintext: str) -> bool:
+        """Refuse to write; the environment is externally managed.
+
+        Args:
+            ref: Reference key (unused).
+            plaintext: Value (unused).
+
+        Returns:
+            Always False.
+        """
+        logger.warning(
+            "SECRET_BACKEND=env is read-only; refusing to store secret '%s'.", ref
+        )
+        return False
+
+    def decrypt(self, ref: str) -> str | None:
+        """Read the secret from the environment.
+
+        Args:
+            ref: Reference key to look up.
+
+        Returns:
+            The env var value, or None if unset.
+        """
+        return os.environ.get(self._env_name(ref))
+
+    def has(self, ref: str) -> bool:
+        """Whether the corresponding environment variable is set.
+
+        Args:
+            ref: Reference key to check.
+
+        Returns:
+            True if the env var is present.
+        """
+        return self._env_name(ref) in os.environ
+
+    def delete(self, ref: str) -> None:
+        """No-op; the environment is externally managed.
+
+        Args:
+            ref: Reference key (unused).
+        """
+        logger.warning(
+            "SECRET_BACKEND=env is read-only; refusing to delete secret '%s'.", ref
+        )
+
+
+def make_secret_backend(
+    session_factory: async_sessionmaker[AsyncSession] | None = None,
+) -> SecretBackend:
+    """Build the secret backend named by `settings.secret_backend`.
+
+    Args:
+        session_factory: Async session factory handed to the `fernet` backend so
+            secrets live in the `secrets` table and survive a restart. When
+            omitted, the fernet backend is in-memory only.
+
+    Returns:
+        A SecretBackend implementation. An unknown selector falls back to
+        `fernet` with a warning rather than failing startup.
+    """
+    from nexus.config import settings
+
+    choice = (settings.secret_backend or "fernet").strip().lower()
+    if choice == "keyring":
+        return KeyringSecretBackend()
+    if choice == "env":
+        return EnvSecretBackend()
+    if choice != "fernet":
+        logger.warning(
+            "Unknown SECRET_BACKEND '%s'; falling back to 'fernet'.", choice
+        )
+    return FernetSecretBackend(
+        settings.secret_key, session_factory=session_factory
+    )

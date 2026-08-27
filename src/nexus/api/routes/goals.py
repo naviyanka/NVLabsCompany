@@ -9,9 +9,19 @@ from pydantic import BaseModel
 from sqlalchemy import select, update
 
 from nexus.api.deps import CurrentCompanyId, DbSession
-from nexus.models.task import Goal
+from nexus.models.task import Goal, RunCompletionReason
 
 router = APIRouter(tags=["goals"])
+
+# GoalLoop reports its own vocabulary for why it stopped; map it onto the
+# Phase 1.1 taxonomy so every terminal path speaks one language.
+_LOOP_STOP_REASONS = {
+    "judge_confirmed": RunCompletionReason.goal,
+    "max_iterations": RunCompletionReason.max_iterations,
+    "budget_exceeded": RunCompletionReason.budget_exhausted,
+    "parse_failures": RunCompletionReason.doom_loop,
+    "execution_error": RunCompletionReason.error,
+}
 
 
 class GoalCreate(BaseModel):
@@ -45,6 +55,7 @@ class GoalResponse(BaseModel):
     status: str
     parent_id: uuid.UUID | None = None
     owner_agent_id: uuid.UUID | None = None
+    completion_reason: str | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -227,8 +238,17 @@ async def execute_goal(
     # Update goal status based on result
     from sqlalchemy import update as sa_update
     new_status = "completed" if goal_result.success else "active"
+    reason = _LOOP_STOP_REASONS.get(
+        goal_result.stopped_reason or "", RunCompletionReason.error
+    ).value
     await db.execute(
-        sa_update(Goal).where(Goal.id == goal_id).values(status=new_status, updated_at=datetime.now(timezone.utc))
+        sa_update(Goal)
+        .where(Goal.id == goal_id)
+        .values(
+            status=new_status,
+            completion_reason=reason,
+            updated_at=datetime.now(timezone.utc),
+        )
     )
     await db.commit()
 
@@ -237,7 +257,9 @@ async def execute_goal(
         "success": goal_result.success,
         "iterations_used": goal_result.iterations_used,
         "total_cost_cents": goal_result.total_cost_cents,
-        "stop_reason": goal_result.stop_reason,
+        "stop_reason": goal_result.stopped_reason,
+        "completion_reason": reason,
+        "judge_verdict": goal_result.judge_verdict,
         "final_output": str(goal_result.final_output)[:2000] if goal_result.final_output else None,
         "new_status": new_status,
     }

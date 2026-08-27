@@ -1,13 +1,21 @@
 """Temporal Activities — the actual work units (retryable, timeout-safe).
 
-Each activity wraps an existing NEXUS function to make it durable.
-Activities are automatically retried by Temporal on failure.
+Every operation that touches an LLM, the database, a socket, or a subprocess
+lives here rather than in a workflow body (ADR 0001). Activities take and return
+dataclasses so they are serializable across the worker boundary, and they are
+decorated with ``@activity_defn`` so the worker can register them.
+
+The same functions are the in-process fallback runner: ``_sdk.execute_activity``
+dispatches through Temporal only when actually inside a workflow, so callers on
+the façade path (``workflows/task_flow.py``) run identical code.
 """
 
 import uuid
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
+
+from nexus.temporal._sdk import activity_defn
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +55,34 @@ class DecomposeTaskInput:
     max_subtasks: int = 5
 
 
+@dataclass
+class ExecuteTaskInput:
+    """Input for the execute_task activity.
+
+    Carries the resolved agent and adapter rather than an object reference, so
+    the activity is self-contained across the worker boundary.
+    """
+    task_id: str
+    agent_id: str
+    adapter_type: str
+    payload: dict[str, Any] = field(default_factory=dict)
+    config: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class ExecuteTaskOutput:
+    """Output from the execute_task activity."""
+    task_id: str
+    success: bool
+    output: str = ""
+    status: str = "failed"
+    cost_cents: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
+    error: str | None = None
+
+
+@activity_defn
 async def call_llm_activity(input: LLMCallInput) -> LLMCallOutput:
     """Activity: Call an LLM adapter for an agent.
 
@@ -91,6 +127,7 @@ async def call_llm_activity(input: LLMCallInput) -> LLMCallOutput:
         return LLMCallOutput(response_text="", model_used="", tokens_used=0, success=False, error=str(e))
 
 
+@activity_defn
 async def route_task_activity(input: RouteTaskInput) -> str | None:
     """Activity: Route a task to the best available agent.
 
@@ -134,6 +171,7 @@ async def route_task_activity(input: RouteTaskInput) -> str | None:
         return None
 
 
+@activity_defn
 async def decompose_task_activity(input: DecomposeTaskInput) -> list[dict[str, Any]]:
     """Activity: Decompose a task into subtasks using TaskPlanner."""
     from nexus.orchestration.planner import TaskPlanner
@@ -144,3 +182,76 @@ async def decompose_task_activity(input: DecomposeTaskInput) -> list[dict[str, A
         description=input.description,
     )
     return [{"description": st.description, "dependencies": [str(d) for d in st.dependencies]} for st in subtasks]
+
+
+def _coerce_uuid(value: str) -> uuid.UUID:
+    """Parse a UUID, falling back to a fresh one for non-UUID demo identifiers."""
+    try:
+        return uuid.UUID(value)
+    except (ValueError, AttributeError, TypeError):
+        return uuid.uuid4()
+
+
+@activity_defn
+async def execute_task_activity(input: ExecuteTaskInput) -> ExecuteTaskOutput:
+    """Activity: run one task through its adapter.
+
+    This is ``TaskFlow._do_execute`` lifted out of the façade. The adapter
+    session is created and terminated inside the activity so a crash cannot
+    leak it across a workflow replay. When the adapter type is not registered,
+    the simulated result is returned — the same demo/testing behaviour the
+    façade had.
+    """
+    from nexus.adapters.registry import AdapterRegistry
+
+    try:
+        registry = AdapterRegistry()
+    except Exception as e:  # pragma: no cover — registry construction is trivial
+        logger.error("Adapter registry unavailable: %s", e)
+        registry = None
+
+    if registry is not None and registry.is_registered(input.adapter_type):
+        try:
+            adapter = registry.create_adapter(input.adapter_type, input.config)
+            session = await adapter.create_session(_coerce_uuid(input.agent_id), input.config)
+            try:
+                result = await adapter.execute_task(
+                    session, _coerce_uuid(input.task_id), input.payload
+                )
+            finally:
+                await adapter.terminate(session)
+
+            return ExecuteTaskOutput(
+                task_id=input.task_id,
+                success=result.success,
+                output=result.output or "",
+                status="success" if result.success else "failed",
+                cost_cents=result.cost_cents,
+                input_tokens=result.input_tokens,
+                output_tokens=result.output_tokens,
+                error=result.error,
+            )
+        except Exception as e:
+            logger.error("Execute task activity failed: %s", e)
+            return ExecuteTaskOutput(
+                task_id=input.task_id,
+                success=False,
+                error=f"Adapter execution failed: {type(e).__name__}: {e}",
+            )
+
+    # No registered adapter — simulated execution for demo/testing.
+    return ExecuteTaskOutput(
+        task_id=input.task_id,
+        success=True,
+        output=f"Executed task {input.task_id}",
+        status="success",
+    )
+
+
+# Single registration list so the worker cannot drift out of sync with this file.
+ALL_ACTIVITIES = [
+    call_llm_activity,
+    route_task_activity,
+    decompose_task_activity,
+    execute_task_activity,
+]

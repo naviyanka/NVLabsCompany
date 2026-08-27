@@ -1,25 +1,94 @@
 """Task delegation engine.
 
 Handles finding the best agent for a task based on skill matching and capacity,
-cascading delegations through organizational hierarchy, and tracking delegation state.
+cascading delegations through organizational hierarchy, tracking delegation state,
+and capping how many sub-agents a lead may run concurrently (delegation permits).
 """
 
+import os
 import uuid
-from typing import Any, Optional
+from typing import Any
+
+from nexus.communication.permits import SubagentPermits
+
+
+def _default_subagent_cap() -> int:
+    """Concurrent sub-agent cap, from NEXUS_SUBAGENT_CAP (default 3)."""
+    try:
+        return max(1, int(os.environ.get("NEXUS_SUBAGENT_CAP", "3")))
+    except ValueError:
+        return 3
 
 
 class DelegationEngine:
     """Delegates tasks to the best-suited agents based on skills and capacity."""
 
-    def __init__(self, db: Optional[Any] = None) -> None:
+    def __init__(
+        self, db: Any | None = None, subagent_cap: int | None = None
+    ) -> None:
         """Initialize with optional database session for persistence.
 
         Args:
             db: Optional AsyncSession for persisting delegation records.
+            subagent_cap: Max concurrent sub-agents per lead. Defaults to
+                NEXUS_SUBAGENT_CAP, or 3.
         """
         self.db = db
         self._delegations: dict[uuid.UUID, dict[str, Any]] = {}
         self._task_delegations: dict[uuid.UUID, list[dict[str, Any]]] = {}
+        self.subagent_cap = (
+            _default_subagent_cap() if subagent_cap is None else max(1, subagent_cap)
+        )
+        # Permits live in nexus.communication.permits so there is one
+        # implementation of the cap rather than one per caller.
+        self._permits = SubagentPermits(cap=self.subagent_cap)
+
+    async def acquire_subagent_permit(
+        self,
+        lead_id: Any,
+        holder_id: Any,
+        timeout: float | None = None,
+    ) -> bool:
+        """Acquire a permit to run one sub-agent under ``lead_id``.
+
+        Forwards to the shared permit pool. Waits FIFO until a permit frees up
+        or ``timeout`` elapses, and is idempotent per holder so retries and
+        replays do not consume two slots.
+
+        Args:
+            lead_id: The delegating (parent) agent -- the cap applies per lead.
+            holder_id: Unique id of the sub-agent taking the slot.
+            timeout: Max seconds to wait. None waits indefinitely.
+
+        Returns:
+            True if the permit is held, False if the wait timed out.
+        """
+        return await self._permits.acquire_subagent_permit(lead_id, holder_id, timeout)
+
+    def release_subagent_permit(self, lead_id: Any, holder_id: Any) -> bool:
+        """Release a sub-agent permit. Idempotent -- safe on every terminal path.
+
+        A crash-recovery sweep can call this on behalf of a killed child; a
+        double release is a no-op rather than inflating the cap.
+
+        Returns:
+            True if a permit was actually released.
+        """
+        return self._permits.release_subagent_permit(lead_id, holder_id)
+
+    def held_subagent_permits(self, lead_id: Any) -> int:
+        """Number of permits currently held under ``lead_id``."""
+        return self._permits.held(lead_id)
+
+    def subagent_permit(
+        self, lead_id: Any, holder_id: Any, timeout: float | None = None
+    ) -> Any:
+        """Hold a permit for the block, releasing on every exit path.
+
+        Yields True when the permit was granted, False on timeout (the caller
+        decides whether to give up).
+        """
+        return self._permits.permit(lead_id, holder_id, timeout)
 
     def find_best_delegate(
         self, task_title: str, task_skills: list[str], candidates: list

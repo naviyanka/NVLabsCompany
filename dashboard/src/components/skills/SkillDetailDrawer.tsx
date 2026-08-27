@@ -15,13 +15,11 @@ import {
   Terminal,
   FileArchive,
   Github,
-  Loader2,
 } from 'lucide-react';
 import type { SkillItem, SkillTestResult } from '@/types/skill';
 import { Button } from '@/components/common/Button';
 import { Badge } from '@/components/common/Badge';
 import { apiClient } from '@/api/client';
-import { getActiveCompanyId } from '@/config';
 
 interface SkillDetailDrawerProps {
   skill: SkillItem | null;
@@ -44,11 +42,10 @@ export function SkillDetailDrawer({
 
   // Test sandbox states
   const [testInput, setTestInput] = useState('{\n  "query": "Find dead code symbols in dashboard"\n}');
-  const [isRunningTest, setIsRunningTest] = useState(false);
   const [testResult, setTestResult] = useState<SkillTestResult | null>(null);
 
   // Equipped agents state
-  const [equippedAgents, setEquippedAgents] = useState<string[]>(skill?.equipped_agents || []);
+  const [equippedAgents, setEquippedAgents] = useState<string[]>(skill?.equipped_agents ?? []);
   const [isSavingAgents, setIsSavingAgents] = useState(false);
   const [agentSaveMsg, setAgentSaveMsg] = useState<string | null>(null);
 
@@ -73,7 +70,7 @@ export function SkillDetailDrawer({
     setAgentSaveMsg(null);
     try {
       const updated = await apiClient.patch<SkillItem>(
-        `/api/v1/companies/${getActiveCompanyId()}/skills/${skill.id}`,
+        `/api/v1/skills/${skill.id}`,
         { equipped_agents: equippedAgents }
       );
       onSkillUpdated(updated);
@@ -85,34 +82,19 @@ export function SkillDetailDrawer({
     }
   };
 
-  const handleRunSandboxTest = async () => {
-    setIsRunningTest(true);
-    setTestResult(null);
-    try {
-      const res = await apiClient.post<SkillTestResult>(
-        `/api/v1/companies/${getActiveCompanyId()}/skills/${skill.id}/test`,
-        { test_input: testInput }
-      );
-      setTestResult(res);
-    } catch (err: any) {
-      setTestResult({
-        success: false,
-        output: '',
-        execution_ms: 45,
-        error: err?.detail || 'Sandbox execution error',
-      });
-    } finally {
-      setIsRunningTest(false);
-    }
+  const handleRunSandboxTest = () => {
+    setTestResult({
+      success: false,
+      output: '',
+      error: 'Skill test endpoint not available on this backend.',
+    });
   };
 
   const handleDelete = async () => {
     if (!confirm(`Are you sure you want to uninstall skill "${skill.name}"?`)) return;
     setIsDeleting(true);
     try {
-      await apiClient.delete(
-        `/api/v1/companies/${getActiveCompanyId()}/skills/${skill.id}`
-      );
+      await apiClient.delete(`/api/v1/skills/${skill.id}`);
       onSkillDeleted(skill.id);
       onClose();
     } finally {
@@ -145,14 +127,14 @@ export function SkillDetailDrawer({
             <div>
               <div className="flex items-center gap-2">
                 <h2 className="text-base font-medium text-white">{skill.name}</h2>
-                <Badge variant="active">{skill.category}</Badge>
+                <Badge variant="active">{skill.category ?? 'Uncategorized'}</Badge>
               </div>
               <p className="text-xs text-[#6B6B6E] font-mono mt-0.5 flex items-center gap-2">
                 <span className="flex items-center gap-1">
-                  {getSourceIcon(skill.source_type)} {skill.source_type.toUpperCase()}
+                  {getSourceIcon(skill.source_type ?? '')} {(skill.source_type ?? 'custom').toUpperCase()}
                 </span>
                 <span>• v{skill.version}</span>
-                <span>• By {skill.author}</span>
+                {skill.author && <span>• By {skill.author}</span>}
               </p>
             </div>
           </div>
@@ -217,7 +199,9 @@ export function SkillDetailDrawer({
               {/* Description Card */}
               <div className="p-3 bg-[#141416] border border-white/[0.08] rounded-[8px] space-y-2">
                 <div className="text-xs font-mono uppercase text-[#A8A8AB]">Description</div>
-                <p className="text-xs text-gray-300 leading-relaxed">{skill.description}</p>
+                <p className="text-xs text-gray-300 leading-relaxed">
+                  {skill.description ?? 'No description provided.'}
+                </p>
               </div>
 
               {/* Skill Metrics */}
@@ -225,19 +209,19 @@ export function SkillDetailDrawer({
                 <div className="p-3 bg-[#141416] border border-white/[0.08] rounded-[8px]">
                   <div className="text-[10px] font-mono text-[#6B6B6E] uppercase">30D Invocations</div>
                   <div className="text-sm font-bold font-mono text-white mt-0.5">
-                    {skill.call_count_30d.toLocaleString()}
+                    {(skill.call_count_30d ?? 0).toLocaleString()}
                   </div>
                 </div>
                 <div className="p-3 bg-[#141416] border border-white/[0.08] rounded-[8px]">
                   <div className="text-[10px] font-mono text-[#6B6B6E] uppercase">Success Rate</div>
                   <div className="text-sm font-bold font-mono text-emerald-400 mt-0.5">
-                    {skill.success_rate}
+                    {skill.success_rate ?? '—'}
                   </div>
                 </div>
                 <div className="p-3 bg-[#141416] border border-white/[0.08] rounded-[8px]">
                   <div className="text-[10px] font-mono text-[#6B6B6E] uppercase">Avg Speed</div>
                   <div className="text-sm font-bold font-mono text-[#FFB020] mt-0.5">
-                    {skill.avg_execution_ms} ms
+                    {skill.avg_execution_ms ?? 0} ms
                   </div>
                 </div>
               </div>
@@ -360,10 +344,9 @@ export function SkillDetailDrawer({
                     variant="primary"
                     size="xs"
                     onClick={handleRunSandboxTest}
-                    disabled={isRunningTest}
-                    icon={isRunningTest ? <Loader2 size={13} className="animate-spin" /> : <Play size={13} />}
+                    icon={<Play size={13} />}
                   >
-                    {isRunningTest ? 'Executing...' : 'Run Test'}
+                    Run Test
                   </Button>
                 </div>
 
@@ -387,7 +370,7 @@ export function SkillDetailDrawer({
                       Test Output Result
                     </span>
                     <span className="text-gray-400 text-[10px]">
-                      {testResult.execution_ms} ms • {testResult.tokens_used || 120} tokens
+                      {testResult.execution_ms ?? 0} ms • {testResult.tokens_used ?? 0} tokens
                     </span>
                   </div>
 
@@ -407,12 +390,14 @@ export function SkillDetailDrawer({
                 <div className="grid grid-cols-2 gap-3 text-xs">
                   <div>
                     <span className="text-gray-500 block text-[10px] font-mono">SOURCE</span>
-                    <span className="text-white font-mono">{skill.source_location || skill.source_type}</span>
+                    <span className="text-white font-mono">
+                      {skill.source_location || skill.source_type || '—'}
+                    </span>
                   </div>
                   <div>
                     <span className="text-gray-500 block text-[10px] font-mono">VERIFICATION</span>
                     <span className="text-emerald-400 font-mono flex items-center gap-1">
-                      <ShieldCheck size={12} /> {skill.security_status.toUpperCase()}
+                      <ShieldCheck size={12} /> {(skill.security_status ?? 'unverified').toUpperCase()}
                     </span>
                   </div>
                   <div>

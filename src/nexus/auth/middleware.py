@@ -46,6 +46,7 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 from nexus.auth.api_keys import resolve_api_key, touch_api_key
 from nexus.auth.csrf import CSRF_HEADER, requires_csrf, tokens_match
 from nexus.auth.principal import Principal
+from nexus.auth.run_tokens import RunTokenError, looks_like_run_token, verify_run_token
 from nexus.auth.sessions import resolve_session, touch_session
 from nexus.auth.users import get_membership
 from nexus.config import settings
@@ -262,6 +263,14 @@ class AuthenticationMiddleware:
         if not credential and not cookie_token:
             return None, False
 
+        # A run token verifies locally, so it is checked before opening a
+        # session: an agent hitting a tool endpoint every few seconds should not
+        # pay for a database round trip to prove who it is.
+        if credential and looks_like_run_token(credential):
+            principal = self._principal_from_run_token(credential)
+            if principal is not None:
+                return principal, False
+
         async with async_session_factory() as db:
             try:
                 if credential:
@@ -285,6 +294,29 @@ class AuthenticationMiddleware:
                 logger.exception("failed to resolve request principal")
 
         return None, False
+
+    def _principal_from_run_token(self, credential: str) -> Principal | None:
+        """Resolve a run JWT to a run principal, or ``None`` if it does not verify.
+
+        The role is fixed at ``"agent"`` rather than read from a claim: a token
+        that could name its own role would let whoever mints one grant itself
+        admin, and an agent's permissions belong to the RBAC table, not to the
+        credential.
+        """
+        try:
+            run_id, agent_id, company_id = verify_run_token(credential)
+        except RunTokenError as exc:
+            # Expected on an expired token, which is the normal end of a run.
+            logger.debug("run token rejected: %s", exc)
+            return None
+
+        return Principal(
+            kind="run",
+            company_id=company_id,
+            role="agent",
+            run_id=run_id,
+            agent_id=agent_id,
+        )
 
     async def _principal_from_api_key(self, db: Any, credential: str) -> Principal | None:
         """Resolve an API key to a service principal."""

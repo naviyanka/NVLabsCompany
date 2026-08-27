@@ -545,50 +545,48 @@ class TaskFlow:
         Returns:
             Tuple of (success: bool, result: dict).
         """
-        # If adapter registry is available, wire through real adapter
-        if self._adapter_registry is not None:
-            adapter_type = agent["adapter_type"]
-            config = agent.get("config", {})
+        from nexus.temporal._sdk import LLM_TIMEOUT, ONCE_ONLY, execute_activity
+        from nexus.temporal.activities import ExecuteTaskInput, execute_task_activity
 
-            if self._adapter_registry.is_registered(adapter_type):
-                try:
-                    adapter = self._adapter_registry.create_adapter(adapter_type, config)
-                    agent_uuid = uuid.UUID(agent["agent_id"]) if self._is_valid_uuid(agent["agent_id"]) else uuid.uuid4()
-                    session = await adapter.create_session(agent_uuid, config)
+        adapter_type = agent["adapter_type"]
 
-                    task_uuid = uuid.UUID(execution.task_id) if self._is_valid_uuid(execution.task_id) else uuid.uuid4()
-                    task_result = await adapter.execute_task(session, task_uuid, execution.payload)
+        # No registry injected — keep the simulated result the façade always
+        # returned for demo/testing, without paying for an activity dispatch.
+        if self._adapter_registry is None:
+            return True, {
+                "task_id": execution.task_id,
+                "agent_id": agent["agent_id"],
+                "adapter_type": adapter_type,
+                "output": f"Executed task {execution.task_id}",
+                "status": "success",
+            }
 
-                    await adapter.terminate(session)
+        # An adapter run bills, so it is dispatched once only.
+        output = await execute_activity(
+            execute_task_activity,
+            ExecuteTaskInput(
+                task_id=execution.task_id,
+                agent_id=agent["agent_id"],
+                adapter_type=adapter_type,
+                payload=execution.payload,
+                config=agent.get("config", {}),
+            ),
+            timeout=LLM_TIMEOUT,
+            maximum_attempts=ONCE_ONLY,
+        )
 
-                    result = {
-                        "task_id": execution.task_id,
-                        "agent_id": agent["agent_id"],
-                        "adapter_type": adapter_type,
-                        "output": task_result.output or "",
-                        "status": "success" if task_result.success else "failed",
-                        "cost_cents": task_result.cost_cents,
-                        "input_tokens": task_result.input_tokens,
-                        "output_tokens": task_result.output_tokens,
-                        "error": task_result.error,
-                    }
-                    return task_result.success, result
-                except Exception as e:
-                    return False, {
-                        "task_id": execution.task_id,
-                        "error": f"Adapter execution failed: {type(e).__name__}: {e}",
-                        "status": "failed",
-                    }
-
-        # Fallback: simulated execution for demo/testing
-        result = {
-            "task_id": execution.task_id,
+        result: dict[str, Any] = {
+            "task_id": output.task_id,
             "agent_id": agent["agent_id"],
-            "adapter_type": agent["adapter_type"],
-            "output": f"Executed task {execution.task_id}",
-            "status": "success",
+            "adapter_type": adapter_type,
+            "output": output.output,
+            "status": output.status,
+            "cost_cents": output.cost_cents,
+            "input_tokens": output.input_tokens,
+            "output_tokens": output.output_tokens,
+            "error": output.error,
         }
-        return True, result
+        return output.success, result
 
     @staticmethod
     def _is_valid_uuid(value: str) -> bool:

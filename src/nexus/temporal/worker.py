@@ -23,12 +23,8 @@ async def run_worker():
     try:
         from temporalio.client import Client
         from temporalio.worker import Worker
-        from nexus.temporal.activities import (
-            call_llm_activity, route_task_activity, decompose_task_activity,
-        )
-        from nexus.temporal.workflows import (
-            goal_pursuit_workflow, pipeline_execution_workflow,
-        )
+        from nexus.temporal.activities import ALL_ACTIVITIES
+        from nexus.temporal.workflows import ALL_WORKFLOWS
 
         logger.info("Connecting to Temporal at %s (namespace: %s)", TEMPORAL_HOST, TEMPORAL_NAMESPACE)
         client = await Client.connect(TEMPORAL_HOST, namespace=TEMPORAL_NAMESPACE)
@@ -36,8 +32,8 @@ async def run_worker():
         worker = Worker(
             client,
             task_queue=TASK_QUEUE,
-            workflows=[goal_pursuit_workflow, pipeline_execution_workflow],
-            activities=[call_llm_activity, route_task_activity, decompose_task_activity],
+            workflows=ALL_WORKFLOWS,
+            activities=ALL_ACTIVITIES,
         )
 
         logger.info("Temporal worker started on queue '%s'", TASK_QUEUE)

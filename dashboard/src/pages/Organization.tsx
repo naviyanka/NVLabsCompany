@@ -13,7 +13,7 @@ import {
 import { Card } from '@/components/common/Card';
 import { Button } from '@/components/common/Button';
 import { Badge } from '@/components/common/Badge';
-import { apiClient, unwrapItems } from '@/api/client';
+import { apiClient } from '@/api/client';
 import type { Department, Squad } from '@/types/organization';
 import type { Agent } from '@/types/agent';
 import { getActiveCompanyId } from '@/config';
@@ -40,24 +40,24 @@ export function Organization() {
     async function loadOrgData() {
       try {
         const companyId = getActiveCompanyId();
-        const deptsRes = await apiClient.get<Department[] | { items: Department[] }>(
+        const deptsRes = await apiClient.get<Department[]>(
           `/api/v1/companies/${companyId}/departments`
         );
-        const deptsItems = unwrapItems(deptsRes);
+        const deptsItems = deptsRes;
         if (deptsItems.length) setDepartments(deptsItems);
 
-        const squadsRes = await apiClient.get<Squad[] | { items: Squad[] }>(
+        const squadsRes = await apiClient.get<Squad[]>(
           `/api/v1/companies/${companyId}/squads`
         ).catch(() => null);
         if (squadsRes) {
-          const squadsItems = unwrapItems(squadsRes);
+          const squadsItems = squadsRes;
           if (squadsItems.length) setSquads(squadsItems);
         }
 
-        const agentsRes = await apiClient.get<Agent[] | { items: Agent[] }>(
+        const agentsRes = await apiClient.get<Agent[]>(
           `/api/v1/companies/${companyId}/agents`
         );
-        const agentsItems = unwrapItems(agentsRes);
+        const agentsItems = agentsRes;
         if (agentsItems.length) setAgents(agentsItems);
       } catch (err) {
         console.error('Failed to load org hierarchy', err);

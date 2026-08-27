@@ -177,6 +177,7 @@ async def test_persist_completion_updates_running_row(monkeypatch):
     completed = _naive(datetime.now(timezone.utc))
     await wf_routes._persist_completion(
         uuid.uuid4(),
+        COMPANY_ID,
         status_value="completed",
         steps=[{"step_id": "s"}],
         total_cost_cents=9,
@@ -200,6 +201,7 @@ async def test_persist_completion_never_overwrites_cancelled(monkeypatch):
     original_completed_at = run.completed_at
     await wf_routes._persist_completion(
         uuid.uuid4(),
+        COMPANY_ID,
         status_value="completed",
         total_cost_cents=999,
     )
@@ -231,7 +233,7 @@ async def test_run_company_flow_reports_failure_on_engine_error(monkeypatch):
     row["run"] = run_row
     monkeypatch.setattr("nexus.database.async_session_factory", factory)
 
-    async def fake_persist(run_id, **kwargs):
+    async def fake_persist(run_id, company_id, **kwargs):
         persisted.update(kwargs)
 
     monkeypatch.setattr(wf_routes, "_persist_completion", fake_persist)
