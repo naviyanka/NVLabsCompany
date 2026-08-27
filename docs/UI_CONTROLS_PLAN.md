@@ -44,7 +44,7 @@ Triggers fire runs but cannot be created from the UI.
 - **Check:** create a cron trigger, see it listed with a computed next-fire; fire it and see
   an execution row.
 
-### Phase U3 — Audit chain verify (wire the real thing) · small backend + UI · HIGH
+### Phase U3 — Audit chain verify (wire the real thing) · small backend + UI · HIGH · DONE
 The button today fakes success client-side.
 - U3.1 Backend: `GET /api/v1/companies/{id}/audit-logs/verify` calling the existing
   `PersistentAuditLogger.verify_chain_integrity()`; return `{valid, checked, broken_at?}`.
@@ -98,6 +98,12 @@ unusable from UI; audit verify is a correctness lie). U4–U6 second. U7–U8 la
       (NOTE: backend `compute_next_fire` computed next-fire ~now for a `0 9 * * *` cron
       instead of the next 9am — a backend cron-parse issue to fix separately; UI stores the
       correct config and displays whatever next_fire_at the backend returns.)
+- [x] U3 Audit chain verify — added GET /companies/{id}/audit-logs/verify calling
+      PersistentAuditLogger.verify_chain_integrity(); wired the button to the real verdict
+      (green Verified / red Tampered). Verified 200 {valid:true, checked:3}.
+      NOTE: dev DB (`src/nexus_dev.db`) predated Wave 0-6 migrations — added missing columns
+      (agents.autonomy_policy, goals.completion_reason, audit_log.sequence_number/entry_hash/
+      previous_hash/archived_at) via ALTER TABLE to reconcile schema with models.
 - [ ] U2 Triggers management
 - [ ] U3 Audit chain verify (backend + UI)
 - [ ] U4 Secrets vault panel

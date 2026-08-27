@@ -51,6 +51,30 @@ async def list_audit_logs(
     ]
 
 
+@router.get("/api/v1/companies/{company_id}/audit-logs/verify")
+async def verify_audit_chain(company_id: uuid.UUID, db: DbSession) -> dict[str, Any]:
+    """Verify the audit hash chain's integrity.
+
+    Recomputes each entry's hash over the persisted chain and reports whether
+    it is intact. The hash chain is global (one sequence across the whole
+    deployment), so this verifies the entire chain, not just this company's
+    rows — tampering anywhere invalidates it. `checked` is the number of
+    persisted entries the verifier walked.
+    """
+    from nexus.database import async_session_factory
+    from nexus.governance.audit_persistent import PersistentAuditLogger
+
+    logger = PersistentAuditLogger(session_factory=async_session_factory)
+    valid = await logger.verify_chain_integrity()
+    checked = await logger.total_entries()
+
+    return {
+        "valid": bool(valid),
+        "checked": int(checked),
+        "scope": "global",
+    }
+
+
 @router.get("/api/v1/companies/{company_id}/audit-logs/stats")
 async def audit_log_stats(company_id: uuid.UUID, db: DbSession) -> dict[str, Any]:
     """Audit log statistics (total entries, by action type)."""

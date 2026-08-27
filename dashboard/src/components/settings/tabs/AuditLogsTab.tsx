@@ -86,13 +86,25 @@ export function AuditLogsTab({ onSaveToast }: AuditLogsTabProps) {
     setExpandedId(expandedId === id ? null : id);
   };
 
-  const handleVerifyMerkleChain = () => {
+  const handleVerifyMerkleChain = async () => {
     setVerifyingChain(true);
-    setTimeout(() => {
+    try {
+      const res = await apiClient.get<{ valid: boolean; checked: number; scope: string }>(
+        `/api/v1/companies/${getActiveCompanyId()}/audit-logs/verify`
+      );
+      setChainVerified(res.valid);
+      if (res.valid) {
+        onSaveToast(`Audit hash chain verified — ${res.checked} entries intact and tamper-evident.`);
+      } else {
+        onSaveToast('Audit hash chain FAILED verification — the log has been tampered with.');
+      }
+    } catch (err) {
+      console.error('Chain verification failed', err);
+      setChainVerified(false);
+      onSaveToast('Could not verify the audit chain (backend error).');
+    } finally {
       setVerifyingChain(false);
-      setChainVerified(true);
-      onSaveToast('Merkle Hash Chain Verified! All cryptographic block hashes intact & tamper-proof.');
-    }, 1000);
+    }
   };
 
   const handleExportAuditJson = () => {
@@ -154,9 +166,14 @@ export function AuditLogsTab({ onSaveToast }: AuditLogsTabProps) {
           <div>
             <div className="flex items-center gap-2">
               <span className="font-bold text-white text-xs">SHA-256 Merkle Block Chain</span>
-              {chainVerified && (
+              {chainVerified === true && (
                 <span className="px-2 py-0.5 rounded text-[9px] font-mono bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center gap-1">
                   <Check size={11} /> Cryptographically Verified
+                </span>
+              )}
+              {chainVerified === false && (
+                <span className="px-2 py-0.5 rounded text-[9px] font-mono bg-rose-500/10 text-rose-400 border border-rose-500/20 flex items-center gap-1">
+                  <X size={11} /> Chain Tampered
                 </span>
               )}
             </div>
