@@ -27,6 +27,7 @@ class ApprovalService:
         requested_by_agent_id: uuid.UUID,
         payload: dict[str, Any] | None = None,
         expires_at: datetime | None = None,
+        approval_id: uuid.UUID | None = None,
     ) -> Approval:
         """Create a new approval request.
 
@@ -36,21 +37,40 @@ class ApprovalService:
             requested_by_agent_id: The agent requesting approval.
             payload: Optional JSON payload with request details.
             expires_at: Optional expiration datetime.
+            approval_id: Explicit ID — pass a correlation ID so a retried
+                operation resolves to this same approval instead of a new one.
 
         Returns:
             The newly created Approval instance.
         """
-        approval = Approval(
-            company_id=company_id,
-            type=approval_type,
-            requested_by_agent_id=requested_by_agent_id,
-            payload=payload,
-            expires_at=expires_at,
-            status="pending",
-        )
+        fields: dict[str, Any] = {
+            "company_id": company_id,
+            "type": approval_type,
+            "requested_by_agent_id": requested_by_agent_id,
+            "payload": payload,
+            "expires_at": expires_at,
+            "status": "pending",
+        }
+        if approval_id is not None:
+            fields["id"] = approval_id
+        approval = Approval(**fields)
         self._db.add(approval)
         await self._db.flush()
         return approval
+
+    async def get(self, approval_id: uuid.UUID) -> Approval | None:
+        """Fetch an approval by ID.
+
+        Args:
+            approval_id: The approval to fetch.
+
+        Returns:
+            The Approval, or None when it does not exist.
+        """
+        result = await self._db.execute(
+            select(Approval).where(Approval.id == approval_id)
+        )
+        return result.scalar_one_or_none()
 
     async def approve(
         self,

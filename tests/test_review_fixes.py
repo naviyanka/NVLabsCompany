@@ -48,7 +48,7 @@ class TestCallbackRoutingNoFallback:
     @pytest.fixture
     def config(self):
         return {
-            "base_url": "http://test-agent.example.com",
+            "base_url": "https://test-agent.example.com",
             "bearer_token": "test-token-123",
             "poll_interval": 0.1,
             "timeout": 5.0,

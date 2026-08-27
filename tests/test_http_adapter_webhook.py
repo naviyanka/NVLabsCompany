@@ -47,7 +47,7 @@ def task_id():
 def config():
     """Default HTTP adapter config."""
     return {
-        "base_url": "http://test-agent.example.com",
+        "base_url": "https://test-agent.example.com",
         "bearer_token": "test-token-123",
         "poll_interval": 0.1,
         "timeout": 5.0,
@@ -91,7 +91,7 @@ class TestPollForResultSuccessful:
             result = _run(
                 adapter._poll_for_result(
                     session,
-                    "http://test-agent.example.com/poll/123",
+                    "https://test-agent.example.com/poll/123",
                     poll_interval=0.01,
                 )
             )
@@ -120,7 +120,7 @@ class TestPollForResultSuccessful:
             result = _run(
                 adapter._poll_for_result(
                     session,
-                    "http://test-agent.example.com/poll/123",
+                    "https://test-agent.example.com/poll/123",
                     poll_interval=0.01,
                 )
             )
@@ -147,7 +147,7 @@ class TestPollForResultSuccessful:
             result = _run(
                 adapter._poll_for_result(
                     session,
-                    "http://test-agent.example.com/poll/123",
+                    "https://test-agent.example.com/poll/123",
                     poll_interval=0.01,
                 )
             )
@@ -177,7 +177,7 @@ class TestPollForResultTimeout:
             result = _run(
                 adapter._poll_for_result(
                     session,
-                    "http://test-agent.example.com/poll/123",
+                    "https://test-agent.example.com/poll/123",
                     poll_interval=0.01,
                     max_polls=3,
                 )
@@ -211,7 +211,7 @@ class TestPollForResultTimeout:
             result = _run(
                 adapter._poll_for_result(
                     session,
-                    "http://test-agent.example.com/poll/123",
+                    "https://test-agent.example.com/poll/123",
                 )
             )
 
@@ -241,7 +241,7 @@ class TestPollForResultConnectionErrors:
             result = _run(
                 adapter._poll_for_result(
                     session,
-                    "http://test-agent.example.com/poll/123",
+                    "https://test-agent.example.com/poll/123",
                     poll_interval=0.01,
                     max_polls=10,
                 )
@@ -269,7 +269,7 @@ class TestPollForResultConnectionErrors:
             result = _run(
                 adapter._poll_for_result(
                     session,
-                    "http://test-agent.example.com/poll/123",
+                    "https://test-agent.example.com/poll/123",
                     poll_interval=0.01,
                     max_polls=10,
                 )
@@ -303,7 +303,7 @@ class TestPollForResultConnectionErrors:
             result = _run(
                 adapter._poll_for_result(
                     session,
-                    "http://test-agent.example.com/poll/123",
+                    "https://test-agent.example.com/poll/123",
                     poll_interval=0.01,
                     max_polls=10,
                 )
@@ -511,7 +511,7 @@ class TestConfigurablePollParameters:
             result = _run(
                 adapter._poll_for_result(
                     session,
-                    "http://test-agent.example.com/poll/123",
+                    "https://test-agent.example.com/poll/123",
                     poll_interval=0.001,
                 )
             )
@@ -535,7 +535,7 @@ class TestConfigurablePollParameters:
             result = _run(
                 adapter._poll_for_result(
                     session,
-                    "http://test-agent.example.com/poll/123",
+                    "https://test-agent.example.com/poll/123",
                     poll_interval=0.01,
                     max_polls=5,
                 )
@@ -562,7 +562,7 @@ class TestConfigurablePollParameters:
             result = _run(
                 adapter._poll_for_result(
                     session,
-                    "http://test-agent.example.com/poll/123",
+                    "https://test-agent.example.com/poll/123",
                     poll_interval=0.01,
                     timeout=0.1,
                 )
@@ -604,7 +604,7 @@ class TestFullExecuteWith202:
         initial_response = httpx.Response(
             202,
             json={
-                "poll_url": "http://test-agent.example.com/poll/123",
+                "poll_url": "https://test-agent.example.com/poll/123",
                 "status": "accepted",
             },
         )

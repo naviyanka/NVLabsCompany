@@ -11,8 +11,12 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from nexus.orchestration.llm_critic import LLMCriticEvaluator
-from nexus.orchestration.critic import EvaluationCriteria, EvaluationResult
+from nexus.orchestration.llm_critic import LLMCriticEvaluator, make_critic
+from nexus.orchestration.critic import (
+    CriticEvaluator,
+    EvaluationCriteria,
+    EvaluationResult,
+)
 
 
 @pytest.fixture
@@ -259,3 +263,112 @@ class TestLLMCriticEvaluatorEvaluation:
         assert result.criteria_scores["accuracy"] == 0.75
         assert result.score == 0.75
         assert mock_llm.call_count == 1
+
+
+class TestDefaultCriticSelection:
+    """Tests for make_critic() — the LLM critic is the default gate."""
+
+    def test_llm_critic_is_default(self):
+        """A model is available, so the LLM critic is chosen."""
+        critic = make_critic(llm_callable=AsyncMock())
+        assert isinstance(critic, LLMCriticEvaluator)
+
+    def test_heuristic_when_no_model_available(self):
+        """No llm_callable means no model, so the heuristic is used."""
+        critic = make_critic(llm_callable=None)
+        assert isinstance(critic, CriticEvaluator)
+
+    def test_heuristic_by_explicit_config(self):
+        """use_llm=False explicitly selects the heuristic critic."""
+        critic = make_critic(llm_callable=AsyncMock(), use_llm=False)
+        assert isinstance(critic, CriticEvaluator)
+
+
+class TestStructuredVerdict:
+    """Tests for the structured {verdict, reason, scores} judge output."""
+
+    async def test_pass_verdict(self, task_id):
+        """A passing evaluation reports verdict 'pass'."""
+        responses = [
+            json.dumps({"verdict": "pass", "score": 0.9, "reason": "Complete"}),
+            json.dumps({"verdict": "pass", "score": 0.9, "reason": "Correct"}),
+            json.dumps({"verdict": "pass", "score": 0.9, "reason": "Clear"}),
+        ]
+        evaluator = LLMCriticEvaluator(llm_callable=AsyncMock(side_effect=responses))
+        result = await evaluator.evaluate(task_id, "Task", "Good result")
+
+        assert result.verdict == "pass"
+        assert result.passed is True
+
+    async def test_fail_verdict_rejects_trivial_output(self, task_id):
+        """A trivially incomplete output is rejected where the heuristic passes it.
+
+        The heuristic critic scores a long-but-empty string above the
+        threshold on length alone; the LLM judge rejects it.
+        """
+        trivial = "TODO. " * 40  # long enough for the heuristic to pass
+
+        heuristic = CriticEvaluator(quality_threshold=0.7)
+        heuristic_result = await heuristic.evaluate(task_id, "Write a summary", trivial)
+        assert heuristic_result.passed is True
+
+        responses = [
+            json.dumps({"verdict": "fail", "score": 0.1, "reason": "No content"}),
+            json.dumps({"verdict": "fail", "score": 0.1, "reason": "Not correct"}),
+            json.dumps({"verdict": "fail", "score": 0.1, "reason": "Placeholder"}),
+        ]
+        llm = LLMCriticEvaluator(
+            llm_callable=AsyncMock(side_effect=responses), quality_threshold=0.7
+        )
+        llm_result = await llm.evaluate(task_id, "Write a summary", trivial)
+
+        assert llm_result.passed is False
+        assert llm_result.verdict == "fail"
+
+
+class TestJudgeFailureHandling:
+    """Tests for fail-open and the consecutive-parse-failure cap."""
+
+    async def test_judge_error_fails_open_to_continue(self, task_id):
+        """A single judge error fails open rather than blocking the run."""
+        evaluator = LLMCriticEvaluator(
+            llm_callable=AsyncMock(side_effect=RuntimeError("judge down"))
+        )
+        result = await evaluator.evaluate(task_id, "Task", "Some output")
+
+        assert result.verdict == "continue"
+        assert result.passed is True
+
+    async def test_third_consecutive_failure_pauses(self, task_id):
+        """A deliberately broken judge pauses instead of spinning."""
+        evaluator = LLMCriticEvaluator(
+            llm_callable=AsyncMock(return_value="not json at all"),
+            max_consecutive_parse_failures=3,
+        )
+
+        verdicts = []
+        for i in range(3):
+            result = await evaluator.evaluate(task_id, "Task", f"Output {i}")
+            verdicts.append(result.verdict)
+
+        assert verdicts == ["continue", "continue", "paused"]
+
+    async def test_success_resets_failure_counter(self, task_id):
+        """A successful evaluation resets the consecutive failure count."""
+        good = json.dumps({"verdict": "pass", "score": 0.9, "reason": "ok"})
+        responses = [
+            "broken", "broken", "broken",  # attempt 1 — all criteria fail
+            "broken", "broken", "broken",  # attempt 2 — all criteria fail
+            good, good, good,              # attempt 3 — judge recovers
+            "broken", "broken", "broken",  # attempt 4 — fails again
+        ]
+        evaluator = LLMCriticEvaluator(
+            llm_callable=AsyncMock(side_effect=responses),
+            max_consecutive_parse_failures=3,
+        )
+
+        assert (await evaluator.evaluate(task_id, "T", "o1")).verdict == "continue"
+        assert (await evaluator.evaluate(task_id, "T", "o2")).verdict == "continue"
+        assert (await evaluator.evaluate(task_id, "T", "o3")).verdict == "pass"
+        # Counter was reset, so this is failure 1 of 3 — not a pause.
+        assert (await evaluator.evaluate(task_id, "T", "o4")).verdict == "continue"

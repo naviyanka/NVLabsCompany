@@ -16,6 +16,7 @@ All configuration is done via environment variables. Copy `.env.example` → `.e
 | `OPENAI_EMBED_MODEL` | No | `text-embedding-3-small` | Embedding model when using OpenAI |
 | `OLLAMA_EMBED_MODEL` | No | `nomic-embed-text` | Embedding model when using Ollama |
 | `OLLAMA_EMBED_URL` | No | `http://localhost:11434` | Ollama API URL |
+| `SECRET_BACKEND` | No | `fernet` | Secret vault store: `fernet` (encrypted rows in `secrets`), `keyring` (OS keychain), `env` (read-only `NEXUS_SECRET_<REF>` variables) |
 
 ## Frontend (Dashboard)
 

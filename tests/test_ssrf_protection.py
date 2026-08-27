@@ -3,7 +3,7 @@
 import pytest
 from unittest.mock import patch
 
-from nexus.governance.ssrf_protection import SSRFGuard
+from nexus.governance.ssrf_protection import SSRFGuard, guard_url
 
 
 @pytest.fixture
@@ -209,3 +209,72 @@ class TestIsSafeUrl:
         """Empty and invalid URLs should be blocked."""
         assert guard.is_safe_url("") is False
         assert guard.is_safe_url("not-a-url") is False
+
+
+class TestGuardUrl:
+    """guard_url is the adapter-facing wrapper: raises instead of returning bool."""
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "https://api.example.com",
+            "https://1.1.1.1/v1",
+            "http://localhost:11434",
+            "http://127.0.0.1:8000",
+        ],
+    )
+    def test_allowed_urls_pass_through(self, url: str) -> None:
+        assert guard_url(url) == url
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "http://evil.example.com",  # plaintext to a remote host
+            "file:///etc/passwd",  # non-http scheme
+            "https://169.254.169.254/latest/meta-data/",  # cloud metadata
+            "https://10.0.0.5",  # RFC1918 literal
+            "https://192.168.1.5:8080",
+            "https://[fd00::1]/v1",  # IPv6 ULA literal
+            "not-a-url",
+        ],
+    )
+    def test_blocked_urls_raise(self, url: str) -> None:
+        with pytest.raises(ValueError, match="blocked by SSRF protection"):
+            guard_url(url)
+
+    def test_error_names_the_config_field(self) -> None:
+        with pytest.raises(ValueError, match="server_url blocked"):
+            guard_url("https://10.0.0.5", "server_url")
+
+
+class TestAdapterConfigWiring:
+    """Adapters must reject SSRF-unsafe URLs at validate_config time."""
+
+    @pytest.mark.parametrize(
+        ("adapter_path", "adapter_name", "key"),
+        [
+            ("nexus.adapters.http_adapter", "HTTPAdapter", "base_url"),
+            ("nexus.adapters.mcp_adapter", "MCPAgentAdapter", "server_url"),
+            ("nexus.adapters.hermes_adapter", "HermesAdapter", "ollama_host"),
+        ],
+    )
+    def test_private_ip_config_rejected(
+        self, adapter_path: str, adapter_name: str, key: str
+    ) -> None:
+        import importlib
+
+        adapter = getattr(importlib.import_module(adapter_path), adapter_name)()
+        adapter.validate_config({key: "https://api.example.com"})  # sanity: allowed
+        with pytest.raises(ValueError, match="blocked by SSRF protection"):
+            adapter.validate_config({key: "https://169.254.169.254"})
+
+    def test_http_adapter_guards_webhook_url(self) -> None:
+        from nexus.adapters.http_adapter import HTTPAdapter
+
+        with pytest.raises(ValueError, match="webhook_url blocked"):
+            HTTPAdapter().validate_config(
+                {
+                    "base_url": "https://api.example.com",
+                    "webhook_url": "https://169.254.169.254/hook",
+                }
+            )

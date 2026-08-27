@@ -58,3 +58,6 @@ dashboard/data/
 
 # Reference repos (cloned for analysis, not part of this project)
 temp_repos/
+
+# Tool cache, not project state
+graphify-out/cache/

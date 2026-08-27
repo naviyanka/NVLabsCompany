@@ -30,6 +30,7 @@ class AgentCreate(BaseModel):
     objectives: str | None = None
     soul_description: str | None = None
     budget_monthly_cents: int = 0
+    autonomy_policy: dict[str, Any] | None = None
 
 
 class AgentUpdate(BaseModel):
@@ -46,6 +47,7 @@ class AgentUpdate(BaseModel):
     objectives: str | None = None
     soul_description: str | None = None
     budget_monthly_cents: int | None = None
+    autonomy_policy: dict[str, Any] | None = None
 
 
 class AgentResponse(BaseModel):
@@ -68,6 +70,7 @@ class AgentResponse(BaseModel):
     budget_monthly_cents: int
     spent_monthly_cents: int
     soul_description: str | None = None
+    autonomy_policy: dict[str, Any] | None = None
     last_heartbeat_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
@@ -97,6 +100,7 @@ async def create_agent(
         objectives=body.objectives,
         soul_description=body.soul_description,
         budget_monthly_cents=body.budget_monthly_cents,
+        autonomy_policy=body.autonomy_policy,
     )
     db.add(agent)
     await db.flush()

@@ -477,11 +477,68 @@ def _resolve_adapter_type(agent: Agent) -> tuple[str, dict[str, Any]]:
     return resolve_provider(agent.adapter_type or "anthropic", agent.model)
 
 
+async def _preflight_budget(
+    agent: Agent,
+    system_prompt: str,
+    user_message: str,
+    history: list[dict[str, Any]],
+    config: dict[str, Any],
+) -> None:
+    """Refuse an LLM call whose estimated cost would breach the company cap.
+
+    Checking after the fact only reports an overspend; this prevents it. The
+    estimate is a floor, so the post-call cost recording still matters.
+
+    Raises:
+        BudgetExceededError: When the cap would be reached and the configured
+            policy is to stop.
+    """
+    from nexus.models_router.preflight import (
+        BudgetExceededError,
+        estimate_min_call_cost,
+    )
+
+    # Rough token estimate: the adapters do not expose a tokenizer here, and the
+    # ~4-characters-per-token rule is close enough for a floor. The last 10
+    # history messages are what _call_llm actually sends.
+    prompt_chars = len(system_prompt) + len(user_message)
+    prompt_chars += sum(len(str(msg.get("text", ""))) for msg in history[-10:])
+    estimate_usd = estimate_min_call_cost(config.get("model"), prompt_chars // 4)
+    estimate_cents = max(1, round(estimate_usd * 100))
+
+    try:
+        from nexus.database import async_session_factory
+        from nexus.services.budget_service import BudgetService
+
+        async with async_session_factory() as budget_db:
+            # BudgetService already scopes to active policies and to the policy's
+            # own window, so a monthly cap stays monthly rather than becoming a
+            # lifetime one.
+            result = await BudgetService(budget_db).check_budget(
+                scope_type="company",
+                scope_id=agent.company_id,
+                amount=estimate_cents,
+                company_id=agent.company_id,
+            )
+    except Exception as exc:  # noqa: BLE001 - budget lookup must not break chat
+        logger.warning("Budget pre-flight lookup failed, allowing call: %s", exc)
+        return
+
+    if not result.allowed:
+        raise BudgetExceededError(
+            config.get("model"),
+            estimate_usd,
+            result.used_cents / 100.0,
+            result.limit_cents / 100.0,
+        )
+
+
 async def _call_llm(
     agent: Agent,
     system_prompt: str,
     user_message: str,
     history: list[dict[str, Any]],
+    temperature: float | None = None,
 ) -> tuple[str, str, int]:
     """Call the LLM adapter to get a real response.
 
@@ -490,6 +547,8 @@ async def _call_llm(
         system_prompt: Generated system prompt from soul.
         user_message: The user's message.
         history: Conversation history for context.
+        temperature: Optional sampling temperature override. Judges and other
+            deterministic callers should pass 0.0.
 
     Returns:
         Tuple of (response_text, model_used, tokens_used).
@@ -542,6 +601,14 @@ async def _call_llm(
             0,
         )
 
+    # Pre-flight budget check. Every LLM dispatch in the app funnels through this
+    # function, so guarding here covers the orchestrator, pipelines, triggers and
+    # Temporal activities rather than just the chat route. It sits outside the try
+    # below on purpose: that block catches Exception broadly and answers in
+    # character, which would turn a budget refusal into a friendly message and let
+    # the call proceed anyway.
+    await _preflight_budget(agent, system_prompt, user_message, history, config)
+
     try:
         adapter_registry = AdapterRegistry()
         adapter = adapter_registry.create_adapter(registry_key)
@@ -566,6 +633,8 @@ async def _call_llm(
             "prompt": user_message,
             "system_prompt": system_prompt,
         }
+        if temperature is not None:
+            payload["temperature"] = temperature
 
         result = await adapter.execute_task(session, task_id, payload)
 
