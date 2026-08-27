@@ -29,7 +29,7 @@ import { StatCard } from '@/components/common/StatCard';
 import { Button } from '@/components/common/Button';
 import { Badge } from '@/components/common/Badge';
 import { Modal } from '@/components/common/Modal';
-import { apiClient, unwrapItems } from '@/api/client';
+import { apiClient } from '@/api/client';
 import { getActiveCompanyId } from '@/config';
 
 export type MutationCategory = 'Prompt Refinement' | 'Formatting Constraint' | 'Safety Guardrail' | 'Context Optimization';
@@ -78,10 +78,10 @@ export function Evolution() {
   useEffect(() => {
     async function loadProposals() {
       try {
-        const res = await apiClient.get<EvolutionProposal[] | { items: EvolutionProposal[] }>(
+        const res = await apiClient.get<EvolutionProposal[]>(
           `/api/v1/companies/${getActiveCompanyId()}/evolution/proposals`
         );
-        const items = unwrapItems(res);
+        const items = res;
         if (items.length > 0) {
           const formatted = items.map((prop) => ({
             ...prop,
@@ -102,10 +102,10 @@ export function Evolution() {
   useEffect(() => {
     async function loadAgents() {
       try {
-        const res = await apiClient.get<{ name: string }[] | { items: { name: string }[] }>(
+        const res = await apiClient.get<{ name: string }[]>(
           `/api/v1/companies/${getActiveCompanyId()}/agents`
         );
-        const items = unwrapItems(res);
+        const items = res;
         setAgentOptions(items.map((a) => a.name));
       } catch {
         setAgentOptions([]);

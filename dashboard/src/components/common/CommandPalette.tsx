@@ -10,7 +10,7 @@ import {
   Plus,
   Layers,
 } from 'lucide-react';
-import { apiClient, unwrapItems } from '../../api/client';
+import { apiClient } from '../../api/client';
 import { getActiveCompanyId } from '../../config';
 
 export interface CommandPaletteProps {
@@ -50,12 +50,12 @@ export function CommandPalette({
 
       // Fetch dynamic entities
       const companyId = getActiveCompanyId();
-      apiClient.get<Array<{ id: string; name: string; title: string }> | { items: Array<{ id: string; name: string; title: string }> }>(`/api/v1/companies/${companyId}/agents`)
-        .then((res) => { const items = unwrapItems(res); if (items.length) setAgentsList(items); })
+      apiClient.get<Array<{ id: string; name: string; title: string }>>(`/api/v1/companies/${companyId}/agents`)
+        .then((res) => { const items = res; if (items.length) setAgentsList(items); })
         .catch(() => {});
 
-      apiClient.get<Array<{ id: string; title: string }> | { items: Array<{ id: string; title: string }> }>(`/api/v1/companies/${companyId}/tasks`)
-        .then((res) => { const items = unwrapItems(res); if (items.length) setTasksList(items); })
+      apiClient.get<Array<{ id: string; title: string }>>(`/api/v1/companies/${companyId}/tasks`)
+        .then((res) => { const items = res; if (items.length) setTasksList(items); })
         .catch(() => {});
     }
   }, [isOpen]);

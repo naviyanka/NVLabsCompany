@@ -37,11 +37,11 @@ export function Header({ onToggleSidebar, onOpenCommandPalette }: HeaderProps) {
 
   useEffect(() => {
     apiClient
-      .get<{ items: NotificationItem[] }>(
+      .get<NotificationItem[]>(
         `/api/v1/companies/${getActiveCompanyId()}/notifications`
       )
       .then((res) => {
-        if (res?.items) setNotifications(res.items);
+        if (res) setNotifications(res);
       })
       .catch(() => {});
   }, []);

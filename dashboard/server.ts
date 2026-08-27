@@ -6,7 +6,7 @@ import crypto from 'crypto';
 import { createServer as createViteServer } from 'vite';
 
 const app = express();
-const PORT = 3000;
+const PORT = Number(process.env.PORT) || 3000;
 
 // ──────────────── Real API Proxy ────────────────
 //
@@ -2541,13 +2541,25 @@ try {
 // ──────────────── Dev Auth Bypass ────────────────
 // Mock auth endpoints so the frontend works without the real Python backend
 
-app.get('/api/v1/auth/me', (req, res) => {
-  res.json({
-    authenticated: true,
-    principal: { kind: 'user', role: 'admin' },
+// Shape matches MeResponse in dashboard/src/api/auth.ts (see _build_me in
+// src/nexus/api/routes/auth.py). AuthContext reads these keys directly.
+const DEV_MEMBERSHIPS = [{
+  company_id: '00000000-0000-4000-8000-000000000001',
+  company_name: 'NVLabs',
+  role: 'admin',
+  is_current: true,
+}];
+
+function devMe(email = 'admin@nvlabs.dev') {
+  return {
+    kind: 'user',
+    role: 'admin',
+    company_id: '00000000-0000-4000-8000-000000000001',
+    company_name: 'NVLabs',
+    display_name: 'Admin Dev',
     user: {
       id: '00000000-0000-4000-8000-000000000099',
-      email: 'admin@nvlabs.dev',
+      email,
       first_name: 'Admin',
       last_name: 'Dev',
       title: 'Super Administrator',
@@ -2557,17 +2569,40 @@ app.get('/api/v1/auth/me', (req, res) => {
       two_factor_enabled: false,
       is_superuser: true,
     },
-    company: {
-      id: '00000000-0000-4000-8000-000000000001',
-      name: 'NVLabs',
-      role: 'admin',
-    },
-    memberships: [{
-      company_id: '00000000-0000-4000-8000-000000000001',
-      company_name: 'NVLabs',
-      role: 'admin',
-    }],
-  });
+    memberships: DEV_MEMBERSHIPS,
+  };
+}
+
+const DEV_CSRF_TOKEN = 'dev-csrf-token';
+
+// Mutable so revokes change real state across requests.
+let devSessions = [
+  {
+    id: '00000000-0000-4000-8000-0000000000a1',
+    company_id: '00000000-0000-4000-8000-000000000001',
+    browser: 'Chrome 128 on Windows',
+    ip_address: '127.0.0.1',
+    location: 'Localhost',
+    is_current: true,
+    last_active_at: new Date().toISOString(),
+    expires_at: null as string | null,
+    created_at: new Date(Date.now() - 3600_000).toISOString(),
+  },
+  {
+    id: '00000000-0000-4000-8000-0000000000a2',
+    company_id: '00000000-0000-4000-8000-000000000001',
+    browser: 'Firefox 130 on macOS',
+    ip_address: '192.168.1.42',
+    location: 'Berlin, DE',
+    is_current: false,
+    last_active_at: new Date(Date.now() - 86_400_000).toISOString(),
+    expires_at: new Date(Date.now() + 7 * 86_400_000).toISOString() as string | null,
+    created_at: new Date(Date.now() - 5 * 86_400_000).toISOString(),
+  },
+];
+
+app.get('/api/v1/auth/me', (req, res) => {
+  res.json(devMe());
 });
 
 app.get('/api/v1/auth/setup-required', (req, res) => {
@@ -2575,31 +2610,59 @@ app.get('/api/v1/auth/setup-required', (req, res) => {
 });
 
 app.post('/api/v1/auth/login', (req, res) => {
-  res.json({
-    authenticated: true,
-    principal: { kind: 'user', role: 'admin' },
-    user: {
-      id: '00000000-0000-4000-8000-000000000099',
-      email: req.body?.email || 'admin@nvlabs.dev',
-      first_name: 'Admin',
-      last_name: 'Dev',
-      is_superuser: true,
-    },
-    company: {
-      id: '00000000-0000-4000-8000-000000000001',
-      name: 'NVLabs',
-      role: 'admin',
-    },
-    memberships: [{
-      company_id: '00000000-0000-4000-8000-000000000001',
-      company_name: 'NVLabs',
-      role: 'admin',
-    }],
-  });
+  res.json(devMe(req.body?.email || 'admin@nvlabs.dev'));
 });
 
 app.post('/api/v1/auth/logout', (req, res) => {
   res.json({ success: true });
+});
+
+// The client reads nv_csrf from document.cookie for the X-CSRF-Token header.
+app.get('/api/v1/auth/csrf', (req, res) => {
+  res.setHeader('set-cookie', `nv_csrf=${DEV_CSRF_TOKEN}; Path=/; SameSite=Lax`);
+  res.json({ csrf_token: DEV_CSRF_TOKEN });
+});
+
+app.get('/api/v1/auth/sessions', (req, res) => {
+  res.json(devSessions);
+});
+
+app.delete('/api/v1/auth/sessions/:sessionId', (req, res) => {
+  const target = devSessions.find((s) => s.id === req.params.sessionId);
+  if (!target || target.is_current) {
+    res.json({ revoked: false });
+    return;
+  }
+  devSessions = devSessions.filter((s) => s.id !== target.id);
+  res.json({ revoked: true });
+});
+
+app.post('/api/v1/auth/sessions/revoke-others', (req, res) => {
+  const before = devSessions.length;
+  devSessions = devSessions.filter((s) => s.is_current);
+  res.json({ revoked_count: before - devSessions.length });
+});
+
+app.get('/api/v1/auth/companies', (req, res) => {
+  res.json(DEV_MEMBERSHIPS);
+});
+
+app.post('/api/v1/auth/switch-company', (req, res) => {
+  res.json(devMe());
+});
+
+app.post('/api/v1/auth/change-password', (req, res) => {
+  const current = req.body?.current_password;
+  const next = req.body?.new_password;
+  if (!current || !next) {
+    res.status(400).json({ detail: 'current_password and new_password are required.' });
+    return;
+  }
+  if (String(next).length < 12) {
+    res.status(400).json({ detail: 'New password must be at least 12 characters.' });
+    return;
+  }
+  res.json({ success: true, other_sessions_revoked: 0 });
 });
 
 app.get('/api/health', (req, res) => {
@@ -2644,7 +2707,7 @@ app.get('/api/v1/companies/:companyId/activity/stream', (req, res) => {
 
 // Companies
 app.get('/api/v1/companies', (req, res) => {
-  res.json({ items: companies, total: companies.length, page: 1, page_size: 20, pages: 1 });
+  res.json(companies);
 });
 
 app.get('/api/v1/companies/:companyId', (req, res) => {
@@ -2654,7 +2717,7 @@ app.get('/api/v1/companies/:companyId', (req, res) => {
 
 // Agents
 app.get('/api/v1/companies/:companyId/agents', (req, res) => {
-  res.json({ items: agents, total: agents.length, page: 1, page_size: 50, pages: 1 });
+  res.json(agents);
 });
 
 app.get('/api/v1/companies/:companyId/agents/:agentId', (req, res) => {
@@ -2992,7 +3055,7 @@ app.post('/api/v1/agents/:agentId/chat', async (req, res) => {
 
 // Tasks
 app.get('/api/v1/companies/:companyId/tasks', (req, res) => {
-  res.json({ items: tasks, total: tasks.length, page: 1, page_size: 50, pages: 1 });
+  res.json(tasks);
 });
 
 app.post('/api/v1/companies/:companyId/tasks', (req, res) => {
@@ -3232,7 +3295,7 @@ app.delete('/api/v1/companies/:companyId/backups/:backupId', (req, res) => {
 
 // ──────────────── Audit Logs Trail API Endpoints ────────────────
 app.get('/api/v1/companies/:companyId/audit-logs', (req, res) => {
-  res.json({ items: auditLogs, total: auditLogs.length });
+  res.json(auditLogs);
 });
 
 // ──────────────── Clawith Plaza Knowledge Feed Endpoints ────────────────
@@ -3579,7 +3642,7 @@ app.post('/api/v1/companies/:companyId/billing/refresh-credits', (req, res) => {
 
 // Pipelines & CI/CD Gateways Endpoints
 app.get('/api/v1/companies/:companyId/pipelines', (req, res) => {
-  res.json({ items: pipelines, total: pipelines.length });
+  res.json(pipelines);
 });
 
 app.post('/api/v1/companies/:companyId/pipelines', (req, res) => {
@@ -3643,7 +3706,7 @@ app.delete('/api/v1/companies/:companyId/pipelines/:pipeId', (req, res) => {
 // Goals
 // Goals & Strategic Directives Endpoints
 app.get('/api/v1/companies/:companyId/goals', (req, res) => {
-  res.json({ items: goals, total: goals.length });
+  res.json(goals);
 });
 
 app.post('/api/v1/companies/:companyId/goals', (req, res) => {
@@ -3698,7 +3761,7 @@ app.delete('/api/v1/companies/:companyId/goals/:goalId', (req, res) => {
 
 // Meetings API Endpoints
 app.get('/api/v1/companies/:companyId/meetings', (req, res) => {
-  res.json({ items: meetings, total: meetings.length });
+  res.json(meetings);
 });
 
 app.post('/api/v1/companies/:companyId/meetings', (req, res) => {
@@ -3754,7 +3817,7 @@ app.get('/api/v1/companies/:companyId/organization', (req, res) => {
 
 // Organization & Department Endpoints
 app.get('/api/v1/companies/:companyId/departments', (req, res) => {
-  res.json({ items: departments, total: departments.length });
+  res.json(departments);
 });
 
 app.post('/api/v1/companies/:companyId/departments', (req, res) => {
@@ -3822,7 +3885,7 @@ app.delete('/api/v1/companies/:companyId/departments/:deptId', (req, res) => {
 
 // Squad Endpoints
 app.get('/api/v1/companies/:companyId/squads', (req, res) => {
-  res.json({ items: squads, total: squads.length });
+  res.json(squads);
 });
 
 app.post('/api/v1/companies/:companyId/squads', (req, res) => {
@@ -3870,7 +3933,7 @@ app.patch('/api/v1/companies/:companyId/squads/:squadId', (req, res) => {
 
 // Skills API Endpoints
 app.get('/api/v1/companies/:companyId/skills', (req, res) => {
-  res.json({ items: skills, total: skills.length });
+  res.json(skills);
 });
 
 app.get('/api/v1/companies/:companyId/skills/:skillId', (req, res) => {
@@ -3963,7 +4026,7 @@ app.post('/api/v1/companies/:companyId/skills/:skillId/test', (req, res) => {
 
 // Tools API Endpoints
 app.get('/api/v1/companies/:companyId/tools', (req, res) => {
-  res.json({ items: tools, total: tools.length });
+  res.json(tools);
 });
 
 app.post('/api/v1/companies/:companyId/tools', (req, res) => {
@@ -4140,7 +4203,7 @@ async function fetchGitHubRepoDetails(fullName: string, token: string | null) {
 
 // Repositories & Agent PRs (Returns ONLY manually imported repositories)
 const handleGetRepos = (req: express.Request, res: express.Response) => {
-  res.json({ items: repos, total: repos.length });
+  res.json(repos);
 };
 
 app.get('/api/v1/companies/:companyId/repos', handleGetRepos);
@@ -4758,7 +4821,7 @@ app.get('/api/v1/companies/:companyId/prs', (req, res) => {
   });
   // Sort recently updated or created
   allPRs.sort((a, b) => new Date(b.updated_at || b.created_at).getTime() - new Date(a.updated_at || a.created_at).getTime());
-  res.json({ items: allPRs, total: allPRs.length });
+  res.json(allPRs);
 });
 
 // Aggregated All Commits across all repositories
@@ -4777,12 +4840,12 @@ app.get('/api/v1/companies/:companyId/commits', (req, res) => {
   });
   // Sort by timestamp descending
   allCommits.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-  res.json({ items: allCommits, total: allCommits.length });
+  res.json(allCommits);
 });
 
 // Knowledge Base
 app.get('/api/v1/companies/:companyId/knowledge', (req, res) => {
-  res.json({ items: knowledgeArticles, total: knowledgeArticles.length });
+  res.json(knowledgeArticles);
 });
 
 app.post('/api/v1/companies/:companyId/knowledge', (req, res) => {
@@ -4803,7 +4866,7 @@ app.post('/api/v1/companies/:companyId/knowledge', (req, res) => {
 
 // Notifications
 app.get('/api/v1/companies/:companyId/notifications', (req, res) => {
-  res.json({ items: notifications, total: notifications.length });
+  res.json(notifications);
 });
 
 app.patch('/api/v1/companies/:companyId/notifications/:notifId', (req, res) => {
@@ -4852,7 +4915,7 @@ app.post('/api/v1/companies/:companyId/notifications/test-dispatch', (req, res) 
 
 // Activity
 app.get('/api/v1/companies/:companyId/activity', (req, res) => {
-  res.json({ items: activities, total: activities.length });
+  res.json(activities);
 });
 
 // Agent Archetypes & Providers (for Hire Agent modal)
@@ -5071,7 +5134,7 @@ app.get('/api/v1/soul-templates', (req, res) => {
 
 // Budgets
 app.get('/api/v1/companies/:companyId/budget-policies', (req, res) => {
-  res.json({ items: budgetPolicies, total: budgetPolicies.length });
+  res.json(budgetPolicies);
 });
 
 app.post('/api/v1/companies/:companyId/budget-policies', (req, res) => {
@@ -5103,7 +5166,7 @@ app.get('/api/v1/companies/:companyId/budget-usage', (req, res) => {
 
 // Evolution
 app.get('/api/v1/companies/:companyId/evolution/proposals', (req, res) => {
-  res.json({ items: proposals, total: proposals.length });
+  res.json(proposals);
 });
 
 app.post('/api/v1/companies/:companyId/evolution/proposals', (req, res) => {
@@ -5139,12 +5202,12 @@ app.post('/api/v1/companies/:companyId/evolution/proposals/:propId/decide', (req
 
 // Memory
 app.get('/api/v1/companies/:companyId/memory', (req, res) => {
-  res.json({ items: memoryEntries, total: memoryEntries.length });
+  res.json(memoryEntries);
 });
 
 app.get('/api/v1/agents/:agentId/memory', (req, res) => {
   const agentMemories = memoryEntries.filter((m) => m.agent_id === req.params.agentId);
-  res.json({ items: agentMemories.length ? agentMemories : memoryEntries, total: agentMemories.length || memoryEntries.length });
+  res.json(agentMemories.length ? agentMemories : memoryEntries);
 });
 
 // Settings & Integrations
@@ -5237,11 +5300,11 @@ try {
 }
 
 app.get('/api/v1/workflows', (req, res) => {
-  res.json({ items: workflows, total: workflows.length });
+  res.json(workflows);
 });
 
 app.get('/api/v1/companies/:companyId/workflows', (req, res) => {
-  res.json({ items: workflows, total: workflows.length });
+  res.json(workflows);
 });
 
 app.post('/api/v1/workflows', (req, res) => {

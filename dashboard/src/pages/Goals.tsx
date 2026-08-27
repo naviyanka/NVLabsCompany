@@ -12,7 +12,7 @@ import {
 import { Card } from '@/components/common/Card';
 import { Button } from '@/components/common/Button';
 import { Badge } from '@/components/common/Badge';
-import { apiClient, unwrapItems } from '@/api/client';
+import { apiClient } from '@/api/client';
 import { getActiveCompanyId } from '@/config';
 import type { GoalItem } from '@/types/goal';
 import { AddGoalModal } from '@/components/goals/AddGoalModal';
@@ -33,18 +33,18 @@ export function Goals() {
     async function loadData() {
       try {
         const companyId = getActiveCompanyId();
-        const res = await apiClient.get<GoalItem[] | { items: GoalItem[] }>(
+        const res = await apiClient.get<GoalItem[]>(
           `/api/v1/companies/${companyId}/goals`
         );
-        const items = unwrapItems(res);
+        const items = res;
         if (items.length > 0) {
           setGoals(items);
         }
 
-        const agentsRes = await apiClient.get<any[] | { items: any[] }>(
+        const agentsRes = await apiClient.get<any[]>(
           `/api/v1/companies/${companyId}/agents`
         );
-        const agentItems = unwrapItems(agentsRes);
+        const agentItems = agentsRes;
         if (agentItems.length) setAgents(agentItems);
       } catch (err) {
         console.error('Failed to load goals', err);

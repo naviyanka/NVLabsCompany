@@ -99,10 +99,7 @@ function companyPath(path: string): string {
 
 /** List all agents for the active company. */
 export async function listAgents(): Promise<Agent[]> {
-  const data = await apiClient.get<Agent[] | { items: Agent[] }>(companyPath('/agents'));
-  // Backend returns list[AgentResponse], handle both shapes
-  if (Array.isArray(data)) return data;
-  return data.items ?? [];
+  return apiClient.get<Agent[]>(companyPath('/agents'));
 }
 
 /** Create a single agent. */

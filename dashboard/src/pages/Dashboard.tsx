@@ -16,7 +16,7 @@ import { StatCard } from '@/components/common/StatCard';
 import { Button } from '@/components/common/Button';
 import { Badge } from '@/components/common/Badge';
 import { Modal } from '@/components/common/Modal';
-import { apiClient, unwrapItems } from '@/api/client';
+import { apiClient } from '@/api/client';
 import { getActiveCompanyId } from '@/config';
 
 interface AgentItem {
@@ -84,22 +84,22 @@ export function Dashboard() {
       try {
         const companyId = getActiveCompanyId();
         const [agentsRes, tasksRes, pipesRes] = await Promise.allSettled([
-          apiClient.get<AgentItem[] | { items: AgentItem[] }>(`/api/v1/companies/${companyId}/agents`),
-          apiClient.get<TaskItem[] | { items: TaskItem[] }>(`/api/v1/companies/${companyId}/tasks`),
-          apiClient.get<PipelineItem[] | { items: PipelineItem[] }>(`/api/v1/companies/${companyId}/pipelines`),
+          apiClient.get<AgentItem[]>(`/api/v1/companies/${companyId}/agents`),
+          apiClient.get<TaskItem[]>(`/api/v1/companies/${companyId}/tasks`),
+          apiClient.get<PipelineItem[]>(`/api/v1/companies/${companyId}/pipelines`),
         ]);
         if (!isMounted) return;
 
         if (agentsRes.status === 'fulfilled') {
-          const items = unwrapItems(agentsRes.value);
+          const items = agentsRes.value;
           if (items.length) setAgents(items);
         }
         if (tasksRes.status === 'fulfilled') {
-          const items = unwrapItems(tasksRes.value);
+          const items = tasksRes.value;
           if (items.length) setTasks(items);
         }
         if (pipesRes.status === 'fulfilled') {
-          const items = unwrapItems(pipesRes.value);
+          const items = pipesRes.value;
           if (items.length) setPipelines(items);
         }
       } catch (err) {
