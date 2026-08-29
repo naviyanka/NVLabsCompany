@@ -95,6 +95,26 @@ async def _get_history_fresh(
     return _conversations.get(agent_id, [])
 
 
+async def _persist_from_generator(
+    agent_id: uuid.UUID, company_id: uuid.UUID, sender: str, text: str
+) -> None:
+    """Persist a message on its own session, for use inside an SSE generator.
+
+    The request's session is closed once the endpoint returns its
+    StreamingResponse, but the generator body runs after that. A streamed message
+    therefore needs a session of its own, or it only ever reaches the in-process
+    cache and is gone on restart.
+    """
+    try:
+        from nexus.database import async_session_factory
+
+        async with async_session_factory() as own:
+            await _persist_message_to_db(own, agent_id, company_id, sender, text)
+            await own.commit()
+    except Exception as exc:  # noqa: BLE001 - persistence must not break the stream
+        logger.warning("Could not persist streamed message for agent %s: %s", agent_id, exc)
+
+
 def _add_message(agent_id: str, sender: str, text: str) -> dict[str, Any]:
     """Add a message to the conversation history (in-memory + DB persist)."""
     if agent_id not in _conversations:
@@ -848,8 +868,10 @@ async def chat_with_agent_stream(
     # Get history for context (TTL-fresh across workers)
     history = await _get_history_fresh(db, str(agent_id), company_id)
 
-    # Store user message
+    # Store user message. The request session is still open here, so this one
+    # can go through it; the agent's reply is written later from the generator.
     _add_message(str(agent_id), "user", body.prompt)
+    await _persist_message_to_db(db, agent_id, company_id, "user", body.prompt)
 
     async def event_generator():
         """Generate SSE events — uses true token streaming when adapter supports it."""
@@ -898,6 +920,7 @@ async def chat_with_agent_stream(
 
                 # Store response and emit done
                 agent_msg = _add_message(str(agent_id), "agent", accumulated)
+                await _persist_from_generator(agent_id, company_id, "agent", accumulated)
                 tokens_used = len(accumulated.split()) * 2  # Rough estimate
                 done_event = json.dumps({
                     "type": "done",
@@ -921,6 +944,7 @@ async def chat_with_agent_stream(
                     await asyncio.sleep(0.02)
 
                 agent_msg = _add_message(str(agent_id), "agent", response_text)
+                await _persist_from_generator(agent_id, company_id, "agent", response_text)
                 done_event = json.dumps({
                     "type": "done",
                     "message": agent_msg,
