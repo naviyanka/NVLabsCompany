@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from nexus.models.agent import Agent
 from nexus.models.heartbeat_run import HeartbeatRun
+from nexus.runtime.heartbeat_persistent import NEEDS_RECOVERY
 from nexus.runtime.watchdog import AgentInfo, RecoveryAction, Watchdog, WatchdogConfig
 
 logger = logging.getLogger(__name__)
@@ -52,50 +53,47 @@ async def _load_active_runs(session: AsyncSession) -> list[HeartbeatRun]:
     return list((await session.execute(stmt)).scalars().all())
 
 
-async def _escalate(
+async def _file_decision(
     session_factory: async_sessionmaker[AsyncSession],
-    action: dict[str, object],
+    agent_id: uuid.UUID,
+    source_id: uuid.UUID,
+    title: str,
+    body: str,
 ) -> None:
-    """File one human decision for a stalled run.
+    """Put one open decision on the escalation queue for a human to answer.
 
-    The watchdog never reassigns or cancels on its own -- a stall it cannot
-    explain goes to a person.
+    Deduped on ``source_id``, so a condition that persists across patrols files
+    one decision rather than one per tick.
+
+    Args:
+        session_factory: Session factory for the decision and queue writes.
+        agent_id: The agent the escalation is about; supplies the company.
+        source_id: Dedupe key and queue-item source (a run id, or an agent id
+            when the escalation is about the agent rather than a single run).
+        title: Short summary shown in the queue.
+        body: What the operator needs to know to decide.
     """
     from nexus.governance.decision_queue_persistent import (
         PersistentDecisionQueueManager,
     )
     from nexus.models.governance import Decision
 
-    raw_run_id = action.get("run_id")
-    raw_agent_id = action.get("agent_id")
-    if raw_run_id is None or raw_agent_id is None:
-        return
-    run_id = uuid.UUID(str(raw_run_id))
-    if run_id in _escalated:
+    if source_id in _escalated:
         return
 
     # Neither the action dict nor HeartbeatRun carries a company, so it comes
     # from the owning agent.
     async with session_factory() as session:
         agent = (
-            await session.execute(
-                select(Agent).where(Agent.id == uuid.UUID(str(raw_agent_id)))
-            )
+            await session.execute(select(Agent).where(Agent.id == agent_id))
         ).scalars().first()
         if agent is None:
-            logger.warning(
-                "Stalled run %s references unknown agent %s; cannot escalate",
-                run_id,
-                raw_agent_id,
-            )
+            logger.warning("Cannot escalate: unknown agent %s", agent_id)
             return
         company_id = agent.company_id
 
         decision = Decision(
-            company_id=company_id,
-            title=f"Stalled agent run {run_id}",
-            body=str(action.get("reason", "Run stopped producing output.")),
-            status="open",
+            company_id=company_id, title=title, body=body, status="open"
         )
         session.add(decision)
         await session.commit()
@@ -112,11 +110,58 @@ async def _escalate(
         queue_name=ESCALATION_QUEUE,
         decision_id=decision_id,
         source_kind="system",
-        source_id=run_id,
+        source_id=source_id,
         priority=1,
     )
-    _escalated.add(run_id)
-    logger.warning("Escalated stalled run %s for human review", run_id)
+    _escalated.add(source_id)
+    logger.warning("Escalated %s for human review: %s", source_id, title)
+
+
+async def _escalate(
+    session_factory: async_sessionmaker[AsyncSession],
+    action: dict[str, object],
+) -> None:
+    """File one human decision for a stalled run.
+
+    The watchdog never reassigns or cancels on its own -- a stall it cannot
+    explain goes to a person.
+    """
+    raw_run_id = action.get("run_id")
+    raw_agent_id = action.get("agent_id")
+    if raw_run_id is None or raw_agent_id is None:
+        return
+
+    run_id = uuid.UUID(str(raw_run_id))
+    await _file_decision(
+        session_factory,
+        agent_id=uuid.UUID(str(raw_agent_id)),
+        source_id=run_id,
+        title=f"Stalled agent run {run_id}",
+        body=str(action.get("reason", "Run stopped producing output.")),
+    )
+
+
+async def _escalate_recovery(
+    session_factory: async_sessionmaker[AsyncSession],
+    agent_id: uuid.UUID,
+) -> None:
+    """File a decision for an agent left in ``needs_recovery``.
+
+    Startup reclaim moves an agent whose process died into ``needs_recovery``,
+    but nothing moved it out again: no code read that status, so a reclaimed
+    agent sat there indefinitely. Surfacing it as a decision is what makes the
+    reclaim visible to someone who can act on it.
+    """
+    await _file_decision(
+        session_factory,
+        agent_id=agent_id,
+        source_id=agent_id,
+        title=f"Agent {agent_id} needs recovery",
+        body=(
+            "The agent's run process died and was reclaimed at startup. Decide "
+            "whether to resume its work, reassign it, or leave it stopped."
+        ),
+    )
 
 
 async def patrol_once(session_factory: async_sessionmaker[AsyncSession]) -> None:
@@ -138,6 +183,16 @@ async def patrol_once(session_factory: async_sessionmaker[AsyncSession]) -> None
                 await _escalate(session_factory, action)
             except Exception as exc:  # noqa: BLE001 - one failure must not stop the patrol
                 logger.warning("Could not escalate stalled run: %s", exc)
+
+    # Agents parked in needs_recovery by startup reclaim. Nothing else reads
+    # that status, so without this the reclaim is invisible.
+    for agent in agents:
+        if agent.status != NEEDS_RECOVERY:
+            continue
+        try:
+            await _escalate_recovery(session_factory, agent.agent_id)
+        except Exception as exc:  # noqa: BLE001 - one failure must not stop the patrol
+            logger.warning("Could not escalate agent %s: %s", agent.agent_id, exc)
 
     if report.issues_found:
         logger.info(
