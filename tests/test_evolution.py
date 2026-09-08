@@ -309,20 +309,49 @@ class TestEvolutionSandbox:
         assert str(sandbox_id) in sandbox._sandboxes
 
     @pytest.mark.asyncio
-    async def test_run_benchmark(self, proposal_id):
-        """run_benchmark returns results for test cases."""
-        sandbox = EvolutionSandbox()
-        sandbox_id = sandbox.create_sandbox(proposal_id, {"model": "gpt-4"})
+    async def test_run_benchmark_uses_execution_backend(self, proposal_id):
+        """run_benchmark executes each test case in the real sandbox backend."""
+        from nexus.execution.sandbox import ExecutionResult, SandboxType
 
-        test_cases = [
-            {"id": "test1", "expected_score": 0.85, "expected_duration_ms": 100},
-            {"id": "test2", "expected_score": 0.9, "expected_duration_ms": 120},
-        ]
+        class FakeBackend:
+            def __init__(self):
+                self.calls = []
 
-        results = await sandbox.run_benchmark(sandbox_id, test_cases)
-        assert len(results) == 2
+            async def run(self, code, language="python", **kwargs):
+                self.calls.append((code, language, kwargs))
+                return ExecutionResult(
+                    stdout="42\n" if "42" in code else "nope\n",
+                    stderr="",
+                    exit_code=0,
+                    timed_out=False,
+                    backend=SandboxType.LOCAL,
+                    duration_ms=10,
+                )
+
+        backend = FakeBackend()
+        sandbox = EvolutionSandbox(backend=backend)
+        sandbox_id = sandbox.create_sandbox(proposal_id, {"language": "python"})
+
+        results = await sandbox.run_benchmark(
+            sandbox_id,
+            [
+                {"id": "test1", "code": "print(42)", "expected_output": "42"},
+                {"id": "test2", "code": "print(1)", "expected_output": "42"},
+            ],
+        )
+        assert len(backend.calls) == 2
         assert results[0]["test_case_id"] == "test1"
-        assert results[0]["score"] == 0.85
+        assert results[0]["score"] == 1.0
+        assert results[1]["score"] == 0.0
+        assert results[0]["backend"] == "local"
+
+    @pytest.mark.asyncio
+    async def test_run_benchmark_rejects_test_case_without_code(self, proposal_id):
+        """A test case with no code is a caller error, not a fake pass."""
+        sandbox = EvolutionSandbox(backend=object())
+        sandbox_id = sandbox.create_sandbox(proposal_id, {})
+        with pytest.raises(ValueError, match="no 'code'"):
+            await sandbox.run_benchmark(sandbox_id, [{"id": "t"}])
 
     def test_compare_with_baseline(self):
         """compare_with_baseline calculates improvement correctly."""

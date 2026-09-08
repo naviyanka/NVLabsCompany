@@ -1,0 +1,207 @@
+global:
+  environment: production
+  imageRegistry: ghcr.io/nvlabs
+  imagePullSecrets: []
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: "nexus-sa"
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  runAsGroup: 10001
+  fsGroup: 10001
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: false
+  capabilities:
+    drop:
+      - ALL
+
+api:
+  replicaCount: 3
+  image:
+    repository: ghcr.io/nvlabs/nexus-api
+    tag: "0.1.0"
+    pullPolicy: IfNotPresent
+  service:
+    type: ClusterIP
+    port: 8000
+  resources:
+    limits:
+      cpu: 2000m
+      memory: 2048Mi
+    requests:
+      cpu: 500m
+      memory: 512Mi
+  autoscaling:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: 80
+  pdb:
+    enabled: true
+    minAvailable: 1
+  probes:
+    startup:
+      enabled: true
+      path: /health/startup
+      initialDelaySeconds: 5
+      periodSeconds: 5
+      timeoutSeconds: 3
+      failureThreshold: 30
+    liveness:
+      enabled: true
+      path: /health/live
+      initialDelaySeconds: 15
+      periodSeconds: 10
+      timeoutSeconds: 5
+      failureThreshold: 3
+    readiness:
+      enabled: true
+      path: /health/ready
+      initialDelaySeconds: 10
+      periodSeconds: 5
+      timeoutSeconds: 5
+      failureThreshold: 3
+
+worker:
+  replicaCount: 3
+  image:
+    repository: ghcr.io/nvlabs/nexus-api
+    tag: "0.1.0"
+    pullPolicy: IfNotPresent
+  command: ["python", "-m", "nexus.temporal.worker"]
+  resources:
+    limits:
+      cpu: 2000m
+      memory: 2048Mi
+    requests:
+      cpu: 500m
+      memory: 512Mi
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 8
+    targetCPUUtilizationPercentage: 75
+
+scheduler:
+  replicaCount: 1
+  image:
+    repository: ghcr.io/nvlabs/nexus-api
+    tag: "0.1.0"
+    pullPolicy: IfNotPresent
+  command: ["python", "-c", "import asyncio; from nexus.runtime.scheduler import run_scheduler; asyncio.run(run_scheduler())"]
+  resources:
+    limits:
+      cpu: 1000m
+      memory: 1024Mi
+    requests:
+      cpu: 250m
+      memory: 256Mi
+
+frontend:
+  replicaCount: 2
+  image:
+    repository: ghcr.io/nvlabs/nexus-frontend
+    tag: "0.1.0"
+    pullPolicy: IfNotPresent
+  service:
+    type: ClusterIP
+    port: 80
+    targetPort: 8080
+  resources:
+    limits:
+      cpu: 1000m
+      memory: 512Mi
+    requests:
+      cpu: 100m
+      memory: 128Mi
+  pdb:
+    enabled: true
+    minAvailable: 1
+  probes:
+    liveness:
+      path: /healthz
+      port: 8080
+      initialDelaySeconds: 10
+      periodSeconds: 10
+    readiness:
+      path: /healthz
+      port: 8080
+      initialDelaySeconds: 5
+      periodSeconds: 5
+
+ingress:
+  enabled: true
+  className: "nginx"
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "120"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "120"
+  hosts:
+    - host: nexus.nvlabs.company
+      paths:
+        - path: /api
+          pathType: Prefix
+          service: api
+        - path: /health
+          pathType: Prefix
+          service: api
+        - path: /
+          pathType: Prefix
+          service: frontend
+  tls:
+    - secretName: nexus-tls-cert
+      hosts:
+        - nexus.nvlabs.company
+
+database:
+  host: postgres-cluster.database.svc.cluster.local
+  port: 5432
+  name: nexus
+  user: nexus
+  sslMode: require
+
+redis:
+  host: redis-master.cache.svc.cluster.local
+  port: 6379
+
+temporal:
+  enabled: true
+  host: temporal-frontend.temporal.svc.cluster.local:7233
+  namespace: default
+
+migration:
+  enabled: true
+  hook: "pre-install,pre-upgrade"
+  hookDeletePolicy: "before-hook-creation,hook-succeeded"
+  resources:
+    limits:
+      cpu: 1000m
+      memory: 1024Mi
+    requests:
+      cpu: 250m
+      memory: 256Mi
+
+externalSecrets:
+  enabled: false
+  secretStoreRef:
+    name: aws-secrets-manager
+    kind: ClusterSecretStore
+  remoteRefKey: "production/nexus/secrets"
+
+secrets:
+  databasePassword: "change_me_in_vault"
+  redisPassword: "change_me_in_vault"
+  secretKey: "change_me_in_vault"
+  openaiApiKey: ""
+  anthropicApiKey: ""

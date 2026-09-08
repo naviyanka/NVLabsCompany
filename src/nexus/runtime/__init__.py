@@ -3,7 +3,19 @@
 from nexus.runtime.adapter import AgentAdapter, AgentSession, TaskResult
 from nexus.runtime.lifecycle import AgentLifecycleManager
 from nexus.runtime.executor import TaskExecutor
-from nexus.runtime.checkpoint import CheckpointManager, ExecutionCheckpoint
+from nexus.runtime.checkpoint import (
+    CheckpointManager,
+    CheckpointStatus,
+    DurableCheckpointService,
+    ExecutionCheckpoint,
+    abandon_stale,
+    build_checkpoint_state,
+    load_latest,
+    mark_completed,
+    resume_from_checkpoint,
+    save_checkpoint,
+    save_checkpoint_nonblocking,
+)
 from nexus.runtime.closing_time import ClosingTimeController, ClosingTimeEvent, ClosingTimePhase
 from nexus.runtime.cycle_guard import CycleGuard, CycleGuardError
 from nexus.runtime.heartbeat_persistent import PersistentHeartbeatService
@@ -21,6 +33,8 @@ __all__ = [
     "ClosingTimePhase",
     "TaskExecutor",
     "CheckpointManager",
+    "CheckpointStatus",
+    "DurableCheckpointService",
     "CycleGuard",
     "CycleGuardError",
     "ExecutionCheckpoint",
@@ -31,4 +45,11 @@ __all__ = [
     "WatchdogConfig",
     "WorktreeInfo",
     "WorktreeManager",
+    "abandon_stale",
+    "build_checkpoint_state",
+    "load_latest",
+    "mark_completed",
+    "resume_from_checkpoint",
+    "save_checkpoint",
+    "save_checkpoint_nonblocking",
 ]

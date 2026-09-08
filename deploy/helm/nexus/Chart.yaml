@@ -1,0 +1,15 @@
+apiVersion: v2
+name: nexus
+description: Enterprise Helm chart for NEXUS Autonomous AI Company Operating System
+type: application
+version: 1.0.0
+appVersion: "0.1.0"
+keywords:
+  - nexus
+  - ai-agents
+  - autonomous-company
+  - temporal
+  - postgresql
+maintainers:
+  - name: NVLabs DevOps Team
+    email: devops@nvlabs.company

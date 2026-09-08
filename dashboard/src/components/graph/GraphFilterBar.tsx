@@ -10,7 +10,7 @@ import {
   MemoryNodeType,
   MemoryClusterId,
 } from '@/types/memoryGraph';
-import { NODE_TYPE_COLORS, MEMORY_CLUSTERS } from '@/lib/memoryGraphAdapter';
+import { NODE_TYPE_COLORS, graphClusters } from '@/lib/memoryGraphAdapter';
 
 interface GraphFilterBarProps {
   filterState: GraphFilterState;
@@ -173,7 +173,7 @@ export function GraphFilterBar({
             <Layers className="w-3 h-3" />
             Clusters:
           </span>
-          {MEMORY_CLUSTERS.map((c) => {
+          {graphClusters().map((c) => {
             const isSelected =
               filterState.selectedClusters.size === 0 ||
               filterState.selectedClusters.has(c.id);

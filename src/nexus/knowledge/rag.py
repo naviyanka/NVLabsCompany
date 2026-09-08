@@ -17,12 +17,17 @@ import uuid
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Optional
 
+from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 
 from nexus.knowledge.embeddings import cosine_similarity
 from nexus.memory.retriever import search as bm25_search, tokenize
-from nexus.models.knowledge import EMBEDDING_DIM, KnowledgeChunk
+from nexus.models.knowledge import (
+    EMBEDDING_DIM,
+    SOURCE_TYPE_KNOWLEDGE_PAGE,
+    KnowledgeChunk,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -338,8 +343,9 @@ class RAGPipeline:
     async def index_chunks(
         self,
         company_id: uuid.UUID,
-        page_id: uuid.UUID,
+        source_id: uuid.UUID,
         chunks: list[str],
+        source_type: str = SOURCE_TYPE_KNOWLEDGE_PAGE,
     ) -> list[KnowledgeChunk]:
         """Store document chunks as KnowledgeChunk records.
 
@@ -350,8 +356,11 @@ class RAGPipeline:
 
         Args:
             company_id: Company scope for the chunks.
-            page_id: The knowledge page these chunks belong to.
+            source_id: The parent document these chunks belong to — a
+                knowledge_pages id, or an obsidian_documents nexus_id.
             chunks: List of chunk content strings to store.
+            source_type: Which table ``source_id`` refers to (ADR 0002 §12).
+                Defaults to the knowledge page, which is every existing caller.
 
         Returns:
             List of created KnowledgeChunk instances.
@@ -388,7 +397,8 @@ class RAGPipeline:
             embedding_vector = embeddings[idx] if embeddings is not None else None
             chunk_record = KnowledgeChunk(
                 company_id=company_id,
-                page_id=page_id,
+                source_type=source_type,
+                source_id=source_id,
                 content=chunk_content,
                 chunk_index=idx,
                 chunk_metadata={"length": len(chunk_content)},
@@ -398,10 +408,61 @@ class RAGPipeline:
             self.db.add(chunk_record)
             records.append(chunk_record)
 
-        await self.db.commit()
-        for record in records:
-            await self.db.refresh(record)
+        # Flush rather than commit: the caller owns the transaction boundary, so
+        # the page write and its chunk rows land -- or roll back -- together. A
+        # commit here leaves chunks behind for a page write that later fails.
+        await self.db.flush()
         return records
+
+    async def delete_page_chunks(
+        self,
+        company_id: uuid.UUID,
+        source_id: uuid.UUID,
+        source_type: str = SOURCE_TYPE_KNOWLEDGE_PAGE,
+    ) -> None:
+        """Drop every chunk of one source document, without committing.
+
+        Filtering on source_type as well as source_id matters: the two id spaces
+        are independent UUID spaces, so without it a delete could reach a chunk
+        of a different document that happened to share an id.
+
+        Args:
+            company_id: Company scope for the chunks.
+            source_id: The parent document whose chunks are dropped.
+            source_type: Which table ``source_id`` refers to.
+        """
+        await self.db.execute(
+            delete(KnowledgeChunk).where(
+                KnowledgeChunk.company_id == company_id,
+                KnowledgeChunk.source_type == source_type,
+                KnowledgeChunk.source_id == source_id,
+            )
+        )
+
+    async def reindex_page(
+        self,
+        company_id: uuid.UUID,
+        source_id: uuid.UUID,
+        chunks: list[str],
+        source_type: str = SOURCE_TYPE_KNOWLEDGE_PAGE,
+    ) -> list[KnowledgeChunk]:
+        """Replace a page's chunks with ``chunks`` inside the caller's transaction.
+
+        Dropping the stale rows and inserting the new ones with no commit in
+        between is what keeps the index from ever holding chunks from two
+        document versions at once: a failure anywhere rolls back to the old set.
+
+        Args:
+            company_id: Company scope for the chunks.
+            source_id: The parent document being reindexed.
+            chunks: New chunk content strings.
+            source_type: Which table ``source_id`` refers to.
+
+        Returns:
+            List of created KnowledgeChunk instances.
+        """
+        await self.delete_page_chunks(company_id, source_id, source_type)
+        return await self.index_chunks(company_id, source_id, chunks, source_type)
 
     async def search(
         self,

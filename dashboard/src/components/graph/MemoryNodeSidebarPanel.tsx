@@ -30,7 +30,7 @@ import {
   MemoryGraphNode,
   MemoryGraphLink,
 } from '@/types/memoryGraph';
-import { NODE_TYPE_COLORS, MEMORY_CLUSTERS, EDGE_TYPE_COLORS } from '@/lib/memoryGraphAdapter';
+import { NODE_TYPE_COLORS, graphClusters, EDGE_TYPE_COLORS } from '@/lib/memoryGraphAdapter';
 
 interface MemoryNodeSidebarPanelProps {
   node: MemoryGraphNode | null;
@@ -81,7 +81,7 @@ export function MemoryNodeSidebarPanel({
     text: '#0A0A0B',
     glow: 'rgba(255,176,32,0.4)',
   };
-  const cluster = MEMORY_CLUSTERS.find((c) => c.id === node.community);
+  const cluster = graphClusters().find((c) => c.id === node.community);
 
   // Incoming Links (Source -> node)
   const incomingLinks = useMemo(() => {

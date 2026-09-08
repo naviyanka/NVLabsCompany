@@ -48,7 +48,8 @@ class TestDockerSandboxFallback:
             result = await sandbox.run("print('hello')", language="python")
 
             assert result["docker_used"] is False
-            assert result["exit_code"] == 0
+            # Nothing ran, so this must not look like a success.
+            assert result["exit_code"] != 0
             assert result["timed_out"] is False
             assert result["is_fallback"] is True
 

@@ -7,7 +7,18 @@ from typing import Any
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from nexus.models.governance import Approval, DecisionQueue
+from nexus.governance.approval_signing import (
+    SignatureError,
+    canonical_approval_bytes,
+    required_signatures_for,
+    verify_signature,
+)
+from nexus.models.governance import (
+    Approval,
+    ApprovalSignature,
+    ApprovalSignerKey,
+    DecisionQueue,
+)
 
 
 class ApprovalService:
@@ -50,6 +61,9 @@ class ApprovalService:
             "payload": payload,
             "expires_at": expires_at,
             "status": "pending",
+            # Fixed at creation from the type and the amount at stake, so a later
+            # payload edit cannot lower the bar on a request already in flight.
+            "required_signatures": required_signatures_for(approval_type, payload),
         }
         if approval_id is not None:
             fields["id"] = approval_id
@@ -87,7 +101,21 @@ class ApprovalService:
 
         Returns:
             The updated Approval instance.
+
+        Raises:
+            SignatureError: The request needs more distinct signatures than it
+                has. Refusing here rather than in the route means every caller
+                (route, orchestrator, agent tooling) is held to the same quorum.
         """
+        approval = await self.get(approval_id)
+        if approval is not None and approval.required_signatures > 1:
+            collected = await self.count_signatures(approval_id)
+            if collected < approval.required_signatures:
+                raise SignatureError(
+                    f"approval needs {approval.required_signatures} signatures, "
+                    f"has {collected}"
+                )
+
         stmt = (
             update(Approval)
             .where(Approval.id == approval_id, Approval.status == "pending")
@@ -105,6 +133,93 @@ class ApprovalService:
             select(Approval).where(Approval.id == approval_id)
         )
         return result.scalar_one_or_none()
+
+    async def count_signatures(self, approval_id: uuid.UUID) -> int:
+        """How many distinct signers have signed this approval.
+
+        Distinct by subject, not by row: one operator holding two enrolled keys
+        is still one party, which is the whole point of a quorum.
+
+        Args:
+            approval_id: The approval to count signatures for.
+
+        Returns:
+            The number of distinct signers.
+        """
+        result = await self._db.execute(
+            select(ApprovalSignature.subject)
+            .where(ApprovalSignature.approval_id == approval_id)
+            .distinct()
+        )
+        return len(result.scalars().all())
+
+    async def add_signature(
+        self,
+        approval_id: uuid.UUID,
+        subject: str,
+        signature_b64: str,
+    ) -> ApprovalSignature:
+        """Verify and record one signature over a pending approval.
+
+        Args:
+            approval_id: The approval being signed.
+            subject: The signer, matching an active enrolled key.
+            signature_b64: Base64 Ed25519 signature over the approval's
+                canonical bytes.
+
+        Returns:
+            The recorded ApprovalSignature.
+
+        Raises:
+            SignatureError: No such pending approval, no active key for the
+                subject, the signature did not verify against any of that
+                subject's keys, or the subject already signed.
+        """
+        approval = await self.get(approval_id)
+        if approval is None or approval.status != "pending":
+            raise SignatureError("approval is not pending")
+
+        existing = await self._db.execute(
+            select(ApprovalSignature).where(
+                ApprovalSignature.approval_id == approval_id,
+                ApprovalSignature.subject == subject,
+            )
+        )
+        if existing.scalar_one_or_none() is not None:
+            # Otherwise one operator signing twice would satisfy a two-party
+            # quorum on their own.
+            raise SignatureError(f"{subject} has already signed this approval")
+
+        keys = await self._db.execute(
+            select(ApprovalSignerKey).where(
+                ApprovalSignerKey.company_id == approval.company_id,
+                ApprovalSignerKey.subject == subject,
+                ApprovalSignerKey.is_active == True,  # noqa: E712
+            )
+        )
+        active_keys = keys.scalars().all()
+        if not active_keys:
+            raise SignatureError(f"no active signer key for {subject}")
+
+        message = canonical_approval_bytes(
+            approval.id, approval.company_id, approval.type, approval.payload
+        )
+        for key in active_keys:
+            try:
+                verify_signature(key.public_key, message, signature_b64)
+            except SignatureError:
+                continue
+            record = ApprovalSignature(
+                approval_id=approval_id,
+                signer_key_id=key.id,
+                subject=subject,
+                signature=signature_b64,
+            )
+            self._db.add(record)
+            await self._db.flush()
+            return record
+
+        raise SignatureError("signature did not verify for any active key")
 
     async def reject(
         self,

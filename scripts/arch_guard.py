@@ -46,6 +46,19 @@ R5  No unscoped query against a tenant table in ``api/routes/`` (Phase 5.2).
     its body -- coarse on purpose, since the filter is often assembled across
     several statements, and a rule that demanded one shape would be argued with
     rather than obeyed.
+
+R6  No Obsidian vault path built outside ``obsidian/security.py`` (ADR 0002 §25).
+    ``obsidian/security.py`` is the only filesystem trust boundary in the
+    codebase: it resolves symlinks before comparing, keeps a path under the
+    company vault root, enforces the ``.md`` allowlist, and validates that
+    ``company_id`` really is a UUID. Code that instead does
+    ``Path(settings.obsidian_vault_root) / something`` gets none of that, and it
+    fails silently -- the path resolves, the file opens, and the escape is
+    invisible until someone audits it. The vault is also agent-reachable in a
+    later phase, so the input is machine-generated, not merely user-supplied.
+    Anything under ``obsidian/`` other than ``security.py``, and anything
+    elsewhere in ``src/nexus/``, must go through ``resolve_note_path`` /
+    ``company_vault_root`` rather than touching the setting itself.
 """
 
 from __future__ import annotations
@@ -101,6 +114,13 @@ TENANT_QUERY_OWNERS = {
     # scoped to that row's company_id.
     "webhooks.py",
 }
+
+# --- R6 ---------------------------------------------------------------------
+# The one module allowed to turn the configured vault root into a path. Every
+# other caller goes through its resolve_note_path/company_vault_root.
+VAULT_PATH_OWNERS = {"obsidian/security.py"}
+VAULT_ROOT_SETTINGS = {"obsidian_vault_root"}
+VAULT_ROOT_ENV = {"OBSIDIAN_VAULT_ROOT", "NEXUS_OBSIDIAN_VAULT_ROOT"}
 
 # --- Baseline ---------------------------------------------------------------
 # Pre-existing violations, each owned by a phase that will remove it. Entries
@@ -364,7 +384,42 @@ def check_r5() -> list[tuple[str, str]]:
     return out
 
 
-CHECKS = (check_r1, check_r2, check_r3, check_r4, check_r5)
+def check_r6() -> list[tuple[str, str]]:
+    """No Obsidian vault path built outside obsidian/security.py."""
+    out: list[tuple[str, str]] = []
+    for path in iter_py():
+        name = rel(path)
+        if name in VAULT_PATH_OWNERS:
+            continue
+        tree = parse(path)
+        if tree is None:
+            continue
+        for node in ast.walk(tree):
+            # settings.obsidian_vault_root / cfg.obsidian_vault_root / ...
+            if isinstance(node, ast.Attribute) and node.attr in VAULT_ROOT_SETTINGS:
+                out.append(
+                    (
+                        f"R6 {name}:{node.attr}",
+                        f"reads {node.attr} directly at line {node.lineno} -- build "
+                        "vault paths with obsidian.security.resolve_note_path() / "
+                        "company_vault_root(), which resolve symlinks, enforce the "
+                        "vault boundary and validate company_id",
+                    )
+                )
+            # os.environ["OBSIDIAN_VAULT_ROOT"] / .get("OBSIDIAN_VAULT_ROOT")
+            elif isinstance(node, ast.Constant) and isinstance(node.value, str):
+                if node.value.upper() in VAULT_ROOT_ENV:
+                    out.append(
+                        (
+                            f"R6 {name}:{node.value}",
+                            f"reads the vault root from the environment at line "
+                            f"{node.lineno} -- go through obsidian.security instead",
+                        )
+                    )
+    return out
+
+
+CHECKS = (check_r1, check_r2, check_r3, check_r4, check_r5, check_r6)
 
 
 def main(argv: list[str] | None = None) -> int:

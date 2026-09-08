@@ -294,6 +294,23 @@ class ClaudeCodeAdapter(BaseAdapter):
                     "content": stderr_text[:5000],
                 })
 
+            # Checkpoint tool calls and intermediate progress if stream-json events present
+            tool_events = [e for e in events if e.get("type") in ("tool_use", "tool_result")]
+            if tool_events:
+                checkpoint_state = {
+                    "agent_context": {"agent_id": str(session.agent_id), "workspace": workspace},
+                    "completed_steps": list(range(len(tool_events))),
+                    "intermediate_results": tool_events,
+                    "metadata": {"event_count": len(events), "cost_cents": cost_cents},
+                }
+                await self.record_step_checkpoint(
+                    session=session,
+                    task_id=task_id,
+                    step_index=len(tool_events) - 1,
+                    state=checkpoint_state,
+                    db_session=session.config.get("db_session"),
+                )
+
             success = return_code == 0
 
             return TaskResult(

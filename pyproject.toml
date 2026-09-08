@@ -39,10 +39,23 @@ dependencies = [
     # api/routes/secrets.py). Previously only a transitive dependency.
     "cryptography>=42.0.0",
     "jsonschema>=4.20.0",
+    # YAML frontmatter in agent role templates (templates/registry.py) and
+    # Obsidian vault notes (obsidian/frontmatter.py). Previously relied on
+    # transitively.
+    "pyyaml>=6.0",
     "temporalio>=1.7.0",
+    "prometheus-client>=0.20.0",
 ]
 
 [project.optional-dependencies]
+# Distributed tracing. Optional on purpose: observability/tracing.py degrades
+# to no-op spans when these are absent, so the base install stays lean.
+otel = [
+    "opentelemetry-sdk>=1.27.0",
+    "opentelemetry-exporter-otlp-proto-http>=1.27.0",
+    "opentelemetry-instrumentation-fastapi>=0.48b0",
+    "opentelemetry-instrumentation-httpx>=0.48b0",
+]
 dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",

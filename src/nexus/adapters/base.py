@@ -164,6 +164,15 @@ class BaseAdapter(ABC):
                 session.session_id,
                 f"Task {task_id} completed (success={result.success})",
             )
+            try:
+                from nexus.observability.metrics import record_task_metrics
+                record_task_metrics(
+                    agent_id=session.agent_id,
+                    status="completed" if result.success else "failed",
+                    duration_seconds=duration_ms / 1000.0,
+                )
+            except Exception:
+                pass
             return result
 
         except Exception as e:
@@ -176,6 +185,15 @@ class BaseAdapter(ABC):
             self._add_log(
                 session.session_id, f"Task {task_id} failed: {error_msg}"
             )
+            try:
+                from nexus.observability.metrics import record_task_metrics
+                record_task_metrics(
+                    agent_id=session.agent_id,
+                    status="error",
+                    duration_seconds=duration_ms / 1000.0,
+                )
+            except Exception:
+                pass
             return TaskResult(
                 task_id=task_id,
                 agent_id=session.agent_id,
@@ -476,3 +494,33 @@ class BaseAdapter(ABC):
         """
         if session_id in self._artifacts:
             self._artifacts[session_id].append(artifact)
+
+    async def record_step_checkpoint(
+        self,
+        session: AgentSession,
+        task_id: uuid.UUID,
+        step_index: int,
+        state: dict[str, Any],
+        db_session: Any | None = None,
+    ) -> Any | None:
+        """Record an intermediate checkpoint after a tool call or execution step.
+
+        Saves state transactionally and non-blockingly so failures in persistence
+        do not halt agent execution.
+        """
+        try:
+            from nexus.runtime.checkpoint import save_checkpoint_nonblocking
+
+            return await save_checkpoint_nonblocking(
+                task_id=task_id,
+                step_index=step_index,
+                state=state,
+                session=db_session,
+            )
+        except Exception as exc:
+            self._add_log(
+                session.session_id,
+                f"Checkpoint save failed for step {step_index}: {exc}",
+            )
+            return None
+

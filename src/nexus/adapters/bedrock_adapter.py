@@ -14,15 +14,9 @@ from typing import Any
 from urllib.parse import quote
 
 from nexus.adapters.base import BaseAdapter
+from nexus.models_router.pricing import estimate_cost_cents
 from nexus.runtime.adapter import AgentSession, TaskResult
 
-
-# Per-model pricing in cents per 1K tokens (input, output)
-MODEL_PRICING: dict[str, tuple[float, float]] = {
-    "anthropic.claude-3-5-sonnet": (0.3, 1.5),
-    "anthropic.claude-3-haiku": (0.025, 0.125),
-    "amazon.titan-text-express": (0.02, 0.06),
-}
 
 # Default max retries for rate limit errors
 MAX_RETRIES = 5
@@ -190,12 +184,7 @@ class BedrockAdapter(BaseAdapter):
         input_tokens = usage.get("input_tokens", 0)
         output_tokens = usage.get("output_tokens", 0)
 
-        # Calculate cost
-        pricing = MODEL_PRICING.get(model, (0.3, 1.5))
-        cost_cents = round(
-            (input_tokens / 1000 * pricing[0])
-            + (output_tokens / 1000 * pricing[1])
-        )
+        cost_cents = estimate_cost_cents(model, input_tokens, output_tokens)
 
         # Add assistant response to history
         history.append({"role": "assistant", "content": output_content})

@@ -249,9 +249,12 @@ async def execute_task_activity(input: ExecuteTaskInput) -> ExecuteTaskOutput:
 
 
 # Single registration list so the worker cannot drift out of sync with this file.
+from nexus.temporal.obsidian_activities import ALL_OBSIDIAN_ACTIVITIES  # noqa: E402
+
 ALL_ACTIVITIES = [
     call_llm_activity,
     route_task_activity,
     decompose_task_activity,
     execute_task_activity,
+    *ALL_OBSIDIAN_ACTIVITIES,
 ]

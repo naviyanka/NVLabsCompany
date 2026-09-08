@@ -1,14 +1,84 @@
-"""Observability — optional OpenTelemetry tracing integration.
+"""Observability — OpenTelemetry distributed tracing and Prometheus metrics."""
 
-Provides a thin wrapper that uses real OTel spans when the SDK is installed
-and configured, and degrades to no-op spans otherwise. This lets the codebase
-be instrumented without a hard dependency on opentelemetry packages.
+from nexus.observability.metrics import (
+    generate_metrics_response,
+    metrics_router,
+    nexus_active_reservations_cents,
+    nexus_budget_exhausted_total,
+    nexus_circuit_breaker_trips_total,
+    nexus_http_request_duration_seconds,
+    nexus_llm_cost_cents_total,
+    nexus_llm_request_duration_seconds,
+    nexus_llm_tokens_total,
+    nexus_running_tasks_count,
+    nexus_task_execution_duration_seconds,
+    record_budget_exhausted,
+    record_checkpoint_recovery,
+    record_checkpoint_save,
+    record_circuit_breaker_trip,
+    record_http_request,
+    record_llm_metrics,
+    record_orchestrator_tick,
+    record_task_metrics,
+    set_active_reservations,
+    set_running_tasks,
+)
+from nexus.observability.tracing import (
+    DEFAULT_SPAN_ID,
+    DEFAULT_TRACE_ID,
+    current_span_context,
+    current_span_id,
+    current_trace_id,
+    extract_trace_context,
+    get_in_memory_spans,
+    get_tracer,
+    init_tracing,
+    inject_trace_context,
+    instrument_app,
+    record_llm_usage,
+    reset_tracing,
+    start_llm_span,
+    start_tool_span,
+    trace_span,
+)
 
-Usage:
-    from nexus.observability.tracing import get_tracer
+__all__ = [
+    "DEFAULT_SPAN_ID",
+    "DEFAULT_TRACE_ID",
+    "current_span_context",
+    "current_span_id",
+    "current_trace_id",
+    "extract_trace_context",
+    "generate_metrics_response",
+    "get_in_memory_spans",
+    "get_tracer",
+    "init_tracing",
+    "inject_trace_context",
+    "instrument_app",
+    "metrics_router",
+    "nexus_active_reservations_cents",
+    "nexus_budget_exhausted_total",
+    "nexus_circuit_breaker_trips_total",
+    "nexus_http_request_duration_seconds",
+    "nexus_llm_cost_cents_total",
+    "nexus_llm_request_duration_seconds",
+    "nexus_llm_tokens_total",
+    "nexus_running_tasks_count",
+    "nexus_task_execution_duration_seconds",
+    "record_budget_exhausted",
+    "record_checkpoint_recovery",
+    "record_checkpoint_save",
+    "record_circuit_breaker_trip",
+    "record_http_request",
+    "record_llm_metrics",
+    "record_llm_usage",
+    "record_orchestrator_tick",
+    "record_task_metrics",
+    "reset_tracing",
+    "set_active_reservations",
+    "set_running_tasks",
+    "start_llm_span",
+    "start_tool_span",
+    "trace_span",
+]
 
-    tracer = get_tracer("nexus.orchestrator")
-    with tracer.start_as_current_span("evaluate_proposal") as span:
-        span.set_attribute("proposal_id", str(proposal_id))
-        ...
-"""

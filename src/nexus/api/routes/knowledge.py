@@ -10,7 +10,12 @@ from pydantic import BaseModel
 from sqlalchemy import select
 
 from nexus.api.deps import CurrentCompanyId, DbSession
-from nexus.models.knowledge import ExperienceRecord, KnowledgeChunk, KnowledgePage
+from nexus.models.knowledge import (
+    SOURCE_TYPE_KNOWLEDGE_PAGE,
+    ExperienceRecord,
+    KnowledgeChunk,
+    KnowledgePage,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -85,14 +90,46 @@ class RAGSearchRequest(BaseModel):
 
 
 class RAGSearchResult(BaseModel):
-    """A single RAG search result."""
+    """A single RAG search result.
+
+    Search spans one corpus (ADR 0002 §13): a hit may come from a knowledge page
+    or from an Obsidian vault note, and ``source_type`` is how a caller tells
+    which. ``source_id`` identifies the parent within that type — a
+    ``knowledge_pages.id`` or an ``obsidian_documents.nexus_id``.
+
+    ``page_id`` is retained for existing consumers and carries the same value as
+    ``source_id``. It is only resolvable against ``/api/v1/knowledge/{page_id}``
+    when ``source_type == "knowledge_page"``; for a vault hit that endpoint will
+    404, because no KnowledgePage row exists for it and inventing one would put
+    two rows in charge of one document. New callers should read ``source_type``
+    and ``source_id`` and treat ``page_id`` as deprecated.
+    """
 
     chunk_id: uuid.UUID
+    source_type: str
+    source_id: uuid.UUID
+    # Deprecated alias of source_id; see the class docstring.
     page_id: uuid.UUID
     content: str
     chunk_index: int
     metadata: Optional[dict[str, Any]] = None
     score: Optional[float] = None
+
+    @classmethod
+    def from_chunk(
+        cls, chunk: KnowledgeChunk, score: Optional[float] = None
+    ) -> "RAGSearchResult":
+        """Build a result from a chunk, keeping the two id fields in step."""
+        return cls(
+            chunk_id=chunk.id,
+            source_type=chunk.source_type,
+            source_id=chunk.source_id,
+            page_id=chunk.source_id,
+            content=chunk.content,
+            chunk_index=chunk.chunk_index,
+            metadata=chunk.chunk_metadata,
+            score=score,
+        )
 
 
 class RecordExperienceRequest(BaseModel):
@@ -226,7 +263,11 @@ async def get_page_history(page_id: uuid.UUID, db: DbSession, company_id: Curren
     """Get version history (chunks) for a knowledge page."""
     stmt = (
         select(KnowledgeChunk)
-        .where(KnowledgeChunk.page_id == page_id, KnowledgeChunk.company_id == company_id)
+        .where(
+            KnowledgeChunk.source_type == SOURCE_TYPE_KNOWLEDGE_PAGE,
+            KnowledgeChunk.source_id == page_id,
+            KnowledgeChunk.company_id == company_id,
+        )
         .order_by(KnowledgeChunk.chunk_index)
     )
     result = await db.execute(stmt)
@@ -234,7 +275,7 @@ async def get_page_history(page_id: uuid.UUID, db: DbSession, company_id: Curren
     return [
         PageHistoryEntry(
             id=c.id,
-            page_id=c.page_id,
+            page_id=c.source_id,
             content=c.content,
             chunk_index=c.chunk_index,
             created_at=c.created_at,
@@ -264,14 +305,7 @@ async def rag_search(
         pipeline = RAGPipeline(db=db, embedding_provider=embedding_provider)
         results = await pipeline.search(company_id=company_id, query=body.query, top_k=body.top_k)
         return [
-            RAGSearchResult(
-                chunk_id=r["chunk"].id,
-                page_id=r["chunk"].page_id,
-                content=r["chunk"].content,
-                chunk_index=r["chunk"].chunk_index,
-                metadata=r["chunk"].chunk_metadata,
-                score=r.get("combined_score"),
-            )
+            RAGSearchResult.from_chunk(r["chunk"], score=r.get("combined_score"))
             for r in results
         ]
     except Exception:
@@ -284,16 +318,7 @@ async def rag_search(
         )
         result = await db.execute(stmt)
         chunks = list(result.scalars().all())
-        return [
-            RAGSearchResult(
-                chunk_id=c.id,
-                page_id=c.page_id,
-                content=c.content,
-                chunk_index=c.chunk_index,
-                metadata=c.chunk_metadata,
-            )
-            for c in chunks
-        ]
+        return [RAGSearchResult.from_chunk(c) for c in chunks]
 
 
 # ---------------------------------------------------------------------------
@@ -416,9 +441,21 @@ async def list_knowledge_categories(company_id: uuid.UUID, db: DbSession) -> lis
 
 @router.delete("/api/v1/knowledge/{page_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_knowledge_page(page_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId) -> None:
-    """Delete a knowledge page with company_id check."""
+    """Delete a knowledge page and its RAG chunks with company_id check."""
     from sqlalchemy import delete as sa_delete
 
+    # Chunks first, in the same transaction: nothing cascades from the parent
+    # (the polymorphic source pair carries no FK, per ADR 0002 §12), so leaving
+    # them behind keeps deleted content retrievable through RAG search.
+    # source_type is part of the filter so a vault document that happens to share
+    # this UUID is never caught by a page delete.
+    await db.execute(
+        sa_delete(KnowledgeChunk).where(
+            KnowledgeChunk.source_type == SOURCE_TYPE_KNOWLEDGE_PAGE,
+            KnowledgeChunk.source_id == page_id,
+            KnowledgeChunk.company_id == company_id,
+        )
+    )
     stmt = sa_delete(KnowledgePage).where(KnowledgePage.id == page_id, KnowledgePage.company_id == company_id)
     await db.execute(stmt)
 

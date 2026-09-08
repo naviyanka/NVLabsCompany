@@ -2,7 +2,13 @@
 
 import uuid
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Any
+
+from sqlalchemy import delete, select
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+from nexus.models.tool import Tool, ToolAccess
 
 
 @dataclass
@@ -91,11 +97,84 @@ class ToolRegistry:
     Tools are scoped to companies and access is controlled via ToolAccess records.
     """
 
-    def __init__(self) -> None:
-        """Initialize an empty tool registry."""
+    def __init__(self, session_factory: async_sessionmaker[AsyncSession] | None = None) -> None:
+        """Initialize registry with database-backed access authority."""
         self._tools: dict[uuid.UUID, ToolDefinition] = {}
-        self._agent_access: dict[uuid.UUID, set[uuid.UUID]] = {}
         self._catalog_entries: dict[uuid.UUID, CatalogEntry] = {}
+        if session_factory is None:
+            from nexus.database import async_session_factory
+
+            session_factory = async_session_factory
+        self._session_factory = session_factory
+
+    async def grant_access(
+        self,
+        company_id: uuid.UUID,
+        agent_id: uuid.UUID,
+        tool_id: uuid.UUID,
+        granted_by: str | None = None,
+        expires_at: datetime | None = None,
+    ) -> ToolAccess:
+        """Persist an agent/tool grant."""
+        if self._session_factory is None:
+            raise RuntimeError("database session factory is required")
+        async with self._session_factory() as session:
+            tool = await session.get(Tool, tool_id)
+            if tool is None or tool.company_id != company_id:
+                raise ValueError("tool does not belong to company")
+            access = ToolAccess(
+                company_id=company_id,
+                agent_id=agent_id,
+                tool_id=tool_id,
+                granted_by=granted_by,
+                expires_at=expires_at,
+            )
+            session.add(access)
+            await session.commit()
+            await session.refresh(access)
+            return access
+
+    async def revoke_access(
+        self, company_id: uuid.UUID, agent_id: uuid.UUID, tool_id: uuid.UUID
+    ) -> None:
+        """Remove active database grants for an agent/tool pair."""
+        if self._session_factory is None:
+            raise RuntimeError("database session factory is required")
+        async with self._session_factory() as session:
+            await session.execute(
+                delete(ToolAccess).where(
+                    ToolAccess.company_id == company_id,
+                    ToolAccess.agent_id == agent_id,
+                    ToolAccess.tool_id == tool_id,
+                )
+            )
+            await session.commit()
+
+    async def has_access(
+        self,
+        company_id: uuid.UUID,
+        agent_id: uuid.UUID,
+        tool_id: uuid.UUID,
+    ) -> bool:
+        """Check current, unexpired database authority."""
+        if self._session_factory is None:
+            return False
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        async with self._session_factory() as session:
+            result = await session.execute(
+                select(ToolAccess.id)
+                .join(Tool, Tool.id == ToolAccess.tool_id)
+                .where(
+                    ToolAccess.company_id == company_id,
+                    ToolAccess.agent_id == agent_id,
+                    ToolAccess.tool_id == tool_id,
+                    Tool.company_id == company_id,
+                    (ToolAccess.expires_at.is_(None) | (ToolAccess.expires_at > now)),
+                    Tool.is_active.is_(True),
+                )
+                .limit(1)
+            )
+            return result.scalar_one_or_none() is not None
 
     def register_tool(self, tool: ToolDefinition) -> ToolDefinition:
         """Register a new tool in the registry.
@@ -172,66 +251,38 @@ class ToolRegistry:
 
         return results
 
-    def grant_access(self, agent_id: uuid.UUID, tool_id: uuid.UUID) -> None:
-        """Grant an agent access to a tool.
-
-        Args:
-            agent_id: The agent to grant access to.
-            tool_id: The tool to grant access for.
-        """
-        if agent_id not in self._agent_access:
-            self._agent_access[agent_id] = set()
-        self._agent_access[agent_id].add(tool_id)
-
-    def revoke_access(self, agent_id: uuid.UUID, tool_id: uuid.UUID) -> None:
-        """Revoke an agent's access to a tool.
-
-        Args:
-            agent_id: The agent to revoke from.
-            tool_id: The tool to revoke access for.
-        """
-        if agent_id in self._agent_access:
-            self._agent_access[agent_id].discard(tool_id)
-
-    def has_access(self, agent_id: uuid.UUID, tool_id: uuid.UUID) -> bool:
-        """Check if an agent has access to a tool.
-
-        Args:
-            agent_id: The agent to check.
-            tool_id: The tool to check access for.
-
-        Returns:
-            True if the agent has access.
-        """
-        return tool_id in self._agent_access.get(agent_id, set())
+    async def discover_tools_async(
+        self, company_id: uuid.UUID, agent_id: uuid.UUID
+    ) -> list[Tool]:
+        """Discover active tools currently granted in the database."""
+        if self._session_factory is None:
+            return []
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        async with self._session_factory() as session:
+            result = await session.execute(
+                select(Tool)
+                .join(ToolAccess, ToolAccess.tool_id == Tool.id)
+                .where(
+                    Tool.company_id == company_id,
+                    ToolAccess.company_id == company_id,
+                    ToolAccess.agent_id == agent_id,
+                    (ToolAccess.expires_at.is_(None) | (ToolAccess.expires_at > now)),
+                    Tool.is_active.is_(True),
+                )
+            )
+            return list(result.scalars().all())
 
     def discover_tools(
         self,
         agent_id: uuid.UUID,
         company_id: uuid.UUID | None = None,
     ) -> list[ToolDefinition]:
-        """Discover tools available to a specific agent.
-
-        Returns only tools the agent has been granted access to.
-
-        Args:
-            agent_id: The agent requesting discovery.
-            company_id: Optional company filter.
-
-        Returns:
-            List of ToolDefinitions the agent can access.
-        """
-        accessible_ids = self._agent_access.get(agent_id, set())
-        results: list[ToolDefinition] = []
-
-        for tool_id in accessible_ids:
-            tool = self._tools.get(tool_id)
-            if tool and tool.is_active:
-                if company_id and tool.company_id != company_id:
-                    continue
-                results.append(tool)
-
-        return results
+        """Return local definitions; database discovery uses ``discover_tools_async``."""
+        return [
+            tool
+            for tool in self._tools.values()
+            if tool.is_active and (company_id is None or tool.company_id == company_id)
+        ]
 
     # --- Catalog Entry Methods ---
 

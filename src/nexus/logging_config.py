@@ -49,6 +49,11 @@ class JSONFormatter(logging.Formatter):
         # Ensure record.message is populated
         message = record.getMessage()
 
+        # Retrieve active OpenTelemetry trace and span IDs (or standard zeroes when inactive)
+        from nexus.observability.tracing import current_span_context
+
+        trace_id, span_id = current_span_context()
+
         log_entry: dict[str, Any] = {
             "timestamp": datetime.fromtimestamp(
                 record.created, tz=timezone.utc
@@ -57,6 +62,8 @@ class JSONFormatter(logging.Formatter):
             "logger": record.name,
             "message": message,
             "correlation_id": correlation_id.get(),
+            "trace_id": trace_id,
+            "span_id": span_id,
         }
 
         # Include exception info if present
@@ -87,11 +94,11 @@ def configure_logging(level: str = "INFO") -> None:
 
 
 class RequestIDMiddleware:
-    """ASGI middleware that propagates X-Request-ID as a correlation ID.
+    """ASGI middleware that propagates X-Request-ID and W3C traceparent headers.
 
-    Reads the X-Request-ID header from the incoming request. If absent,
-    generates a new UUID4. Sets the correlation_id context var and adds
-    the X-Request-ID header to the response.
+    Extracts or generates X-Request-ID, extracts W3C trace context, sets
+    the correlation_id context var, records HTTP latency metrics, and attaches
+    correlation headers (X-Request-ID, X-Trace-ID, traceparent) to the response.
     """
 
     def __init__(self, app: ASGIApp) -> None:
@@ -108,28 +115,73 @@ class RequestIDMiddleware:
             await self.app(scope, receive, send)
             return
 
-        # Extract X-Request-ID from headers
-        headers = dict(scope.get("headers", []))
-        request_id_bytes = headers.get(b"x-request-id")
+        import time
+        from nexus.observability.metrics import record_http_request
+        from nexus.observability.tracing import (
+            current_span_id,
+            current_trace_id,
+            extract_trace_context,
+            get_tracer,
+        )
 
-        if request_id_bytes:
-            request_id = request_id_bytes.decode("utf-8", errors="replace")
-        else:
-            request_id = str(uuid.uuid4())
+        headers_raw = dict(scope.get("headers", []))
+        headers_str = {
+            k.decode("latin1").lower(): v.decode("latin1")
+            for k, v in headers_raw.items()
+        }
 
-        # Set the correlation_id context var
+        # Extract or generate X-Request-ID
+        request_id = headers_str.get("x-request-id") or str(uuid.uuid4())
+
+        # Set correlation ID
         token = correlation_id.set(request_id)
+        start_time = time.time()
+        status_code = 500
 
-        async def send_wrapper(message: Message) -> None:
-            if message["type"] == "http.response.start":
-                response_headers = list(message.get("headers", []))
-                response_headers.append(
-                    (b"x-request-id", request_id.encode("utf-8"))
-                )
-                message = {**message, "headers": response_headers}
-            await send(message)
+        parent_ctx = extract_trace_context(headers_str)
+        method = scope.get("method", "GET")
+        path = scope.get("path", "/")
 
-        try:
-            await self.app(scope, receive, send_wrapper)
-        finally:
-            correlation_id.reset(token)
+        tracer = get_tracer("nexus.http")
+        with tracer.start_as_current_span(
+            f"HTTP {method} {path}",
+            context=parent_ctx,
+            attributes={
+                "http.method": method,
+                "http.target": path,
+                "http.request_id": request_id,
+            },
+        ) as span:
+
+            async def send_wrapper(message: Message) -> None:
+                nonlocal status_code
+                if message["type"] == "http.response.start":
+                    status_code = message.get("status", 500)
+                    response_headers = list(message.get("headers", []))
+                    response_headers.append(
+                        (b"x-request-id", request_id.encode("utf-8"))
+                    )
+
+                    tid = current_trace_id()
+                    sid = current_span_id()
+                    if tid:
+                        response_headers.append(
+                            (b"x-trace-id", tid.encode("utf-8"))
+                        )
+                        if sid:
+                            response_headers.append(
+                                (b"traceparent", f"00-{tid}-{sid}-01".encode("utf-8"))
+                            )
+
+                    message = {**message, "headers": response_headers}
+                await send(message)
+
+            try:
+                await self.app(scope, receive, send_wrapper)
+            finally:
+                duration = time.time() - start_time
+                correlation_id.reset(token)
+                record_http_request(method, path, status_code, duration)
+                if span is not None:
+                    span.set_attribute("http.status_code", status_code)
+

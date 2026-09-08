@@ -1,7 +1,8 @@
-"""Approval Engine - manages approval requests, decisions, and auto-approve policies.
+"""Compatibility facade over database-backed :class:`ApprovalService`.
 
-Supports optional file-backed persistence with atomic writes, approval history
-queries, and notification hooks for new pending approvals.
+New code should construct ``ApprovalService`` with a database session. The
+legacy synchronous surface remains only for callers that explicitly opt into
+its old file-backed mode.
 """
 
 from __future__ import annotations
@@ -77,6 +78,7 @@ class ApprovalEngine:
         self,
         persist_path: Path | None = None,
         on_approval_needed: Callable[[ApprovalRequest], None] | None = None,
+        service: Any | None = None,
     ) -> None:
         """Initialize the approval engine.
 
@@ -86,10 +88,18 @@ class ApprovalEngine:
             on_approval_needed: Optional callback invoked when a new approval
                 request enters the pending queue (not called for auto-approved).
         """
+        if service is not None:
+            self._service = service
+            self._approvals = {}
+            self._policies = []
+            self._persist_path = None
+            self._on_approval_needed = on_approval_needed
+            return
         self._approvals: dict[uuid.UUID, ApprovalRequest] = {}
         self._policies: list[AutoApprovalPolicy] = []
         self._persist_path = persist_path
         self._on_approval_needed = on_approval_needed
+        self._service = None
 
         if self._persist_path is not None:
             self._load()
@@ -213,6 +223,25 @@ class ApprovalEngine:
         requested_by_agent_id: uuid.UUID,
         payload: dict[str, Any],
     ) -> ApprovalRequest:
+        if self._service is not None:
+            approval = await self._service.request_approval(
+                company_id=company_id,
+                approval_type=approval_type,
+                requested_by_agent_id=requested_by_agent_id,
+                payload=payload,
+            )
+            return ApprovalRequest(
+                id=approval.id,
+                company_id=approval.company_id,
+                type=approval.type,
+                requested_by_agent_id=approval.requested_by_agent_id,
+                payload=approval.payload or {},
+                status=approval.status,
+                decision_note=approval.decision_note,
+                decided_by=approval.decided_by,
+                decided_at=approval.decided_at,
+                created_at=approval.created_at,
+            )
         """Submit a new approval request.
 
         Checks auto-approval policies first. If the request matches a
@@ -258,6 +287,26 @@ class ApprovalEngine:
         decided_by: str,
         note: str | None = None,
     ) -> ApprovalRequest | None:
+        if self._service is not None:
+            approval = (
+                await self._service.approve(approval_id, decided_by, note)
+                if decision == "approved"
+                else await self._service.reject(approval_id, decided_by, note)
+            )
+            if approval is None:
+                return None
+            return ApprovalRequest(
+                id=approval.id,
+                company_id=approval.company_id,
+                type=approval.type,
+                requested_by_agent_id=approval.requested_by_agent_id,
+                payload=approval.payload or {},
+                status=approval.status,
+                decision_note=approval.decision_note,
+                decided_by=approval.decided_by,
+                decided_at=approval.decided_at,
+                created_at=approval.created_at,
+            )
         """Process a pending approval with a human decision.
 
         Args:
@@ -371,6 +420,16 @@ class ApprovalEngine:
                 continue
             results.append(request)
         return results
+
+    async def get_async(self, approval_id: uuid.UUID) -> Any | None:
+        """Read approval state through the shared service."""
+        if self._service is None:
+            raise RuntimeError("database approval service is not configured")
+        return await self._service.get(approval_id)
+
+    async def get(self, approval_id: uuid.UUID) -> Any | None:
+        """Duck-typed async lookup used by AutonomyGate."""
+        return await self.get_async(approval_id)
 
     def get_approval(self, approval_id: uuid.UUID) -> ApprovalRequest | None:
         """Retrieve an approval request by ID.

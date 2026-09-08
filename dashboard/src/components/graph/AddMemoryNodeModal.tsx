@@ -6,7 +6,7 @@ import {
   MemoryClusterId,
   MemoryGraphNode,
 } from '@/types/memoryGraph';
-import { MEMORY_CLUSTERS } from '@/lib/memoryGraphAdapter';
+import { graphClusters } from '@/lib/memoryGraphAdapter';
 
 interface AddMemoryNodeModalProps {
   isOpen: boolean;
@@ -119,7 +119,7 @@ export function AddMemoryNodeModal({
               onChange={(e) => setCommunity(e.target.value as MemoryClusterId)}
               className="w-full px-3 py-2 bg-[#141416] border border-white/[0.12] rounded-[6px] text-xs text-[#F2F1EE] focus:outline-none focus:border-[#FFB020]"
             >
-              {MEMORY_CLUSTERS.map((c) => (
+              {graphClusters().map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.name}
                 </option>

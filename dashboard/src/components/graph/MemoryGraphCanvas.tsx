@@ -8,7 +8,7 @@ import {
   GraphFilterState,
   MemoryClusterId,
 } from '@/types/memoryGraph';
-import { NODE_TYPE_COLORS, EDGE_TYPE_COLORS, MEMORY_CLUSTERS } from '@/lib/memoryGraphAdapter';
+import { NODE_TYPE_COLORS, EDGE_TYPE_COLORS, graphClusters } from '@/lib/memoryGraphAdapter';
 import { ShortestPathResult, getLinkKey, normalizeLinkId } from '@/lib/graphPathFinder';
 
 interface MemoryGraphCanvasProps {
@@ -324,7 +324,7 @@ export function MemoryGraphCanvas({
       // 2. Draw Cluster Hull Halos if enabled
       if (showClusters && layoutMode === 'force') {
         const clusterGroups: Record<string, { x: number; y: number; count: number; color: string; name: string }> = {};
-        MEMORY_CLUSTERS.forEach((c) => {
+        graphClusters().forEach((c) => {
           clusterGroups[c.id] = { x: 0, y: 0, count: 0, color: c.color, name: c.name };
         });
 

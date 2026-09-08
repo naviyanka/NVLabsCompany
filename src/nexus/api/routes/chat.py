@@ -375,7 +375,7 @@ async def _fetch_agent_memories(
         result = await db.execute(stmt)
         records = list(result.scalars().all())
 
-    return [
+    memories = [
         {
             "content": r.content,
             "scope": r.scope,
@@ -385,6 +385,92 @@ async def _fetch_agent_memories(
         }
         for r in records
     ]
+
+    # L3 (shared) rows carry the *source* agent's id, so the agent-scoped query
+    # above can never see them. Reading them here is what makes a fact one agent
+    # promoted visible to the rest of the company.
+    memories += await _fetch_shared_knowledge(company_id)
+    return memories
+
+
+async def _fetch_shared_knowledge(
+    company_id: uuid.UUID, limit: int = 5
+) -> list[dict[str, Any]]:
+    """Read the company's promoted L3 facts through PersistentLayeredMemory.
+
+    Its own session factory rather than the request's session: the layered store
+    owns its transaction boundaries (it bumps access counts as it reads), and a
+    failure here must not roll back the caller's work.
+
+    Args:
+        company_id: Tenant whose shared knowledge to read.
+        limit: Maximum facts to return.
+
+    Returns:
+        Memory dicts in the shape ``_build_system_prompt`` expects, or an empty
+        list when the lookup fails.
+    """
+    try:
+        from nexus.database import async_session_factory
+        from nexus.memory.layered_persistent import L3_SCOPE, PersistentLayeredMemory
+
+        memory = PersistentLayeredMemory(
+            session_factory=async_session_factory, company_id=company_id
+        )
+        return [
+            {
+                "content": fact.content,
+                "scope": L3_SCOPE,
+                # Shared knowledge earned promotion, so it outranks a raw L2 row
+                # when the persona layer trims to its memory budget.
+                "importance": 0.9,
+                "tier": "warm",
+                "created_at": fact.created_at.isoformat(),
+            }
+            for fact in await memory.get_shared_knowledge(limit=limit)
+        ]
+    except Exception as exc:  # noqa: BLE001 - missing shared context must not break chat
+        logger.warning("Shared knowledge lookup failed for %s: %s", company_id, exc)
+        return []
+
+
+async def _remember_response(agent: Agent, response_text: str) -> int:
+    """Extract durable facts from an agent's reply and store them in L2.
+
+    Chat history is a transcript: it is replayed verbatim and trimmed to the last
+    few turns, so anything an agent worked out beyond that window was lost on the
+    next request. This puts what the reply actually established into
+    ``memory_records`` through :class:`PersistentLayeredMemory`, which dedups
+    against the agent's existing rows and evicts its oldest when full -- so the
+    knowledge survives a restart while the transcript stays bounded.
+
+    Args:
+        agent: The agent that produced the reply.
+        response_text: The reply text.
+
+    Returns:
+        How many new facts were stored.
+    """
+    try:
+        from nexus.database import async_session_factory
+        from nexus.memory.extract import FactExtractor
+        from nexus.memory.layered_persistent import PersistentLayeredMemory
+
+        facts = FactExtractor().extract_facts(response_text, agent.id)
+        if not facts:
+            return 0
+
+        memory = PersistentLayeredMemory(
+            session_factory=async_session_factory, company_id=agent.company_id
+        )
+        stored = 0
+        for fact in facts:
+            if await memory.store_fact(agent.id, fact.content, metadata=fact.metadata):
+                stored += 1
+        return stored
+    except Exception as exc:  # noqa: BLE001 - remembering must not break chat
+        logger.warning("Could not store memory for agent %s: %s", agent.id, exc)
+        return 0
 
 
 def _build_system_prompt(agent: Agent, memories: list[dict[str, Any]] | None = None) -> str:
@@ -497,17 +583,24 @@ def _resolve_adapter_type(agent: Agent) -> tuple[str, dict[str, Any]]:
     return resolve_provider(agent.adapter_type or "anthropic", agent.model)
 
 
-async def _preflight_budget(
+async def _reserve_budget(
     agent: Agent,
     system_prompt: str,
     user_message: str,
     history: list[dict[str, Any]],
     config: dict[str, Any],
-) -> None:
-    """Refuse an LLM call whose estimated cost would breach the company cap.
+) -> Any:
+    """Hold the estimated cost of an LLM call before making it.
 
-    Checking after the fact only reports an overspend; this prevents it. The
-    estimate is a floor, so the post-call cost recording still matters.
+    Checking after the fact only reports an overspend; checking without holding
+    lets every concurrent worker pass the same check. This writes a reservation
+    in the same transaction as the check, so the next worker sums this hold and
+    refuses. :func:`_settle_budget` reconciles it to the real cost afterwards.
+
+    Returns:
+        The reservation row, or None when no reservation could be taken (no
+        database, lookup failure) -- the call proceeds unheld rather than
+        breaking chat.
 
     Raises:
         BudgetExceededError: When the cap would be reached and the configured
@@ -534,23 +627,73 @@ async def _preflight_budget(
             # BudgetService already scopes to active policies and to the policy's
             # own window, so a monthly cap stays monthly rather than becoming a
             # lifetime one.
-            result = await BudgetService(budget_db).check_budget(
-                scope_type="company",
-                scope_id=agent.company_id,
-                amount=estimate_cents,
+            allowed, reservation, result = await BudgetService(budget_db).reserve(
                 company_id=agent.company_id,
+                estimate_cents=estimate_cents,
+                scope_type="company",
+                agent_id=agent.id,
+                provider=agent.adapter_type or "anthropic",
+                model=config.get("model"),
             )
     except Exception as exc:  # noqa: BLE001 - budget lookup must not break chat
-        logger.warning("Budget pre-flight lookup failed, allowing call: %s", exc)
-        return
+        logger.warning("Budget reservation failed, allowing call: %s", exc)
+        return None
 
-    if not result.allowed:
+    if not allowed:
         raise BudgetExceededError(
             config.get("model"),
             estimate_usd,
             result.used_cents / 100.0,
             result.limit_cents / 100.0,
         )
+
+    return reservation.id if reservation else None
+
+
+async def _settle_budget(
+    reservation_id: Any,
+    cost_cents: int,
+    input_tokens: int = 0,
+    output_tokens: int = 0,
+    model: str | None = None,
+) -> None:
+    """Phase two of the spend: reconcile or release a hold from ``_reserve_budget``.
+
+    A zero cost means the call never billed (provider error, in-character
+    fallback), so the hold is released rather than settled at zero -- otherwise
+    the row stays on the books as reserved until its TTL and makes the budget
+    look more spent than it is.
+
+    Args:
+        reservation_id: Id from :func:`_reserve_budget`, or None when no hold
+            was taken.
+        cost_cents: Actual cost in cents.
+        input_tokens: Actual input tokens.
+        output_tokens: Actual output tokens.
+        model: Model actually used.
+    """
+    if reservation_id is None:
+        return
+    try:
+        from nexus.database import async_session_factory
+        from nexus.services.budget_service import BudgetService
+
+        async with async_session_factory() as budget_db:
+            service = BudgetService(budget_db)
+            if cost_cents > 0:
+                await service.commit_reservation(
+                    reservation_id,
+                    cost_cents=cost_cents,
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    model=model,
+                )
+            else:
+                await service.release_reservation(reservation_id)
+    except Exception as exc:  # noqa: BLE001 - settlement must not break chat
+        # The hold expires on its own, so a failure here overstates spend for
+        # the TTL rather than losing the guardrail.
+        logger.warning("Budget settlement failed for %s: %s", reservation_id, exc)
 
 
 async def _call_llm(
@@ -621,13 +764,18 @@ async def _call_llm(
             0,
         )
 
-    # Pre-flight budget check. Every LLM dispatch in the app funnels through this
+    # Budget reservation. Every LLM dispatch in the app funnels through this
     # function, so guarding here covers the orchestrator, pipelines, triggers and
     # Temporal activities rather than just the chat route. It sits outside the try
     # below on purpose: that block catches Exception broadly and answers in
     # character, which would turn a budget refusal into a friendly message and let
     # the call proceed anyway.
-    await _preflight_budget(agent, system_prompt, user_message, history, config)
+    reservation_id = await _reserve_budget(
+        agent, system_prompt, user_message, history, config
+    )
+    # Filled in only on a billed call; the finally below releases the hold when
+    # it stays zero, so every exit path settles exactly once.
+    spend: dict[str, Any] = {"cost_cents": 0, "input": 0, "output": 0, "model": None}
 
     try:
         adapter_registry = AdapterRegistry()
@@ -645,7 +793,7 @@ async def _call_llm(
                 "content": msg["text"],
             })
 
-        # Execute the chat task
+        # Execute the chat task with GenAI tracing and metrics
         task_id = uuid.uuid4()
         payload = {
             "objective": user_message,
@@ -656,27 +804,90 @@ async def _call_llm(
         if temperature is not None:
             payload["temperature"] = temperature
 
-        result = await adapter.execute_task(session, task_id, payload)
+        from nexus.observability.metrics import record_llm_metrics
+        from nexus.observability.tracing import record_llm_usage, start_llm_span
+        import time
 
-        # Clean up session
-        await adapter.terminate(session)
+        model_name = config.get("model", "unknown")
+        start_t = time.time()
 
-        if result.success and result.output:
-            response_text = str(result.output)
-            tokens = result.input_tokens + result.output_tokens
-            return response_text, config.get("model", "unknown"), tokens
-        elif result.error:
-            return (
-                f"[{agent.name}] Execution error: {result.error}",
-                config.get("model", "unknown"),
-                0,
-            )
-        else:
-            return (
-                f"[{agent.name}] No response generated.",
-                config.get("model", "unknown"),
-                0,
-            )
+        with start_llm_span(
+            model=model_name,
+            provider=registry_key,
+            company_id=agent.company_id,
+            agent_id=agent.id,
+            prompt=user_message,
+        ) as llm_span:
+            result = await adapter.execute_task(session, task_id, payload)
+            duration_t = time.time() - start_t
+
+            # Clean up session
+            await adapter.terminate(session)
+
+            if result.success and result.output:
+                response_text = str(result.output)
+                tokens = result.input_tokens + result.output_tokens
+                model_used = config.get("model", "unknown")
+                # Reconcile against the provider's own token counts rather than the
+                # ~4-chars-per-token floor the reservation used.
+                from nexus.models_router.pricing import TokenSplit, estimate_cost_usd
+
+                actual_usd = estimate_cost_usd(
+                    model_used,
+                    TokenSplit(result.input_tokens, result.output_tokens),
+                )
+                cost_cents = max(1, round(actual_usd * 100)) if tokens else 0
+                spend.update(
+                    cost_cents=cost_cents,
+                    input=result.input_tokens,
+                    output=result.output_tokens,
+                    model=model_used,
+                )
+
+                # Record GenAI span attributes and Prometheus metrics
+                record_llm_usage(
+                    llm_span,
+                    input_tokens=result.input_tokens,
+                    output_tokens=result.output_tokens,
+                    cost_cents=cost_cents,
+                    finish_reason="stop",
+                    model=model_used,
+                )
+                record_llm_metrics(
+                    company_id=agent.company_id,
+                    agent_id=agent.id,
+                    provider=registry_key,
+                    model=model_used,
+                    input_tokens=result.input_tokens,
+                    output_tokens=result.output_tokens,
+                    cost_cents=cost_cents,
+                    duration_seconds=duration_t,
+                )
+                # Durable memory. Sits here rather than in the route because
+                # every LLM dispatch in the app funnels through this function,
+                # so the orchestrator, pipelines and triggers remember too.
+                await _remember_response(agent, response_text)
+                return response_text, model_used, tokens
+            elif result.error:
+                record_llm_usage(
+                    llm_span,
+                    input_tokens=result.input_tokens,
+                    output_tokens=result.output_tokens,
+                    cost_cents=0,
+                    finish_reason="error",
+                    model=model_name,
+                )
+                return (
+                    f"[{agent.name}] Execution error: {result.error}",
+                    config.get("model", "unknown"),
+                    0,
+                )
+            else:
+                return (
+                    f"[{agent.name}] No response generated.",
+                    config.get("model", "unknown"),
+                    0,
+                )
 
     except Exception as e:
         logger.warning("LLM call failed for agent %s: %s", agent.id, e)
@@ -689,6 +900,17 @@ async def _call_llm(
             f"{', '.join(agent.capabilities or ['general tasks'])}.",
             "fallback",
             0,
+        )
+
+    finally:
+        # Every exit above — success, provider error, in-character fallback —
+        # passes through here, so a hold is never left dangling for its TTL.
+        await _settle_budget(
+            reservation_id,
+            cost_cents=spend["cost_cents"],
+            input_tokens=spend["input"],
+            output_tokens=spend["output"],
+            model=spend["model"],
         )
 
 

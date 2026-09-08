@@ -1,30 +1,16 @@
-"""Cost Tracker - records LLM invocations and computes costs based on pricing tables."""
+"""Cost Tracker - records LLM invocations and computes costs.
 
+Prices come from :mod:`nexus.models_router.pricing`, the one table shared with
+the pre-flight budget guard and the provider adapters. This module used to carry
+its own copy, which disagreed with that one.
+"""
+
+import math
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
-# Pricing per 1000 tokens in cents (USD)
-# Input/Output pricing for common models
-_MODEL_PRICING: dict[str, dict[str, float]] = {
-    # OpenAI models
-    "gpt-4o": {"input": 0.25, "output": 1.0},
-    "gpt-4o-mini": {"input": 0.015, "output": 0.06},
-    "gpt-4-turbo": {"input": 1.0, "output": 3.0},
-    "gpt-3.5-turbo": {"input": 0.05, "output": 0.15},
-    # Anthropic models
-    "claude-sonnet-4-20250514": {"input": 0.3, "output": 1.5},
-    "claude-3-5-haiku-20241022": {"input": 0.08, "output": 0.4},
-    "claude-3-opus-20240229": {"input": 1.5, "output": 7.5},
-    # Google models
-    "gemini-1.5-pro": {"input": 0.125, "output": 0.5},
-    "gemini-1.5-flash": {"input": 0.0075, "output": 0.03},
-    "gemini-2.0-flash": {"input": 0.01, "output": 0.04},
-    # Local models (zero cost)
-    "llama3": {"input": 0.0, "output": 0.0},
-    "mistral": {"input": 0.0, "output": 0.0},
-    "codellama": {"input": 0.0, "output": 0.0},
-}
+from nexus.models_router.pricing import estimate_cost_cents
 
 
 @dataclass
@@ -61,8 +47,10 @@ class InvocationRecord:
 class CostTracker:
     """Tracks LLM invocation costs with per-model pricing.
 
-    Records each invocation, computes costs based on the pricing table,
-    and provides aggregation methods for budget monitoring.
+    Records each invocation, computes costs from the central pricing table
+    (:mod:`nexus.models_router.pricing`), and provides aggregation methods for
+    budget monitoring. Per-model overrides can be supplied at construction or
+    via :meth:`update_pricing`.
     """
 
     def __init__(
@@ -72,11 +60,12 @@ class CostTracker:
         """Initialize the cost tracker.
 
         Args:
-            pricing: Model pricing table. Uses defaults if None.
-                Keys are model names, values are dicts with 'input'
-                and 'output' prices per 1000 tokens in cents.
+            pricing: Per-model price overrides. Keys are exact model names,
+                values are dicts with 'input' and 'output' prices per 1000
+                tokens in cents. Any model not listed here is priced from
+                :mod:`nexus.models_router.pricing`.
         """
-        self._pricing = pricing or _MODEL_PRICING
+        self._pricing: dict[str, dict[str, float]] = dict(pricing or {})
         self._records: list[InvocationRecord] = []
 
     def get_cost_for_invocation(
@@ -97,26 +86,18 @@ class CostTracker:
         Returns:
             Cost in cents (rounded up to nearest cent).
         """
-        import math
+        override = self._pricing.get(model)
+        if override:
+            input_cost = (input_tokens / 1000.0) * override["input"]
+            output_cost = (output_tokens / 1000.0) * override["output"]
+            return math.ceil(input_cost + output_cost)
 
-        model_pricing = self._pricing.get(model)
-        if model_pricing:
-            input_cost = (input_tokens / 1000.0) * model_pricing["input"]
-            output_cost = (output_tokens / 1000.0) * model_pricing["output"]
-            return int(math.ceil(input_cost + output_cost))
-
-        # Unknown to this table: fall through to pricing.py, which matches by
-        # model family and is what the pre-flight budget check uses. Keeping a
-        # separate default here is how the two ended up disagreeing — the old
-        # one charged $1/M for input where pricing.py charges $3/M, so a call
-        # the guard refused could still be recorded as affordable.
-        from nexus.models_router.pricing import TokenSplit, estimate_cost_usd
-
-        usd = estimate_cost_usd(
-            model,
-            TokenSplit(input_tokens=input_tokens, output_tokens=output_tokens),
-        )
-        return int(math.ceil(usd * 100))
+        # No override for this model: price it from pricing.py, the one table the
+        # pre-flight budget guard and every provider adapter also use. A second
+        # built-in table here is how the two ended up disagreeing — the old one
+        # charged $1/M for input where pricing.py charges $3/M, so a call the
+        # guard refused could still be recorded as affordable.
+        return estimate_cost_cents(model, input_tokens, output_tokens)
 
     def record_invocation(
         self,
@@ -202,10 +183,10 @@ class CostTracker:
         return filtered[-limit:]
 
     def update_pricing(self, model: str, input_price: float, output_price: float) -> None:
-        """Update or add pricing for a model.
+        """Override the price for one model, shadowing the central table.
 
         Args:
-            model: The model name.
+            model: The exact model name to override.
             input_price: Price per 1000 input tokens in cents.
             output_price: Price per 1000 output tokens in cents.
         """

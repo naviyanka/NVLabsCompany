@@ -414,9 +414,9 @@ class TestModelCapabilityResolver:
         keep more history than the model accepts and the call fails at dispatch.
         """
         for model, window in (
-            ("gpt-35-turbo", 16_385),          # azure_adapter.MODEL_PRICING key
-            ("gpt-3.5-turbo", 16_385),         # cost_tracker._MODEL_PRICING key
-            ("amazon.titan-text-express", 8_192),  # bedrock_adapter.MODEL_PRICING key
+            ("gpt-35-turbo", 16_385),          # Azure deployment id spelling
+            ("gpt-3.5-turbo", 16_385),         # canonical OpenAI id
+            ("amazon.titan-text-express", 8_192),  # Bedrock first-party model id
         ):
             assert ModelCapabilityResolver.resolve(model).context_window == window
 

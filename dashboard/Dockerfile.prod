@@ -1,0 +1,38 @@
+# ==============================================================================
+# Stage 1: Build React/Vite SPA
+# ==============================================================================
+FROM node:20-alpine AS builder
+
+WORKDIR /app
+
+# Copy dependency specifications
+COPY package.json ./
+
+# Install build dependencies
+RUN npm install
+
+# Copy source code and build production assets
+COPY . .
+RUN npm run build
+
+# ==============================================================================
+# Stage 2: Hardened NGINX Unprivileged Runtime
+# ==============================================================================
+FROM nginxinc/nginx-unprivileged:alpine AS runtime
+
+# Copy custom hardened nginx configuration
+COPY nginx.conf /etc/nginx/nginx.conf
+
+# Copy compiled static assets from builder stage
+COPY --from=builder --chown=101:101 /app/dist /usr/share/nginx/html
+
+# Run as non-root unprivileged user (UID 101)
+USER 101
+
+EXPOSE 8080
+
+# Container liveness check
+HEALTHCHECK --interval=30s --timeout=3s --retries=3 \
+    CMD wget -q -O /dev/null http://localhost:8080/healthz || exit 1
+
+CMD ["nginx", "-g", "daemon off;"]

@@ -9,15 +9,9 @@ import uuid
 from typing import Any
 
 from nexus.adapters.base import BaseAdapter
+from nexus.models_router.pricing import estimate_cost_cents
 from nexus.runtime.adapter import AgentSession, TaskResult
 
-
-# Per-model pricing in cents per 1K tokens (input, output) - Azure pricing
-MODEL_PRICING: dict[str, tuple[float, float]] = {
-    "gpt-4o": (0.25, 1.0),
-    "gpt-4-turbo": (1.0, 3.0),
-    "gpt-35-turbo": (0.05, 0.15),
-}
 
 # Default max retries for rate limit errors
 MAX_RETRIES = 5
@@ -171,12 +165,7 @@ class AzureOpenAIAdapter(BaseAdapter):
         input_tokens = usage.get("prompt_tokens", 0)
         output_tokens = usage.get("completion_tokens", 0)
 
-        # Calculate cost
-        pricing = MODEL_PRICING.get(model, (0.5, 1.5))
-        cost_cents = round(
-            (input_tokens / 1000 * pricing[0])
-            + (output_tokens / 1000 * pricing[1])
-        )
+        cost_cents = estimate_cost_cents(model, input_tokens, output_tokens)
 
         output_content = ""
         tool_calls = []

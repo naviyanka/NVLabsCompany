@@ -7,6 +7,7 @@ from nexus.models_router.pricing import (
     TokenSplit,
     normalize_model,
     price_for,
+    estimate_cost_cents,
     estimate_cost_usd,
 )
 from nexus.models_router.preflight import (
@@ -36,6 +37,7 @@ __all__ = [
     "TokenSplit",
     "normalize_model",
     "price_for",
+    "estimate_cost_cents",
     "estimate_cost_usd",
     "DEFAULT_OUTPUT_RESERVATION_TOKENS",
     "BudgetExceededError",

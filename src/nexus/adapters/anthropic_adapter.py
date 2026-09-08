@@ -10,19 +10,9 @@ from datetime import datetime, timezone
 from typing import Any
 
 from nexus.adapters.base import BaseAdapter
+from nexus.models_router.pricing import estimate_cost_cents
 from nexus.runtime.adapter import AgentSession, TaskResult
 
-
-# Per-model pricing in cents per 1K tokens (input, output)
-MODEL_PRICING: dict[str, tuple[float, float]] = {
-    "claude-3-5-sonnet-20241022": (0.3, 1.5),
-    "claude-3-5-haiku-20241022": (0.08, 0.4),
-    "claude-3-opus-20240229": (1.5, 7.5),
-    "claude-3-sonnet-20240229": (0.3, 1.5),
-    "claude-3-haiku-20240307": (0.025, 0.125),
-    "claude-sonnet-4-20250514": (0.3, 1.5),
-    "claude-opus-4-20250514": (1.5, 7.5),
-}
 
 MAX_RETRIES = 5
 BASE_BACKOFF_SECONDS = 1.0
@@ -168,12 +158,7 @@ class AnthropicAdapter(BaseAdapter):
         input_tokens = usage.get("input_tokens", 0)
         output_tokens = usage.get("output_tokens", 0)
 
-        # Calculate cost
-        pricing = MODEL_PRICING.get(model, (0.3, 1.5))
-        cost_cents = int(
-            (input_tokens / 1000 * pricing[0])
-            + (output_tokens / 1000 * pricing[1])
-        )
+        cost_cents = estimate_cost_cents(model, input_tokens, output_tokens)
 
         # Extract text and tool use from content blocks
         text_parts: list[str] = []
@@ -204,6 +189,28 @@ class AnthropicAdapter(BaseAdapter):
         # Add assistant response to history
         history.append({"role": "assistant", "content": content_blocks})
         self._conversation_history[session.session_id] = history
+
+        if tool_use_blocks:
+            checkpoint_state = {
+                "agent_context": {"agent_id": str(session.agent_id), "model": model},
+                "completed_steps": [0],
+                "intermediate_results": [
+                    {
+                        "tool_use_id": b.get("id", ""),
+                        "name": b.get("name", ""),
+                        "input": b.get("input", {}),
+                    }
+                    for b in tool_use_blocks
+                ],
+                "metadata": {"input_tokens": input_tokens, "output_tokens": output_tokens},
+            }
+            await self.record_step_checkpoint(
+                session=session,
+                task_id=task_id,
+                step_index=0,
+                state=checkpoint_state,
+                db_session=session.config.get("db_session"),
+            )
 
         return TaskResult(
             task_id=task_id,

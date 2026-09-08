@@ -9,15 +9,9 @@ import uuid
 from typing import Any
 
 from nexus.adapters.base import BaseAdapter
+from nexus.models_router.pricing import estimate_cost_cents
 from nexus.runtime.adapter import AgentSession, TaskResult
 
-
-# Per-model pricing in cents per 1K tokens (input, output)
-MODEL_PRICING: dict[str, tuple[float, float]] = {
-    "gemini-2.0-flash": (0.01, 0.04),
-    "gemini-1.5-pro": (0.125, 0.5),
-    "gemini-1.5-flash": (0.0075, 0.03),
-}
 
 # Default max retries for rate limit errors
 MAX_RETRIES = 5
@@ -173,12 +167,7 @@ class GoogleGeminiAdapter(BaseAdapter):
         input_tokens = usage_metadata.get("promptTokenCount", 0)
         output_tokens = usage_metadata.get("candidatesTokenCount", 0)
 
-        # Calculate cost
-        pricing = MODEL_PRICING.get(model, (0.01, 0.04))
-        cost_cents = round(
-            (input_tokens / 1000 * pricing[0])
-            + (output_tokens / 1000 * pricing[1])
-        )
+        cost_cents = estimate_cost_cents(model, input_tokens, output_tokens)
 
         # Add assistant response to history
         history.append({

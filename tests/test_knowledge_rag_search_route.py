@@ -21,7 +21,7 @@ def _chunk(content: str, index: int = 0) -> KnowledgeChunk:
     return KnowledgeChunk(
         id=uuid.uuid4(),
         company_id=COMPANY_ID,
-        page_id=uuid.uuid4(),
+        source_id=uuid.uuid4(),
         content=content,
         chunk_index=index,
         chunk_metadata={"source": "test"},
@@ -45,7 +45,8 @@ async def test_search_returns_pipeline_results_with_scores():
 
     assert len(results) == 1
     assert results[0].chunk_id == chunk.id
-    assert results[0].page_id == chunk.page_id
+    # The response field keeps its name; it carries the chunk's source_id.
+    assert results[0].page_id == chunk.source_id
     assert results[0].content == "deployment runbook"
     assert results[0].chunk_index == 2
     assert results[0].metadata == {"source": "test"}

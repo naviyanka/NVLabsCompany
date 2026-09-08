@@ -81,6 +81,9 @@ export const EDGE_TYPE_COLORS: Record<MemoryEdgeType, { stroke: string; label: s
   informs: { stroke: '#60A5FA', label: 'Informs / Guides', style: 'solid' },
   part_of: { stroke: '#6B6B6E', label: 'Part Of', style: 'solid' },
   temporal_precedes: { stroke: '#F59E0B', label: 'Temporal Precedes', style: 'dashed' },
+  // Matches the vault cluster colour the API sends, so a wikilink reads as part
+  // of the vault rather than as another memory relationship.
+  wikilink: { stroke: '#7C6CF0', label: 'Wikilink', style: 'solid' },
 };
 
 function generateEmbeddingPreview(): number[] {
@@ -748,12 +751,73 @@ const INITIAL_LINKS: MemoryGraphLink[] = [
   },
 ];
 
+/**
+ * The clusters to render nodes against.
+ *
+ * The API derives its own clusters — one per memory scope, plus `vault` when the
+ * company has Obsidian notes — so a real graph's cluster ids are nothing like
+ * `MEMORY_CLUSTERS`. Reading them from the store keeps every consumer agreeing
+ * with the payload; the built-in list stays as the fallback for the demo
+ * fixtures, whose ids only exist there.
+ */
+export function graphClusters(): MemoryCluster[] {
+  const fromServer = memoryGraphStore.getData().clusters;
+  return fromServer.length > 0 ? fromServer : MEMORY_CLUSTERS;
+}
+
+/** An empty graph — the state before the API answers, and a real answer too. */
+export function emptyGraphData(): MemoryGraphData {
+  return {
+    nodes: [],
+    links: [],
+    clusters: [],
+    metrics: {
+      total_nodes: 0,
+      total_links: 0,
+      contradictions_count: 0,
+      avg_confidence: 0,
+      avg_importance: 0,
+      modularity_score: 0,
+      clustering_coefficient: 0,
+      memory_recall_rate: 0,
+      hnsw_index_size_kb: 0,
+    },
+  };
+}
+
 class MemoryGraphStore {
   private data: MemoryGraphData;
   private listeners: Set<() => void> = new Set();
 
   constructor() {
+    // Empty until the API answers. The hardcoded fixtures below are kept as
+    // fixtures — reachable through `loadDemoData()` — but they are no longer
+    // what the page renders, because a graph that shows notes nobody wrote is
+    // worse than one that shows nothing.
+    this.data = emptyGraphData();
+  }
+
+  /**
+   * Replace the whole graph with a server response.
+   *
+   * A replace rather than a merge: the backend derives the graph on read, so its
+   * answer is the complete current truth and anything kept from a previous fetch
+   * would be a stale edge the server has already stopped reporting.
+   */
+  public replaceData(data: MemoryGraphData): void {
+    this.data = {
+      nodes: data.nodes ?? [],
+      links: data.links ?? [],
+      clusters: data.clusters ?? [],
+      metrics: { ...emptyGraphData().metrics, ...(data.metrics ?? {}) },
+    };
+    this.notify();
+  }
+
+  /** Load the built-in fixtures. Demos and manual UI work only. */
+  public loadDemoData(): void {
     this.data = this.calculateInitialData();
+    this.notify();
   }
 
   private calculateInitialData(): MemoryGraphData {
@@ -927,12 +991,15 @@ class MemoryGraphStore {
   private recalculateMetrics() {
     const nodes = this.data.nodes;
     const links = this.data.links;
+    // An empty graph is a real state now that the store starts empty, so the
+    // averages divide by a guarded count rather than producing NaN on screen.
+    const divisor = nodes.length || 1;
     this.data.metrics = {
       total_nodes: nodes.length,
       total_links: links.length,
       contradictions_count: nodes.filter((n) => n.type === 'contradiction').length,
-      avg_confidence: Number((nodes.reduce((s, n) => s + n.confidence, 0) / nodes.length).toFixed(3)),
-      avg_importance: Number((nodes.reduce((s, n) => s + n.importance, 0) / nodes.length).toFixed(3)),
+      avg_confidence: Number((nodes.reduce((s, n) => s + n.confidence, 0) / divisor).toFixed(3)),
+      avg_importance: Number((nodes.reduce((s, n) => s + n.importance, 0) / divisor).toFixed(3)),
       modularity_score: 0.78,
       clustering_coefficient: 0.64,
       memory_recall_rate: 99.2,

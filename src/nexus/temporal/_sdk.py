@@ -32,6 +32,7 @@ try:
     activity_defn = _activity.defn
     workflow_defn = _workflow.defn
     workflow_run = _workflow.run
+    workflow_query = _workflow.query
     imports_passed_through = _workflow.unsafe.imports_passed_through
 except ImportError:  # pragma: no cover — only without temporalio installed
     HAS_SDK = False
@@ -51,6 +52,7 @@ except ImportError:  # pragma: no cover — only without temporalio installed
     activity_defn = _passthrough
     workflow_defn = _passthrough
     workflow_run = _passthrough
+    workflow_query = _passthrough
     imports_passed_through = contextlib.nullcontext
 
 # An LLM call can legitimately take minutes; routing and planning should not.

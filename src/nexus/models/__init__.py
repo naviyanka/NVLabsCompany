@@ -26,6 +26,7 @@ from nexus.models.incident import Incident, IncidentAction, IncidentEvent
 from nexus.models.knowledge import ExperienceRecord, KnowledgeChunk, KnowledgePage
 from nexus.models.meeting import ActionItem, Meeting, MeetingMinutes, MeetingParticipant
 from nexus.models.memory import MemoryRecord
+from nexus.models.obsidian import ObsidianDocument, VaultWriteGrantRecord
 from nexus.models.plaza import PlazaPost
 from nexus.models.policy import Policy, PolicyRule, PolicyVersion
 from nexus.models.secret import Secret, SecretAccess, SecretBinding, SecretVersion
@@ -118,6 +119,8 @@ __all__ = [
     "KnowledgePage",
     "KnowledgeChunk",
     "ExperienceRecord",
+    "ObsidianDocument",
+    "VaultWriteGrantRecord",
     # Meetings
     "Meeting",
     "MeetingParticipant",

@@ -228,5 +228,14 @@ class PipelineExecutionWorkflow:
 goal_pursuit_workflow = GoalPursuitWorkflow
 pipeline_execution_workflow = PipelineExecutionWorkflow
 
+# Obsidian indexing lives in its own module — it shares no activities with the
+# goal/pipeline workflows — but registers through this one list so the worker has
+# a single source of truth.
+from nexus.temporal.obsidian_workflow import ALL_OBSIDIAN_WORKFLOWS  # noqa: E402
+
 # Single registration list so the worker cannot drift out of sync with this file.
-ALL_WORKFLOWS = [GoalPursuitWorkflow, PipelineExecutionWorkflow]
+ALL_WORKFLOWS = [
+    GoalPursuitWorkflow,
+    PipelineExecutionWorkflow,
+    *ALL_OBSIDIAN_WORKFLOWS,
+]

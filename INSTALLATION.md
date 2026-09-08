@@ -137,8 +137,25 @@ NEXUS uses SQLModel (SQLAlchemy + Pydantic) with Alembic for type-safe database 
 alembic upgrade head
 ```
 
+> [!IMPORTANT]
+> Run `alembic upgrade head` for SQLite too, not only for PostgreSQL.
+>
+> The application lifespan calls `SQLModel.metadata.create_all` for SQLite, which
+> creates tables that do not exist yet but **never adds a column to a table that
+> already exists**. So after pulling a migration that alters an existing table,
+> a SQLite dev database starts cleanly, reports healthy, and then fails only when
+> the new column is read. Startup logs a warning when the database is behind the
+> Alembic head; `alembic upgrade head` is what resolves it.
+
 > [!NOTE]
-> When using SQLite for local testing, the application lifespan automatically creates missing tables on startup. For PostgreSQL databases, running `alembic upgrade head` is mandatory.
+> **Which SQLite file is authoritative.** `DATABASE_URL=sqlite+aiosqlite:///./nexus_dev.db`
+> is a *relative* path, so the file lands in whatever directory the server was
+> started from. Running `uvicorn nexus.main:app` from `src/` (as the docs above
+> describe) uses `src/nexus_dev.db` — that is the development database. An empty
+> `nexus_dev.db` at the repository root is a leftover from a start in that
+> directory and is not used; deleting it is safe, and `src/nexus.db` and
+> `nexus.db` are similarly stale. To avoid the ambiguity entirely, set an
+> absolute path in `DATABASE_URL`.
 
 ### 5. Start Backend FastAPI Server
 
@@ -150,6 +167,35 @@ uvicorn nexus.main:app --reload --host 0.0.0.0 --port 8000
 Once running:
 - **Interactive OpenAPI Documentation (Swagger UI)**: `http://localhost:8000/docs`
 - **ReDoc Documentation**: `http://localhost:8000/redoc`
+
+> [!IMPORTANT]
+> **With `USE_TEMPORAL=true`, start the worker too.** The API only *submits*
+> workflows; a separate worker process executes them. Enabled Temporal with no
+> worker means every workflow is accepted and then sits on the `nexus-main` queue
+> forever — the API reports success and nothing runs.
+>
+> ```bash
+> # Separate terminal, alongside uvicorn. Run from src/ so the relative
+> # DATABASE_URL resolves to the same development database the API uses.
+> cd src && python -m nexus.temporal.worker
+> ```
+>
+> `GET /health/ready` is the check: it returns 503 with
+> `temporal.status = "no_workers"` when the queue has no worker, and 200 with a
+> worker count when it does. Set `USE_TEMPORAL=false` to run without Temporal —
+> the activity layer then executes in-process (ADR 0001's fallback runner), which
+> is not durable but needs no worker.
+
+### Docker Compose (starts everything, including the worker)
+
+```bash
+# Brings up postgres, redis, temporal, temporal-ui, backend and temporal-worker
+docker compose -f docker-compose.dev.yml up
+```
+
+The compose file already defines `temporal-worker` (`python -m nexus.temporal.worker`),
+so this path has no queue-to-nowhere gap. Temporal's own UI is at
+`http://localhost:8088`.
 
 ### 6. Setup & Start React Dashboard
 

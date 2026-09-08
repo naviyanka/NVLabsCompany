@@ -5,7 +5,6 @@ of optional system components and reports their status as full, degraded,
 or unavailable.
 """
 
-import os
 import shutil
 
 from fastapi import APIRouter
@@ -134,7 +133,7 @@ def _check_temporal() -> dict[str, str]:
     (docker-compose `temporal-worker`), and the SDK import is lazy so the app
     never depends on temporalio being installed.
     """
-    use_temporal = os.environ.get("USE_TEMPORAL", "").lower() == "true"
+    use_temporal = bool(settings.use_temporal)
     try:
         import temporalio  # noqa: F401
 
@@ -143,7 +142,7 @@ def _check_temporal() -> dict[str, str]:
         sdk = False
 
     if use_temporal and sdk:
-        host = os.environ.get("TEMPORAL_HOST", "localhost:7233")
+        host = settings.temporal_host
         return {"status": "full", "detail": f"Temporal enabled (worker target {host})"}
     if use_temporal and not sdk:
         return {

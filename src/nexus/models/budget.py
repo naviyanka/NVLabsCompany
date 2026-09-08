@@ -27,7 +27,17 @@ class BudgetPolicy(SQLModel, table=True):
 
 
 class CostEvent(SQLModel, table=True):
-    """Records an individual cost event (LLM call, tool usage, etc.)."""
+    """Records an individual cost event (LLM call, tool usage, etc.).
+
+    Doubles as the two-phase budget ledger. A row written before a provider
+    call carries ``status="reserved"`` and an ``expires_at``: it holds the
+    estimated spend so concurrent workers see it in the same window sum that
+    committed rows land in. After the call the row is reconciled to the exact
+    cost (``status="committed"``) or released (``status="released"``, excluded
+    from the sum). Reusing this table rather than a separate reservations one
+    means the existing window aggregation needs no second query to stay
+    correct.
+    """
 
     __tablename__ = "cost_events"
 
@@ -48,5 +58,12 @@ class CostEvent(SQLModel, table=True):
     output_tokens: int = Field(default=0)
     cost_cents: int = Field(default=0)
     billing_type: str = Field(default="llm_inference", max_length=100)
+    # Two-phase ledger state: reserved (hold), committed (settled), released
+    # (hold returned). Existing rows predate reservations and are committed.
+    status: str = Field(default="committed", max_length=20, index=True)
+    # When a reservation stops counting against the budget. A worker that dies
+    # mid-call would otherwise hold spend forever; the window sum ignores
+    # reserved rows past this instant, so a crash self-heals without a sweeper.
+    expires_at: Optional[datetime] = Field(default=None)
     occurred_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None))

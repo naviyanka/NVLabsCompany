@@ -1,5 +1,7 @@
 """Application configuration using pydantic-settings."""
 
+from pathlib import Path
+
 from pydantic_settings import BaseSettings
 
 
@@ -75,13 +77,39 @@ class Settings(BaseSettings):
     judge0_base_url: str = "https://judge0-ce.p.rapidapi.com"
     judge0_api_key: str = ""
 
+    # Temporal (ADR 0001). These were read straight from os.environ, which meant
+    # a value in .env was silently ignored: pydantic-settings loads .env into
+    # Settings without exporting it to the process environment. Declaring them
+    # here makes .env work for local development while docker-compose's real
+    # environment variables still win, since os.environ takes precedence over
+    # .env for every Settings field.
+    use_temporal: bool = False
+    temporal_host: str = "localhost:7233"
+    temporal_namespace: str = "default"
+
+    # Obsidian vault (ADR 0002). Empty disables the integration entirely.
+    # A company's vault is <obsidian_vault_root>/<company_id>/; tenant
+    # isolation is the path root, not a per-read authorization check.
+    obsidian_vault_root: str = ""
+    # Read cap per note, enforced before the file is opened.
+    obsidian_max_note_bytes: int = 1_048_576
+
     # Application
     app_name: str = "NEXUS"
     app_version: str = "0.1.0"
 
     model_config = {
         "env_prefix": "",
-        "env_file": ".env",
+        # Anchored to the repository root rather than the process CWD. A bare
+        # ".env" is resolved against wherever the server was started, so running
+        # `uvicorn nexus.main:app` from src/ — which is what INSTALLATION.md
+        # documents — silently loaded no .env at all, and every setting fell back
+        # to the defaults below. That failure is invisible: the app starts, and
+        # only a value that differs from its default reveals the problem.
+        #
+        # Real environment variables still take precedence, so docker-compose,
+        # CI, and shell overrides are unaffected. A missing file is ignored.
+        "env_file": str(Path(__file__).resolve().parents[2] / ".env"),
         "env_file_encoding": "utf-8",
         "case_sensitive": False,
         "extra": "ignore",

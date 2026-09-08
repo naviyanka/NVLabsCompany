@@ -59,7 +59,7 @@ class FakePGSession:
 def _chunk(content: str, vector: list[float], idx: int) -> KnowledgeChunk:
     return KnowledgeChunk(
         company_id=COMPANY_ID,
-        page_id=PAGE_ID,
+        source_id=PAGE_ID,
         content=content,
         chunk_index=idx,
         embedding_vector=vector,

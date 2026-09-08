@@ -10,21 +10,9 @@ from datetime import datetime, timezone
 from typing import Any
 
 from nexus.adapters.base import BaseAdapter
+from nexus.models_router.pricing import estimate_cost_cents
 from nexus.runtime.adapter import AgentSession, TaskResult
 
-
-# Per-model pricing in cents per 1K tokens (input, output)
-MODEL_PRICING: dict[str, tuple[float, float]] = {
-    "gpt-4o": (0.25, 1.0),
-    "gpt-4o-mini": (0.015, 0.06),
-    "gpt-4-turbo": (1.0, 3.0),
-    "gpt-4": (3.0, 6.0),
-    "gpt-3.5-turbo": (0.05, 0.15),
-    "o1": (1.5, 6.0),
-    "o1-mini": (0.3, 1.2),
-    "o3": (1.5, 6.0),
-    "o3-mini": (0.11, 0.44),
-}
 
 # Default max retries for rate limit errors
 MAX_RETRIES = 5
@@ -174,12 +162,7 @@ class OpenAIAdapter(BaseAdapter):
         input_tokens = usage.get("prompt_tokens", 0)
         output_tokens = usage.get("completion_tokens", 0)
 
-        # Calculate cost
-        pricing = MODEL_PRICING.get(model, (0.5, 1.5))
-        cost_cents = int(
-            (input_tokens / 1000 * pricing[0])
-            + (output_tokens / 1000 * pricing[1])
-        )
+        cost_cents = estimate_cost_cents(model, input_tokens, output_tokens)
 
         output_content = ""
         tool_calls = []
@@ -201,6 +184,20 @@ class OpenAIAdapter(BaseAdapter):
                     "tool_call_id": tc.get("id", ""),
                     "function": tc.get("function", {}),
                 })
+
+            checkpoint_state = {
+                "agent_context": {"agent_id": str(session.agent_id), "model": model},
+                "completed_steps": [0],
+                "intermediate_results": artifacts,
+                "metadata": {"input_tokens": input_tokens, "output_tokens": output_tokens},
+            }
+            await self.record_step_checkpoint(
+                session=session,
+                task_id=task_id,
+                step_index=0,
+                state=checkpoint_state,
+                db_session=session.config.get("db_session"),
+            )
 
         return TaskResult(
             task_id=task_id,

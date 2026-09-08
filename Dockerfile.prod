@@ -1,0 +1,72 @@
+# ==============================================================================
+# Stage 1: Build & Dependencies
+# ==============================================================================
+FROM python:3.12-slim AS builder
+
+WORKDIR /build
+
+# Install build-time dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create virtual environment
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Install production dependencies only (no dev dependencies)
+COPY pyproject.toml ./
+RUN pip install --no-cache-dir --upgrade pip wheel && \
+    pip install --no-cache-dir ".[otel]" gunicorn uvicorn[standard]
+
+# ==============================================================================
+# Stage 2: Hardened Production Runtime
+# ==============================================================================
+FROM python:3.12-slim AS runtime
+
+# Install minimal runtime libraries and curl for healthchecks
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libpq5 \
+    curl \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+
+# Create unprivileged system group and user (UID 10001)
+RUN groupadd -g 10001 -r nexus && \
+    useradd -u 10001 -r -g nexus -s /sbin/nologin -d /app -c "NEXUS App User" nexus
+
+WORKDIR /app
+
+# Copy virtualenv from builder stage
+COPY --from=builder /opt/venv /opt/venv
+
+# Copy application source code
+COPY --chown=nexus:nexus src/ ./src/
+COPY --chown=nexus:nexus alembic/ ./alembic/
+COPY --chown=nexus:nexus alembic.ini ./alembic.ini
+COPY --chown=nexus:nexus scripts/ ./scripts/
+
+# Ensure directory permissions
+RUN mkdir -p /app/data && chown -R nexus:nexus /app
+
+# Configure hardened runtime environment
+ENV PATH="/opt/venv/bin:$PATH" \
+    PYTHONPATH=/app/src \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PORT=8000 \
+    WEB_CONCURRENCY=4 \
+    TIMEOUT=60
+
+# Non-root user execution
+USER 10001:10001
+
+EXPOSE 8000
+
+# Container liveness check
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD curl -f http://localhost:8000/health/live || exit 1
+
+# Production server entrypoint: multi-worker, explicit timeouts, no reload
+CMD ["gunicorn", "-k", "uvicorn.workers.UvicornWorker", "-w", "4", "-b", "0.0.0.0:8000", "--timeout", "60", "--access-logfile", "-", "--error-logfile", "-", "nexus.main:app"]

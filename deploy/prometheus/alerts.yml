@@ -1,0 +1,61 @@
+groups:
+  - name: nexus_alerts
+    rules:
+      - alert: NexusHighHttpErrorRate
+        expr: |
+          (
+            sum(rate(nexus_http_request_duration_seconds_count{status_code=~"5.."}[5m]))
+            /
+            sum(rate(nexus_http_request_duration_seconds_count[5m]))
+          ) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+          tier: platform
+        annotations:
+          summary: "NEXUS HTTP 5xx error rate exceeded 5%"
+          description: "High error rate detected on API endpoints: {{ $value | humanizePercentage }} of requests are failing."
+
+      - alert: NexusLlmLatencyDegraded
+        expr: |
+          histogram_quantile(0.95, sum(rate(nexus_llm_request_duration_seconds_bucket[5m])) by (le, provider, model)) > 10.0
+        for: 5m
+        labels:
+          severity: warning
+          tier: inference
+        annotations:
+          summary: "LLM inference latency degraded for model {{ $labels.model }}"
+          description: "P95 inference round-trip time for provider {{ $labels.provider }} on model {{ $labels.model }} is {{ $value }}s (> 10s)."
+
+      - alert: NexusCircuitBreakerTripped
+        expr: |
+          sum(increase(nexus_circuit_breaker_trips_total[5m])) by (service) > 0
+        for: 1m
+        labels:
+          severity: critical
+          tier: governance
+        annotations:
+          summary: "Circuit breaker tripped for service {{ $labels.service }}"
+          description: "Safety circuit breaker opened to protect against cascading agent or provider failures on {{ $labels.service }}."
+
+      - alert: NexusOrchestratorStalled
+        expr: |
+          (time() - nexus_orchestrator_tick_last_timestamp_seconds) > 300
+        for: 2m
+        labels:
+          severity: critical
+          tier: runtime
+        annotations:
+          summary: "NEXUS autonomous orchestrator is stalled"
+          description: "No orchestration ticks have executed in the last 5 minutes. Background goal pursuit is paused."
+
+      - alert: NexusBudgetExhaustionSpike
+        expr: |
+          sum(increase(nexus_budget_exhausted_total[10m])) by (company_id) > 5
+        for: 2m
+        labels:
+          severity: warning
+          tier: finance
+        annotations:
+          summary: "Frequent budget exhaustion events for company {{ $labels.company_id }}"
+          description: "More than 5 subtasks failed due to exhausted budgets in the last 10 minutes for company {{ $labels.company_id }}."

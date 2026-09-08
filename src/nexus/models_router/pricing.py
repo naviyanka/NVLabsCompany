@@ -1,16 +1,25 @@
-"""Fallback-only model pricing table (USD per million tokens).
+"""Central model pricing table (USD per million tokens).
 
-The LIVE telemetry path does NOT use this. Claude Code emits a pre-computed,
-per-model cost_usd on every api_request log, so the collector trusts Claude's
-own figure. This table exists solely for the OFFLINE transcript reconciler,
-which runs when telemetry is off and must estimate cost from raw token counts.
+This is the ONE place per-model pricing lives. Every caller that needs a price
+resolves it here by model family:
 
-It supersedes old hard-coded Sonnet-for-everyone constants. Prices are now
-matched per model family. This is the ONE place per-model pricing lives.
+* the pre-flight budget guard (:mod:`nexus.models_router.preflight`),
+* the cost tracker that records recorded spend,
+* every provider adapter (Anthropic, OpenAI, Azure, Bedrock, Google), which
+  used to each carry a private table of its own. Those tables disagreed with
+  this one and with each other, so the same call was priced differently
+  depending on which code path saw it, and a call the budget guard refused
+  could still be recorded as affordable.
+
+The one path that does NOT price from this table is LIVE Claude Code telemetry:
+Claude emits a pre-computed, per-model cost_usd on every api_request log, so the
+collector trusts Claude's own figure. This table covers everything else,
+including the OFFLINE transcript reconciler that runs when telemetry is off.
 """
 
 from __future__ import annotations
 
+import math
 import re
 from dataclasses import dataclass
 
@@ -46,6 +55,15 @@ HAIKU: ModelPrice = ModelPrice(
     cache_read_per_m=0.08,
     cache_write_per_m=1.0,
 )
+# Claude 3 Haiku (the 2024-03 generation, also served by Bedrock) is a third of
+# the price of 3.5 Haiku. Folding it into HAIKU would over-bill recorded spend
+# by 3x, which is fine for a budget guard but wrong for an invoice.
+HAIKU_3: ModelPrice = ModelPrice(
+    input_per_m=0.25,
+    output_per_m=1.25,
+    cache_read_per_m=0.03,
+    cache_write_per_m=0.3,
+)
 
 # ---------------------------------------------------------------------------
 # OpenAI list prices (USD per million tokens)
@@ -68,9 +86,29 @@ O1: ModelPrice = ModelPrice(
     cache_read_per_m=7.5,
     cache_write_per_m=0,
 )
+O1_MINI: ModelPrice = ModelPrice(
+    input_per_m=3,
+    output_per_m=12,
+    cache_read_per_m=0,
+    cache_write_per_m=0,
+)
+O3_MINI: ModelPrice = ModelPrice(
+    input_per_m=1.1,
+    output_per_m=4.4,
+    cache_read_per_m=0,
+    cache_write_per_m=0,
+)
 GPT4_TURBO: ModelPrice = ModelPrice(
     input_per_m=10,
     output_per_m=30,
+    cache_read_per_m=0,
+    cache_write_per_m=0,
+)
+# Bare gpt-4 is three times the price of gpt-4-turbo, so it needs its own row:
+# folding it into GPT4_TURBO under-charges, which is the unsafe direction.
+GPT4: ModelPrice = ModelPrice(
+    input_per_m=30,
+    output_per_m=60,
     cache_read_per_m=0,
     cache_write_per_m=0,
 )
@@ -114,12 +152,27 @@ LOCAL: ModelPrice = ModelPrice(
 )
 
 # ---------------------------------------------------------------------------
+# Amazon Bedrock first-party models
+# ---------------------------------------------------------------------------
+TITAN: ModelPrice = ModelPrice(
+    input_per_m=0.2,
+    output_per_m=0.6,
+    cache_read_per_m=0,
+    cache_write_per_m=0,
+)
+
+# ---------------------------------------------------------------------------
 # Default: when the model id is unknown, assume Sonnet (the historical default)
 # ---------------------------------------------------------------------------
 DEFAULT_PRICE: ModelPrice = SONNET
 
 # Pattern to strip variant suffixes like [1m] from model identifiers
 _VARIANT_SUFFIX_RE = re.compile(r"\[[^\]]*\]\s*$")
+
+# Claude 3 Haiku, distinguished from 3.5 Haiku ("claude-3-5-haiku-…"), which is
+# three times the price. Matches "claude-3-haiku-…" and "claude-haiku-3" but not
+# "claude-haiku-3.5".
+_HAIKU_3_RE = re.compile(r"3-haiku|haiku-3(?![.-]5)")
 
 
 def normalize_model(model: str | None) -> str:
@@ -139,18 +192,28 @@ def price_for(model: str | None) -> ModelPrice:
     if "opus" in m:
         return OPUS
     if "haiku" in m:
-        return HAIKU
+        # Claude 3 Haiku, not 3.5: "claude-3-haiku-…" / "anthropic.claude-3-haiku".
+        return HAIKU_3 if _HAIKU_3_RE.search(m) else HAIKU
     if "sonnet" in m:
         return SONNET
+    if "titan" in m:
+        return TITAN
     if "gpt-4o-mini" in m:
         return GPT4O_MINI
     if "gpt-4o" in m:
         return GPT4O
-    if "gpt-4" in m:
+    # gpt-4.1 is a Turbo-generation price, not the original gpt-4 price.
+    if "gpt-4-turbo" in m or "gpt-4.1" in m:
         return GPT4_TURBO
+    if "gpt-4" in m:
+        return GPT4
     # Azure's deployment id drops the dot, so both spellings have to match.
     if "gpt-3.5" in m or "gpt-35" in m:
         return GPT35_TURBO
+    if "o1-mini" in m:
+        return O1_MINI
+    if "o3-mini" in m:
+        return O3_MINI
     if "o1" in m or "o3" in m:
         return O1
     # Flash before the general Gemini row: it is an order of magnitude cheaper,
@@ -186,3 +249,19 @@ def estimate_cost_usd(model: str | None, tokens: TokenSplit) -> float:
         + (tokens.cache_read_tokens / 1_000_000) * p.cache_read_per_m
         + (tokens.cache_write_tokens / 1_000_000) * p.cache_write_per_m
     )
+
+
+def estimate_cost_cents(
+    model: str | None, input_tokens: int, output_tokens: int
+) -> int:
+    """Cost in whole cents for a plain input/output split, rounded up.
+
+    This is what the provider adapters and the cost tracker record. Rounding up
+    keeps a recorded cost from ever landing below what the pre-flight budget
+    guard charged for the same call, which is how the old per-adapter tables
+    drifted into admitting calls the guard had refused.
+    """
+    usd = estimate_cost_usd(
+        model, TokenSplit(input_tokens=input_tokens, output_tokens=output_tokens)
+    )
+    return math.ceil(usd * 100)

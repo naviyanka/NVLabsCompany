@@ -1,0 +1,191 @@
+name: Enterprise Deployment & CI/CD Pipeline
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*.*.*']
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  packages: write
+  security-events: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_BACKEND: ghcr.io/${{ github.repository }}/nexus-api
+  IMAGE_FRONTEND: ghcr.io/${{ github.repository }}/nexus-frontend
+
+jobs:
+  # ============================================================================
+  # 1. Static Analysis, Linting & Security Auditing
+  # ============================================================================
+  security-and-lint:
+    name: Security & Static Analysis
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install Linting & Security Tools
+        run: |
+          pip install ruff mypy bandit[toml] safety
+
+      - name: Python Code Quality (Ruff)
+        run: ruff check .
+
+      - name: Python Security Audit (Bandit)
+        run: bandit -r src/ -ll -q
+
+      - name: Dockerfile Linting (Hadolint)
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: Dockerfile.prod
+          failure-threshold: error
+
+      - name: Frontend Dockerfile Linting
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: dashboard/Dockerfile.prod
+          failure-threshold: error
+
+  # ============================================================================
+  # 2. Kubernetes Helm Chart Linting & Schema Validation
+  # ============================================================================
+  helm-validation:
+    name: Helm Chart & Kubeconform Validation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Set up Helm v3
+        uses: azure/setup-helm@v4.2.0
+        with:
+          version: 'v3.14.0'
+
+      - name: Helm Lint
+        run: helm lint deploy/helm/nexus
+
+      - name: Render Helm Templates
+        run: |
+          mkdir -p output
+          helm template nexus deploy/helm/nexus > output/manifests.yaml
+
+      - name: Validate Kubernetes Manifests with Kubeconform
+        uses: yannh/kubeconform-action@v0.8.8
+        with:
+          files: output/manifests.yaml
+          schemaLocations: |
+            default
+            https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json
+
+  # ============================================================================
+  # 3. Multi-Architecture Container Build & Vulnerability Scan
+  # ============================================================================
+  build-and-scan:
+    name: Multi-Arch Build & Vulnerability Scan
+    needs: [security-and-lint, helm-validation]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU for Multi-Architecture
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Docker Metadata (Backend)
+        id: meta-backend
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_BACKEND }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,format=short
+            type=semver,pattern={{version}}
+
+      - name: Extract Docker Metadata (Frontend)
+        id: meta-frontend
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_FRONTEND }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,format=short
+            type=semver,pattern={{version}}
+
+      # Build & Scan Backend
+      - name: Build Backend Image (Local single-arch for scan)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: Dockerfile.prod
+          load: true
+          tags: nexus-api-scan:latest
+
+      - name: Trivy Vulnerability Scan (Backend)
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'nexus-api-scan:latest'
+          format: 'table'
+          exit-code: '0'
+          severity: 'CRITICAL,HIGH'
+
+      - name: Build & Push Backend Multi-Arch Image (amd64/arm64)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: Dockerfile.prod
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta-backend.outputs.tags }}
+          labels: ${{ steps.meta-backend.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Build & Scan Frontend
+      - name: Build Frontend Image (Local single-arch for scan)
+        uses: docker/build-push-action@v5
+        with:
+          context: ./dashboard
+          file: dashboard/Dockerfile.prod
+          load: true
+          tags: nexus-frontend-scan:latest
+
+      - name: Trivy Vulnerability Scan (Frontend)
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'nexus-frontend-scan:latest'
+          format: 'table'
+          exit-code: '0'
+          severity: 'CRITICAL,HIGH'
+
+      - name: Build & Push Frontend Multi-Arch Image (amd64/arm64)
+        uses: docker/build-push-action@v5
+        with:
+          context: ./dashboard
+          file: dashboard/Dockerfile.prod
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta-frontend.outputs.tags }}
+          labels: ${{ steps.meta-frontend.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

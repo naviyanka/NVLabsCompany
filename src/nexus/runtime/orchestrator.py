@@ -28,6 +28,7 @@ from typing import Any
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from nexus.models._time import utcnow
 from nexus.models.task import RunCompletionReason
 
 logger = logging.getLogger(__name__)
@@ -56,6 +57,15 @@ SUBTASK_TIMEOUT_SECONDS = 300
 # Agents emit this marker to hand a subtask back to a human.
 NEEDS_HELP_MARKER = "[NEEDS_HELP"
 
+# How long a claimed subtask may stay in_progress before its process is presumed
+# gone. Twice the per-call budget, so a call that is merely slow is not reaped
+# out from under a live worker.
+STALE_SUBTASK_SECONDS = SUBTASK_TIMEOUT_SECONDS * 2
+
+# How long a goal handed to Temporal may sit in_progress without any update
+# before the workflow is presumed dead and the goal is returned to the tick.
+STRANDED_GOAL_SECONDS = 3600
+
 
 def _finish(row: Any, status: str, reason: str) -> None:
     """Mark a goal or task terminal with an explicit completion reason.
@@ -68,6 +78,176 @@ def _finish(row: Any, status: str, reason: str) -> None:
     row.updated_at = datetime.now(timezone.utc)
 
 
+async def _reap_stale_subtasks(db: AsyncSession) -> int:
+    """Fail or flag subtasks claimed by a process that never came back.
+
+    ``_execute_subtasks`` claims a task as ``in_progress`` before the LLM call.
+    If that process dies the claim outlives it, and ``_drive_goal`` treats the
+    row as active forever — the goal never advances and nothing reports why.
+    Reaping the claim is what makes a crash resumable.
+
+    If an active checkpoint exists for the task, marks it as 'needs_recovery'
+    so it can be resumed by the recovery reconciliation pass. Otherwise,
+    marks the task failed with timeout.
+
+    Returns:
+        How many stale claims were reaped or flagged for recovery.
+    """
+    from nexus.models.task import Task
+    from nexus.runtime.checkpoint import DurableCheckpointService
+
+    cutoff = utcnow() - timedelta(seconds=STALE_SUBTASK_SECONDS)
+    stmt = select(Task).where(
+        Task.status == "in_progress",
+        Task.started_at.is_not(None),
+        Task.started_at < cutoff,
+    )
+    stale = list((await db.execute(stmt)).scalars().all())
+
+    handled = 0
+    for task in stale:
+        checkpoint = await DurableCheckpointService.load_latest(task.id, db)
+        if checkpoint is not None:
+            task.status = "needs_recovery"
+            task.error = (
+                f"Claimed at {task.started_at} but executing process died; "
+                f"checkpoint found at step {checkpoint.step_index} — queued for recovery"
+            )
+            task.updated_at = utcnow()
+            db.add(task)
+            logger.warning(
+                "Stale subtask '%s' flagged as needs_recovery with checkpoint step %d",
+                task.title[:40],
+                checkpoint.step_index,
+            )
+        else:
+            _finish(task, "failed", RunCompletionReason.timeout)
+            task.error = (
+                f"Claimed at {task.started_at} and never finished — "
+                "the executing process is gone"
+            )
+            db.add(task)
+            logger.warning(
+                "Reaped stale subtask '%s' claimed at %s (no checkpoint)",
+                task.title[:40],
+                task.started_at,
+            )
+        handled += 1
+
+    return handled
+
+
+async def _reclaim_stranded_goals(db: AsyncSession) -> int:
+    """Return goals to ``active`` when whatever took them never came back.
+
+    Dispatching a goal to Temporal marks it ``in_progress`` so the tick does not
+    re-dispatch it, but ``_tick`` only selects ``active`` goals — so a workflow
+    that dies takes the goal with it, permanently. A goal untouched for
+    ``STRANDED_GOAL_SECONDS`` is handed back; a live workflow keeps updating the
+    row and so is never clawed back.
+
+    Returns:
+        How many goals were reclaimed.
+    """
+    from nexus.models.task import Goal
+
+    cutoff = utcnow() - timedelta(seconds=STRANDED_GOAL_SECONDS)
+    stmt = select(Goal).where(
+        Goal.status == "in_progress",
+        Goal.updated_at < cutoff,
+    )
+    stranded = list((await db.execute(stmt)).scalars().all())
+
+    for goal in stranded:
+        goal.status = "active"
+        goal.updated_at = utcnow()
+        db.add(goal)
+        logger.warning(
+            "Reclaimed goal %s stranded in_progress since %s", goal.id, cutoff
+        )
+
+    return len(stranded)
+
+
+async def reconcile_recovery(db: AsyncSession) -> int:
+    """Automated background recovery reconciliation pass.
+
+    Identifies:
+    1. Tasks explicitly in 'needs_recovery' status.
+    2. Reaped stale subtasks or crashed 'in_progress' subtasks with active checkpoints.
+    3. Tasks marked 'failed' due to timeout or process crashes that have active checkpoints.
+
+    Re-enqueues eligible tasks with their restored checkpoint state to 'pending'
+    status without requiring manual operator intervention.
+
+    Returns:
+        The number of tasks successfully restored and re-enqueued.
+    """
+    from nexus.models.task import Task
+    from nexus.runtime.checkpoint import DurableCheckpointService, abandon_stale
+
+    # Clean up stale expired checkpoints
+    await abandon_stale(max_age_hours=24, session=db)
+
+    # Find tasks that need recovery
+    stmt = select(Task).where(
+        Task.status.in_(["needs_recovery", "in_progress", "failed"])
+    )
+    result = await db.execute(stmt)
+    tasks = list(result.scalars().all())
+
+    recovered_count = 0
+    now = utcnow()
+
+    for task in tasks:
+        # For failed tasks, only consider those with timeout or crash
+        if task.status == "failed" and task.completion_reason not in (
+            RunCompletionReason.timeout,
+            RunCompletionReason.error,
+        ):
+            continue
+
+        # For in_progress tasks, only consider if they are stale (process gone)
+        if task.status == "in_progress":
+            cutoff = now - timedelta(seconds=STALE_SUBTASK_SECONDS)
+            if task.started_at and task.started_at >= cutoff:
+                continue
+
+        checkpoint = await DurableCheckpointService.load_latest(task.id, db)
+        if checkpoint is not None:
+            task.status = "pending"
+            task.error = None
+            task.completion_reason = None
+            task.started_at = None
+            task.updated_at = now
+            db.add(task)
+            recovered_count += 1
+
+            try:
+                from nexus.observability.metrics import record_checkpoint_recovery
+                record_checkpoint_recovery(status="success")
+            except Exception:
+                pass
+
+            logger.info(
+                "Restored task '%s' (%s) from checkpoint step %d to pending queue",
+                task.title[:40],
+                task.id,
+                checkpoint.step_index,
+            )
+            await _broadcast_orchestrator_event("task_recovered_from_checkpoint", {
+                "task_id": str(task.id),
+                "checkpoint_id": str(checkpoint.id),
+                "step_index": checkpoint.step_index,
+                "title": task.title[:60],
+            })
+
+    if recovered_count:
+        await db.flush()
+
+    return recovered_count
+
+
 async def _tick(session_factory: async_sessionmaker[AsyncSession]) -> None:
     """Single orchestration tick: find active goals and drive progress."""
     from nexus.models.task import Goal, Task
@@ -78,7 +258,22 @@ async def _tick(session_factory: async_sessionmaker[AsyncSession]) -> None:
     if not await try_acquire_leader("orchestrator", _instance_id):
         return
 
+    try:
+        from nexus.observability.metrics import record_orchestrator_tick
+        record_orchestrator_tick()
+    except Exception:
+        pass
+
     async with session_factory() as db:
+        # Release claims held by processes that died, whether they died during
+        # this tick's predecessor or while the whole service was down.
+        recovered = await _reap_stale_subtasks(db)
+        recovered += await _reclaim_stranded_goals(db)
+        # Automated recovery pass: restore eligible tasks with valid checkpoints
+        restored = await reconcile_recovery(db)
+        if recovered or restored:
+            await db.commit()
+
         # Find active goals that have an owner agent
         stmt = (
             select(Goal)
@@ -375,18 +570,122 @@ async def _execute_subtasks(db: AsyncSession, tasks: list[Any], company_id: uuid
             logger.warning("Subtask '%s' skipped: agent %s budget exhausted", task.title[:40], agent.name)
             continue
 
+        # Claim the task before spending anything on it. A crash between here
+        # and the terminal write leaves the row in_progress, which is what
+        # _reap_stale_subtasks looks for — without the claim the task looks
+        # fresh and the next tick pays for the same LLM call again.
+        task.status = "in_progress"
+        task.started_at = utcnow()
+        task.updated_at = task.started_at
+        db.add(task)
+        await db.commit()
+
         try:
+            # Check for active checkpoint to resume from
+            import hashlib
+            import json
+            from nexus.runtime.checkpoint import DurableCheckpointService, ExecutionCheckpoint, mark_completed
+            from nexus.governance.audit_service import record_audit
+
+            checkpoint = None
+            try:
+                cp_candidate = await DurableCheckpointService.load_latest(task.id, db)
+                if isinstance(cp_candidate, ExecutionCheckpoint):
+                    checkpoint = cp_candidate
+            except Exception as cp_err:
+                # A missing or unreadable checkpoint must not stop the work: the
+                # task simply restarts from step 0.
+                logger.debug("Checkpoint check skipped for task %s: %s", getattr(task, "id", None), cp_err)
+                checkpoint = None
+
+            resumed_step = 0
+            resumption_context = ""
+            completed_steps: list[int] = []
+            intermediate_results: list[dict[str, Any]] = []
+
+            if checkpoint is not None and isinstance(checkpoint, ExecutionCheckpoint):
+                state = checkpoint.state_json or {}
+                step_index = checkpoint.step_index
+                resumed_step = step_index + 1
+                completed_steps = state.get("completed_steps", list(range(resumed_step)))
+                intermediate_results = state.get("intermediate_results", [])
+
+                # Calculate deterministic state hash for audit record
+                state_hash = hashlib.sha256(
+                    json.dumps(state, sort_keys=True, default=str).encode("utf-8")
+                ).hexdigest()
+
+                logger.info(
+                    "Task %s rehydrating from checkpoint step %d (resuming at step %d, %d completed steps)",
+                    task.id,
+                    step_index,
+                    resumed_step,
+                    len(completed_steps),
+                )
+
+                # Emit audit log event: task_resumed_from_checkpoint
+                try:
+                    await record_audit(
+                        company_id=company_id,
+                        action="task_resumed_from_checkpoint",
+                        actor_type="orchestrator",
+                        actor_id=str(agent.id) if hasattr(agent, "id") else "orchestrator",
+                        resource_type="task",
+                        resource_id=str(task.id),
+                        details={
+                            "resumed_step": resumed_step,
+                            "step_index": step_index,
+                            "checkpoint_id": str(checkpoint.id),
+                            "state_hash": state_hash,
+                            "completed_steps": completed_steps,
+                            "intermediate_results_count": len(intermediate_results),
+                        },
+                        db=db,
+                    )
+                except Exception as audit_err:
+                    logger.debug("Audit log recording skipped: %s", audit_err)
+
+                await _broadcast_orchestrator_event("task_resumed_from_checkpoint", {
+                    "task_id": str(task.id),
+                    "checkpoint_id": str(checkpoint.id),
+                    "resumed_step": resumed_step,
+                    "state_hash": state_hash,
+                })
+
+                # Inject completed steps and intermediate results into prompt instructions
+                resumption_context = (
+                    f"\n\n[CHECKPOINT RESUMPTION CONTEXT]\n"
+                    f"Task execution was previously checkpointed at step {step_index}.\n"
+                    f"Completed steps: {completed_steps}\n"
+                    f"Intermediate results from completed steps:\n"
+                    f"{json.dumps(intermediate_results, indent=2, default=str)}\n"
+                    f"INSTRUCTION: Do NOT re-execute completed steps {completed_steps}. "
+                    f"Resume directly from step {resumed_step} using the intermediate results above."
+                )
+
             # Build prompt and execute
             memories = await _fetch_agent_memories(db, agent.id, company_id, limit=5)
             system_prompt = _build_system_prompt(agent, memories=memories)
-            prompt = f"Execute this task:\n{task.title}\n{task.description or ''}"
+            prompt = f"Execute this task:\n{task.title}\n{task.description or ''}{resumption_context}"
+
+            # Prepare history messages with intermediate results for context
+            history_messages: list[dict[str, Any]] = []
+            if intermediate_results:
+                for idx, res in enumerate(intermediate_results):
+                    history_messages.append({
+                        "sender": "agent",
+                        "text": f"Intermediate step {idx} output: {json.dumps(res, default=str)}",
+                    })
 
             await _broadcast_orchestrator_event("subtask_started", {
-                "task_id": str(task.id), "title": task.title[:60], "agent": agent.name,
+                "task_id": str(task.id),
+                "title": task.title[:60],
+                "agent": agent.name,
+                "resumed_step": resumed_step,
             })
 
             response_text, model_used, tokens_used = await asyncio.wait_for(
-                _call_llm(agent, system_prompt, prompt, []),
+                _call_llm(agent, system_prompt, prompt, history_messages),
                 timeout=SUBTASK_TIMEOUT_SECONDS,
             )
 
@@ -418,6 +717,20 @@ async def _execute_subtasks(db: AsyncSession, tasks: list[Any], company_id: uuid
             _finish(task, "completed", RunCompletionReason.goal)
             db.add(task)
 
+            # Record task completion metric
+            try:
+                from nexus.observability.metrics import record_task_metrics
+                duration_sec = (utcnow() - task.started_at).total_seconds() if task.started_at else None
+                record_task_metrics(agent_id=agent.id, status="completed", duration_seconds=duration_sec)
+            except Exception:
+                pass
+
+            # Mark checkpoints completed upon task success
+            try:
+                await mark_completed(task.id, db)
+            except Exception as cp_err:
+                logger.debug("Checkpoint mark_completed skipped: %s", cp_err)
+
             await _broadcast_orchestrator_event("subtask_completed", {
                 "task_id": str(task.id), "title": task.title[:60],
                 "agent": agent.name, "tokens": tokens_used,
@@ -433,6 +746,13 @@ async def _execute_subtasks(db: AsyncSession, tasks: list[Any], company_id: uuid
             task.error = f"Timed out after {SUBTASK_TIMEOUT_SECONDS}s"
             db.add(task)
 
+            try:
+                from nexus.observability.metrics import record_task_metrics
+                duration_sec = (utcnow() - task.started_at).total_seconds() if task.started_at else None
+                record_task_metrics(agent_id=getattr(agent, "id", None), status="timeout", duration_seconds=duration_sec)
+            except Exception:
+                pass
+
             await _broadcast_orchestrator_event("subtask_failed", {
                 "task_id": str(task.id), "title": task.title[:60], "error": task.error,
                 "completion_reason": RunCompletionReason.timeout.value,
@@ -443,6 +763,13 @@ async def _execute_subtasks(db: AsyncSession, tasks: list[Any], company_id: uuid
             _finish(task, "failed", RunCompletionReason.error)
             task.error = str(e)[:2000]
             db.add(task)
+
+            try:
+                from nexus.observability.metrics import record_task_metrics
+                duration_sec = (utcnow() - task.started_at).total_seconds() if task.started_at else None
+                record_task_metrics(agent_id=getattr(agent, "id", None), status="failed", duration_seconds=duration_sec)
+            except Exception:
+                pass
 
             await _broadcast_orchestrator_event("subtask_failed", {
                 "task_id": str(task.id), "title": task.title[:60], "error": str(e)[:100],

@@ -39,8 +39,10 @@ from nexus.api.routes.knowledge import router as knowledge_router
 from nexus.api.routes.meetings import router as meetings_router
 from nexus.api.routes.memory import router as memory_router
 from nexus.api.routes.memory_global import router as memory_global_router
+from nexus.api.routes.memory_graph import router as memory_graph_router
 from nexus.api.routes.nodes import router as nodes_router
 from nexus.api.routes.notifications import router as notifications_router
+from nexus.api.routes.obsidian import router as obsidian_router
 from nexus.api.routes.okr import router as okr_router
 from nexus.api.routes.pipelines import router as pipelines_router
 from nexus.api.routes.plaza import router as plaza_router
@@ -69,10 +71,16 @@ from nexus.api.versioning import APIVersionMiddleware
 from nexus.auth.middleware import AuthenticationMiddleware
 from nexus.config import settings
 from nexus.logging_config import RequestIDMiddleware, configure_logging
-from nexus.telemetry import MetricsMiddleware, metrics_router
+from nexus.observability.metrics import metrics_router
+from nexus.observability.tracing import init_tracing, instrument_app
 
 # Configure structured JSON logging at module level
 configure_logging()
+
+# Install the OTel TracerProvider before the app is built, so instrumentation
+# below binds to a real provider. No-op unless OTEL_EXPORTER_OTLP_ENDPOINT is
+# set and the SDK is installed.
+init_tracing()
 
 
 @asynccontextmanager
@@ -212,6 +220,17 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     from nexus.config_validator import validate_config
     await validate_config()
 
+    # Obsidian vault + embedding-dimension policy (ADR 0002 §20-§21).
+    # Deliberately NOT part of validate_config, which promises never to raise: a
+    # typo'd vault root must refuse to start rather than report an empty vault
+    # forever, and a wrong-width provider must refuse to start rather than index
+    # a corpus whose vectors get silently dropped at write time.
+    from nexus.obsidian import validate_embedding_policy, validate_vault_root
+    vault = validate_vault_root()
+    if vault is not None:
+        _logger.info("Obsidian vault root validated: %s", vault)
+    validate_embedding_policy()
+
     # Reclaim heartbeat runs whose process died while we were down (Phase 1.3.4)
     try:
         from nexus.runtime.heartbeat_persistent import PersistentHeartbeatService
@@ -220,6 +239,17 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             _logger.warning("Reclaimed %d orphaned heartbeat run(s)", len(reclaimed))
     except Exception as exc:
         _logger.warning("Heartbeat orphan reclaim failed: %s", exc)
+
+    # Automated recovery pass: reconcile interrupted tasks with active checkpoints
+    try:
+        from nexus.runtime.orchestrator import reconcile_recovery
+        async with async_session_factory() as recovery_db:
+            recovered_count = await reconcile_recovery(recovery_db)
+            if recovered_count:
+                await recovery_db.commit()
+                _logger.info("Startup recovery pass re-enqueued %d task(s) from checkpoints", recovered_count)
+    except Exception as exc:
+        _logger.warning("Startup checkpoint recovery pass failed: %s", exc)
 
     # Start the background scheduler for cron/schedule triggers
     from nexus.runtime.scheduler import start_scheduler, stop_scheduler
@@ -395,11 +425,14 @@ app.add_middleware(AuthenticationMiddleware)
 # API version middleware for X-API-Version header
 app.add_middleware(APIVersionMiddleware, version="1.0")
 
-# Metrics middleware for HTTP request tracking
-app.add_middleware(MetricsMiddleware)
-
-# Request ID middleware
+# Request ID middleware — also opens the server span and records HTTP latency
+# metrics via observability.metrics.record_http_request
 app.add_middleware(RequestIDMiddleware)
+
+# Distributed tracing: server spans that join an inbound traceparent, plus
+# traceparent injection on every outbound httpx call. No-op unless
+# init_tracing() above installed a real provider.
+instrument_app(app)
 
 # CORS middleware - restrict to configured origins. Credentials are allowed
 # because the dashboard authenticates with a cookie, which also means the
@@ -434,6 +467,7 @@ app.include_router(portability_router)
 app.include_router(webhooks_router)
 app.include_router(communication_router)
 app.include_router(knowledge_router)
+app.include_router(obsidian_router)
 app.include_router(meetings_router)
 app.include_router(company_sim_router)
 app.include_router(evolution_router)
@@ -457,6 +491,7 @@ app.include_router(api_keys_router)
 app.include_router(profile_router)
 app.include_router(audit_router)
 app.include_router(memory_global_router)
+app.include_router(memory_graph_router)
 app.include_router(hr_router)
 app.include_router(departments_router)
 app.include_router(events_router)

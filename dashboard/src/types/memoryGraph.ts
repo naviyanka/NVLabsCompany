@@ -19,21 +19,18 @@ export type MemoryEdgeType =
   | 'derived_from'
   | 'informs'
   | 'part_of'
-  | 'temporal_precedes';
+  | 'temporal_precedes'
+  /** A `[[wikilink]]` between two vault notes, read from the vault itself. */
+  | 'wikilink';
 
-export type MemoryClusterId =
-  | 'ai_evolution'
-  | 'systems_routing'
-  | 'security_audit'
-  | 'ui_3d_spatial'
-  | 'enterprise_governance'
-  | 'infrastructure_ops';
+/** Cluster ids are derived from memory scopes at runtime, not a fixed enum. */
+export type MemoryClusterId = string;
 
 export interface MemoryCluster {
   id: MemoryClusterId;
   name: string;
   description: string;
-  lead_agent_id: string;
+  lead_agent_id: string | null;
   color: string;
   accent_color: string;
 }
@@ -58,6 +55,17 @@ export interface MemoryGraphNode {
   contradiction_reason?: string;
   decay_score?: number; // 0.0 to 1.0 (1.0 = freshest)
   access_count?: number;
+  /**
+   * Vault-relative path of the Obsidian note behind this node.
+   *
+   * Present only on vault nodes, and absent on the derived
+   * `obsidian:missing:*` node a dangling wikilink produces — that target has no
+   * file, so it has no path. Never an absolute host path: the API deliberately
+   * does not expose the vault root.
+   */
+  vault_path?: string;
+  /** Index state of a vault note, or `"missing"` for a dangling target. */
+  index_status?: string;
   // Physics coordinates (d3 simulation)
   x?: number;
   y?: number;

@@ -11,7 +11,7 @@ import {
   MemoryGraphNode,
   MemoryGraphLink,
 } from '@/types/memoryGraph';
-import { NODE_TYPE_COLORS, MEMORY_CLUSTERS } from '@/lib/memoryGraphAdapter';
+import { NODE_TYPE_COLORS, graphClusters } from '@/lib/memoryGraphAdapter';
 
 interface GraphNodeInspectorProps {
   node: MemoryGraphNode | null;
@@ -44,7 +44,7 @@ export function GraphNodeInspector({
     border: '#F59E0B',
     text: '#0A0A0B',
   };
-  const cluster = MEMORY_CLUSTERS.find((c) => c.id === node.community);
+  const cluster = graphClusters().find((c) => c.id === node.community);
 
   // Find incoming and outgoing links
   const connectedLinks = links.filter((l) => {

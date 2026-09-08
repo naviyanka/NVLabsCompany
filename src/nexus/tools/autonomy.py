@@ -242,7 +242,11 @@ class AutonomyGate:
                 ),
             )
 
-        existing = await self._approvals.get(cid)
+        existing = await (
+            self._approvals.get_async(cid)
+            if hasattr(self._approvals, "get_async")
+            else self._approvals.get(cid)
+        )
         status = getattr(existing, "status", None) if existing is not None else None
 
         if status == "approved":

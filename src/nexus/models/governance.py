@@ -4,7 +4,7 @@ import uuid
 from datetime import timezone, datetime
 from typing import Any, Optional
 
-from sqlalchemy import JSON
+from sqlalchemy import JSON, UniqueConstraint
 from sqlmodel import Column, Field, SQLModel
 
 
@@ -25,8 +25,56 @@ class Approval(SQLModel, table=True):
     decided_by: Optional[str] = Field(default=None, max_length=255)
     decided_at: Optional[datetime] = Field(default=None)
     expires_at: Optional[datetime] = Field(default=None)
+    # How many distinct valid signatures this request needs before it can be
+    # approved. 1 keeps every pre-existing approval type behaving exactly as it
+    # did; high-risk types (large spend, deployment, destructive file writes) are
+    # created with more, so no single compromised operator can wave one through.
+    required_signatures: int = Field(default=1)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+
+
+class ApprovalSignerKey(SQLModel, table=True):
+    """An Ed25519 public key trusted to sign approvals for one company.
+
+    Keys are registered out of band (an operator enrols their key); the private
+    half never reaches the platform, which is the whole point -- a database
+    breach yields no ability to forge an approval.
+    """
+
+    __tablename__ = "approval_signer_keys"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    company_id: uuid.UUID = Field(foreign_key="companies.id", index=True)
+    # Who this key belongs to: an email, user id, or service label. Quorum counts
+    # distinct subjects, so one operator with two keys is still one signature.
+    subject: str = Field(max_length=255, index=True)
+    # Raw Ed25519 public key, base64 (32 bytes decoded).
+    public_key: str = Field(max_length=128)
+    is_active: bool = Field(default=True)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+    revoked_at: Optional[datetime] = Field(default=None)
+
+
+class ApprovalSignature(SQLModel, table=True):
+    """One verified signature over an approval's canonical bytes."""
+
+    __tablename__ = "approval_signatures"
+    # One signature per party per approval. The service checks this too, but the
+    # constraint is what holds when two operators race the same request.
+    __table_args__ = (
+        UniqueConstraint("approval_id", "subject", name="uq_approval_signature_subject"),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    approval_id: uuid.UUID = Field(foreign_key="approvals.id", index=True)
+    signer_key_id: uuid.UUID = Field(foreign_key="approval_signer_keys.id")
+    # Denormalised so quorum counting and audit reading do not need a join, and
+    # so a later key revocation cannot rewrite who signed.
+    subject: str = Field(max_length=255)
+    # Ed25519 signature over canonical_approval_bytes(), base64.
+    signature: str = Field(max_length=128)
+    signed_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
 
 
 class Decision(SQLModel, table=True):

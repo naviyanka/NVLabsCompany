@@ -25,6 +25,10 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
+class AuditPersistenceError(RuntimeError):
+    """The requested audit row could not be persisted."""
+
+
 async def record_audit(
     company_id: uuid.UUID,
     action: str,
@@ -36,6 +40,7 @@ async def record_audit(
     details: dict[str, Any] | None = None,
     ip_address: str | None = None,
     db: Any | None = None,
+    raise_on_error: bool = False,
 ) -> None:
     """Write an audit log entry to the database.
 
@@ -80,8 +85,10 @@ async def record_audit(
                 await _write_with_chain_retry(new_db, entry)
 
         logger.info("Audit: %s [%s] %s", action, actor_type, resource_type or "")
-    except Exception as e:
-        logger.warning("Audit log write failed: %s", e)
+    except Exception as exc:
+        logger.warning("Audit log write failed: %s", exc)
+        if raise_on_error:
+            raise AuditPersistenceError("audit log write failed") from exc
 
 
 async def _chain(session: Any, entry: Any) -> None:

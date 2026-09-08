@@ -11,10 +11,13 @@ import logging
 import os
 import sys
 
+from nexus.config import settings
+
 logger = logging.getLogger(__name__)
 
-TEMPORAL_HOST = os.environ.get("TEMPORAL_HOST", "localhost:7233")
-TEMPORAL_NAMESPACE = os.environ.get("TEMPORAL_NAMESPACE", "default")
+# Through Settings so .env works locally; docker-compose env vars still override.
+TEMPORAL_HOST = settings.temporal_host
+TEMPORAL_NAMESPACE = settings.temporal_namespace
 TASK_QUEUE = "nexus-main"
 
 

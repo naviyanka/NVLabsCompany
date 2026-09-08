@@ -1,8 +1,7 @@
-import { useState, useEffect, useMemo } from 'react';
-import {
-  memoryGraphStore,
-  MEMORY_CLUSTERS,
-} from '@/lib/memoryGraphAdapter';
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import { memoryGraphStore } from '@/lib/memoryGraphAdapter';
+import { fetchMemoryGraph } from '@/api/memoryGraph';
+import { ApiClientError } from '@/api/client';
 import {
   MemoryGraphData,
   MemoryGraphNode,
@@ -28,12 +27,31 @@ import {
   X,
   Search,
   Route,
+  RefreshCw,
 } from 'lucide-react';
+
+/**
+ * A user-facing sentence for a failed graph fetch.
+ *
+ * The API's own detail is deliberately not shown: it is written for an operator
+ * reading logs, and passing it through is how backend internals and host paths
+ * end up on screen. The status is what the reader can act on.
+ */
+function graphErrorMessage(error: unknown): string {
+  if (error instanceof ApiClientError) {
+    if (error.status === 401) return 'Your session has expired. Sign in again to load the graph.';
+    if (error.status === 403) return 'You do not have access to this company’s graph.';
+    if (error.status === 404) return 'This company has no graph yet.';
+  }
+  return 'The graph could not be loaded. Try again in a moment.';
+}
 
 export function MemoryGraph() {
   const [graphData, setGraphData] = useState<MemoryGraphData>(() =>
     memoryGraphStore.getData()
   );
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [layoutMode, setLayoutMode] = useState<LayoutMode>('force');
   const [selectedNode, setSelectedNode] = useState<MemoryGraphNode | null>(null);
 
@@ -84,6 +102,40 @@ export function MemoryGraph() {
     });
     return unsubscribe;
   }, []);
+
+  /**
+   * Load the real graph.
+   *
+   * The response replaces the store outright rather than merging into it: the
+   * backend derives the whole graph on read, so a node or edge it stops
+   * reporting has genuinely gone — a merge would leave that stale edge on the
+   * canvas after a note was edited or deleted. A failed load leaves the previous
+   * graph on screen and reports the failure, rather than blanking the canvas or
+   * quietly substituting fixtures.
+   */
+  const loadGraph = useCallback(async () => {
+    setLoading(true);
+    try {
+      memoryGraphStore.replaceData(await fetchMemoryGraph());
+      setLoadError(null);
+    } catch (error) {
+      setLoadError(graphErrorMessage(error));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadGraph();
+  }, [loadGraph]);
+
+  // A node the last fetch no longer returned must not stay open in the
+  // inspector, describing something the server has stopped reporting.
+  useEffect(() => {
+    setSelectedNode((current) =>
+      current && graphData.nodes.some((node) => node.id === current.id) ? current : null
+    );
+  }, [graphData.nodes]);
 
   // Automatic Shortest Path calculation whenever endpoints or directed mode change
   useEffect(() => {
@@ -248,6 +300,18 @@ export function MemoryGraph() {
             </button>
           )}
 
+          {/* Refresh: the graph is derived on read, so re-fetching after a vault
+              scan or index is how new notes and wikilinks appear. */}
+          <button
+            onClick={loadGraph}
+            disabled={loading}
+            className="flex items-center gap-1 px-2 py-1 bg-[#141416] hover:bg-white/[0.04] text-[#6B6B6E] hover:text-[#F2F1EE] border border-white/[0.08] rounded text-[11px] font-mono transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-default"
+            title="Re-fetch the graph from the server"
+          >
+            <RefreshCw className={`w-3 h-3 ${loading ? 'animate-spin' : ''}`} />
+            <span className="hidden md:inline">{loading ? 'Loading' : 'Refresh'}</span>
+          </button>
+
           {/* Metrics HUD Toggle */}
           <button
             onClick={() => setShowMetricsSummary((prev) => !prev)}
@@ -350,7 +414,7 @@ export function MemoryGraph() {
           </div>
 
           <div className="text-[11px] font-mono text-[#6B6B6E] pt-1 flex items-center justify-between border-t border-white/[0.04]">
-            <span>Active Communities: {MEMORY_CLUSTERS.length} domains</span>
+            <span>Active Communities: {graphData.clusters.length} domains</span>
             <button
               onClick={handlePruneDecayed}
               className="text-[#FFB020] hover:underline cursor-pointer flex items-center gap-1"
@@ -381,6 +445,48 @@ export function MemoryGraph() {
             pathSourceNodeId={pathSourceNodeId}
             pathTargetNodeId={pathTargetNodeId}
           />
+
+          {/* Load failure. Shown over whatever graph is already on screen rather
+              than replacing it, and never replaced by fixtures — a canvas of
+              invented nodes reads as a working graph. */}
+          {loadError && (
+            <div className="absolute top-2.5 left-1/2 -translate-x-1/2 z-30 px-3 py-2 bg-[#101012]/95 border border-red-500/40 rounded-[6px] backdrop-blur-md flex items-center gap-2 text-xs font-mono text-red-300 shadow-xl">
+              <AlertTriangle className="w-3.5 h-3.5 text-red-400 shrink-0" />
+              <span>{loadError}</span>
+              <button
+                onClick={loadGraph}
+                className="ml-1 px-2 py-0.5 border border-red-500/40 rounded text-red-200 hover:bg-red-500/15 cursor-pointer"
+              >
+                Retry
+              </button>
+            </div>
+          )}
+
+          {/* First load, before any graph exists to show. */}
+          {loading && graphData.nodes.length === 0 && (
+            <div className="absolute inset-0 z-20 flex items-center justify-center bg-[#0A0A0B]/60 backdrop-blur-sm pointer-events-none">
+              <div className="flex items-center gap-2 text-xs font-mono text-[#A8A8AB]">
+                <RefreshCw className="w-4 h-4 animate-spin text-[#FFB020]" />
+                <span>Loading graph…</span>
+              </div>
+            </div>
+          )}
+
+          {/* A genuinely empty graph. An empty vault and no memories is a real
+              answer, so it says so rather than showing a blank canvas. */}
+          {!loading && !loadError && graphData.nodes.length === 0 && (
+            <div className="absolute inset-0 z-10 flex items-center justify-center pointer-events-none">
+              <div className="max-w-sm text-center space-y-2 px-6">
+                <Brain className="w-8 h-8 text-[#6B6B6E] mx-auto" />
+                <div className="text-sm font-display text-[#F2F1EE]">No graph yet</div>
+                <p className="text-[11px] font-mono text-[#6B6B6E] leading-relaxed">
+                  This company has no memories and no indexed vault notes. Scan and
+                  index an Obsidian vault, or let the agents record memories, then
+                  refresh.
+                </p>
+              </div>
+            </div>
+          )}
 
           {/* Top Floating Controls Bar (Overlays Canvas seamlessly) */}
           <div className="absolute top-2.5 left-2.5 right-2.5 z-20 pointer-events-auto">

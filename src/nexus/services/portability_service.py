@@ -14,6 +14,7 @@ restored into the database it came from without colliding with the original.
 """
 
 import json
+import logging
 import uuid
 from datetime import datetime
 from typing import Any
@@ -24,6 +25,8 @@ from sqlmodel import SQLModel
 
 import nexus.models  # noqa: F401 -- registers every table on SQLModel.metadata
 from nexus.models._time import utcnow
+
+logger = logging.getLogger(__name__)
 
 ARCHIVE_VERSION = 1
 
@@ -158,6 +161,15 @@ class CompanyPortabilityService:
             if t.name not in covered and not self._has_known_fk(t, covered)
         )
 
+        # Vault-backed note bodies live on a filesystem this walk cannot see, so
+        # they would drop out of the archive silently (ADR 0002 §19). Carried as
+        # a separate top-level section rather than as rows: they are files, and
+        # every path in it is vault-relative — an archive never carries host
+        # filesystem layout.
+        from nexus.obsidian.portability import export_vault_files
+
+        vault = export_vault_files(company_id).to_dict()
+
         return {
             "manifest": {
                 "archive_version": ARCHIVE_VERSION,
@@ -167,8 +179,14 @@ class CompanyPortabilityService:
                 "row_counts": {name: len(rows) for name, rows in tables.items()},
                 "scrubbed": dict(sorted(scrubbed.items())),
                 "skipped_tables": skipped,
+                # Stated explicitly so a partial export cannot be mistaken for a
+                # complete one, which is the failure §19 forbids.
+                "vault_complete": vault["complete"],
+                "vault_file_count": vault["file_count"],
+                "vault_detail": vault["detail"],
             },
             "tables": tables,
+            "vault": vault,
         }
 
     async def _collect_children(
@@ -239,7 +257,11 @@ class CompanyPortabilityService:
     # --- import -------------------------------------------------------------
 
     async def import_company(
-        self, archive: dict[str, Any], *, new_name: str | None = None
+        self,
+        archive: dict[str, Any],
+        *,
+        new_name: str | None = None,
+        restore_vault: bool = False,
     ) -> uuid.UUID:
         """Restore an archive under freshly minted IDs and return the new company ID.
 
@@ -250,6 +272,12 @@ class CompanyPortabilityService:
         Args:
             archive: An archive produced by :meth:`export_company`.
             new_name: Optional replacement name for the imported company.
+            restore_vault: Also write the archive's note files into the new
+                company's vault. Off by default, deliberately: importing rows is
+                a database operation, and every existing caller would otherwise
+                gain a filesystem side effect it never asked for. When it is off
+                and the archive carries notes, the omission is logged rather than
+                passed over in silence (ADR 0002 §19).
 
         Returns:
             The ID of the newly created company.
@@ -289,6 +317,35 @@ class CompanyPortabilityService:
             await self._db.execute(insert(table), remapped)
 
         await self._db.commit()
+
+        from nexus.obsidian.portability import VaultBundle, import_vault_files
+
+        bundle = VaultBundle.from_dict(archive.get("vault"))  # type: ignore[arg-type]
+        if bundle.files and not restore_vault:
+            # Not silent: the rows landed and the note bodies did not, which is
+            # exactly the partial state §19 refuses to leave undeclared.
+            logger.warning(
+                "Imported company %s without its %d vault note(s); pass "
+                "restore_vault=True to write them into the destination vault",
+                new_company_id,
+                len(bundle.files),
+            )
+        elif bundle.files:
+            # Committed first: the files are keyed by the new company's vault
+            # root, which only exists once the company row does. A file write
+            # that fails after this leaves the rows intact and the note missing,
+            # which the next scan reports as a deregistered document rather than
+            # as corruption.
+            outcomes = import_vault_files(new_company_id, bundle)
+            refused = {path: why for path, why in outcomes.items() if why.startswith("refused")}
+            if refused:
+                logger.warning(
+                    "Refused %d vault path(s) while importing company %s: %s",
+                    len(refused),
+                    new_company_id,
+                    sorted(refused.values()),
+                )
+
         return new_company_id
 
     @staticmethod

@@ -415,11 +415,11 @@ class DockerSandbox:
     async def _run_fallback(
         self, code: str, language: str
     ) -> dict[str, Any]:
-        """Execute code using the fallback IsolatedSandbox.
+        """Report that Docker was unavailable, without executing the code.
 
-        Note: When Docker is unavailable, code is NOT actually executed.
-        The result is a synthetic fallback indicating Docker was not
-        available for real execution.
+        Nothing runs here: a non-zero exit_code keeps callers from reading a
+        skipped execution as a passing one. For real execution without Docker,
+        use `nexus.execution.sandbox.get_backend()`.
 
         Args:
             code: The code to execute.
@@ -444,8 +444,8 @@ class DockerSandbox:
             )
             return {
                 "stdout": str(result.get("result", "")),
-                "stderr": "",
-                "exit_code": 0,
+                "stderr": "Docker unavailable: code was not executed.",
+                "exit_code": -1,
                 "timed_out": False,
                 "docker_used": False,
                 "is_fallback": True,

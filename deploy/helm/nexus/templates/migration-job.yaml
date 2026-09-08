@@ -1,0 +1,41 @@
+{{- if .Values.migration.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "nexus.fullname" . }}-migration-{{ .Release.Revision }}
+  labels:
+    {{- include "nexus.labels" . | nindent 4 }}
+    app.kubernetes.io/component: migration
+  annotations:
+    "helm.sh/hook": {{ .Values.migration.hook | default "pre-install,pre-upgrade" | quote }}
+    "helm.sh/hook-delete-policy": {{ .Values.migration.hookDeletePolicy | default "before-hook-creation,hook-succeeded" | quote }}
+    "helm.sh/hook-weight": "-5"
+spec:
+  backoffLimit: 3
+  activeDeadlineSeconds: 300
+  template:
+    metadata:
+      name: {{ include "nexus.fullname" . }}-migration
+      labels:
+        {{- include "nexus.labels" . | nindent 8 }}
+        app.kubernetes.io/component: migration
+    spec:
+      restartPolicy: Never
+      serviceAccountName: {{ include "nexus.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: alembic-upgrade
+          image: "{{ .Values.api.image.repository }}:{{ .Values.api.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.api.image.pullPolicy }}
+          command: ["alembic", "upgrade", "head"]
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "nexus.fullname" . }}-config
+            - secretRef:
+                name: {{ include "nexus.fullname" . }}-secrets
+          resources:
+            {{- toYaml .Values.migration.resources | nindent 12 }}
+{{- end }}

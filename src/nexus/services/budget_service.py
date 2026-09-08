@@ -5,10 +5,15 @@ from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
 from typing import Any
 
-from sqlalchemy import select, func
+from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from nexus.models.budget import BudgetPolicy, CostEvent
+
+# How long a hold counts against the budget before it stops being trusted. Long
+# enough for the slowest streaming provider call, short enough that a killed
+# worker's hold clears without an operator.
+RESERVATION_TTL_SECONDS = 900
 
 
 @dataclass
@@ -181,6 +186,130 @@ class BudgetService:
         await self._db.flush()
         return event
 
+    async def reserve(
+        self,
+        company_id: uuid.UUID,
+        estimate_cents: int,
+        scope_type: str = "company",
+        scope_id: uuid.UUID | None = None,
+        agent_id: uuid.UUID | None = None,
+        provider: str = "unknown",
+        model: str | None = None,
+        ttl_seconds: int = RESERVATION_TTL_SECONDS,
+    ) -> tuple[bool, CostEvent | None, BudgetCheckResult]:
+        """Phase one of a two-phase spend: check and hold in one transaction.
+
+        Checking and then spending as two separate statements is what lets two
+        workers both pass a check that only one of them fits under. Writing the
+        hold in the same transaction as the check closes that window: the second
+        worker's check sums the first worker's hold and refuses.
+
+        Args:
+            company_id: The company being charged.
+            estimate_cents: Estimated cost to hold. A floor is fine; ``commit``
+                reconciles to the real figure.
+            scope_type: Budget scope to check against.
+            scope_id: Scope identifier. Defaults to ``company_id``.
+            agent_id: Optional agent to attribute the spend to.
+            provider: Provider name recorded on the ledger row.
+            model: Optional model identifier.
+            ttl_seconds: How long the hold counts before expiring, so a worker
+                that dies mid-call cannot pin the budget.
+
+        Returns:
+            ``(allowed, reservation, check)``. When denied, ``reservation`` is
+            None and no hold is written.
+        """
+        target_id = scope_id or company_id
+        check = await self.check_budget(
+            scope_type=scope_type,
+            scope_id=target_id,
+            amount=estimate_cents,
+            company_id=company_id,
+        )
+        if not check.allowed:
+            return False, None, check
+
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        reservation = CostEvent(
+            company_id=company_id,
+            agent_id=agent_id,
+            provider=provider,
+            model=model,
+            cost_cents=max(0, estimate_cents),
+            status="reserved",
+            expires_at=now + timedelta(seconds=ttl_seconds),
+            occurred_at=now,
+        )
+        self._db.add(reservation)
+        # Commit rather than flush: a hold only protects concurrent workers once
+        # it is visible to their transactions, and the provider call that follows
+        # happens outside this session.
+        await self._db.commit()
+        return True, reservation, check
+
+    async def commit_reservation(
+        self,
+        reservation_id: uuid.UUID,
+        cost_cents: int,
+        input_tokens: int = 0,
+        output_tokens: int = 0,
+        model: str | None = None,
+    ) -> bool:
+        """Phase two: reconcile a hold to the exact spend.
+
+        Addressed by id rather than by instance because the provider call
+        happens between the two phases, outside the session that took the hold.
+
+        Args:
+            reservation_id: The id returned by :meth:`reserve`.
+            cost_cents: Actual cost in cents.
+            input_tokens: Actual input tokens.
+            output_tokens: Actual output tokens.
+            model: Model actually used, when it differs from the estimate.
+
+        Returns:
+            True when a reserved row was settled, False when none was found
+            (already settled, or released).
+        """
+        values: dict[str, Any] = {
+            "cost_cents": max(0, cost_cents),
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "status": "committed",
+            "expires_at": None,
+        }
+        if model:
+            values["model"] = model
+        result = await self._db.execute(
+            update(CostEvent)
+            .where(CostEvent.id == reservation_id, CostEvent.status == "reserved")
+            .values(**values)
+        )
+        await self._db.commit()
+        return bool(result.rowcount)
+
+    async def release_reservation(self, reservation_id: uuid.UUID) -> bool:
+        """Drop a hold for a call that never billed (provider error, refusal).
+
+        Leaving the hold to expire would work but keeps phantom spend on the
+        books for the whole TTL, which is what makes a budget look exhausted
+        when it is not.
+
+        Args:
+            reservation_id: The id returned by :meth:`reserve`.
+
+        Returns:
+            True when a reserved row was released, False when none was found.
+        """
+        result = await self._db.execute(
+            update(CostEvent)
+            .where(CostEvent.id == reservation_id, CostEvent.status == "reserved")
+            .values(status="released", cost_cents=0, expires_at=None)
+        )
+        await self._db.commit()
+        return bool(result.rowcount)
+
     async def get_usage(
         self,
         scope_type: str,
@@ -263,6 +392,21 @@ class BudgetService:
         ).where(
             filter_col == scope_id,
             CostEvent.occurred_at >= window_start,
+            # Live holds count against the budget the same as settled spend --
+            # that is what stops two workers from both passing a check that only
+            # one of them fits under. Released holds never count, and an expired
+            # one stops counting on its own so a worker that died mid-call does
+            # not pin the budget forever.
+            or_(
+                CostEvent.status == "committed",
+                and_(
+                    CostEvent.status == "reserved",
+                    or_(
+                        CostEvent.expires_at.is_(None),
+                        CostEvent.expires_at > now.replace(tzinfo=None),
+                    ),
+                ),
+            ),
         )
 
         result = await self._db.execute(stmt)

@@ -184,3 +184,129 @@ async def test_validate_config_sqlite_url_accepted(
             if r.levelno >= logging.WARNING and "DATABASE" in r.getMessage()
         ]
         assert len(db_warnings) == 0
+
+
+class TestSchemaCurrency:
+    """Startup must not silently accept a stale SQLite dev schema.
+
+    The lifespan runs ``create_all`` for SQLite, which creates missing tables but
+    never ALTERs an existing one. A developer who pulls a migration adding a
+    column to a table that already exists therefore gets a database that looks
+    healthy and fails only when that column is read.
+    """
+
+    @staticmethod
+    def _dev_db(tmp_path, revision):
+        """A SQLite database at model shape, optionally stamped at ``revision``."""
+        import sqlite3
+
+        from sqlalchemy import create_engine
+        from sqlmodel import SQLModel
+
+        import nexus.models  # noqa: F401 - register every model
+
+        path = tmp_path / "dev.db"
+        SQLModel.metadata.create_all(create_engine(f"sqlite:///{path}"))
+        con = sqlite3.connect(path)
+        con.execute("CREATE TABLE IF NOT EXISTS alembic_version (version_num VARCHAR(32))")
+        if revision is not None:
+            con.execute("INSERT INTO alembic_version (version_num) VALUES (?)", (revision,))
+        else:
+            con.execute("DROP TABLE alembic_version")
+        con.commit()
+        con.close()
+        return path
+
+    @staticmethod
+    def _head():
+        from pathlib import Path
+
+        from alembic.config import Config
+        from alembic.script import ScriptDirectory
+
+        root = Path(__file__).resolve().parent.parent
+        return ScriptDirectory.from_config(Config(str(root / "alembic.ini"))).get_heads()[0]
+
+    @pytest.mark.asyncio
+    async def test_warns_when_dev_db_is_behind_head(
+        self, tmp_path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """A database stamped at an older revision is called out by name."""
+        path = self._dev_db(tmp_path, "c2f9a4d81b70")
+
+        with patch("nexus.config_validator.settings") as mock_settings:
+            mock_settings.database_url = f"sqlite+aiosqlite:///{path.as_posix()}"
+            with patch("nexus.database.engine", _engine_for(path)):
+                with caplog.at_level(logging.WARNING):
+                    from nexus.config_validator import _check_schema_currency
+                    await _check_schema_currency()
+
+        assert "c2f9a4d81b70" in caplog.text
+        assert "alembic upgrade head" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_warns_when_dev_db_has_no_migration_history(
+        self, tmp_path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """A create_all-only database has unknown history, which is worth saying."""
+        path = self._dev_db(tmp_path, None)
+
+        with patch("nexus.config_validator.settings") as mock_settings:
+            mock_settings.database_url = f"sqlite+aiosqlite:///{path.as_posix()}"
+            with patch("nexus.database.engine", _engine_for(path)):
+                with caplog.at_level(logging.WARNING):
+                    from nexus.config_validator import _check_schema_currency
+                    await _check_schema_currency()
+
+        assert "no alembic_version table" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_silent_when_dev_db_is_at_head(
+        self, tmp_path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """A current database must not nag on every startup."""
+        path = self._dev_db(tmp_path, self._head())
+
+        with patch("nexus.config_validator.settings") as mock_settings:
+            mock_settings.database_url = f"sqlite+aiosqlite:///{path.as_posix()}"
+            with patch("nexus.database.engine", _engine_for(path)):
+                with caplog.at_level(logging.WARNING):
+                    from nexus.config_validator import _check_schema_currency
+                    await _check_schema_currency()
+
+        assert "Alembic revision" not in caplog.text
+        assert "no alembic_version" not in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_postgres_is_exempt(self, caplog: pytest.LogCaptureFixture) -> None:
+        """PostgreSQL is migration-managed and has no create_all path to drift from."""
+        with patch("nexus.config_validator.settings") as mock_settings:
+            mock_settings.database_url = "postgresql+asyncpg://user:pass@localhost:5432/db"
+            with caplog.at_level(logging.WARNING):
+                from nexus.config_validator import _check_schema_currency
+                await _check_schema_currency()
+
+        assert caplog.text == ""
+
+    @pytest.mark.asyncio
+    async def test_never_raises_when_alembic_is_unreadable(
+        self, tmp_path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """The check is advisory: a broken lookup must not block startup."""
+        path = self._dev_db(tmp_path, "c2f9a4d81b70")
+
+        with patch("nexus.config_validator.settings") as mock_settings:
+            mock_settings.database_url = f"sqlite+aiosqlite:///{path.as_posix()}"
+            with patch(
+                "alembic.script.ScriptDirectory.from_config",
+                side_effect=RuntimeError("alembic.ini missing"),
+            ):
+                from nexus.config_validator import _check_schema_currency
+                await _check_schema_currency()  # must not raise
+
+
+def _engine_for(path):
+    """An async engine bound to ``path``, for patching nexus.database.engine."""
+    from sqlalchemy.ext.asyncio import create_async_engine
+
+    return create_async_engine(f"sqlite+aiosqlite:///{path.as_posix()}")

@@ -61,3 +61,13 @@ temp_repos/
 
 # Tool cache, not project state
 graphify-out/cache/
+
+# Local Obsidian vault (ADR 0002 §18). The vault is a SEPARATE Git repository:
+# agent- and human-authored knowledge must not land in application commits, and
+# application history must not clutter knowledge diffs. Leading slash so only
+# the vault directory at the repo root is ignored -- src/nexus/obsidian/, the
+# ADR, and tests/test_obsidian_vault.py are all unaffected.
+/NVLabsCompany/
+# Any vault a developer keeps inside the working tree by convention.
+/vaults/
+.obsidian/

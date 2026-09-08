@@ -463,3 +463,26 @@ class TestRAGPipelineWithEmbeddings:
         assert records == []
         # embed_batch should not be called for empty list
         mock_provider.embed_batch.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_index_chunks_does_not_commit(self, mock_db, company_id, page_id):
+        """index_chunks flushes inside the caller's transaction, never commits."""
+        rag = RAGPipeline(mock_db)
+
+        await rag.index_chunks(company_id, page_id, ["a", "b"])
+
+        mock_db.flush.assert_awaited_once()
+        mock_db.commit.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_reindex_page_deletes_then_inserts(self, mock_db, company_id, page_id):
+        """reindex_page drops stale chunks and adds the new ones atomically."""
+        rag = RAGPipeline(mock_db)
+
+        records = await rag.reindex_page(company_id, page_id, ["new one"])
+
+        # The DELETE runs before any INSERT is flushed, in one transaction.
+        assert mock_db.execute.await_count == 1
+        assert len(records) == 1
+        assert records[0].content == "new one"
+        mock_db.commit.assert_not_awaited()

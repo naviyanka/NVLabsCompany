@@ -302,6 +302,30 @@ class HermesAdapter(BaseAdapter):
             session.metadata["tool_calls_made"] = (
                 session.metadata.get("tool_calls_made", 0) + len(tool_calls)
             )
+
+            # Save intermediate progress checkpoint after successful tool execution round
+            checkpoint_state = {
+                "agent_context": {
+                    "agent_id": str(session.agent_id),
+                    "model": session.metadata.get("model", ""),
+                    "backend": backend,
+                    "tool_calls_made": session.metadata.get("tool_calls_made", 0),
+                },
+                "completed_steps": list(range(_round + 1)),
+                "intermediate_results": tool_results,
+                "metadata": {
+                    "round": _round,
+                    "tokens_used": total_input_tokens + total_output_tokens,
+                    "cost_cents": total_cost_cents,
+                },
+            }
+            await self.record_step_checkpoint(
+                session=session,
+                task_id=task_id,
+                step_index=_round,
+                state=checkpoint_state,
+                db_session=session.config.get("db_session"),
+            )
         else:
             # Exceeded max rounds
             final_output = response_text  # type: ignore[possibly-undefined]

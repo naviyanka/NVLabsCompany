@@ -70,11 +70,27 @@ def make_agent(budget=10_000, spent=0):
     )
 
 
+def _empty_result():
+    """A result row-less enough for a query this test does not care about."""
+    res = MagicMock()
+    res.scalar_one_or_none.return_value = None
+    scalars = MagicMock()
+    scalars.all.return_value = []
+    res.scalars.return_value = scalars
+    return res
+
+
 def db_returning(*rows):
-    """A mock session whose execute() yields the given rows in order."""
+    """A mock session whose execute() yields the given rows in order.
+
+    Queries beyond the supplied rows get an empty result rather than raising:
+    the code under test also loads execution checkpoints, and a test about
+    completion reasons should not have to enumerate those.
+    """
     db = AsyncMock()
     db.add = MagicMock()
     db.flush = AsyncMock()
+    db.commit = AsyncMock()
     results = []
     for row in rows:
         res = MagicMock()
@@ -83,7 +99,13 @@ def db_returning(*rows):
         scalars.all.return_value = row if isinstance(row, list) else [row]
         res.scalars.return_value = scalars
         results.append(res)
-    db.execute = AsyncMock(side_effect=results)
+
+    pending = iter(results)
+
+    async def execute(*_args, **_kwargs):
+        return next(pending, _empty_result())
+
+    db.execute = AsyncMock(side_effect=execute)
     return db
 
 

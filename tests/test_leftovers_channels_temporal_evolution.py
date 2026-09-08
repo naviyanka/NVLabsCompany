@@ -163,19 +163,44 @@ async def test_discord_channel_uses_bot_rest_api(monkeypatch):
 
 
 def test_temporal_disabled_by_default():
-    from nexus.temporal.client import is_temporal_enabled, start_goal_workflow
+    """Temporal stays off unless it is switched on deliberately.
 
-    original = os.environ.get("USE_TEMPORAL")
-    os.environ.pop("USE_TEMPORAL", None)
+    The flag is a Settings field rather than a raw ``os.environ`` read, so a
+    value in ``.env`` reaches it (it did not before — pydantic-settings loads
+    ``.env`` into Settings without exporting to the process environment). This
+    patches Settings for the same reason it used to clear the environment: to
+    assert the default, independently of whatever the developer's own ``.env``
+    happens to say.
+    """
+    from unittest.mock import patch
+
+    import nexus.temporal.client as tc
+    from nexus.config import Settings
+
+    assert Settings.model_fields["use_temporal"].default is False
+
+    original_cache = tc._enabled
+    tc._enabled = None
     try:
-        # Reset cached flag
-        import nexus.temporal.client as tc
-
-        tc._enabled = None
-        assert is_temporal_enabled() is False
+        with patch.object(tc.settings, "use_temporal", False):
+            assert tc.is_temporal_enabled() is False
     finally:
-        if original is not None:
-            os.environ["USE_TEMPORAL"] = original
+        tc._enabled = original_cache
+
+
+def test_temporal_enabled_when_the_setting_is_on():
+    """The flag actually turns on, through the project's configuration mechanism."""
+    from unittest.mock import patch
+
+    import nexus.temporal.client as tc
+
+    original_cache = tc._enabled
+    tc._enabled = None
+    try:
+        with patch.object(tc.settings, "use_temporal", True):
+            assert tc.is_temporal_enabled() is True
+    finally:
+        tc._enabled = original_cache
 
 
 def test_temporal_degradation_entry_present():

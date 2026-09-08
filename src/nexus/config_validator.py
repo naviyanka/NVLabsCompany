@@ -7,6 +7,7 @@ startup, only logs warnings to alert operators of misconfigurations.
 
 import logging
 import os
+from pathlib import Path
 from urllib.parse import urlparse
 
 from nexus.config import settings
@@ -24,6 +25,7 @@ async def validate_config() -> None:
       disabled auth, insecure session cookies)
     - Redis connectivity (non-blocking, logs warning on failure)
     - Data directory writability (if configured via environment)
+    - Schema currency against the Alembic head (SQLite dev databases)
 
     This function never raises exceptions or blocks startup. All issues
     are reported as log warnings.
@@ -33,7 +35,66 @@ async def validate_config() -> None:
     _check_auth_settings()
     await _check_redis_connectivity()
     _check_data_directory()
+    await _check_schema_currency()
     logger.info("Configuration validation complete")
+
+
+async def _check_schema_currency() -> None:
+    """Warn when a SQLite dev database is behind the repository's migrations.
+
+    The lifespan runs ``SQLModel.metadata.create_all`` for SQLite, which creates
+    tables that do not exist yet but never ALTERs one that does. So a developer
+    who pulls a migration adding a column to an existing table gets a database
+    that looks fine and fails only when that column is read — the exact silent
+    drift that had ``obsidian_documents`` missing its retry columns while the
+    server reported healthy.
+
+    PostgreSQL is exempt: it is managed through ``alembic upgrade head`` and has
+    no create_all shortcut to drift from.
+
+    Logs the resolution rather than fixing it, because a migration is a decision
+    for a developer to make rather than something startup should do behind their
+    back.
+    """
+    if not settings.database_url.startswith("sqlite"):
+        return
+
+    try:
+        from alembic.config import Config
+        from alembic.script import ScriptDirectory
+        from sqlalchemy import inspect, text
+
+        from nexus.database import engine
+
+        root = Path(__file__).resolve().parent.parent.parent
+        script = ScriptDirectory.from_config(Config(str(root / "alembic.ini")))
+        heads = set(script.get_heads())
+
+        async with engine.connect() as conn:
+            names = await conn.run_sync(lambda c: inspect(c).get_table_names())
+            if "alembic_version" not in names:
+                # A create_all-built database with no migration history at all.
+                if names:
+                    logger.warning(
+                        "Development database has no alembic_version table, so its "
+                        "schema history is unknown. Run: alembic stamp head (if the "
+                        "schema is current) or alembic upgrade head."
+                    )
+                return
+            result = await conn.execute(text("SELECT version_num FROM alembic_version"))
+            current = {row[0] for row in result}
+
+        if current and current != heads:
+            logger.warning(
+                "Development database is at Alembic revision(s) %s but the "
+                "repository head is %s. create_all does not add columns to "
+                "existing tables, so the schema may be silently stale. Run: "
+                "alembic upgrade head",
+                ", ".join(sorted(current)) or "none",
+                ", ".join(sorted(heads)),
+            )
+    except Exception as exc:  # noqa: BLE001 - this check must never block startup
+        logger.debug("Schema currency check skipped: %s", exc)
 
 
 def _check_auth_settings() -> None:

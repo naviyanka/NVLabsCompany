@@ -1,26 +1,36 @@
-"""Evolution Sandbox - isolated testing environment for proposals.
+"""Evolution Sandbox - isolated execution environment for proposals.
 
-Provides a logical sandbox (in-memory state tracking) for evaluating
-proposals against test data before promoting them to production.
-Resource limits ensure sandboxes do not exceed cost or time budgets.
+Proposal code runs through `nexus.execution.sandbox` (E2B, Judge0, or a
+local subprocess behind `allow_unsafe_local_execution`) - never on the host
+API process. This module only owns the per-proposal bookkeeping: which
+sandbox belongs to which proposal, its duration budget, and its results.
 """
 
 import uuid
 from datetime import datetime, timezone
 from typing import Any
 
+from nexus.evolution.isolated_sandbox import ResourceLimitExceeded
+from nexus.execution.sandbox import SandboxBackend, get_backend
+
 
 class EvolutionSandbox:
-    """Manages logical sandboxes for evaluating evolution proposals.
+    """Runs evolution proposals inside a real isolated sandbox backend.
 
-    Sandboxes are in-memory state containers that track configuration,
-    resource limits, and benchmark results. They provide isolation for
-    testing proposals without affecting production systems.
+    Each sandbox tracks its proposal, resource budget, and benchmark
+    results; the actual code execution is delegated to a
+    `nexus.execution.sandbox.SandboxBackend`.
     """
 
-    def __init__(self) -> None:
-        """Initialize the sandbox manager."""
+    def __init__(self, backend: SandboxBackend | None = None) -> None:
+        """Initialize the sandbox manager.
+
+        Args:
+            backend: Execution backend. Defaults to the configured one
+                (`settings.sandbox_backend`) resolved at benchmark time.
+        """
         self._sandboxes: dict[str, dict[str, Any]] = {}
+        self._backend = backend
 
     def create_sandbox(
         self,
@@ -62,6 +72,10 @@ class EvolutionSandbox:
 
         Returns:
             List of result dicts with test_case_id, score, and duration_ms.
+
+        Raises:
+            ValueError: Sandbox missing/inactive, or a test case has no `code`.
+            ResourceLimitExceeded: The sandbox duration budget was spent.
         """
         sandbox_key = str(sandbox_id)
         if sandbox_key not in self._sandboxes:
@@ -71,19 +85,53 @@ class EvolutionSandbox:
         if sandbox["status"] != "active":
             raise ValueError(f"Sandbox {sandbox_id} is not active (status: {sandbox['status']})")
 
+        backend = self._backend or get_backend()
+        budget = sandbox["max_duration_seconds"]
+        language = sandbox["config"].get("language", "python")
+        spent = 0.0
+
         results: list[dict[str, Any]] = []
         for test_case in test_cases:
-            # Simulate benchmark execution
-            test_case_id = test_case.get("id", str(uuid.uuid4()))
-            expected_score = test_case.get("expected_score", 0.8)
-            expected_duration = test_case.get("expected_duration_ms", 100.0)
+            test_case_id = str(test_case.get("id", uuid.uuid4()))
+            code = test_case.get("code")
+            if not code:
+                raise ValueError(
+                    f"Test case {test_case_id} has no 'code' to execute; "
+                    "evolution benchmarks run real code in the sandbox."
+                )
 
-            result = {
-                "test_case_id": str(test_case_id),
-                "score": expected_score,
-                "duration_ms": expected_duration,
-            }
-            results.append(result)
+            execution = await backend.run(
+                code,
+                language=test_case.get("language", language),
+                timeout=max(1, int(budget - spent)),
+                workspace=test_case.get("workspace"),
+                run_id=sandbox_key,
+            )
+            spent += execution.duration_ms / 1000.0
+
+            expected = test_case.get("expected_output")
+            passed = execution.ok and (
+                expected is None or str(expected).strip() in execution.stdout
+            )
+            results.append(
+                {
+                    "test_case_id": test_case_id,
+                    "score": 1.0 if passed else 0.0,
+                    "duration_ms": float(execution.duration_ms),
+                    "stdout": execution.stdout,
+                    "stderr": execution.stderr,
+                    "exit_code": execution.exit_code,
+                    "timed_out": execution.timed_out,
+                    "backend": execution.backend.value,
+                }
+            )
+
+            if spent > budget:
+                sandbox["status"] = "aborted"
+                sandbox["results"] = results
+                raise ResourceLimitExceeded(
+                    resource="duration", limit=budget, actual=spent
+                )
 
         sandbox["results"] = results
         return results

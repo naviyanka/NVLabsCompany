@@ -11,6 +11,12 @@ from sqlmodel import Column, Field, SQLModel
 # OpenAI text-embedding-3-small width; the JSON variant is the SQLite dev fallback.
 EMBEDDING_DIM = 1536
 
+# KnowledgeChunk.source_type values (ADR 0002 §12). A chunk is derived data whose
+# parent lives in one of two tables, so the parent's table is named explicitly
+# rather than left to be inferred from which lookup happens to succeed.
+SOURCE_TYPE_KNOWLEDGE_PAGE = "knowledge_page"
+SOURCE_TYPE_OBSIDIAN_DOCUMENT = "obsidian_document"
+
 
 class KnowledgePage(SQLModel, table=True):
     """A versioned knowledge page in the company knowledge base.
@@ -50,7 +56,16 @@ class KnowledgeChunk(SQLModel, table=True):
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     company_id: uuid.UUID = Field(foreign_key="companies.id", index=True)
-    page_id: uuid.UUID = Field(foreign_key="knowledge_pages.id", index=True)
+    # Explicit polymorphic parent (ADR 0002 §12). No database-level FK, because
+    # one column cannot reference two tables; migration c2f9a4d81b70 dropped the
+    # original single-target constraint and d8e3b6c04a90 made the pair explicit.
+    # source_type names the parent table, so a chunk is never resolved by trying
+    # one lookup and falling back to the other.
+    source_type: str = Field(
+        default=SOURCE_TYPE_KNOWLEDGE_PAGE, max_length=32, index=True
+    )
+    # knowledge_pages.id or obsidian_documents.nexus_id, per source_type.
+    source_id: uuid.UUID = Field(index=True)
     content: str
     chunk_index: int = Field(default=0)
     chunk_metadata: Optional[dict[str, Any]] = Field(default=None, sa_column=Column(JSON, name="metadata"))

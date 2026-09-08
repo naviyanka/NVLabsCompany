@@ -37,11 +37,20 @@ class CircuitBreakerState:
     cooldown_seconds: int = 300
 
 
+def _trip_key(agent_id: uuid.UUID) -> str:
+    """The Redis key naming one agent's open circuit."""
+    return f"nexus:breaker:open:{agent_id}"
+
+
 class PersistentCircuitBreaker:
     """Database-backed circuit breaker that survives restarts.
 
-    Stores circuit breaker state in the `circuit_breaker_records` table.
-    Mirrors the in-memory CircuitBreaker pattern but persists state to DB.
+    Stores circuit breaker state in the `circuit_breaker_records` table, and
+    mirrors an open circuit into Redis when Redis is configured. The database is
+    the record of truth; the Redis key is a containment fast path, so a trip on
+    one worker blocks the next call on every other replica without waiting for a
+    database round trip. Without Redis the behaviour is unchanged -- every check
+    reads the database.
 
     Usage:
         cb = PersistentCircuitBreaker(async_session_factory)
@@ -68,6 +77,46 @@ class PersistentCircuitBreaker:
         self._session_factory = session_factory
         self._failure_threshold = failure_threshold
         self._cooldown_seconds = cooldown_seconds
+
+    async def _propagate_trip(self, agent_id: uuid.UUID, cooldown_seconds: int) -> None:
+        """Publish an open circuit to every replica via Redis.
+
+        The key carries the cooldown as its TTL, so the fast path expires exactly
+        when the circuit would auto-close anyway and cannot outlive the database
+        state it mirrors.
+
+        Args:
+            agent_id: The agent whose circuit opened.
+            cooldown_seconds: How long the circuit stays open.
+        """
+        try:
+            from nexus.runtime.redis_utils import get_redis
+
+            redis = await get_redis()
+            if redis is None:
+                return
+            await redis.set(_trip_key(agent_id), "1", ex=max(1, cooldown_seconds))
+        except Exception as exc:  # noqa: BLE001 - the DB state still holds
+            logger.warning("Breaker trip propagation failed for %s: %s", agent_id, exc)
+
+    async def _clear_trip(self, agent_id: uuid.UUID) -> None:
+        """Drop the Redis fast-path key when a circuit closes.
+
+        A stale key would block a healthy agent for the rest of its TTL, so this
+        runs on success, manual reset, and cooldown expiry.
+
+        Args:
+            agent_id: The agent whose circuit closed.
+        """
+        try:
+            from nexus.runtime.redis_utils import get_redis
+
+            redis = await get_redis()
+            if redis is None:
+                return
+            await redis.delete(_trip_key(agent_id))
+        except Exception as exc:  # noqa: BLE001 - the DB state still holds
+            logger.warning("Breaker trip clear failed for %s: %s", agent_id, exc)
 
     async def record_failure(self, agent_id: uuid.UUID) -> bool:
         """Record a failure for an agent and persist to DB.
@@ -143,6 +192,12 @@ class PersistentCircuitBreaker:
                 agent_id,
                 record.consecutive_failures,
             )
+            try:
+                from nexus.observability.metrics import record_circuit_breaker_trip
+                record_circuit_breaker_trip(service=str(agent_id))
+            except Exception:
+                pass
+            await self._propagate_trip(agent_id, record.cooldown_seconds)
 
         return just_opened
 
@@ -175,6 +230,8 @@ class PersistentCircuitBreaker:
             record.updated_at = now
             await session.commit()
 
+        await self._clear_trip(agent_id)
+
         logger.debug(
             "Circuit breaker success recorded for agent %s (reset to closed)",
             agent_id,
@@ -197,6 +254,19 @@ class PersistentCircuitBreaker:
 
         now = datetime.now(timezone.utc)
 
+        # Containment fast path: a trip on any replica lands here first, so this
+        # worker refuses the next call without a database round trip. Only a
+        # positive answer short-circuits -- a missing key means "ask the database",
+        # never "the circuit is closed", so losing Redis cannot open a circuit.
+        try:
+            from nexus.runtime.redis_utils import get_redis
+
+            redis = await get_redis()
+            if redis is not None and await redis.exists(_trip_key(agent_id)):
+                return True
+        except Exception as exc:  # noqa: BLE001 - fall through to the DB
+            logger.warning("Breaker fast-path check failed for %s: %s", agent_id, exc)
+
         async with self._session_factory() as session:
             stmt = select(CircuitBreakerRecord).where(
                 CircuitBreakerRecord.agent_id == agent_id,
@@ -218,6 +288,7 @@ class PersistentCircuitBreaker:
                     record.consecutive_failures = 0
                     record.updated_at = now
                     await session.commit()
+                    await self._clear_trip(agent_id)
                     logger.info(
                         "Circuit breaker auto-reset for agent %s "
                         "(cooldown of %ds elapsed)",
@@ -255,6 +326,8 @@ class PersistentCircuitBreaker:
             record.opened_at = None
             record.updated_at = now
             await session.commit()
+
+        await self._clear_trip(agent_id)
 
         logger.info("Circuit breaker manually RESET for agent %s", agent_id)
 
