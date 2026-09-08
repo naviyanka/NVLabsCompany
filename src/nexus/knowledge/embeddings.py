@@ -111,6 +111,54 @@ class OllamaEmbeddingProvider:
             return []
         res = await self.embed(texts)
         return res if isinstance(res, list) and (not res or isinstance(res[0], list)) else [res]  # type: ignore
+class VoyageEmbeddingProvider:
+    """Embedding provider using Voyage AI API."""
+
+    def __init__(
+        self,
+        model: str = "voyage-3",
+        api_key: str | None = None,
+    ) -> None:
+        self._model = model
+        self._api_key = api_key if api_key is not None else os.environ.get("VOYAGE_API_KEY", "")
+        self._dimension = 1024
+
+    @property
+    def dimension(self) -> int:
+        return self._dimension
+
+    async def embed(self, text_or_texts: str | list[str]) -> list[float] | list[list[float]]:
+        if not self._api_key:
+            raise ValueError("VOYAGE_API_KEY is not configured — cannot generate embeddings")
+
+        is_single = isinstance(text_or_texts, str)
+        texts = [text_or_texts] if is_single else text_or_texts
+        if not texts:
+            return []
+
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                "https://api.voyageai.com/v1/embeddings",
+                json={"model": self._model, "input": texts},
+                headers={
+                    "Authorization": f"Bearer {self._api_key}",
+                    "Content-Type": "application/json",
+                },
+            )
+            if response.status_code != 200:
+                raise RuntimeError(f"Voyage embeddings API error {response.status_code}: {response.text[:200]}")
+
+            data = response.json()
+            sorted_items = sorted(data["data"], key=lambda x: x.get("index", 0))
+            embeddings = [item["embedding"] for item in sorted_items]
+            return embeddings[0] if is_single else embeddings
+
+    async def embed_batch(self, texts: list[str]) -> list[list[float]]:
+        if not texts:
+            return []
+        res = await self.embed(texts)
+        return res if isinstance(res, list) and (not res or isinstance(res[0], list)) else [res]  # type: ignore
+
 
 
 class NullEmbeddingProvider:
@@ -138,6 +186,9 @@ def get_embedding_provider() -> EmbeddingProvider | None:
     if provider_type == "openai":
         model = os.environ.get("OPENAI_EMBED_MODEL", "text-embedding-3-small")
         return OpenAIEmbeddingProvider(model=model)
+    elif provider_type == "voyage":
+        model = os.environ.get("VOYAGE_EMBED_MODEL", "voyage-3")
+        return VoyageEmbeddingProvider(model=model)
     elif provider_type == "ollama":
         return OllamaEmbeddingProvider()
     elif provider_type == "local":
