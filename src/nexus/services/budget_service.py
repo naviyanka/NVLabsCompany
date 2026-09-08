@@ -310,6 +310,25 @@ class BudgetService:
         await self._db.commit()
         return bool(result.rowcount)
 
+    async def reap_expired_reservations(self) -> int:
+        """Reap and release reservations older than their expiry instant.
+
+        Releases holds where status='reserved' and expires_at <= utcnow.
+        Returns the count of reaped reservations.
+        """
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        result = await self._db.execute(
+            update(CostEvent)
+            .where(
+                CostEvent.status == "reserved",
+                CostEvent.expires_at.is_not(None),
+                CostEvent.expires_at <= now,
+            )
+            .values(status="released", cost_cents=0, expires_at=None)
+        )
+        await self._db.commit()
+        return int(result.rowcount)
+
     async def get_usage(
         self,
         scope_type: str,

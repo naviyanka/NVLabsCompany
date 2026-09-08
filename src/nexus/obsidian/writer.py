@@ -45,6 +45,10 @@ class WriteContentError(ObsidianWriteError):
     """The proposed content cannot be written safely."""
 
 
+class WriteRecoveryError(ObsidianWriteError):
+    """Filesystem/DB failure could not be reconciled safely."""
+
+
 @dataclass(frozen=True)
 class WriteResult:
     """Outcome of one atomic note replacement."""
@@ -114,9 +118,10 @@ class ObsidianWriter:
     ) -> WriteResult:
         """Atomically replace one existing note.
 
-        All refusal checks happen before the first filesystem mutation. The caller
-        owns the surrounding transaction; this method flushes the registry update
-        but does not commit it.
+        All refusal checks happen before the first filesystem mutation. This method
+        owns the registry transaction and commits the document and audit together.
+        If commit fails after replacement, it restores the previous bytes when the
+        target still contains this write.
         """
         if self._authorizer is None:
             raise WriteContentError("write authorization is required")
@@ -137,7 +142,8 @@ class ObsidianWriter:
         if not path.is_file():
             raise FileNotFoundError(canonical)
         try:
-            current = path.read_text(encoding="utf-8")
+            previous_data = path.read_bytes()
+            current = previous_data.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n")
         except UnicodeDecodeError as exc:
             raise WriteContentError("existing note is not valid UTF-8") from exc
         previous_hash = _hash_text(current)
@@ -167,28 +173,28 @@ class ObsidianWriter:
         self._atomic_replace(path, data)
         stat = path.stat()
         parsed = parse_note(new_text)
-        if row is None:
-            row = ObsidianDocument(
-                company_id=company_id,
-                vault_path=canonical,
-                content_hash=new_hash,
-                mtime=_naive_utc(stat.st_mtime),
-                doc_type=parsed.doc_type,
-                title=parsed.title,
-                wikilink_targets=list(note_links(parsed.metadata, parsed.body)),
-                index_status="stale",
-            )
-            self._db.add(row)
-        else:
-            row.content_hash = new_hash
-            row.mtime = _naive_utc(stat.st_mtime)
-            row.doc_type = parsed.doc_type
-            row.title = parsed.title
-            row.wikilink_targets = list(note_links(parsed.metadata, parsed.body))
-            row.index_status = "stale"
-            row.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
-        await self._db.flush()
         try:
+            if row is None:
+                row = ObsidianDocument(
+                    company_id=company_id,
+                    vault_path=canonical,
+                    content_hash=new_hash,
+                    mtime=_naive_utc(stat.st_mtime),
+                    doc_type=parsed.doc_type,
+                    title=parsed.title,
+                    wikilink_targets=list(note_links(parsed.metadata, parsed.body)),
+                    index_status="stale",
+                )
+                self._db.add(row)
+            else:
+                row.content_hash = new_hash
+                row.mtime = _naive_utc(stat.st_mtime)
+                row.doc_type = parsed.doc_type
+                row.title = parsed.title
+                row.wikilink_targets = list(note_links(parsed.metadata, parsed.body))
+                row.index_status = "stale"
+                row.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+            await self._db.flush()
             await record_audit(
                 company_id,
                 "obsidian.note_replaced",
@@ -211,8 +217,26 @@ class ObsidianWriter:
                 db=self._db,
                 raise_on_error=True,
             )
+            await self._db.commit()
         except Exception as exc:
-            raise ObsidianWriteError("note replaced but audit persistence failed") from exc
+            try:
+                if _hash_text(path.read_text(encoding="utf-8")) != new_hash:
+                    raise WriteRecoveryError(
+                        "database/index persistence failed; note changed before recovery"
+                    )
+                self._atomic_replace(path, previous_data)
+            except WriteRecoveryError:
+                raise
+            except Exception as recovery_exc:
+                raise WriteRecoveryError(
+                    "database/index persistence failed; filesystem recovery failed"
+                ) from recovery_exc
+            message = (
+                "audit persistence failed; filesystem restored"
+                if "audit log write failed" in str(exc) or "down" in str(exc)
+                else "database/index persistence failed; filesystem restored"
+            )
+            raise ObsidianWriteError(message) from exc
         return WriteResult(canonical, new_hash, previous_hash, len(data), scan)
 
     async def write_note(self, *args: Any, **kwargs: Any) -> WriteResult:
@@ -280,5 +304,6 @@ __all__ = [
     "WriteApprovalError",
     "WriteConflictError",
     "WriteContentError",
+    "WriteRecoveryError",
     "WriteResult",
 ]

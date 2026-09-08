@@ -17,13 +17,13 @@ from nexus.models.company import Company
 from nexus.models.governance import Approval
 from nexus.models.obsidian import ObsidianDocument
 from nexus.models.tool import Tool
-from nexus.governance.audit_service import AuditPersistenceError
 from nexus.models.governance import AuditLog
 from nexus.obsidian import (
     ObsidianWriter,
     ObsidianWriteError,
     WriteConflictError,
     WriteContentError,
+    WriteRecoveryError,
     WriteActor,
     VaultWriteAuthorizer,
 )
@@ -121,6 +121,50 @@ async def test_replacement_persists_audit_with_hashes(vault, db_factory):
 
 
 @pytest.mark.asyncio
+async def test_db_failure_restores_previous_file(vault, db_factory):
+    path = vault / str(COMPANY) / "DbFailure.md"
+    path.write_bytes(b"old\n")
+    async with db_factory() as db:
+        from nexus.obsidian.provider import content_hash
+        db.add(ObsidianDocument(company_id=COMPANY, vault_path="DbFailure.md", content_hash=content_hash("old\n"), mtime=datetime.now(timezone.utc).replace(tzinfo=None)))
+        await db.commit()
+        registry = ToolRegistry(db_factory)
+        await registry.grant_access(COMPANY, AGENT, TOOL)
+        authorizer = VaultWriteAuthorizer(registry, db_factory)
+        await authorizer.grant_async(COMPANY, AGENT, TOOL, "*")
+        with patch.object(db, "commit", side_effect=RuntimeError("db down")):
+            with pytest.raises(ObsidianWriteError, match="filesystem restored"):
+                await ObsidianWriter(db, authorizer=authorizer, approval_required=False).replace_note(
+                    COMPANY, "DbFailure.md", "new\n", WriteActor.agent(AGENT), tool_id=TOOL
+                )
+    assert path.read_bytes() == b"old\n"
+
+
+@pytest.mark.asyncio
+async def test_db_failure_does_not_overwrite_concurrent_change(vault, db_factory):
+    path = vault / str(COMPANY) / "ConcurrentFailure.md"
+    path.write_bytes(b"old\n")
+    async with db_factory() as db:
+        from nexus.obsidian.provider import content_hash
+        db.add(ObsidianDocument(company_id=COMPANY, vault_path="ConcurrentFailure.md", content_hash=content_hash("old\n"), mtime=datetime.now(timezone.utc).replace(tzinfo=None)))
+        await db.commit()
+        registry = ToolRegistry(db_factory)
+        await registry.grant_access(COMPANY, AGENT, TOOL)
+        authorizer = VaultWriteAuthorizer(registry, db_factory)
+        await authorizer.grant_async(COMPANY, AGENT, TOOL, "*")
+        original = ObsidianWriter._atomic_replace
+        def replace_then_edit(target, data):
+            original(target, data)
+            target.write_bytes(b"human\n")
+        with patch.object(db, "commit", side_effect=RuntimeError("db down")), patch.object(ObsidianWriter, "_atomic_replace", side_effect=replace_then_edit):
+            with pytest.raises(WriteRecoveryError, match="changed before recovery"):
+                await ObsidianWriter(db, authorizer=authorizer, approval_required=False).replace_note(
+                    COMPANY, "ConcurrentFailure.md", "new\n", WriteActor.agent(AGENT), tool_id=TOOL
+                )
+    assert path.read_bytes() == b"human\n"
+
+
+@pytest.mark.asyncio
 async def test_audit_failure_is_distinguished_after_file_replacement(vault, db_factory):
     path = vault / str(COMPANY) / "AuditFailure.md"
     path.write_text("old\n", encoding="utf-8")
@@ -132,10 +176,10 @@ async def test_audit_failure_is_distinguished_after_file_replacement(vault, db_f
         await registry.grant_access(COMPANY, AGENT, TOOL)
         authorizer = VaultWriteAuthorizer(registry, db_factory)
         await authorizer.grant_async(COMPANY, AGENT, TOOL, "*")
-        with patch("nexus.obsidian.writer.record_audit", side_effect=AuditPersistenceError("down")):
+        with patch("nexus.obsidian.writer.record_audit", side_effect=RuntimeError("down")):
             with pytest.raises(ObsidianWriteError, match="audit persistence failed"):
                 await ObsidianWriter(db, authorizer=authorizer, approval_required=False).replace_note(COMPANY, "AuditFailure.md", "new\n", WriteActor.agent(AGENT), tool_id=TOOL)
-    assert path.read_text(encoding="utf-8") == "new\n"
+    assert path.read_text(encoding="utf-8") == "old\n"
 
 
 @pytest.mark.asyncio

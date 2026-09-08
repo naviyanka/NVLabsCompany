@@ -38,6 +38,7 @@ from nexus.obsidian.writer import (
     WriteApprovalError,
     WriteConflictError,
     WriteContentError,
+    WriteRecoveryError,
     WriteResult,
 )
 from nexus.obsidian.embedding_policy import (
@@ -169,5 +170,6 @@ __all__ = [
     "WriteApprovalError",
     "WriteConflictError",
     "WriteContentError",
+    "WriteRecoveryError",
     "WriteResult",
 ]

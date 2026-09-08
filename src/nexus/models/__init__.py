@@ -58,6 +58,7 @@ from nexus.models.settings import CompanySettings
 from nexus.models.workflow_run import WorkflowRun
 from nexus.models.workspace import Workspace
 from nexus.models.okr import OKRObjective, OKRKeyResult
+from nexus.models.idempotency import IdempotencyRecord
 
 __all__ = [
     # Company / Organization

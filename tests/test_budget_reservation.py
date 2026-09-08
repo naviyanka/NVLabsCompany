@@ -183,3 +183,26 @@ class TestLegacyRowsStillCount:
             )
         assert allowed is False
         assert check.used_cents == 95
+
+    async def test_reaper_clears_expired_reservation(self, session_factory):
+        """Expired reservations are reaped, releasing held capacity."""
+        company_id = uuid.uuid4()
+        await _seed_policy(session_factory, company_id, amount=100)
+
+        async with session_factory() as db:
+            service = BudgetService(db)
+            # Hold with -1 TTL (immediately expired)
+            allowed, res, _ = await service.reserve(
+                company_id, estimate_cents=80, ttl_seconds=-10
+            )
+            assert allowed is True
+
+            reaped = await service.reap_expired_reservations()
+            assert reaped == 1
+
+            # Capacity is restored
+            allowed_again, _, check = await service.reserve(
+                company_id, estimate_cents=50
+            )
+            assert allowed_again is True
+            assert check.used_cents == 0

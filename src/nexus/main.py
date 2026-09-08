@@ -416,6 +416,10 @@ Afterwards, accounts are created by invitation.
 # 401 or 403 produced by an inner layer never reaches the CORS layer otherwise
 # and the browser reports it as a network error instead of the real status.
 
+# Idempotency: guarantees exactly-once execution for mutating requests
+from nexus.api.idempotency_middleware import IdempotencyMiddleware
+app.add_middleware(IdempotencyMiddleware)
+
 # Governance: policy enforcement, audit logging, rate limit headers
 app.add_middleware(GovernanceMiddleware)
 
