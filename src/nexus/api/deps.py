@@ -17,14 +17,23 @@ from typing import Annotated, Any
 from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from sqlalchemy import text
+
 from nexus.auth.middleware import get_principal_from_scope
 from nexus.auth.principal import Principal
+from nexus.config import settings
 from nexus.database import get_session
 
 
-async def get_db() -> AsyncGenerator[AsyncSession, None]:
-    """Provide an async database session."""
+async def get_db(request: Request) -> AsyncGenerator[AsyncSession, None]:
+    """Provide an async database session with transaction-local tenant context (F4)."""
+    principal = get_principal_from_scope(request.scope)
     async for session in get_session():
+        if principal and principal.company_id and not settings.database_url.startswith("sqlite"):
+            await session.execute(
+                text("SELECT set_config('nexus.company_id', :cid, true)"),
+                {"cid": str(principal.company_id)},
+            )
         yield session
 
 

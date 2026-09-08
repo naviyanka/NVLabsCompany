@@ -76,11 +76,26 @@ def mint_run_token(
         "aud": AUDIENCE,
         "iat": now,
         "exp": now + timedelta(seconds=ttl_seconds),
+        "jti": uuid.uuid4().hex,
     }
     return jwt.encode(payload, settings.secret_key, algorithm=ALGORITHM)
 
 
-def verify_run_token(token: str) -> tuple[uuid.UUID, uuid.UUID, uuid.UUID]:
+# Set of redeemed token nonces for replay prevention (F5)
+_redeemed_nonces: set[str] = set()
+
+
+def redeem_nonce(jti: str) -> bool:
+    """Redeem a token nonce. Returns False if already redeemed."""
+    if jti in _redeemed_nonces:
+        return False
+    _redeemed_nonces.add(jti)
+    return True
+
+
+def verify_run_token(
+    token: str, *, single_use: bool = False
+) -> tuple[uuid.UUID, uuid.UUID, uuid.UUID]:
     """Check a run token's signature and expiry, returning its three ids (5.1.2).
 
     Args:
@@ -107,6 +122,11 @@ def verify_run_token(token: str) -> tuple[uuid.UUID, uuid.UUID, uuid.UUID]:
         )
     except jwt.PyJWTError as exc:
         raise RunTokenError(str(exc)) from exc
+
+    if single_use:
+        jti = claims.get("jti")
+        if not jti or not redeem_nonce(jti):
+            raise RunTokenError("token nonce already redeemed or missing")
 
     try:
         return (

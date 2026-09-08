@@ -255,3 +255,17 @@ def test_jwt_import_is_pyjwt():
     run_tokens.py would still appear to work.
     """
     assert_pyjwt()
+
+
+def test_single_use_nonce_replay_rejected(ids):
+    """F5: Replaying a single-use run token is rejected."""
+    run_id, agent_id, company_id = ids
+    token = mint_run_token(run_id, agent_id, company_id)
+
+    # First verification succeeds
+    res = verify_run_token(token, single_use=True)
+    assert res == (run_id, agent_id, company_id)
+
+    # Second verification fails with replay rejection
+    with pytest.raises(RunTokenError, match="nonce already redeemed"):
+        verify_run_token(token, single_use=True)
