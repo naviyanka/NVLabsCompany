@@ -90,6 +90,28 @@ class ObsidianWriter:
         expected_hash: str | None = None,
         approval_id: uuid.UUID | None = None,
     ) -> WriteResult:
+        async with self._write_lock:
+            return await self._replace_note(
+                company_id,
+                requested_path,
+                content,
+                actor,
+                tool_id=tool_id,
+                expected_hash=expected_hash,
+                approval_id=approval_id,
+            )
+
+    async def _replace_note(
+        self,
+        company_id: uuid.UUID,
+        requested_path: str,
+        content: str | bytes,
+        actor: WriteActor,
+        *,
+        tool_id: uuid.UUID | None = None,
+        expected_hash: str | None = None,
+        approval_id: uuid.UUID | None = None,
+    ) -> WriteResult:
         """Atomically replace one existing note.
 
         All refusal checks happen before the first filesystem mutation. The caller
