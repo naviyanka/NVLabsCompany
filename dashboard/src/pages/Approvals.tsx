@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   ShieldAlert,
   CheckCircle2,
@@ -13,6 +13,7 @@ import { Badge } from '@/components/common/Badge';
 import { EmptyState } from '@/components/common/EmptyState';
 import { apiClient } from '@/api/client';
 import { getActiveCompanyId } from '@/config';
+import { useEventStream } from '@/hooks/useEventStream';
 
 interface GovernanceApproval {
   id: string;
@@ -51,26 +52,96 @@ export function Approvals() {
   const [approvals, setApprovals] = useState<GovernanceApproval[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
 
+  const isMountedRef = useRef(true);
   useEffect(() => {
-    let isMounted = true;
-    async function loadApprovals() {
-      try {
-        const res = await apiClient.get<Record<string, unknown>[]>(
-          `/api/v1/companies/${getActiveCompanyId()}/approvals/pending`
-        );
-        if (isMounted) {
-          setApprovals(res.map(mapApproval));
-          setLoadError(null);
-        }
-      } catch (err) {
-        if (isMounted) setLoadError('Failed to load approvals from the backend.');
-      }
-    }
-    loadApprovals();
+    isMountedRef.current = true;
     return () => {
-      isMounted = false;
+      isMountedRef.current = false;
     };
   }, []);
+
+  const loadApprovals = useCallback(async () => {
+    try {
+      const res = await apiClient.get<Record<string, unknown>[]>(
+        `/api/v1/companies/${getActiveCompanyId()}/approvals/pending`
+      );
+      if (isMountedRef.current) {
+        setApprovals(res.map(mapApproval));
+        setLoadError(null);
+      }
+    } catch (err) {
+      if (isMountedRef.current) {
+        setLoadError('Failed to load approvals from the backend.');
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    loadApprovals();
+  }, [loadApprovals]);
+
+  // Real-time approval updates via SSE
+  useEventStream('approvals', useCallback((event: any) => {
+    if (!event) return;
+
+    const eventType = String(
+      event.event_type || event.type || event.action || event.event || ''
+    ).toLowerCase();
+
+    const isCreated =
+      eventType.includes('create') ||
+      eventType.includes('new') ||
+      eventType.includes('request');
+
+    const isUpdated =
+      eventType.includes('update') ||
+      eventType.includes('resolve') ||
+      eventType.includes('approve') ||
+      eventType.includes('reject') ||
+      eventType.includes('deny') ||
+      eventType.includes('decision');
+
+    // If event is approval created/updated, reload approvals or update state in place
+    if (isCreated || isUpdated || !eventType || eventType.includes('approval')) {
+      const payload = event.payload || event.data || event;
+      const rawApproval = payload?.approval || (payload?.id ? payload : null);
+
+      if (isUpdated && rawApproval?.id) {
+        setApprovals((prev) => {
+          const exists = prev.some((a) => a.id === String(rawApproval.id));
+          if (!exists) {
+            loadApprovals();
+            return prev;
+          }
+          return prev.map((item) => {
+            if (item.id === String(rawApproval.id)) {
+              const newStatus =
+                rawApproval.status === 'approved' || rawApproval.status === 'rejected'
+                  ? rawApproval.status
+                  : item.status;
+              return {
+                ...item,
+                status: newStatus,
+                ...(rawApproval.title ? { title: String(rawApproval.title) } : {}),
+                ...(rawApproval.risk_level ? { risk_level: rawApproval.risk_level } : {}),
+              };
+            }
+            return item;
+          });
+        });
+      } else if (isCreated && rawApproval?.id && (rawApproval.type || rawApproval.payload || rawApproval.title)) {
+        const mapped = mapApproval(rawApproval);
+        setApprovals((prev) => {
+          if (prev.some((a) => a.id === mapped.id)) {
+            return prev.map((a) => (a.id === mapped.id ? mapped : a));
+          }
+          return [mapped, ...prev];
+        });
+      } else {
+        loadApprovals();
+      }
+    }
+  }, [loadApprovals]));
 
   const handleDecision = async (id: string, decision: 'approved' | 'rejected') => {
     const action = decision === 'approved' ? 'approve' : 'reject';

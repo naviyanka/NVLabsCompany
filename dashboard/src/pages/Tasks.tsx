@@ -19,7 +19,8 @@ import {
   Plus,
   Search,
 } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { useEventStream } from '@/hooks/useEventStream';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 const MOCK_TASKS: Task[] = [];
 
@@ -60,6 +61,23 @@ export function Tasks() {
     }
     loadData();
   }, []);
+
+  // Real-time task stream via SSE — updates tasks in place or prepends new tasks
+  useEventStream<any>('tasks', useCallback((event: any) => {
+    if (!event) return;
+    const task: Task = event.task || event.payload?.task || (event.payload?.id ? event.payload : null) || event;
+    if (!task || !task.id) return;
+
+    setTasks((prev) => {
+      const exists = prev.some((t) => t.id === task.id);
+      if (exists) {
+        return prev.map((t) => (t.id === task.id ? { ...t, ...task } : t));
+      }
+      return [task, ...prev];
+    });
+
+    setSelectedTask((prev) => (prev?.id === task.id ? { ...prev, ...task } : prev));
+  }, []));
 
   const handleTaskCreated = (newTask: Task) => {
     setTasks((prev) => [newTask, ...prev]);
