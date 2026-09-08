@@ -28,6 +28,7 @@ from nexus.knowledge.rankers import (
     CrossEncoderRanker,
     Ranker,
     RerankerPipeline,
+    RRFRanker,
 )
 from nexus.knowledge.retrievers import (
     DenseRetriever,
@@ -43,6 +44,7 @@ __all__ = [
     "BM25Ranker",
     "CrossEncoderRanker",
     "RerankerPipeline",
+    "RRFRanker",
     "Ranker",
     "DenseRetriever",
     "SparseRetriever",

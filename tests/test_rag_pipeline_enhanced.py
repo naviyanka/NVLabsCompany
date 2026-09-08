@@ -23,6 +23,7 @@ from nexus.knowledge.rankers import (
     CrossEncoderRanker,
     Ranker,
     RerankerPipeline,
+    RRFRanker,
 )
 from nexus.knowledge.retrievers import (
     DenseRetriever,
@@ -263,6 +264,38 @@ class TestRerankerPipeline:
         assert len(pipeline.rankers) == 1
         pipeline.add_ranker(CrossEncoderRanker())
         assert len(pipeline.rankers) == 2
+
+
+class TestRRFRanker:
+    """Tests for RRFRanker implementation (Phase 6)."""
+
+    def test_rrf_ranker_protocol(self):
+        """RRFRanker conforms to Ranker protocol."""
+        ranker = RRFRanker()
+        assert isinstance(ranker, Ranker)
+
+    def test_rrf_ranker_empty(self):
+        """RRFRanker handles empty results."""
+        ranker = RRFRanker()
+        assert ranker.rank("query", []) == []
+
+    def test_rrf_ranker_scoring(self):
+        """RRFRanker fuses bm25 and vector scores via reciprocal ranks."""
+        ranker = RRFRanker(top_k=2, k=60)
+        items = [
+            {"id": "doc1", "bm25_score": 10.0, "vector_score": 0.1},
+            {"id": "doc2", "bm25_score": 9.0, "vector_score": 0.95},
+            {"id": "doc3", "bm25_score": 1.0, "vector_score": 0.05},
+        ]
+        ranked = ranker.rank("query", items)
+        assert len(ranked) == 2
+        assert "rrf_score" in ranked[0]
+        # doc2 was rank 2 in bm25 and rank 1 in vector -> 1/(60+2) + 1/(60+1)
+        # doc1 was rank 1 in bm25 and rank 2 in vector -> 1/(60+1) + 1/(60+2)
+        # doc3 was rank 3 in bm25 and rank 3 in vector -> lowest
+        assert ranked[0]["id"] in ["doc1", "doc2"]
+        assert ranked[1]["id"] in ["doc1", "doc2"]
+        assert ranked[0]["rrf_score"] > ranked[1]["rrf_score"] or abs(ranked[0]["rrf_score"] - ranked[1]["rrf_score"]) < 1e-6
 
 
 # ============================================================

@@ -281,6 +281,45 @@ class CrossEncoderRanker:
 
 
 @dataclass
+class RRFRanker:
+    """Reciprocal Rank Fusion (RRF) ranker combining multiple ranked lists (Phase 6).
+
+    Formula: score(d) = sum(1.0 / (k + rank_i(d))) across ranking channels.
+    Attributes:
+        top_k: Maximum number of results to return. Defaults to 10.
+        k: Smoothing constant. Standard value is 60.
+    """
+
+    top_k: int = 10
+    k: int = 60
+
+    def rank(self, query: str, results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Rank results using Reciprocal Rank Fusion on bm25 and vector scores."""
+        if not results:
+            return []
+
+        # Sort by bm25 score
+        bm25_sorted = sorted(results, key=lambda x: x.get("bm25_score", 0.0), reverse=True)
+        # Sort by vector score
+        vec_sorted = sorted(results, key=lambda x: x.get("vector_score", 0.0), reverse=True)
+
+        scores: dict[int, float] = {}
+        for rank_idx, item in enumerate(bm25_sorted, start=1):
+            item_id = id(item)
+            scores[item_id] = scores.get(item_id, 0.0) + (1.0 / (self.k + rank_idx))
+
+        for rank_idx, item in enumerate(vec_sorted, start=1):
+            item_id = id(item)
+            scores[item_id] = scores.get(item_id, 0.0) + (1.0 / (self.k + rank_idx))
+
+        for item in results:
+            item["rrf_score"] = scores.get(id(item), 0.0)
+
+        results_sorted = sorted(results, key=lambda x: x.get("rrf_score", 0.0), reverse=True)
+        return results_sorted[:self.top_k]
+
+
+@dataclass
 class RerankerPipeline:
     """Chains multiple rankers sequentially for multi-stage reranking.
 
