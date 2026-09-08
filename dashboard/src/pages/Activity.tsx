@@ -3,6 +3,7 @@ import { RunLivenessPanel } from '@/components/activity/RunLivenessPanel';
 import { Drawer } from '@/components/common/Drawer';
 import { StatCard } from '@/components/common/StatCard';
 import { getActiveCompanyId } from '@/config';
+import { useEventStream } from '@/hooks/useEventStream';
 import {
   COMPLETION_REASONS,
   COMPLETION_REASON_LABELS,
@@ -111,7 +112,26 @@ export function Activity() {
     loadActivity();
   }, []);
 
-  // Real-time activity feed — poll API every 10s when live mode is enabled
+  // Real-time activity stream via SSE — prepends new events immediately
+  useEventStream<any>('activity', useCallback((event: any) => {
+    if (!isLive || !event) return;
+    const newLog: ActivityLog = {
+      id: event.id || `act-${Date.now()}`,
+      event: event.event || event.action || 'System Event',
+      type: event.type || 'System',
+      description: event.description || event.message || '',
+      agent: event.agent || 'System',
+      time: 'just now',
+      timestamp: Date.now(),
+      severity: event.severity || 'info',
+      status: event.status || 'success',
+      latency_ms: event.latency_ms || 0,
+      completion_reason: event.completion_reason,
+    };
+    setLogs((prev) => [newLog, ...prev.slice(0, 49)]);
+  }, [isLive]));
+
+  // Backup fallback polling every 30s when live mode is enabled
   useEffect(() => {
     if (!isLive) return;
 
@@ -121,14 +141,13 @@ export function Activity() {
         const res = await apiClient.get<ActivityLog[]>(
           `/api/v1/companies/${companyId}/activity`
         );
-        const items = res;
-        if (items.length > 0) {
-          setLogs(items.slice(0, 50));
+        if (res && res.length > 0) {
+          setLogs(res.slice(0, 50));
         }
       } catch {
         // Silent retry on next interval
       }
-    }, 10000);
+    }, 30000);
 
     return () => clearInterval(interval);
   }, [isLive]);

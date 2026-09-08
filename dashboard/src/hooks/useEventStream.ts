@@ -24,7 +24,7 @@ export function useEventStream<T = any>(
     const connect = () => {
       if (!isMounted) return;
 
-      const url = `/api/v1/events?channel=${channel}`;
+      const url = `/api/v1/events/stream?channel=${encodeURIComponent(channel)}`;
       // with credentials: 'include' via EventSource's withCredentials option
       const es = new EventSource(url, { withCredentials: true });
       eventSource = es;
