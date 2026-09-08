@@ -17,8 +17,11 @@ from nexus.models.company import Company
 from nexus.models.governance import Approval
 from nexus.models.obsidian import ObsidianDocument
 from nexus.models.tool import Tool
+from nexus.governance.audit_service import AuditPersistenceError
+from nexus.models.governance import AuditLog
 from nexus.obsidian import (
     ObsidianWriter,
+    ObsidianWriteError,
     WriteConflictError,
     WriteContentError,
     WriteActor,
