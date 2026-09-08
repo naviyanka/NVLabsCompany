@@ -100,6 +100,45 @@ async def test_replaces_existing_note_atomically(vault, db_factory):
 
 
 @pytest.mark.asyncio
+async def test_replacement_persists_audit_with_hashes(vault, db_factory):
+    path = vault / str(COMPANY) / "Audit.md"
+    path.write_text("old\n", encoding="utf-8")
+    async with db_factory() as db:
+        from nexus.obsidian.provider import content_hash
+        db.add(ObsidianDocument(company_id=COMPANY, vault_path="Audit.md", content_hash=content_hash("old\n"), mtime=datetime.now(timezone.utc).replace(tzinfo=None)))
+        await db.commit()
+        registry = ToolRegistry(db_factory)
+        await registry.grant_access(COMPANY, AGENT, TOOL)
+        authorizer = VaultWriteAuthorizer(registry, db_factory)
+        await authorizer.grant_async(COMPANY, AGENT, TOOL, "*")
+        result = await ObsidianWriter(db, authorizer=authorizer, approval_required=False).replace_note(COMPANY, "Audit.md", "new\n", WriteActor.agent(AGENT), tool_id=TOOL)
+        audit = (await db.execute(select(AuditLog))).scalars().one()
+        assert audit.action == "obsidian.note_replaced"
+        assert audit.company_id == COMPANY
+        assert audit.details["previous_hash"] == result.previous_hash
+        assert audit.details["content_hash"] == result.content_hash
+        assert audit.details["tool_id"] == str(TOOL)
+
+
+@pytest.mark.asyncio
+async def test_audit_failure_is_distinguished_after_file_replacement(vault, db_factory):
+    path = vault / str(COMPANY) / "AuditFailure.md"
+    path.write_text("old\n", encoding="utf-8")
+    async with db_factory() as db:
+        from nexus.obsidian.provider import content_hash
+        db.add(ObsidianDocument(company_id=COMPANY, vault_path="AuditFailure.md", content_hash=content_hash("old\n"), mtime=datetime.now(timezone.utc).replace(tzinfo=None)))
+        await db.commit()
+        registry = ToolRegistry(db_factory)
+        await registry.grant_access(COMPANY, AGENT, TOOL)
+        authorizer = VaultWriteAuthorizer(registry, db_factory)
+        await authorizer.grant_async(COMPANY, AGENT, TOOL, "*")
+        with patch("nexus.obsidian.writer.record_audit", side_effect=AuditPersistenceError("down")):
+            with pytest.raises(ObsidianWriteError, match="audit persistence failed"):
+                await ObsidianWriter(db, authorizer=authorizer, approval_required=False).replace_note(COMPANY, "AuditFailure.md", "new\n", WriteActor.agent(AGENT), tool_id=TOOL)
+    assert path.read_text(encoding="utf-8") == "new\n"
+
+
+@pytest.mark.asyncio
 async def test_changed_note_is_refused(vault, db_factory):
     path = vault / str(COMPANY) / "A.md"
     path.write_text("human edit\n", encoding="utf-8")
