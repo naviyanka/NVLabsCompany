@@ -181,9 +181,9 @@ class NullEmbeddingProvider:
 
 
 def get_embedding_provider() -> EmbeddingProvider | None:
-    provider_type = os.environ.get("EMBEDDING_PROVIDER", "none").lower()
+    provider_type = os.environ.get("EMBEDDING_PROVIDER", "").lower()
 
-    if provider_type == "openai":
+    if provider_type == "openai" or (not provider_type and os.environ.get("OPENAI_API_KEY")):
         model = os.environ.get("OPENAI_EMBED_MODEL", "text-embedding-3-small")
         return OpenAIEmbeddingProvider(model=model)
     elif provider_type == "voyage":
@@ -191,10 +191,13 @@ def get_embedding_provider() -> EmbeddingProvider | None:
         return VoyageEmbeddingProvider(model=model)
     elif provider_type == "ollama":
         return OllamaEmbeddingProvider()
-    elif provider_type == "local":
-        return LocalEmbeddingProvider()
-    else:
+    elif provider_type in ("local", "default"):
+        return LocalEmbeddingProvider(dimension=1536)
+    elif provider_type == "none":
         return None
+    else:
+        # Default fallback to deterministic local embedding provider with 1536 dimension
+        return LocalEmbeddingProvider(dimension=1536)
 
 
 def cosine_similarity(v1: list[float], v2: list[float]) -> float:

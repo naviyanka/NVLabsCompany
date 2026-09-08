@@ -1,0 +1,12 @@
+-- Initialize least-privilege application and system roles
+CREATE ROLE nexus_app LOGIN PASSWORD 'nexus_app_pass';
+GRANT ALL ON ALL TABLES IN SCHEMA public TO nexus_app;
+GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO nexus_app;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO nexus_app;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO nexus_app;
+
+CREATE ROLE nexus_system LOGIN PASSWORD 'nexus_system_pass' BYPASSRLS;
+GRANT ALL ON ALL TABLES IN SCHEMA public TO nexus_system;
+GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO nexus_system;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO nexus_system;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO nexus_system;

@@ -35,9 +35,12 @@ class TenantBulkhead:
 
     @asynccontextmanager
     async def acquire(self, company_id: uuid.UUID) -> AsyncIterator[None]:
-        sem = await self._get_tenant_semaphore(company_id)
-        if sem.locked() and sem._value <= 0:
-            raise TenantSaturated(company_id)
+        async with self._lock:
+            if company_id not in self._tenant_sems:
+                self._tenant_sems[company_id] = asyncio.Semaphore(self.per_tenant)
+            sem = self._tenant_sems[company_id]
+            if sem.locked() and sem._value <= 0:
+                raise TenantSaturated(company_id)
 
         async with self._global_sem, sem:
             yield

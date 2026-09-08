@@ -19,6 +19,8 @@ class BudgetPolicy(SQLModel, table=True):
     metric: str = Field(max_length=100)  # cost_cents, tokens, api_calls
     window_kind: str = Field(max_length=50)  # monthly, weekly, daily, per_execution
     amount: int = Field(default=0)
+    spent_cents: int = Field(default=0)
+    reserved_cents: int = Field(default=0)
     warn_percent: int = Field(default=80)
     hard_stop_enabled: bool = Field(default=True)
     is_active: bool = Field(default=True)
@@ -51,6 +53,9 @@ class CostEvent(SQLModel, table=True):
     )
     project_id: Optional[uuid.UUID] = Field(
         default=None, foreign_key="projects.id"
+    )
+    policy_id: Optional[uuid.UUID] = Field(
+        default=None, foreign_key="budget_policies.id", index=True
     )
     provider: str = Field(max_length=100)
     model: Optional[str] = Field(default=None, max_length=255)

@@ -97,7 +97,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     import nexus.models  # noqa: F401 - register all models
     from nexus.config import settings
-    from nexus.database import async_session_factory, engine
+    from nexus.database import async_session_factory, engine, assert_role_rls_posture
+    await assert_role_rls_posture()
     if settings.database_url.startswith("sqlite"):
         async with engine.begin() as conn:
             await conn.run_sync(SQLModel.metadata.create_all)

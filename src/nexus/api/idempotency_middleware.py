@@ -1,4 +1,4 @@
-"""Idempotency middleware for mutating requests (F3)."""
+"""Idempotency middleware for mutating requests (WP-1 / F3)."""
 
 import hashlib
 import json
@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 from starlette.datastructures import Headers
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
-from sqlalchemy import select
+from sqlalchemy import select, delete
 from sqlalchemy.exc import IntegrityError
 
 from nexus.auth.middleware import get_principal_from_scope
@@ -18,6 +18,8 @@ from nexus.models.idempotency import IdempotencyRecord
 logger = logging.getLogger(__name__)
 
 MUTATING_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+MAX_BODY_CACHE_BYTES = 256 * 1024  # 256 KB
+
 
 def _canonical_json_hash(body_bytes: bytes) -> str:
     """Compute sha256 of canonical JSON payload or raw bytes."""
@@ -27,6 +29,7 @@ def _canonical_json_hash(body_bytes: bytes) -> str:
         return hashlib.sha256(canonical).hexdigest()
     except Exception:
         return hashlib.sha256(body_bytes).hexdigest()
+
 
 class IdempotencyMiddleware:
     """ASGI middleware providing end-to-end request idempotency."""
@@ -80,41 +83,47 @@ class IdempotencyMiddleware:
             existing = res.scalars().first()
 
             if existing:
-                if existing.request_hash != body_hash:
-                    resp = JSONResponse(
-                        status_code=422,
-                        content={
-                            "code": "IDEMPOTENCY_KEY_REUSED",
-                            "detail": "Idempotency key already used for a different request payload",
-                        },
-                    )
-                    await resp(scope, receive, send)
-                    return
+                # Check if an expired in_flight row can be reclaimed
+                if existing.state == "in_flight" and existing.expires_at <= now:
+                    await session.delete(existing)
+                    await session.commit()
+                    existing = None
+                else:
+                    if existing.request_hash != body_hash:
+                        resp = JSONResponse(
+                            status_code=422,
+                            content={
+                                "code": "IDEMPOTENCY_KEY_REUSED",
+                                "detail": "Idempotency key already used for a different request payload",
+                            },
+                        )
+                        await resp(scope, receive, send)
+                        return
 
-                if existing.state == "in_flight":
-                    resp = JSONResponse(
-                        status_code=409,
-                        content={
-                            "code": "REQUEST_IN_FLIGHT",
-                            "detail": "A request with this idempotency key is currently processing",
-                        },
-                        headers={"Retry-After": "2"},
-                    )
-                    await resp(scope, receive, send)
-                    return
+                    if existing.state == "in_flight":
+                        resp = JSONResponse(
+                            status_code=409,
+                            content={
+                                "code": "REQUEST_IN_FLIGHT",
+                                "detail": "A request with this idempotency key is currently processing",
+                            },
+                            headers={"Retry-After": "2"},
+                        )
+                        await resp(scope, receive, send)
+                        return
 
-                if existing.state == "complete" and existing.status_code is not None:
-                    try:
-                        content = json.loads(existing.response_body) if existing.response_body else {}
-                    except Exception:
-                        content = {"message": existing.response_body or ""}
-                    resp = JSONResponse(
-                        status_code=existing.status_code,
-                        content=content,
-                        headers={"Idempotent-Replay": "true"},
-                    )
-                    await resp(scope, receive, send)
-                    return
+                    if existing.state == "complete" and existing.status_code is not None:
+                        try:
+                            content = json.loads(existing.response_body) if existing.response_body else {}
+                        except Exception:
+                            content = {"message": existing.response_body or ""}
+                        resp = JSONResponse(
+                            status_code=existing.status_code,
+                            content=content,
+                            headers={"Idempotent-Replay": "true"},
+                        )
+                        await resp(scope, receive, send)
+                        return
 
             # Insert in_flight record
             try:
@@ -151,19 +160,29 @@ class IdempotencyMiddleware:
                 return {"type": "http.request", "body": full_body, "more_body": False}
             return {"type": "http.disconnect"}
 
-        response_status = 200
+        response_status = 500
+        response_headers: dict[bytes, bytes] = {}
         response_body_bytes = b""
+        handler_crashed = True
 
         async def capture_send(message: Message) -> None:
-            nonlocal response_status, response_body_bytes
+            nonlocal response_status, response_headers, response_body_bytes
             if message["type"] == "http.response.start":
                 response_status = message.get("status", 200)
+                raw_headers = message.get("headers", [])
+                response_headers = {k.lower(): v for k, v in raw_headers}
             elif message["type"] == "http.response.body":
-                response_body_bytes += message.get("body", b"")
+                # Only capture up to limit and don't buffer streaming event-stream
+                if response_headers.get(b"content-type", b"").startswith(b"text/event-stream"):
+                    pass
+                elif len(response_body_bytes) < MAX_BODY_CACHE_BYTES:
+                    chunk = message.get("body", b"")
+                    response_body_bytes += chunk[: MAX_BODY_CACHE_BYTES - len(response_body_bytes)]
             await send(message)
 
         try:
             await self.app(scope, replay_receive, capture_send)
+            handler_crashed = False
         finally:
             async with async_session_factory() as session:
                 stmt = select(IdempotencyRecord).where(
@@ -173,11 +192,26 @@ class IdempotencyMiddleware:
                 res = await session.execute(stmt)
                 rec = res.scalars().first()
                 if rec:
-                    rec.state = "complete"
-                    rec.status_code = response_status
-                    try:
-                        rec.response_body = response_body_bytes.decode("utf-8")
-                    except Exception:
-                        rec.response_body = None
-                    session.add(rec)
-                    await session.commit()
+                    # If handler crashed or returned 5xx, delete row to allow client retry
+                    if handler_crashed or response_status >= 500 or response_status < 200:
+                        await session.delete(rec)
+                        await session.commit()
+                    elif 200 <= response_status < 300:
+                        # Only persist complete on 2xx
+                        rec.state = "complete"
+                        rec.status_code = response_status
+                        # Skip buffering if streaming
+                        is_streaming = response_headers.get(b"content-type", b"").startswith(b"text/event-stream")
+                        if is_streaming or len(response_body_bytes) >= MAX_BODY_CACHE_BYTES:
+                            rec.response_body = None
+                        else:
+                            try:
+                                rec.response_body = response_body_bytes.decode("utf-8")
+                            except Exception:
+                                rec.response_body = None
+                        session.add(rec)
+                        await session.commit()
+                    else:
+                        # 4xx (client error): delete so client can retry with corrected request
+                        await session.delete(rec)
+                        await session.commit()

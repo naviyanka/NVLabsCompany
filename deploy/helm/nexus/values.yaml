@@ -168,7 +168,8 @@ database:
   host: postgres-cluster.database.svc.cluster.local
   port: 5432
   name: nexus
-  user: nexus
+  user: nexus_app
+  systemUser: nexus_system
   sslMode: require
 
 redis:

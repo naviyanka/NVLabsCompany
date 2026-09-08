@@ -16,6 +16,16 @@ from nexus.models.budget import BudgetPolicy, CostEvent
 RESERVATION_TTL_SECONDS = 900
 
 
+class BudgetExceeded(Exception):
+    """Raised when an atomic budget reservation or spend exceeds available budget."""
+
+    def __init__(self, message: str = "Budget exceeded", code: str = "BUDGET_EXCEEDED", http_status: int = 429) -> None:
+        super().__init__(message)
+        self.message = message
+        self.code = code
+        self.http_status = http_status
+
+
 @dataclass
 class BudgetCheckResult:
     """Result of a budget check operation."""
@@ -197,28 +207,11 @@ class BudgetService:
         model: str | None = None,
         ttl_seconds: int = RESERVATION_TTL_SECONDS,
     ) -> tuple[bool, CostEvent | None, BudgetCheckResult]:
-        """Phase one of a two-phase spend: check and hold in one transaction.
+        """Phase one of a two-phase spend: check and hold atomically in DB.
 
-        Checking and then spending as two separate statements is what lets two
-        workers both pass a check that only one of them fits under. Writing the
-        hold in the same transaction as the check closes that window: the second
-        worker's check sums the first worker's hold and refuses.
-
-        Args:
-            company_id: The company being charged.
-            estimate_cents: Estimated cost to hold. A floor is fine; ``commit``
-                reconciles to the real figure.
-            scope_type: Budget scope to check against.
-            scope_id: Scope identifier. Defaults to ``company_id``.
-            agent_id: Optional agent to attribute the spend to.
-            provider: Provider name recorded on the ledger row.
-            model: Optional model identifier.
-            ttl_seconds: How long the hold counts before expiring, so a worker
-                that dies mid-call cannot pin the budget.
-
-        Returns:
-            ``(allowed, reservation, check)``. When denied, ``reservation`` is
-            None and no hold is written.
+        Atomically increments reserved_cents on matching active BudgetPolicy
+        guarded by spent_cents + reserved_cents + estimate_cents <= amount.
+        If the policy limit is exceeded, raises BudgetExceeded (or returns denied).
         """
         target_id = scope_id or company_id
         check = await self.check_budget(
@@ -230,21 +223,44 @@ class BudgetService:
         if not check.allowed:
             return False, None, check
 
+        amt = max(0, estimate_cents)
+        matched_policy_id = check.policy_id
+
+        if matched_policy_id and amt > 0:
+            # Atomic conditional reservation on budget_policies
+            stmt = (
+                update(BudgetPolicy)
+                .where(
+                    BudgetPolicy.id == matched_policy_id,
+                    BudgetPolicy.is_active == True,  # noqa: E712
+                    (BudgetPolicy.spent_cents + BudgetPolicy.reserved_cents + amt) <= BudgetPolicy.amount,
+                )
+                .values(
+                    reserved_cents=BudgetPolicy.reserved_cents + amt,
+                    updated_at=datetime.now(timezone.utc).replace(tzinfo=None),
+                )
+                .returning(BudgetPolicy.id, BudgetPolicy.reserved_cents, BudgetPolicy.amount)
+            )
+            res = await self._db.execute(stmt)
+            row = res.first()
+            if not row:
+                check.allowed = False
+                check.message = "Budget exceeded (atomic reservation check failed)"
+                return False, None, check
+
         now = datetime.now(timezone.utc).replace(tzinfo=None)
         reservation = CostEvent(
             company_id=company_id,
             agent_id=agent_id,
+            policy_id=matched_policy_id,
             provider=provider,
             model=model,
-            cost_cents=max(0, estimate_cents),
+            cost_cents=amt,
             status="reserved",
             expires_at=now + timedelta(seconds=ttl_seconds),
             occurred_at=now,
         )
         self._db.add(reservation)
-        # Commit rather than flush: a hold only protects concurrent workers once
-        # it is visible to their transactions, and the provider call that follows
-        # happens outside this session.
         await self._db.commit()
         return True, reservation, check
 
@@ -258,22 +274,23 @@ class BudgetService:
     ) -> bool:
         """Phase two: reconcile a hold to the exact spend.
 
-        Addressed by id rather than by instance because the provider call
-        happens between the two phases, outside the session that took the hold.
-
-        Args:
-            reservation_id: The id returned by :meth:`reserve`.
-            cost_cents: Actual cost in cents.
-            input_tokens: Actual input tokens.
-            output_tokens: Actual output tokens.
-            model: Model actually used, when it differs from the estimate.
-
-        Returns:
-            True when a reserved row was settled, False when none was found
-            (already settled, or released).
+        Atomically decrements reserved_cents and increments spent_cents on
+        the associated policy (if any).
         """
+        # Fetch existing reservation first
+        res = await self._db.execute(
+            select(CostEvent).where(CostEvent.id == reservation_id, CostEvent.status == "reserved")
+        )
+        event = res.scalars().first()
+        if not event:
+            return False
+
+        old_hold = event.cost_cents
+        actual_spend = max(0, cost_cents)
+        policy_id = event.policy_id
+
         values: dict[str, Any] = {
-            "cost_cents": max(0, cost_cents),
+            "cost_cents": actual_spend,
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,
             "status": "committed",
@@ -281,43 +298,90 @@ class BudgetService:
         }
         if model:
             values["model"] = model
-        result = await self._db.execute(
+
+        await self._db.execute(
             update(CostEvent)
             .where(CostEvent.id == reservation_id, CostEvent.status == "reserved")
             .values(**values)
         )
+
+        if policy_id:
+            await self._db.execute(
+                update(BudgetPolicy)
+                .where(BudgetPolicy.id == policy_id)
+                .values(
+                    reserved_cents=func.greatest(0, BudgetPolicy.reserved_cents - old_hold),
+                    spent_cents=BudgetPolicy.spent_cents + actual_spend,
+                    updated_at=datetime.now(timezone.utc).replace(tzinfo=None),
+                )
+            )
+
         await self._db.commit()
-        return bool(result.rowcount)
+        return True
 
     async def release_reservation(self, reservation_id: uuid.UUID) -> bool:
-        """Drop a hold for a call that never billed (provider error, refusal).
+        """Drop a hold for a call that never billed (provider error, refusal)."""
+        res = await self._db.execute(
+            select(CostEvent).where(CostEvent.id == reservation_id, CostEvent.status == "reserved")
+        )
+        event = res.scalars().first()
+        if not event:
+            return False
 
-        Leaving the hold to expire would work but keeps phantom spend on the
-        books for the whole TTL, which is what makes a budget look exhausted
-        when it is not.
+        old_hold = event.cost_cents
+        policy_id = event.policy_id
 
-        Args:
-            reservation_id: The id returned by :meth:`reserve`.
-
-        Returns:
-            True when a reserved row was released, False when none was found.
-        """
-        result = await self._db.execute(
+        await self._db.execute(
             update(CostEvent)
             .where(CostEvent.id == reservation_id, CostEvent.status == "reserved")
             .values(status="released", cost_cents=0, expires_at=None)
         )
+
+        if policy_id and old_hold > 0:
+            await self._db.execute(
+                update(BudgetPolicy)
+                .where(BudgetPolicy.id == policy_id)
+                .values(
+                    reserved_cents=func.greatest(0, BudgetPolicy.reserved_cents - old_hold),
+                    updated_at=datetime.now(timezone.utc).replace(tzinfo=None),
+                )
+            )
+
         await self._db.commit()
-        return bool(result.rowcount)
+        return True
 
     async def reap_expired_reservations(self) -> int:
         """Reap and release reservations older than their expiry instant.
 
-        Releases holds where status='reserved' and expires_at <= utcnow.
-        Returns the count of reaped reservations.
+        Releases holds where status='reserved' and expires_at <= utcnow,
+        restoring reserved_cents on policies.
         """
         now = datetime.now(timezone.utc).replace(tzinfo=None)
-        result = await self._db.execute(
+        res = await self._db.execute(
+            select(CostEvent).where(
+                CostEvent.status == "reserved",
+                CostEvent.expires_at.is_not(None),
+                CostEvent.expires_at <= now,
+            )
+        )
+        expired_events = list(res.scalars().all())
+        if not expired_events:
+            return 0
+
+        for event in expired_events:
+            old_hold = event.cost_cents
+            policy_id = event.policy_id
+            if policy_id and old_hold > 0:
+                await self._db.execute(
+                    update(BudgetPolicy)
+                    .where(BudgetPolicy.id == policy_id)
+                    .values(
+                        reserved_cents=func.greatest(0, BudgetPolicy.reserved_cents - old_hold),
+                        updated_at=now,
+                    )
+                )
+
+        await self._db.execute(
             update(CostEvent)
             .where(
                 CostEvent.status == "reserved",
@@ -327,7 +391,7 @@ class BudgetService:
             .values(status="released", cost_cents=0, expires_at=None)
         )
         await self._db.commit()
-        return int(result.rowcount)
+        return len(expired_events)
 
     async def get_usage(
         self,
@@ -383,7 +447,7 @@ class BudgetService:
         Returns:
             UsageSummary or None if no events found.
         """
-        now = datetime.now(timezone.utc)
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
 
         if window == "daily":
             window_start = now.replace(hour=0, minute=0, second=0, microsecond=0)

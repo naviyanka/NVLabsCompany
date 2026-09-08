@@ -293,6 +293,20 @@ class RRFRanker:
     top_k: int = 10
     k: int = 60
 
+    def _get_item_key(self, item: dict[str, Any], default_idx: int) -> str:
+        """Derive a stable unique key for an item."""
+        if "id" in item:
+            return str(item["id"])
+        chunk = item.get("chunk")
+        if chunk is not None:
+            if hasattr(chunk, "id") and chunk.id is not None:
+                return str(chunk.id)
+            if hasattr(chunk, "content"):
+                return str(chunk.content)
+        if "content" in item:
+            return str(item["content"])
+        return str(default_idx)
+
     def rank(self, query: str, results: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Rank results using Reciprocal Rank Fusion on bm25 and vector scores."""
         if not results:
@@ -303,17 +317,18 @@ class RRFRanker:
         # Sort by vector score
         vec_sorted = sorted(results, key=lambda x: x.get("vector_score", 0.0), reverse=True)
 
-        scores: dict[int, float] = {}
+        scores: dict[str, float] = {}
         for rank_idx, item in enumerate(bm25_sorted, start=1):
-            item_id = id(item)
-            scores[item_id] = scores.get(item_id, 0.0) + (1.0 / (self.k + rank_idx))
+            key = self._get_item_key(item, rank_idx)
+            scores[key] = scores.get(key, 0.0) + (1.0 / (self.k + rank_idx))
 
         for rank_idx, item in enumerate(vec_sorted, start=1):
-            item_id = id(item)
-            scores[item_id] = scores.get(item_id, 0.0) + (1.0 / (self.k + rank_idx))
+            key = self._get_item_key(item, rank_idx)
+            scores[key] = scores.get(key, 0.0) + (1.0 / (self.k + rank_idx))
 
-        for item in results:
-            item["rrf_score"] = scores.get(id(item), 0.0)
+        for idx, item in enumerate(results):
+            key = self._get_item_key(item, idx + 1)
+            item["rrf_score"] = scores.get(key, 0.0)
 
         results_sorted = sorted(results, key=lambda x: x.get("rrf_score", 0.0), reverse=True)
         return results_sorted[:self.top_k]

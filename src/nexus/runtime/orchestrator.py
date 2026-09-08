@@ -30,12 +30,14 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from nexus.models._time import utcnow
 from nexus.models.task import RunCompletionReason
+from nexus.governance.bulkhead import TenantBulkhead, TenantSaturated
 
 logger = logging.getLogger(__name__)
 
 _orchestrator_task: asyncio.Task[None] | None = None
 _running = False
 _instance_id = f"orchestrator-{uuid.uuid4().hex[:8]}"
+_tenant_bulkhead = TenantBulkhead(per_tenant=16, global_cap=128)
 
 # How often to scan for active goals (seconds)
 ORCHESTRATION_TICK_INTERVAL = 120  # 2 minutes
@@ -359,95 +361,124 @@ async def _drive_goal(db: AsyncSession, goal: Any) -> None:
 
     company_id = goal.company_id
 
-    # Check for existing subtasks of this goal
-    subtask_stmt = select(Task).where(
-        Task.company_id == company_id,
-        Task.goal_id == goal.id,
-    )
-    result = await db.execute(subtask_stmt)
-    subtasks = list(result.scalars().all())
-
-    # If there are running/pending subtasks, let them finish
-    active_subtasks = [t for t in subtasks if t.status in ("pending", "in_progress", "running")]
-    if active_subtasks:
-        logger.debug("Goal %s: %d subtasks still active, waiting", goal.id, len(active_subtasks))
-        return
-
-    # If all subtasks are completed, evaluate goal with GoalLoop judge
-    completed_subtasks = [t for t in subtasks if t.status == "completed"]
-    if subtasks and len(completed_subtasks) == len(subtasks):
-        # Use HeuristicGoalJudge to check if goal is truly achieved
-        from nexus.orchestration.goal_loop import HeuristicGoalJudge, JudgeVerdict
-        judge = HeuristicGoalJudge(
-            completion_keywords=["complete", "done", "achieved", "finished", "success"],
-            min_output_length=10,
-        )
-        # Combine subtask titles as "output" for the judge
-        combined_output = "\n".join(t.title for t in completed_subtasks)
-        verdict: JudgeVerdict = await judge.evaluate(
-            goal=f"{goal.title}\n{goal.description or ''}",
-            current_output=combined_output,
-            iteration=1,
-        )
-        if verdict.is_complete:
-            _finish(goal, "completed", RunCompletionReason.goal)
-            db.add(goal)
-            logger.info("Goal %s completed (judge confirmed: %s)", goal.id, verdict.reasoning)
-            await _broadcast_orchestrator_event("goal_completed", {
-                "goal_id": str(goal.id), "title": goal.title, "reasoning": verdict.reasoning,
-                "completion_reason": RunCompletionReason.goal.value,
-            })
-        elif len(subtasks) >= MAX_SUBTASKS_PER_GOAL:
-            # Re-decomposing again would just add another round of subtasks the
-            # judge already rejected — that is the doom loop.
-            _finish(goal, "blocked", RunCompletionReason.doom_loop)
-            db.add(goal)
-            logger.warning(
-                "Goal %s: judge still rejects after %d subtasks — doom loop, giving up",
-                goal.id, len(subtasks),
+    # Advisory lock mutex: ensure only one worker/loop drives goals for this company concurrently
+    is_pg = db.bind is not None and db.bind.dialect.name == "postgresql"
+    lock_acquired = True
+    if is_pg and company_id:
+        try:
+            from sqlalchemy import text
+            lock_res = await db.execute(
+                text("SELECT pg_try_advisory_lock(hashtext('nexus:orchestrator:' || :cid))"),
+                {"cid": str(company_id)},
             )
-        else:
-            # Judge says not complete — decompose again for another iteration
-            logger.info("Goal %s: subtasks done but judge says incomplete (%s) — redecomposing", goal.id, verdict.reasoning)
-            await _decompose_goal(db, goal, company_id)
+            lock_acquired = bool(lock_res.scalar())
+        except Exception as e:
+            logger.debug("Advisory lock acquisition skipped or failed: %s", e)
+
+    if not lock_acquired:
+        logger.info("Goal %s: another worker holds advisory lock for company %s, skipping tick", goal.id, company_id)
         return
 
-    # An agent asked for a human — escalate the whole goal, don't retry.
-    escalated = [t for t in subtasks if t.completion_reason == RunCompletionReason.needs_help]
-    if escalated:
-        _finish(goal, "blocked", RunCompletionReason.needs_help)
-        db.add(goal)
-        logger.warning("Goal %s escalated: %d subtasks need human help", goal.id, len(escalated))
-        return
+    try:
+        # Check for existing subtasks of this goal
+        subtask_stmt = select(Task).where(
+            Task.company_id == company_id,
+            Task.goal_id == goal.id,
+        )
+        result = await db.execute(subtask_stmt)
+        subtasks = list(result.scalars().all())
 
-    # If there are failed subtasks, attempt retry or escalation
-    failed_subtasks = [t for t in subtasks if t.status == "failed"]
-    if failed_subtasks and not active_subtasks:
-        # Too many failures — mark goal as blocked, carrying the reason the
-        # subtasks themselves recorded when they all agree.
-        if len(failed_subtasks) >= 3:
-            reasons = {t.completion_reason for t in failed_subtasks if t.completion_reason}
-            reason = reasons.pop() if len(reasons) == 1 else RunCompletionReason.error
-            _finish(goal, "blocked", reason)
-            db.add(goal)
-            logger.warning("Goal %s blocked after %d failures (%s)", goal.id, len(failed_subtasks), reason)
+        # If there are running/pending subtasks, let them finish
+        active_subtasks = [t for t in subtasks if t.status in ("pending", "in_progress", "running")]
+        if active_subtasks:
+            logger.debug("Goal %s: %d subtasks still active, waiting", goal.id, len(active_subtasks))
             return
 
-    # If no subtasks exist yet, decompose the goal
-    if not subtasks:
-        await _decompose_goal(db, goal, company_id)
-        return
 
-    # Route unassigned pending subtasks
-    pending_unassigned = [t for t in subtasks if t.status == "pending" and not t.assigned_agent_id]
-    if pending_unassigned:
-        await _route_subtasks(db, pending_unassigned, company_id)
-        return
+        # If all subtasks are completed, evaluate goal with GoalLoop judge
+        completed_subtasks = [t for t in subtasks if t.status == "completed"]
+        if subtasks and len(completed_subtasks) == len(subtasks):
+            # Use HeuristicGoalJudge to check if goal is truly achieved
+            from nexus.orchestration.goal_loop import HeuristicGoalJudge, JudgeVerdict
+            judge = HeuristicGoalJudge(
+                completion_keywords=["complete", "done", "achieved", "finished", "success"],
+                min_output_length=10,
+            )
+            # Combine subtask titles as "output" for the judge
+            combined_output = "\n".join(t.title for t in completed_subtasks)
+            verdict: JudgeVerdict = await judge.evaluate(
+                goal=f"{goal.title}\n{goal.description or ''}",
+                current_output=combined_output,
+                iteration=1,
+            )
+            if verdict.is_complete:
+                _finish(goal, "completed", RunCompletionReason.goal)
+                db.add(goal)
+                logger.info("Goal %s completed (judge confirmed: %s)", goal.id, verdict.reasoning)
+                await _broadcast_orchestrator_event("goal_completed", {
+                    "goal_id": str(goal.id), "title": goal.title, "reasoning": verdict.reasoning,
+                    "completion_reason": RunCompletionReason.goal.value,
+                })
+            elif len(subtasks) >= MAX_SUBTASKS_PER_GOAL:
+                # Re-decomposing again would just add another round of subtasks the
+                # judge already rejected — that is the doom loop.
+                _finish(goal, "blocked", RunCompletionReason.doom_loop)
+                db.add(goal)
+                logger.warning(
+                    "Goal %s: judge still rejects after %d subtasks — doom loop, giving up",
+                    goal.id, len(subtasks),
+                )
+            else:
+                # Judge says not complete — decompose again for another iteration
+                logger.info("Goal %s: subtasks done but judge says incomplete (%s) — redecomposing", goal.id, verdict.reasoning)
+                await _decompose_goal(db, goal, company_id)
+            return
 
-    # Execute assigned pending subtasks
-    pending_assigned = [t for t in subtasks if t.status == "pending" and t.assigned_agent_id]
-    if pending_assigned:
-        await _execute_subtasks(db, pending_assigned, company_id)
+        # An agent asked for a human — escalate the whole goal, don't retry.
+        escalated = [t for t in subtasks if t.completion_reason == RunCompletionReason.needs_help]
+        if escalated:
+            _finish(goal, "blocked", RunCompletionReason.needs_help)
+            db.add(goal)
+            logger.warning("Goal %s escalated: %d subtasks need human help", goal.id, len(escalated))
+            return
+
+        # If there are failed subtasks, attempt retry or escalation
+        failed_subtasks = [t for t in subtasks if t.status == "failed"]
+        if failed_subtasks and not active_subtasks:
+            # Too many failures — mark goal as blocked, carrying the reason the
+            # subtasks themselves recorded when they all agree.
+            if len(failed_subtasks) >= 3:
+                reasons = {t.completion_reason for t in failed_subtasks if t.completion_reason}
+                reason = reasons.pop() if len(reasons) == 1 else RunCompletionReason.error
+                _finish(goal, "blocked", reason)
+                db.add(goal)
+                logger.warning("Goal %s blocked after %d failures (%s)", goal.id, len(failed_subtasks), reason)
+                return
+
+        # If no subtasks exist yet, decompose the goal
+        if not subtasks:
+            await _decompose_goal(db, goal, company_id)
+            return
+
+        # Route unassigned pending subtasks
+        pending_unassigned = [t for t in subtasks if t.status == "pending" and not t.assigned_agent_id]
+        if pending_unassigned:
+            await _route_subtasks(db, pending_unassigned, company_id)
+            return
+
+        # Execute assigned pending subtasks
+        pending_assigned = [t for t in subtasks if t.status == "pending" and t.assigned_agent_id]
+        if pending_assigned:
+            await _execute_subtasks(db, pending_assigned, company_id)
+    finally:
+        if is_pg and company_id and lock_acquired:
+            try:
+                await db.execute(
+                    text("SELECT pg_advisory_unlock(hashtext('nexus:orchestrator:' || :cid))"),
+                    {"cid": str(company_id)},
+                )
+            except Exception as e:
+                logger.debug("Advisory lock release failed: %s", e)
 
 
 async def _decompose_goal(db: AsyncSession, goal: Any, company_id: uuid.UUID) -> None:
@@ -684,10 +715,11 @@ async def _execute_subtasks(db: AsyncSession, tasks: list[Any], company_id: uuid
                 "resumed_step": resumed_step,
             })
 
-            response_text, model_used, tokens_used = await asyncio.wait_for(
-                _call_llm(agent, system_prompt, prompt, history_messages),
-                timeout=SUBTASK_TIMEOUT_SECONDS,
-            )
+            async with _tenant_bulkhead.acquire(company_id):
+                response_text, model_used, tokens_used = await asyncio.wait_for(
+                    _call_llm(agent, system_prompt, prompt, history_messages),
+                    timeout=SUBTASK_TIMEOUT_SECONDS,
+                )
 
             if NEEDS_HELP_MARKER in (response_text or ""):
                 # The agent decided it cannot finish without a human.
@@ -740,6 +772,18 @@ async def _execute_subtasks(db: AsyncSession, tasks: list[Any], company_id: uuid
 
             # Self-adaptive trigger: parse [SCHEDULE:] patterns from LLM output
             await _parse_adaptive_triggers(db, agent, response_text, company_id)
+
+        except TenantSaturated as e:
+            # Saturated tenant quota: put task back to pending for next tick
+            task.status = "pending"
+            task.started_at = None
+            task.error = f"Tenant concurrency quota reached; will retry (retry_after={e.retry_after}s)"
+            db.add(task)
+            await _broadcast_orchestrator_event("subtask_deferred", {
+                "task_id": str(task.id), "title": task.title[:60], "agent": agent.name,
+                "error": "tenant_saturated",
+            })
+            logger.warning("Subtask '%s' deferred: %s", task.title[:40], e)
 
         except (asyncio.TimeoutError, TimeoutError) as e:
             _finish(task, "failed", RunCompletionReason.timeout)

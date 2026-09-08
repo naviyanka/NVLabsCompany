@@ -180,6 +180,15 @@ async def _tick(session_factory: async_sessionmaker[AsyncSession]) -> None:
     now = datetime.now(timezone.utc).replace(tzinfo=None)
 
     async with session_factory() as db:
+        # Reap expired budget reservations
+        try:
+            from nexus.services.budget_service import BudgetService
+            reaped = await BudgetService(db).reap_expired_reservations()
+            if reaped > 0:
+                logger.info("Scheduler reaped %d expired budget reservations", reaped)
+        except Exception as e:
+            logger.debug("Scheduler budget reap error: %s", e)
+
         # Find active triggers that are due
         stmt = (
             select(Trigger)

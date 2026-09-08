@@ -23,6 +23,11 @@ from nexus.models.task import Task
 @pytest.fixture(scope="module")
 def postgres_container():
     """Start a real PostgreSQL + pgvector container if Docker is available, else skip."""
+    import os
+    if os.environ.get("TEST_DATABASE_URL"):
+        yield None
+        return
+
     pytest.importorskip("testcontainers.postgres")
     from testcontainers.postgres import PostgresContainer
 
@@ -41,8 +46,13 @@ def postgres_container():
 
 @pytest.fixture(scope="module")
 def migrated_postgres_url(postgres_container):
-    """Run real Alembic migrations against the Postgres container."""
-    sync_url = postgres_container.get_connection_url()
+    """Run real Alembic migrations against the Postgres container or TEST_DATABASE_URL."""
+    import os
+    if os.environ.get("TEST_DATABASE_URL"):
+        sync_url = os.environ["TEST_DATABASE_URL"]
+    else:
+        sync_url = postgres_container.get_connection_url()
+
     async_url = sync_url.replace("postgresql+psycopg2://", "postgresql+asyncpg://").replace("postgresql://", "postgresql+asyncpg://")
     
     alembic_cfg = alembic.config.Config("alembic.ini")
@@ -196,5 +206,222 @@ async def test_postgres_row_level_security(app_user_postgres_url):
         tasks_a = result.scalars().all()
         assert len(tasks_a) == 1
         assert tasks_a[0].title == "Tenant A Private Task"
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_postgres_idempotency_workflow(app_user_postgres_url):
+    """Real PostgreSQL verification of IdempotencyRecord with RLS tenant isolation."""
+    from starlette.applications import Starlette
+    from starlette.responses import JSONResponse
+    from starlette.routing import Route
+    from starlette.types import ASGIApp, Receive, Scope, Send
+    import httpx
+    from datetime import timedelta
+    from nexus.models.idempotency import IdempotencyRecord
+    from nexus.api.idempotency_middleware import IdempotencyMiddleware
+    from nexus.auth.principal import Principal
+
+    engine = create_async_engine(app_user_postgres_url)
+    session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+    call_count = 0
+    should_fail = False
+
+    async def sample_endpoint(request):
+        nonlocal call_count
+        if should_fail:
+            raise RuntimeError("Downstream service crashed")
+        call_count += 1
+        body = await request.json()
+        return JSONResponse({"message": "created", "count": call_count, "name": body.get("name")}, status_code=201)
+
+    app = Starlette(routes=[Route("/api/v1/items", sample_endpoint, methods=["POST"])])
+
+    cid = uuid.uuid4()
+    # Create company in DB
+    async with session_factory() as session:
+        session.add(Company(id=cid, name="Idempotency Test Corp"))
+        await session.commit()
+
+    class FakeAuth:
+        def __init__(self, app: ASGIApp):
+            self.app = app
+        async def __call__(self, scope: Scope, receive: Receive, send: Send):
+            if scope["type"] == "http":
+                scope.setdefault("state", {})["principal"] = Principal(kind="user", company_id=cid, role="admin", email="admin@test.com")
+            await self.app(scope, receive, send)
+
+    app.add_middleware(IdempotencyMiddleware)
+    app.add_middleware(FakeAuth)
+
+    key = f"key-{uuid.uuid4()}"
+    headers = {"Idempotency-Key": key}
+
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://testserver") as client:
+        # 1. First call -> 201 Created
+        r1 = await client.post("/api/v1/items", headers=headers, json={"name": "Widget A"})
+        assert r1.status_code == 201
+        assert r1.json()["count"] == 1
+        assert "Idempotent-Replay" not in r1.headers
+
+        # 2. Same key twice -> second returns cached body with Idempotent-Replay: true
+        r2 = await client.post("/api/v1/items", headers=headers, json={"name": "Widget A"})
+        assert r2.status_code == 201
+        assert r2.json()["count"] == 1
+        assert r2.headers.get("Idempotent-Replay") == "true"
+
+        # 3. Same key, different body -> 422 IDEMPOTENCY_KEY_REUSED
+        r3 = await client.post("/api/v1/items", headers=headers, json={"name": "Widget B"})
+        assert r3.status_code == 422
+        assert r3.json()["code"] == "IDEMPOTENCY_KEY_REUSED"
+
+        # 4. Handler raises -> row removed, client can retry
+        fail_key = f"fail-key-{uuid.uuid4()}"
+        fail_headers = {"Idempotency-Key": fail_key}
+        should_fail = True
+        with pytest.raises(RuntimeError):
+            await client.post("/api/v1/items", headers=fail_headers, json={"name": "Crash"})
+
+        # Verify row was deleted, not stuck in_flight or marked complete
+        should_fail = False
+        r_retry = await client.post("/api/v1/items", headers=fail_headers, json={"name": "Crash"})
+        assert r_retry.status_code == 201
+        assert r_retry.json()["name"] == "Crash"
+
+        # 5. Expired in_flight row -> reclaimed, not 409
+        stuck_key = f"stuck-key-{uuid.uuid4()}"
+        async with session_factory() as session:
+            await session.execute(
+                sa.text("SELECT set_config('nexus.company_id', :cid, false)"),
+                {"cid": str(cid)},
+            )
+            stuck_rec = IdempotencyRecord(
+                company_id=cid,
+                idem_key=stuck_key,
+                endpoint="/api/v1/items",
+                request_hash="stale-hash",
+                state="in_flight",
+                created_at=datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=2),
+                expires_at=datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=1),
+            )
+            session.add(stuck_rec)
+            await session.commit()
+
+        r_reclaimed = await client.post("/api/v1/items", headers={"Idempotency-Key": stuck_key}, json={"name": "Reclaimed"})
+        assert r_reclaimed.status_code == 201
+        assert r_reclaimed.json()["name"] == "Reclaimed"
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_postgres_atomic_budget_reservations_concurrency(app_user_postgres_url):
+    """Under 50 concurrent requests competing for a $100 cap ($10 each),
+    exactly 10 must succeed and 40 must be denied, never violating CHECK constraint."""
+    import asyncio
+    from nexus.models.budget import BudgetPolicy, CostEvent
+    from nexus.services.budget_service import BudgetService
+
+    engine = create_async_engine(app_user_postgres_url)
+    session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+    cid = uuid.uuid4()
+    policy_id = uuid.uuid4()
+
+    async with session_factory() as session:
+        # Create company first and commit
+        session.add(Company(id=cid, name="Budget Concurrency Corp"))
+        await session.commit()
+
+    async with session_factory() as session:
+        await session.execute(
+            sa.text("SELECT set_config('nexus.company_id', :cid, false)"),
+            {"cid": str(cid)},
+        )
+        # Create budget policy: $100 (10,000 cents) limit
+        policy = BudgetPolicy(
+            id=policy_id,
+            company_id=cid,
+            scope_type="company",
+            scope_id=cid,
+            metric="cost_cents",
+            window_kind="monthly",
+            amount=10000,
+            spent_cents=0,
+            reserved_cents=0,
+            warn_percent=80,
+            hard_stop_enabled=True,
+            is_active=True,
+        )
+        session.add(policy)
+        await session.commit()
+
+    async def attempt_reserve(worker_id: int):
+        # Each worker opens its own DB session and sets tenant RLS context
+        async with session_factory() as session:
+            await session.execute(
+                sa.text("SELECT set_config('nexus.company_id', :cid, false)"),
+                {"cid": str(cid)},
+            )
+            svc = BudgetService(session)
+            # Try to reserve $10 (1000 cents)
+            allowed, reservation, check = await svc.reserve(
+                company_id=cid,
+                estimate_cents=1000,
+                scope_type="company",
+                scope_id=cid,
+            )
+            return allowed, reservation
+
+    # Launch 50 concurrent tasks
+    tasks = [attempt_reserve(i) for i in range(50)]
+    results = await asyncio.gather(*tasks)
+
+    successes = [r for r in results if r[0] is True]
+    failures = [r for r in results if r[0] is False]
+
+    assert len(successes) == 10, f"Expected exactly 10 successes, got {len(successes)}"
+    assert len(failures) == 40, f"Expected exactly 40 failures, got {len(failures)}"
+
+    # Check database state directly
+    async with session_factory() as session:
+        await session.execute(
+            sa.text("SELECT set_config('nexus.company_id', :cid, false)"),
+            {"cid": str(cid)},
+        )
+        res = await session.execute(sa.select(BudgetPolicy).where(BudgetPolicy.id == policy_id))
+        pol = res.scalar_one()
+        assert pol.reserved_cents == 10000
+        assert pol.spent_cents == 0
+        assert pol.spent_cents + pol.reserved_cents <= pol.amount
+
+        # Commit half of the reservations ($10 -> actual $8) and release the other half
+        svc = BudgetService(session)
+        for i, (allowed, res_event) in enumerate(successes):
+            await session.execute(
+                sa.text("SELECT set_config('nexus.company_id', :cid, false)"),
+                {"cid": str(cid)},
+            )
+            if i < 5:
+                # Settle for 800 cents
+                committed = await svc.commit_reservation(res_event.id, cost_cents=800)
+                assert committed is True
+            else:
+                # Release hold
+                released = await svc.release_reservation(res_event.id)
+                assert released is True
+
+        await session.execute(
+            sa.text("SELECT set_config('nexus.company_id', :cid, false)"),
+            {"cid": str(cid)},
+        )
+        res = await session.execute(sa.select(BudgetPolicy).where(BudgetPolicy.id == policy_id))
+        pol = res.scalar_one()
+        print("Final pol:", pol.spent_cents, pol.reserved_cents)
+        # 5 committed at 800 cents = 4000 spent_cents, 0 remaining reserved_cents
+        assert pol.spent_cents == 4000
+        assert pol.reserved_cents == 0
 
     await engine.dispose()

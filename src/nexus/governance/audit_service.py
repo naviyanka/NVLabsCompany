@@ -25,10 +25,6 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
-class AuditPersistenceError(RuntimeError):
-    """The requested audit row could not be persisted."""
-
-
 async def record_audit(
     company_id: uuid.UUID,
     action: str,
@@ -44,8 +40,8 @@ async def record_audit(
 ) -> None:
     """Write an audit log entry to the database.
 
-    This is fire-and-forget — errors are logged but never raised,
-    so audit logging can never block the operation being audited.
+    Default mode is fire-and-forget for existing callers. ``raise_on_error``
+    makes durability-sensitive operations fail closed when persistence fails.
 
     Args:
         company_id: The company/tenant this event belongs to.
@@ -88,7 +84,7 @@ async def record_audit(
     except Exception as exc:
         logger.warning("Audit log write failed: %s", exc)
         if raise_on_error:
-            raise AuditPersistenceError("audit log write failed") from exc
+            raise RuntimeError("audit log write failed") from exc
 
 
 async def _chain(session: Any, entry: Any) -> None:

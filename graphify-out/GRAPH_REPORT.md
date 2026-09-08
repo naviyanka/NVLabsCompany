@@ -1,16 +1,16 @@
-# Graph Report - NVLabsCompany  (2026-09-08)
+# Graph Report - NVLabsCompany  (2026-09-09)
 
 ## Corpus Check
-- 1593 files · ~1,483,028 words
+- 1609 files · ~1,487,958 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 26121 nodes · 43317 edges · 1237 communities (1063 shown, 174 thin omitted)
-- Extraction: 94% EXTRACTED · 6% INFERRED · 0% AMBIGUOUS · INFERRED: 2498 edges (avg confidence: 0.92)
+- 26264 nodes · 43663 edges · 1285 communities (1111 shown, 174 thin omitted)
+- Extraction: 94% EXTRACTED · 6% INFERRED · 0% AMBIGUOUS · INFERRED: 2557 edges (avg confidence: 0.92)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `e8a19409`
+- Built from commit: `3650ee73`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -19,39 +19,39 @@
 - server.ts
 - CLIAdapter
 - ClaudeCodeAdapter
-- _post
-- test_obsidian_temporal.py
+- _get
+- obsidian_activities.py
 - db
 - Button.tsx
 - WorktreeManager
-- timedelta
+- LLMEvolutionAdvisor
 - _make_server
-- deps.py
-- test_obsidian_wikilinks.py
+- stream_events
+- scan_and_index
 - MemoryGraph.tsx
-- TestVaultWriteAuthorization
+- WriteActor
 - routes/knowledge.py
-- test_obsidian_indexer.py
-- client.py
+- LocalEmbeddingProvider
+- routes/obsidian.py
 - ArchetypeRegistry
 - GitRepos.tsx
 - BudgetIncident
 - routes/auth.py
 - governance/__init__.py
-- models/__init__.py
+- deps.py
 - FileStateBackend
 - App.tsx
 - apiClient
-- tools.py
+- models/__init__.py
 - Watchdog
 - routes/archetypes.py
 - agents.ts
 - skills.py
-- RealtimeEvent
+- EventStream
 - HiveManager
-- test_memory.py
+- TestSearch
 - routes/workflows.py
-- test_knowledge.py
+- fixture
 - StdioMCPTransport
 - OpenOffice2DView.tsx
 - lib/PixelAssets.ts
@@ -59,9 +59,9 @@
 - BreakerInput
 - ComplianceFramework
 - Section
-- _get
+- TaskService
 - routes/hr.py
-- GoalLoop
+- timedelta
 - RetentionManager
 - InteractivePOI
 - HealthMonitor
@@ -78,28 +78,28 @@
 - routes/incidents.py
 - PersistentAuditLogger
 - notifications.py
-- session_factory
+- test_obsidian_vault.py
 - Operation
-- SessionCompactor
-- context_trigger.py
+- CompactionConfig
+- ConditionExpression
 - ValueError
 - CompanyWorkflow
 - TenantViolation
 - NodeRegistry
-- routes/obsidian.py
+- obsidian_service.py
 - HermesAdapter
 - adapters.py
 - ControlRegistry
-- Any
-- ToolRegistry
+- ResourceLimitExceeded
+- CatalogEntry
 - CLIRegistry
 - compute_next_fire
 - LayeredMemoryStore
-- PersistentHeartbeatService
+- main.py
 - .evaluate
-- models_router/__init__.py
+- estimate_min_call_cost
 - BaseFurnitureAsset
-- RAGPipeline
+- BM25Ranker
 - access.py
 - fixture
 - asyncio
@@ -109,11 +109,11 @@
 - _make_registry
 - vault.py
 - ._mine_agent_fallback
-- ThoughtTree
+- ThoughtNode
 - secrets.py
 - RBACManager
 - RedisHiveBackend
-- WebhookServer
+- test_obsidian_writeback_preconditions.py
 - AgentLifecycleManager
 - FernetSecretBackend
 - identity.py
@@ -123,10 +123,10 @@
 - ClosingTimeController
 - LLMCircuitBreaker
 - obsidian/__init__.py
-- Any
+- MeetingConductor
 - HiveMessage
 - ImprovementProposer
-- runtime/__init__.py
+- utcnow
 - triggers/__init__.py
 - _run
 - TaskFlow
@@ -142,7 +142,7 @@
 - _run
 - LLMFactExtractor
 - MemoryStore
-- Agent
+- agent.py
 - TokenCounter
 - TemplateRegistry
 - HiveBackend
@@ -159,13 +159,13 @@
 - HTTPAdapter
 - MemoryRecord
 - routes/okr.py
-- goals.py
-- CostEvent
-- degradation.py
-- temporal/workflows.py
+- SparseRetriever
+- BudgetService
+- CodeParser
+- test_temporal_activity_layer.py
 - policies.py
 - KnowledgePlaza
-- Trigger
+- TriggerExecution
 - Benchmark
 - IntegrationRegistry
 - ToolAuditStore
@@ -177,15 +177,15 @@
 - routes/plaza.py
 - GroupManager
 - StatisticalAnalyzer
-- LocalEmbeddingProvider
-- ProviderRegistry
+- RAGPipeline
+- models_router/__init__.py
 - WebhookHandler
-- meetings.py
+- ToolRegistry
 - _make_controller
 - GuardrailChain
-- MeetingConductor
+- TestMeetingConductorPureLogic
 - arch_guard.py
-- tools/__init__.py
+- factory.py
 - lib/render-report.mjs
 - BudgetEnforcer
 - devDependencies
@@ -193,19 +193,19 @@
 - OrgChart
 - latency_stats
 - ChangePromoter
-- TaskPlanner
+- LLMTaskPlanner
 - lineOf
 - asyncio
-- CompanySettings
+- TextParser
 - EvaluationConfig
 - .consume
 - test_mcp_server.py
 - StructuralGuardrail
 - gates/index.mjs
 - CostTracker
+- PluginRegistry
+- load_plugin
 - NexusPlugin
-- test_plugin_sdk.py
-- _find_plugin_class
 - test_session_compaction.py
 - app
 - ABTestFramework
@@ -216,16 +216,16 @@
 - WebSocketManager
 - ContextBuilder
 - main.tsx
-- main.py
+- Principal
 - AgentInfo
 - test_alembic_migration.py
 - ThresholdCondition
-- get_leader_election
+- is_leader
 - PolicyGuardrail
 - MeetingTemplates
-- MemoryScopeManager
-- SkillService
-- tool_catalog
+- test_obsidian_wikilinks.py
+- ToolExecutor
+- tools/__init__.py
 - DelegationEngine
 - HiringManager
 - ProposalEvaluator
@@ -240,16 +240,16 @@
 - asyncio
 - evolution/__init__.py
 - price_for
-- compress.py
+- routes/communication.py
 - manifest.json
 - with_retry
 - TestSoul
 - PerformanceManager
 - _FernetEncryptor
-- ExperienceManager
+- Path
 - OllamaProvider
 - RetryWithBudget
-- TestPluginLoaderClass
+- PluginLoader
 - _scrub_arguments
 - NEXUS Dashboard Application
 - execution/sandbox.py
@@ -267,9 +267,9 @@
 - Histogram
 - field_validator
 - Software Architect Agent Role
-- tenant_scope
+- test_tool_governance.py
 - Soul
-- routes/chat.py
+- stored_messages
 - dashboard/package.json
 - test_obsidian_smoke_authenticated.py
 - Cronus AI-Company - Repository Analysis
@@ -277,21 +277,21 @@
 - vercel.mjs
 - LLMProvider
 - Counter
-- parse_skill_frontmatter
+- scan_skill_dir
 - ErrorBoundary
 - sop_engine.py
 - RedisStateBackend
 - 4. Cross-Repo Gap Analysis
-- hive_task.py
+- ToolInvocation
 - TestCase
 - NVLabsCompany — Agentic System Architecture Report
 - /agents Page — Wiring Plan
-- get_redis
+- api/middleware.py
 - validate_against_schema
 - Frontend Engineer Agent Role
-- .get_provider
+- UserProfile
 - ManifestRegistry
-- MonkeyPatch
+- writer.py
 - Clawith - Repository Analysis
 - PRD Work-Product Template
 - Three.js Textures
@@ -299,7 +299,7 @@
 - asyncio
 - EmailChannel
 - PraisonAI - Repository Analysis
-- PolicyContext
+- Policy
 - RotationPolicy
 - test_knowledge_plaza_collab.py
 - QA Engineer Agent Role
@@ -314,19 +314,19 @@
 - UI/UX Pro Max - Design Intelligence
 - SRE Agent Role
 - persona.py
-- KnowledgePage
+- test_obsidian_temporal.py
 - investigation-brief.mjs
-- ._do_execute
-- .check_auto_approve
+- TestVaultWriteAuthorization
+- governance/approvals.py
 - ._get_config
-- TestCallbackRoutingNoFallback
+- SessionCompactor
 - Central API Client (src/api/client.ts)
 - NEXUS v1 Architecture
-- TestCLIAdapterBuildArgs
+- TestFernetSecretBackend
 - .__init__
 - workspace-resolver.mjs
 - TestIsolatedSandbox
-- test_realtime_websocket.py
+- TestRealtimeEvent
 - getManifestPath
 - handleAutonomousCEOActions
 - Timeline.tsx
@@ -334,12 +334,12 @@
 - _store
 - vite-env.d.ts
 - .get_queued_requests
-- profile.py
+- test_models.py
 - DockerSandbox
 - make_secret_backend
 - OpenCompany - Repository Analysis
 - ExecutionResult
-- rejection_for
+- TestThroughTheApp
 - tsx
 - @types/three
 - sw.js
@@ -352,23 +352,23 @@
 - TestIntegrationRegistry
 - GSAP Plugins
 - sanitizers/index.mjs
-- ToolPolicyEngine
+- mcp_server.py
 - Munder Difflin Feature Import Plan
 - TestStalledRunDetection
 - 4. Subsystem-by-subsystem comparison
 - NEXUS Cross-Repository Upgrade Plan
 - Paperclip - Repository Analysis
 - TestPersistentAuditLogger
-- _make_agent
+- test_hive_manager.py
 - _setup_hive
-- ._make_app
+- test_logging_telemetry.py
 - Three.js Shaders
 - scripts/render-report.mjs
 - RealtimeEventBus
 - asyncio
 - MemoryReflector
-- .call_tool
-- FakeRequest
+- MCPServer
+- Trigger
 - Three.js Loaders
 - SubagentPermits
 - TestAllArchetypesPopulated
@@ -377,7 +377,7 @@
 - NEXUS — Comprehensive Feature Guide
 - cost_alerting.py
 - FactExtractor
-- RunCompletionReason
+- test_completion_reasons.py
 - Compose Graphics
 - Design Audit
 - ai-application.md
@@ -385,7 +385,7 @@
 - /activity Page — Wiring Plan
 - CompanyPortabilityService
 - TestPerformanceManager
-- test_failure_alchemy.py
+- TestDifferentErrorPatterns
 - patch
 - Three.js Interaction
 - test_memory_graph_frontend_contract.py
@@ -415,9 +415,9 @@
 - dedup-recs.mjs
 - lib/reconcile-candidates.mjs
 - BackendController
-- cli.py
-- .route_to_provider
-- worktree.py
+- test_smart_retry.py
+- TriggerExecutor
+- revoke_session
 - SwiftUI Gestures deep-dive
 - Three.js Fundamentals
 - Three.js Materials
@@ -425,7 +425,7 @@
 - React View Transitions
 - Per-Page Dependencies
 - What You Must Do When Invoked
-- ThoughtNode
+- TestToTPlanner
 - test_evaluation_framework.py
 - ScrollTrigger
 - State & Feedback Patterns
@@ -458,8 +458,8 @@
 - tauri.conf.json
 - AgentProviderPreset
 - ceo_query_api
-- ContextRule
-- WatchdogConfig
+- context_trigger.py
+- watchdog.py
 - TestBuiltinPolicies
 - Material 3 Expressive: Deep-Dive
 - Compose Motion - Sub-skill
@@ -477,19 +477,19 @@
 - scan-codebase.mjs
 - Rules
 - TestNeedsRecoveryEscalation
-- HookPoint
+- _is_workflow_fatal
 - TestDelegationEngine
 - TestHiringManager
-- test_hive_protocol.py
+- hive_protocol.py
 - test_workflow_routes.py
 - Compose Multiplatform
 - GSAP — Animation Engine
 - SwiftUI Motion
-- realtime/__init__.py
+- RealtimeEvent
 - 2. Evidence-Based Subsystem Breakdown & 10/10 Requirements
 - required_signatures_for
 - SecretVault
-- .__init__
+- sso_callback
 - test_devops_enterprise.py
 - Canvas Generative
 - GSAP Timeline
@@ -506,7 +506,7 @@
 - IncidentManager
 - RollbackManager
 - PhaseMachine
-- classify_inbound_kind
+- _run_workflow
 - TestControlAPI
 - TestOKRManagerProgress
 - GSAP ScrollTrigger
@@ -532,12 +532,12 @@
 - token_efficiency
 - KnowledgeManager
 - merge_pinned
-- lib/budget-summary.mjs
-- TimelineEvent
+- test_scheduler_persistence.py
+- TestDelegationChain
 - validate_command_flags
 - TestAlertThreshold
 - test_graceful_shutdown.py
-- MessageTooLargeError
+- compaction.py
 - TestNexusPluginProtocol
 - TestReplayStats
 - Pipeline
@@ -555,10 +555,10 @@
 - Agent
 - 1. Reference implementation (OpenCompany)
 - 2. Per-Subsystem Module Ratings
-- MCPClient
+- .call_tool
 - KgMeta
 - test_meetings.py
-- TestMeetingScheduler
+- MeetingScheduler
 - cavecrew/SKILL.md
 - Caveman Help
 - Find Skills
@@ -579,15 +579,15 @@
 - ._log_access
 - count_sections
 - is_safe_flag
-- normalize_model
+- IndexResult
 - _run
 - TestHeuristicFallback
 - TestExtractDurableFacts
-- format_sse
-- TestTick
+- parse_skill_frontmatter
+- normalize_subtree
 - GitNexus Guide
 - test_semantic_fallback.py
-- semantic.py
+- TestSemanticMemoryStatus
 - TestCompanyIdValidation
 - TestConstants
 - AGSL Recipes
@@ -612,8 +612,8 @@
 - Refactoring with GitNexus
 - test_http_adapter_webhook.py
 - get_preset
-- MultiHookPlugin
-- PageChangeEvent
+- FailingPlugin
+- TaskPlanner
 - Caveman Compress
 - caveman/SKILL.md
 - Generation Guide
@@ -625,7 +625,7 @@
 - Four Archetypes
 - Troubleshooting
 - Canvas (SwiftUI Native Drawing)
-- ._persist
+- TestGuardrailProtocolConformance
 - Doctrine
 - 6. Rendering Performance
 - NEXUS System Architecture
@@ -638,13 +638,13 @@
 - .check_can_spend
 - .available
 - ._chunk_text
-- TestPluginDiscovery
-- TestSandboxedImport
-- BaseModel
+- discover_plugins
+- sandboxed_import
+- VaultAuthorizationError
 - TestLifecycleValidTransitions
 - TestBudgetEnforcerChecks
 - Commands
-- routes/audit.py
+- test_guardrails.py
 - test_incidents.py
 - TestIncidentLifecycle
 - TestSearch
@@ -657,7 +657,7 @@
 - TestRecordAndRollback
 - TestDatabasePersistence
 - _check_llm
-- stop_fingerprint
+- HeartbeatRun
 - caveman-commit
 - caveman-explore/package.json
 - caveman-learn/package.json
@@ -687,7 +687,7 @@
 - LOWER PRIORITY - Polish and Production
 - Priority 6: Autonomous Orchestration & System Completion
 - _check_redis
-- scan_and_index
+- TestStructuralGuardrailLengths
 - TestRegexPatterns
 - test_leftovers_channels_temporal_evolution.py
 - Impact Analysis with GitNexus
@@ -715,7 +715,7 @@
 - test_layered_memory.py
 - telegram_bot.py
 - graphify reference: extra exports and benchmark
-- ApprovalRequest
+- TestWorkflowDeterminism
 - IngestResult
 - fixture
 - activity.py
@@ -729,9 +729,9 @@
 - TestTimelineTracking
 - TestIncidentListing
 - TestStats
-- KnowledgeChunk
+- rag.py
 - TestLLMCircuitBreakerBasic
-- watchdog.py
+- TestPatrolReport
 - TestLLMSummarizer
 - TestOKRManagerQueries
 - TestCostBreakdown
@@ -799,10 +799,10 @@
 - rollback.py
 - TestProviderPresets
 - create_soul
-- TestOrphanedTaskDetection
+- test_plugin_sdk.py
 - TestCancelWorkCallback
-- .record_tool_use
-- test_memory_knowledge_and_vault_nodes_coexist
+- ._validate
+- TestProgressQueryHandler
 - TestHelmChartArchitecture
 - TestPollForResultSuccessful
 - TestPollForResultConnectionErrors
@@ -812,19 +812,19 @@
 - TestRemoveDoc
 - TestWrapLLMCallable
 - TestContainerSecurityAudit
-- scripts/benchmark.py
+- test_failure_alchemy.py
 - graphify reference: query, path, explain
-- TestAzureOpenAIAdapterConfig
+- TestSafeResolve
 - SoulTemplate
 - TestLoadEmbeddings
 - get_memory_graph
-- Security Engineer Agent Role
-- FakeMCPClient
+- create_trigger
+- guard_tool_call
 - TestEmptyTaskHandling
 - TestMultipleTasksIsolation
 - test_utcnow_removal.py
-- TestHalt
-- test_degradation_endpoint.py
+- TestArtifactRetrieval
+- degradation_status
 - Algorithms Reference
 - Evaluate an optimization observation
 - caveman-stats
@@ -838,7 +838,7 @@
 - 1. Eliminating Waterfalls
 - 2. Bundle Size Optimization
 - Common Patterns
-- _ts_union
+- _tick
 - Dark navy mission-control redesign of the NVLABS dashboard
 - Opt-in JSON persistence, restricted CORS, health probes, structured logging, and in-process metrics
 - Phase 2: Adapter Completeness and Fallback Infrastructure (v2)
@@ -861,7 +861,7 @@
 - llm_circuit_breaker.py
 - tmp_path_file
 - test_leader_election.py
-- TestIsOpen
+- TestStart
 - caveman-discover/SKILL.md
 - detect_framework
 - detect_framework
@@ -905,7 +905,7 @@
 - RollbackResult
 - test_tenant_guard.py
 - ._heuristic_fallback
-- _check_docker
+- TestAnalyzeFailure
 - Phase 11: Real-Time & Polish
 - Hermes Agent Template (Nous Research Hermes 3)
 - FIX-06: Real MCP Protocol Implementation
@@ -914,7 +914,7 @@
 - APIVersionMiddleware
 - TestPollForResultTimeout
 - TestCapabilities
-- default_criteria
+- TestSubscribeNotify
 - test_llm_circuit_breaker.py
 - TestLLMCircuitBreakerTimeout
 - TestLLMCircuitBreakerHalfOpen
@@ -922,19 +922,19 @@
 - graphify reference: commit hook and native CLAUDE.md integration
 - graphify reference: incremental update and cluster-only
 - parallel.py
-- Transition Types
+- TestTokenize
 - .soul
 - TestReset
 - graphify reference: GitHub clone and cross-repo merge
 - test_replay_engine.py
 - TestListTasksWithEvents
 - graphify reference: transcribe video and audio
-- .resolve
+- resolve_compaction_budget
 - TestQueryFilterInjection
 - TestTenantContextPropagation
 - TestViolationTracking
 - _generate_intelligent_overrides
-- TestTriggerMode
+- TestBaseTool
 - skills/caveman-learn — the Caveman Learn editing skill (MIT, public)
 - caveman-learn skill
 - ponytail-audit/SKILL.md
@@ -995,7 +995,7 @@
 - Wave 2 — Memory and context depth
 - Wave 3 — Safe execution
 - Phase 0: Foundation & Migration Setup
-- task_id
+- ParsedNote
 - ENH-09: Vector Search / Embeddings
 - ENH-10: Channel Integrations
 - .agents/skills/graphify/references/extraction-spec.md
@@ -1005,7 +1005,7 @@
 - System Persona & Soul
 - System Persona & Soul
 - 3. LLM provider abstraction — **BUILT**
-- test_the_page_fetches_the_real_endpoint
+- BrokenRedis
 - caveman-explore/tests/skill-file.test.mjs
 - ponytail-debt/SKILL.md
 - validate_data.py
@@ -1033,13 +1033,13 @@
 - graphify reference: incremental update and cluster-only
 - opencode.json
 - rate_limiter.py
-- test_the_page_does_not_render_the_built_in_fixtures
+- test_config_governance_encryption.py
 - TestFullExecuteWith202
 - TestTerminateCleanup
-- test_a_failed_fetch_does_not_fall_back_to_fixtures
+- is_public_path
 - TestTypesImportable
-- test_the_page_exposes_a_refresh
-- test_clusters_come_from_the_payload
+- failure_alchemy.py
+- .compact_incremental
 - caveman-learn/tests/skill-file.test.mjs
 - 11. Monorepo
 - 1. Core Rendering
@@ -1066,7 +1066,7 @@
 - graphify reference: transcribe video and audio
 - graphify.js
 - .__init__
-- test_the_frontend_declares_the_vault_node_fields
+- TestCLIAdapterInRegistry
 - rules/graphify.md
 - scripts/__init__.py
 - investigate-first/SKILL.md
@@ -1194,38 +1194,86 @@
 - postcss
 - tailwindcss
 - vite
+- TestGuardrailChainValidation
 - NEXUS × Obsidian Integration
 - api-parity.spec.ts
 - .kiro/skills/graphify/references/extraction-spec.md
+- TestGuardrailChainFailClosed
 - nexus
 - nexus-desktop
-- TestKdfMemoization
+- TestGuardrailChainIntegration
+- test_knowledge_rag_search_route.py
+- .from_dict
+- ._validate_content
 - persistent_circuit_breaker.py
 - TestAtomicWrite
 - Lock
 - VaultIndexer
-- .collect
+- TimelineEvent
+- MetricsMiddleware
 - verify_backup.sh
-- routes/evolution.py
-- .register
+- _post
+- fixture
+- fresh_rate_limits
+- execute_node_endpoint
+- get_correlation_id
+- semantic.py
 - .add_response_action
+- TestGuardrailChainBasic
 - backup_db.sh
 - restore_db.sh
+- TestGuardrailChainFailFast
+- TestStructuralGuardrailFields
+- TestDefaultDeny
+- TestRotationHistory
+- TestCompactionStrategy
+- Common Patterns
 - .__init__
+- .execute_with_smart_retry
+- TestEventBusIntegration
+- Micro-Phase 1.1: Request Idempotency Middleware & Ledger (F3)
+- NullEmbeddingProvider
+- OllamaEmbeddingProvider
+- TestNotifyIntegration
+- test_a_link_cannot_reach_another_companys_note
+- TestTriggerConfigDto
+- Micro-Phase 1.2: Atomic Budget Reservation & Overcommit Protection (F2)
+- Micro-Phase 2: True Database Verification Engine & Test Split (F1)
+- Micro-Phase 3: Operational Guardrails & Fault Tolerance (F5)
+- Micro-Phase 4: Database-Level Row-Level Security (F4)
+- Micro-Phase 5: Real-Time SSE/WS Event Pipeline
+- LearningEventBusProtocol
+- _FirstResult
+- NEXUS / NVLabsCompany — Production Readiness & 10/10 Architecture Master Plan
+- LLMCircuitBreakerConfig
+- Vaccine
+- .__init__
+- TestArtifactTypes
+- TestApprovalModel
+- TestCompanyMembershipModel
+- build_parser
+- _read_password
+- .embed
+- .__init__
+- .__init__
+- .from_model
+- generate_password
 
 ## God Nodes (most connected - your core abstractions)
 1. `_get()` - 172 edges
 2. `_post()` - 146 edges
-3. `Agent` - 136 edges
+3. `Agent` - 138 edges
 4. `getActiveCompanyId()` - 117 edges
 5. `AgentSession` - 117 edges
-6. `FernetSecretBackend` - 103 edges
-7. `db()` - 95 edges
+6. `db()` - 104 edges
+7. `FernetSecretBackend` - 103 edges
 8. `RAGPipeline` - 83 edges
 9. `BudgetEnforcer` - 81 edges
 10. `utcnow()` - 81 edges
 
 ## Surprising Connections (you probably didn't know these)
+- `test_goal_loop_stop_reasons_all_map_into_the_taxonomy()` --uses--> `RunCompletionReason`  [INFERRED]
+  tests/test_completion_reasons.py → src/nexus/models/task.py
 - `Secure Code Review Focus Areas` --semantically_similar_to--> `httpOnly Cookie Session Authentication`  [INFERRED] [semantically similar]
   src/nexus/templates/agents/security-engineer.md → dashboard/README.md
 - `Secure Code Review Focus Areas` --semantically_similar_to--> `X-CSRF-Token Double-Submit Protection`  [INFERRED] [semantically similar]
@@ -1234,8 +1282,6 @@
   src/nexus/templates/agents/frontend-engineer.md → dashboard/README.md
 - `Atomic Component Architecture` --semantically_similar_to--> `Dashboard Source Layout`  [INFERRED] [semantically similar]
   src/nexus/templates/agents/frontend-engineer.md → dashboard/README.md
-- `REST API Design Principles` --semantically_similar_to--> `Central API Client (src/api/client.ts)`  [INFERRED] [semantically similar]
-  src/nexus/templates/agents/backend-engineer.md → dashboard/README.md
 
 ## Import Cycles
 - None detected.
@@ -1245,11 +1291,11 @@
 - **Dashboard Authentication Flow** — dashboard_readme_cookie_session_auth, dashboard_readme_csrf_token_header, dashboard_readme_require_auth_guard, dashboard_readme_auth_disabled_mode, dashboard_readme_cors_credentials_requirement [EXTRACTED 1.00]
 - **Automated Quality Gates (No Human Fallback)** — src_nexus_templates_agents_code_reviewer_role, src_nexus_templates_agents_qa_engineer_role, src_nexus_templates_agents_security_engineer_role, src_nexus_templates_agents_devops_engineer_cicd_pipeline, src_nexus_templates_agents_sre_error_budget_freeze [INFERRED 0.85]
 
-## Communities (1237 total, 174 thin omitted)
+## Communities (1285 total, 174 thin omitted)
 
 ### Community 0 - "AgentSession"
 Cohesion: 0.01
-Nodes (162): AnthropicAdapter, Any, TaskResult, Anthropic Adapter - implements AgentAdapter Protocol for Claude models.…, Agent adapter for Anthropic Claude models. Implements the full AgentAdapter…, Verify Anthropic session is alive. Args: session: The active agent session.…, Clean up Anthropic session resources. Args: session: The session being…, Return Anthropic adapter capabilities. Returns: List of supported capability… (+154 more)
+Nodes (159): AnthropicAdapter, Any, TaskResult, Anthropic Adapter - implements AgentAdapter Protocol for Claude models.…, Agent adapter for Anthropic Claude models. Implements the full AgentAdapter…, Verify Anthropic session is alive. Args: session: The active agent session.…, Clean up Anthropic session resources. Args: session: The session being…, Return Anthropic adapter capabilities. Returns: List of supported capability… (+151 more)
 
 ### Community 1 - "server.ts"
 Cohesion: 0.02
@@ -1257,23 +1303,23 @@ Nodes (75): activities, agents, AGENTS_CONFIG_FILE, app, AUDIT_LOGS_CONFIG_FILE,
 
 ### Community 2 - "CLIAdapter"
 Cohesion: 0.02
-Nodes (77): dict, Process, CLIAdapter, Any, Pattern, TaskResult, Execute a task by spawning the configured CLI backend as a subprocess. Args:…, Send a message to the stdin of a running interactive process. Writes the given… (+69 more)
+Nodes (59): Process, CLIAdapter, Any, Pattern, TaskResult, Execute a task by spawning the configured CLI backend as a subprocess. Args:…, Send a message to the stdin of a running interactive process. Writes the given…, Read stdout from a process line-by-line, log it, and publish to WebSocket.… (+51 more)
 
 ### Community 3 - "ClaudeCodeAdapter"
 Cohesion: 0.02
 Nodes (88): ClaudeCodeAdapter, Any, Pattern, TaskResult, Extract session_id from parsed stream-json events. Scans 'system' and 'result'…, Extract final result text from 'result' type events. Args: events: List of…, Execute a task by spawning Claude Code CLI as a subprocess. Supports structured…, Check if the Claude Code process is still running. Args: session: The active… (+80 more)
 
-### Community 4 - "_post"
-Cohesion: 0.05
-Nodes (67): BackgroundTasks, _build_system_prompt(), Build a system prompt from the agent's stored configuration and memory context.…, create_pipeline(), delete_pipeline(), _execute_pipeline_bg(), get_pipeline(), get_pipeline_run() (+59 more)
+### Community 4 - "_get"
+Cohesion: 0.04
+Nodes (83): BackgroundTasks, audit_log_stats(), list_audit_logs(), Any, DbSession, Audit log query endpoints for Settings > Audit Logs tab., List audit log entries with optional filters., Verify the audit hash chain's integrity. Recomputes each entry's hash over the… (+75 more)
 
-### Community 5 - "test_obsidian_temporal.py"
-Cohesion: 0.02
-Nodes (94): IndexDocumentInput, IndexDocumentOutput, list_pending_obsidian_documents_activity(), PendingDocumentsInput, PendingDocumentsOutput, activity_defn, Which company's pending documents to list, and how many., Document ids awaiting indexing, in the order a pass would take them. Ids are… (+86 more)
+### Community 5 - "obsidian_activities.py"
+Cohesion: 0.08
+Nodes (38): index_obsidian_document_activity(), IndexDocumentInput, IndexDocumentOutput, list_pending_obsidian_documents_activity(), PendingDocumentsInput, PendingDocumentsOutput, activity_defn, BaseException (+30 more)
 
 ### Community 6 - "db"
-Cohesion: 0.03
-Nodes (117): _lock_for(), ObsidianServiceError, ObsidianVaultService, AsyncSession, Exception, _T, Scan and status operations for one company's vault., Bind the service to a session and an authorized company. Args: db: Async… (+109 more)
+Cohesion: 0.05
+Nodes (83): ObsidianVaultService, Scan and status operations for one company's vault., Path, Tests for the operator-facing Obsidian endpoints (ADR 0002, Phase 1B-2). Two…, An unset vault root is a state, not an error., A company with no vault directory yet is unavailable, and says why., A real vault directory for this company is available., The count comes from the registry, scoped to this company. (+75 more)
 
 ### Community 7 - "Button.tsx"
 Cohesion: 0.04
@@ -1281,43 +1327,43 @@ Nodes (69): Button(), ButtonProps, ButtonSize, ButtonVariant, sizeClasses, varia
 
 ### Community 8 - "WorktreeManager"
 Cohesion: 0.06
-Nodes (48): Merge a worktree branch into the current branch of repo_path. Attempts a git…, Pull latest main branch changes into the worktree branch via merge. Fetches the…, Check if the worktree has uncommitted or unmerged work. Uses git status to…, Remove a worktree and delete its associated branch. Args: worktree_path: Path…, Revert the last commit in the worktree. Args: repo_path: Path to the main git…, Run a git command and return stdout, raising on failure. Args: cwd: Working…, Run a git command and return (returncode, stdout, stderr). Args: cwd: Working…, Manages git worktrees for agent isolation using subprocess calls to git.… (+40 more)
+Nodes (53): MergeResult, Worktree Isolation - git worktree management for parallel agent execution.…, Merge a worktree branch into the current branch of repo_path. Attempts a git…, Pull latest main branch changes into the worktree branch via merge. Fetches the…, Check if the worktree has uncommitted or unmerged work. Uses git status to…, Result of merging a worktree branch into the main repository. Attributes:…, Remove a worktree and delete its associated branch. Args: worktree_path: Path…, Revert the last commit in the worktree. Args: repo_path: Path to the main git… (+45 more)
 
-### Community 9 - "timedelta"
-Cohesion: 0.03
-Nodes (90): LLMEvolutionAdvisor, Any, Suggest improvements for an agent based on performance data. Prompts the LLM…, Suggest improvements for a skill based on performance data. Prompts the LLM…, Generate a testable hypothesis about what change would improve performance. The…, Validate a hypothesis using ABTestFramework.run_test. Uses the ABTestFramework…, Parse the LLM response for agent improvement suggestions. Args: response: Raw…, Parse the LLM response for skill improvement suggestions. Args: response: Raw… (+82 more)
+### Community 9 - "LLMEvolutionAdvisor"
+Cohesion: 0.05
+Nodes (36): LLMEvolutionAdvisor, Any, Suggest improvements for an agent based on performance data. Prompts the LLM…, Suggest improvements for a skill based on performance data. Prompts the LLM…, Generate a testable hypothesis about what change would improve performance. The…, Validate a hypothesis using ABTestFramework.run_test. Uses the ABTestFramework…, Parse the LLM response for agent improvement suggestions. Args: response: Raw…, Parse the LLM response for skill improvement suggestions. Args: response: Raw… (+28 more)
 
 ### Community 10 - "_make_server"
 Cohesion: 0.03
-Nodes (54): _default_lookup_status(), _make_endpoint(), _make_server(), Comprehensive tests for the WebhookServer module., Tests for secret verification with constant-time comparison., Providing the correct secret returns True., Providing the wrong secret returns False., None endpoint (unknown id) always returns False. (+46 more)
+Nodes (55): _make_endpoint(), _make_server(), Tests for secret verification with constant-time comparison., Providing the correct secret returns True., Providing the wrong secret returns False., None endpoint (unknown id) always returns False., An empty provided secret returns False., Both known and unknown endpoint paths run hmac.compare_digest. (+47 more)
 
-### Community 11 - "deps.py"
-Cohesion: 0.05
-Nodes (52): Depends, get_current_company_id(), get_db(), get_optional_principal(), get_principal(), get_scoped_company_id(), Any, AsyncSession (+44 more)
+### Community 11 - "stream_events"
+Cohesion: 0.50
+Nodes (4): CurrentCompanyId, StreamingResponse, Stream real-time events using Server-Sent Events (SSE). Returns a streaming…, stream_events()
 
-### Community 12 - "test_obsidian_wikilinks.py"
-Cohesion: 0.05
-Nodes (94): extract_wikilinks(), frontmatter_links(), normalize_target(), note_links(), Any, Wikilink extraction for vault notes (ADR 0002 §14, proposal §7). Obsidian's…, Return targets declared in frontmatter ``related``. ADR 0002 §14 counts…, Every target a note relates to, from its body and its frontmatter. Args:… (+86 more)
+### Community 12 - "scan_and_index"
+Cohesion: 0.09
+Nodes (47): documents(), _edge_pairs(), graph(), parametrize, Path, Register the vault and index it, as the operator endpoints do., A hub note that is only links still relates to its neighbours., A relationship stated before the other note exists is information. (+39 more)
 
 ### Community 13 - "MemoryGraph.tsx"
 Cohesion: 0.08
 Nodes (48): fetchMemoryGraph(), AddMemoryNodeModal(), AddMemoryNodeModalProps, ContradictionsModal(), ContradictionsModalProps, GraphControls(), GraphControlsProps, ALL_NODE_TYPES (+40 more)
 
-### Community 14 - "TestVaultWriteAuthorization"
-Cohesion: 0.03
-Nodes (42): ActorError, Exception, Whether per-agent authorization applies to this actor., Attribution fields safe to persist or log. Ids only, never a path and never…, A short attribution string for a log line., An actor was constructed inconsistently with its kind., Who is performing a vault write. Attributes: kind: ``agent``, ``system`` or…, An agent acting through a granted tool. (+34 more)
+### Community 14 - "WriteActor"
+Cohesion: 0.07
+Nodes (20): ActorError, Exception, Who performed a vault write (ADR 0002 §20 control 9). Control 9 says audit…, Attribution fields safe to persist or log. Ids only, never a path and never…, A short attribution string for a log line., An actor was constructed inconsistently with its kind., Who is performing a vault write. Attributes: kind: ``agent``, ``system`` or…, The platform itself, e.g. the operator-invoked sync path of §17. (+12 more)
 
 ### Community 15 - "routes/knowledge.py"
 Cohesion: 0.07
 Nodes (52): BulkImportRequest, delete_knowledge_page(), _escape_like(), ExperienceResponse, get_knowledge_stats(), get_page(), get_page_history(), import_knowledge_pages() (+44 more)
 
-### Community 16 - "test_obsidian_indexer.py"
+### Community 16 - "LocalEmbeddingProvider"
 Cohesion: 0.06
-Nodes (90): chunks_for(), docs_for(), index(), fixture, Path, Tests for the Obsidian vault indexing engine (ADR 0002 §13, §21, Phase 1B-3A).…, Registry rows for a company, ordered by path., The happy path: a registered note becomes chunks and flips to indexed. (+82 more)
+Nodes (94): LocalEmbeddingProvider, Simple deterministic local embedding provider for testing/fallback without API…, chunks_for(), docs_for(), index(), make_pipeline(), fixture, Path (+86 more)
 
-### Community 17 - "client.py"
+### Community 17 - "routes/obsidian.py"
 Cohesion: 0.05
-Nodes (63): background_services_health(), _check_db_health(), _check_redis_health(), _check_temporal_health(), _count_task_queue_pollers(), health_check(), liveness(), Any (+55 more)
+Nodes (67): description, ge, le, Query, FailedNote, get_obsidian_index_progress(), get_obsidian_status(), index_obsidian_vault() (+59 more)
 
 ### Community 18 - "ArchetypeRegistry"
 Cohesion: 0.08
@@ -1332,16 +1378,16 @@ Cohesion: 0.05
 Nodes (37): AutoPauseCallback, CancelWorkCallback, CostEventRecord, Initialize the budget enforcer. Args: auto_pause_callback: Called with…, Record a cost event and update spent counters. Supports multi-metric tracking.…, Handle a hard stop: create incident, pause agent, cancel work. Args:…, Retrieve cost events with optional filters. Args: scope_type: Filter by scope…, A recorded cost event. Attributes: id: Unique event identifier. scope_type:… (+29 more)
 
 ### Community 21 - "routes/auth.py"
-Cohesion: 0.02
-Nodes (196): ArgumentParser, AsyncOAuth2Client, Company, Namespace, OptionalPrincipal, SQLAlchemyUserDatabase, accept_invite(), _build_me() (+188 more)
+Cohesion: 0.05
+Nodes (96): SQLAlchemyUserDatabase, accept_invite(), _build_me(), change_password(), _client_ip(), _company_name(), create_invite(), InviteAcceptRequest (+88 more)
 
 ### Community 22 - "governance/__init__.py"
 Cohesion: 0.05
-Nodes (59): IntEnum, AgentUsageSample, BreakerAction, BreakerConfig, BreakerDecision, BreakerLevel, BreakerState, Enum (+51 more)
+Nodes (48): IntEnum, AgentUsageSample, BreakerAction, BreakerConfig, BreakerDecision, BreakerLevel, BreakerState, Enum (+40 more)
 
-### Community 23 - "models/__init__.py"
-Cohesion: 0.02
-Nodes (146): CompanyCreate, CompanyResponse, CompanyUpdate, create_company(), delete_company(), get_company(), list_companies(), Any (+138 more)
+### Community 23 - "deps.py"
+Cohesion: 0.03
+Nodes (106): get_db(), AsyncSession, Common FastAPI dependencies for the NEXUS API. Route handlers get their tenant…, Provide an async database session., CompanyCreate, CompanyResponse, CompanyUpdate, create_company() (+98 more)
 
 ### Community 24 - "FileStateBackend"
 Cohesion: 0.05
@@ -1355,9 +1401,9 @@ Nodes (47): authApi, InviteAcceptRequest, InviteAcceptResponse, InviteCreateResp
 Cohesion: 0.04
 Nodes (88): apiClient, AgentCard(), AgentCardProps, AgentList(), AgentListProps, ViewMode, ACTION_TYPES, AutonomyPolicyPanel() (+80 more)
 
-### Community 27 - "tools.py"
+### Community 27 - "models/__init__.py"
 Cohesion: 0.04
-Nodes (75): create_tool(), delete_tool(), discover_tools(), get_tool(), grant_tool_access(), list_agent_tools(), list_tools(), Any (+67 more)
+Nodes (85): NEXUS API route modules., create_tool(), delete_tool(), discover_tools(), get_tool(), grant_tool_access(), list_agent_tools(), list_tools() (+77 more)
 
 ### Community 28 - "Watchdog"
 Cohesion: 0.16
@@ -1372,32 +1418,32 @@ Cohesion: 0.05
 Nodes (54): AgentArchetype, AgentProvider, AgentTemplate, AgentUpdateRequest, companyPath(), createAgent(), hireFromManifest(), HireFromManifestRequest (+46 more)
 
 ### Community 31 - "skills.py"
-Cohesion: 0.08
-Nodes (45): AgentSkillAssign, AgentSkillResponse, assign_skill_to_agent(), create_skill(), delete_skill(), get_skill(), get_skill_policy(), list_skills() (+37 more)
+Cohesion: 0.03
+Nodes (85): CompanySettingsResponse, CompanySettingsUpdate, get_company_settings(), Any, BaseModel, DbSession, PathCompanyId, put (+77 more)
 
-### Community 32 - "RealtimeEvent"
+### Community 32 - "EventStream"
 Cohesion: 0.06
-Nodes (29): Any, A typed event for real-time streaming to connected clients. Represents a single…, Serialize the event to a JSON-compatible dictionary. Returns: Dictionary…, RealtimeEvent, EventStream, Return the current number of buffered events., Buffered event stream for Server-Sent Events delivery. Uses an asyncio.Queue…, Initialize the event stream with a bounded queue. Args: maxsize: Maximum number… (+21 more)
+Nodes (26): EventStream, Return the current number of buffered events., Buffered event stream for Server-Sent Events delivery. Uses an asyncio.Queue…, Initialize the event stream with a bounded queue. Args: maxsize: Maximum number…, Return whether the stream has been closed., Push an event into the stream buffer. Uses put_nowait for non-blocking…, Signal the stream to terminate. Pushes a None sentinel to unblock any waiting…, Async generator yielding SSE-formatted event strings. Blocks on the internal… (+18 more)
 
 ### Community 33 - "HiveManager"
 Cohesion: 0.05
-Nodes (32): HiveManager, AgentStatus, Path, Create the base hive directory structure if not present., Read the registry.json file., Write the registry.json file., Register an agent (async). Use when backend is async., Unregister an agent (async). Use when backend is async. (+24 more)
+Nodes (31): HiveManager, AgentStatus, Path, Create the base hive directory structure if not present., Read the registry.json file., Write the registry.json file., Register an agent (async). Use when backend is async., Unregister an agent (async). Use when backend is async. (+23 more)
 
-### Community 34 - "test_memory.py"
-Cohesion: 0.06
-Nodes (21): Tests for MemoryStore (3-tier system) and BM25 retriever. Tests actual BM25…, Tests for the search function., Search returns at most top_k results., Search results are sorted by relevance (highest score first)., Empty query returns no results., Empty memories list returns no results., Query with no matching terms returns empty results., Search returns correct indices into the memories list. (+13 more)
+### Community 34 - "TestSearch"
+Cohesion: 0.14
+Nodes (8): Tests for the search function., Search returns at most top_k results., Search results are sorted by relevance (highest score first)., Empty query returns no results., Empty memories list returns no results., Query with no matching terms returns empty results., Search returns correct indices into the memories list., TestSearch
 
 ### Community 35 - "routes/workflows.py"
 Cohesion: 0.08
 Nodes (53): cancel_workflow(), _coerce_company_uuid(), _execution_to_step_dicts(), get_workflow_status(), get_workflow_trace(), _iso(), list_company_workflows(), _naive_now() (+45 more)
 
-### Community 36 - "test_knowledge.py"
-Cohesion: 0.04
-Nodes (33): agent_id(), company_id(), mock_db(), page_id(), fixture, Tests for the Knowledge System module. Validates KnowledgePlaza, RAGPipeline,…, Fixed size strategy creates chunks of specified length., Fixed size strategy includes overlap between chunks. (+25 more)
+### Community 36 - "fixture"
+Cohesion: 0.18
+Nodes (11): agent_id(), company_id(), mock_db(), page_id(), fixture, Provide a fixed company UUID for tests., Provide a fixed agent UUID for tests., Provide a fixed task UUID for tests. (+3 more)
 
 ### Community 37 - "StdioMCPTransport"
 Cohesion: 0.04
-Nodes (72): MCPResult, MCPTool, MCP Client - implements the Model Context Protocol for tool communication., A tool discovered via the MCP protocol. Attributes: name: The tool's name as…, Result of an MCP tool invocation. Attributes: content: The result content (text…, Any, MCP Stdio Transport - communicates with MCP servers via subprocess…, List all tools available on the connected MCP server. Returns: List of MCPTool… (+64 more)
+Nodes (73): MCPResult, MCPTool, MCP Client - implements the Model Context Protocol for tool communication., A tool discovered via the MCP protocol. Attributes: name: The tool's name as…, List all tools available on the connected MCP server. Returns: List of MCPTool…, Result of an MCP tool invocation. Attributes: content: The result content (text…, Any, MCP Stdio Transport - communicates with MCP servers via subprocess… (+65 more)
 
 ### Community 38 - "OpenOffice2DView.tsx"
 Cohesion: 0.08
@@ -1409,11 +1455,11 @@ Nodes (42): drawOfficeFloor(), draw3DChair(), draw3DDesk(), drawArcadeCabinet(),
 
 ### Community 40 - "observability/__init__.py"
 Cohesion: 0.02
-Nodes (146): LogRecord, configure_logging(), get_correlation_id(), JSONFormatter, ASGIApp, Receive, Scope, Send (+138 more)
+Nodes (139): LogRecord, configure_logging(), JSONFormatter, ASGIApp, Receive, Scope, Send, Structured JSON logging with correlation IDs for NEXUS. Provides: -… (+131 more)
 
 ### Community 41 - "BreakerInput"
-Cohesion: 0.05
-Nodes (57): BreakerInput, Per-agent input for one beat., _default_config(), _make_breaker(), _make_sample(), Recording N consecutive errors triggers escalation., Fewer errors than the limit does not trip., A distinct tool call clears the error counter. (+49 more)
+Cohesion: 0.04
+Nodes (72): BreakerInput, Per-agent input for one beat., _default_config(), _make_breaker(), _make_sample(), Comprehensive tests for the AdvancedCircuitBreaker module., Tests for the error storm detection., Recording N consecutive errors triggers escalation. (+64 more)
 
 ### Community 42 - "ComplianceFramework"
 Cohesion: 0.06
@@ -1423,17 +1469,17 @@ Nodes (33): ComplianceFramework, ComplianceReport, ComplianceRule, ComplianceSta
 Cohesion: 0.06
 Nodes (40): parse_memory(), pinned_lines(), Protocol, Memory Reflector - auto-condenses oversized memory files. Ported from munder-…, Split a memory.md into header and the three regions. A legacy flat file (no…, Extract non-empty, trimmed lines from the pinned block. These are the lines we…, Reassemble the canonical 3-region file. Args: header: The H1 header text…, The verify-dont-trust gate for condensed rewrites. The rewrite is rejected… (+32 more)
 
-### Community 44 - "_get"
-Cohesion: 0.03
-Nodes (101): get_company_stats(), get_daily_metrics(), get_pipelines_summary(), get_token_usage(), get_top_agents(), Any, DbSession, Dashboard stats and metrics endpoints. (+93 more)
+### Community 44 - "TaskService"
+Cohesion: 0.16
+Nodes (11): AsyncSession, Task, Assign a task to an agent. Args: task_id: The task to assign. agent_id: The…, Update the status of a task. Args: task_id: The task to update. status: The new…, Service layer for task CRUD operations and status management. Handles task…, Mark a task as completed. Args: task_id: The task to complete. result: Optional…, Mark a task as failed with an error message. Args: task_id: The task that…, Create a new task. Args: company_id: The company this task belongs to. title:… (+3 more)
 
 ### Community 45 - "routes/hr.py"
 Cohesion: 0.09
 Nodes (41): create_curriculum(), create_hr_review(), CurriculumCreate, CurriculumUpdate, enhance_agent(), EnhanceRequest, _hr_now(), list_curricula() (+33 more)
 
-### Community 46 - "GoalLoop"
-Cohesion: 0.03
-Nodes (68): GoalJudge, GoalLoop, HeuristicGoalJudge, JudgeVerdict, LLMGoalJudge, Any, Protocol, Goal-Gated Loop with Independent Judge - autonomous iteration mechanism.… (+60 more)
+### Community 46 - "timedelta"
+Cohesion: 0.01
+Nodes (243): create_goal(), delete_goal(), execute_goal(), get_goal(), get_goal_stats(), GoalCreate, GoalResponse, GoalUpdate (+235 more)
 
 ### Community 47 - "RetentionManager"
 Cohesion: 0.07
@@ -1461,11 +1507,11 @@ Nodes (85): findRecContradictions(), asArray(), buildScriptHasMigrationSideEffec
 
 ### Community 53 - "Message"
 Cohesion: 0.04
-Nodes (78): broadcast_message(), BroadcastRequest, create_group(), CreateGroupRequest, EventResponse, get_agent_inbox(), get_group_messages(), GroupResponse (+70 more)
+Nodes (54): Agent-to-Agent (A2A) Protocol - direct messaging with at-least-once delivery.…, _get_retry_queue(), _message_payload(), External channel integration for routing messages to/from external platforms.…, Generic outbound webhook channel with HMAC-SHA256 request signing. Deliveries…, Initialize the Webhook channel. Args: endpoint_url: The webhook endpoint URL.…, POST the message to the endpoint, signed when a secret is set. Args: message:…, Lazily construct the file-backed retry queue under the data dir. (+46 more)
 
 ### Community 54 - "PersistentCircuitBreaker"
-Cohesion: 0.13
-Nodes (12): PersistentCircuitBreaker, async_sessionmaker, AsyncSession, Record a success for an agent, resetting the failure counter. If the circuit…, Manually reset the circuit breaker for an agent. Closes the circuit and resets…, Database-backed circuit breaker that survives restarts. Stores circuit breaker…, Initialize with a session factory. Args: session_factory: SQLAlchemy async…, Tests for PersistentCircuitBreaker.record_success. (+4 more)
+Cohesion: 0.12
+Nodes (14): PersistentCircuitBreaker, async_sessionmaker, AsyncSession, Record a success for an agent, resetting the failure counter. If the circuit…, Manually reset the circuit breaker for an agent. Closes the circuit and resets…, Database-backed circuit breaker that survives restarts. Stores circuit breaker…, Initialize with a session factory. Args: session_factory: SQLAlchemy async…, Tests for PersistentCircuitBreaker.is_open. (+6 more)
 
 ### Community 55 - "spriteAssetLibrary.ts"
 Cohesion: 0.06
@@ -1476,8 +1522,8 @@ Cohesion: 0.33
 Nodes (6): MeetingResult, Any, Virtual Meeting Rooms — synchronous multi-agent debate & consensus (from AI-…, Outcome of a virtual meeting., Run a virtual meeting with multiple agents debating a topic. Each round, every…, run_meeting()
 
 ### Community 57 - "FailureAlchemist"
-Cohesion: 0.04
-Nodes (45): Antibody, ArtifactType, Catalyst, FailureAlchemist, FailureLearning, LearningEventBusProtocol, Any, Enum (+37 more)
+Cohesion: 0.17
+Nodes (10): Catalyst, FailureAlchemist, Any, Transforms execution failures into structured learning artifacts. Uses rule-…, Analyze a failure and produce structured learning artifacts. Uses pattern…, Retrieve all generated catalysts (non-None only). Returns: List of all Catalyst…, Match an error message against known patterns. Args: error: The error message…, Generate a human-readable failure condition description. Args: error: The error… (+2 more)
 
 ### Community 58 - "._load_index"
 Cohesion: 0.14
@@ -1493,35 +1539,35 @@ Nodes (34): create_incident(), get_incident_timeline(), IncidentActionResponse, 
 
 ### Community 61 - "PersistentAuditLogger"
 Cohesion: 0.05
-Nodes (47): compute_entry_hash(), PersistentAuditEntry, PersistentAuditLogger, Any, datetime, Persistent Audit Logger - database-backed audit with hash chain integrity.…, Policy for audit log retention. Attributes: max_age_days: Maximum age of…, Database-backed audit logger with hash chain integrity. Buffers entries in… (+39 more)
+Nodes (45): compute_entry_hash(), PersistentAuditEntry, PersistentAuditLogger, Any, datetime, Persistent Audit Logger - database-backed audit with hash chain integrity.…, Policy for audit log retention. Attributes: max_age_days: Maximum age of…, Database-backed audit logger with hash chain integrity. Buffers entries in… (+37 more)
 
 ### Community 62 - "notifications.py"
 Cohesion: 0.10
 Nodes (33): create_notification(), dismiss_notification(), get_notification_counts(), get_notification_preferences(), list_notifications(), mark_all_notifications_read(), mark_notification_read(), NotificationCreate (+25 more)
 
-### Community 63 - "session_factory"
-Cohesion: 0.12
-Nodes (22): Ed25519PrivateKey, _enrol(), _keypair(), fixture, Tests for cryptographic multi-party approval signing. The guarantee is that a…, Two distinct signers unlock the approval., An ordinary approval still approves with no signing ceremony., A signature must only count for what it actually signed. (+14 more)
+### Community 63 - "test_obsidian_vault.py"
+Cohesion: 0.03
+Nodes (80): parse_note(), Split note text into frontmatter metadata and markdown body. A note is treated…, fixture, parametrize, Path, Tests for the read-only Obsidian vault surface (ADR 0002 Phase 1). Covers the…, Every ..-based escape is refused rather than clamped to the root., An absolute path would ignore the root entirely, so it is refused. (+72 more)
 
 ### Community 64 - "Operation"
 Cohesion: 0.12
 Nodes (11): Operation, Any, Record a new reversible operation. Args: action: Description of the action…, Check if an operation can be safely rolled back. Verifies that no newer…, A recorded reversible operation. Attributes: id: Unique operation identifier.…, Rollback a single operation after safety check. Args: operation_id: The…, Rollback an operation and all operations that depend on it. Performs a…, Get all recorded operations. Args: include_rolled_back: Whether to include… (+3 more)
 
-### Community 65 - "SessionCompactor"
-Cohesion: 0.06
-Nodes (29): CompactionConfig, Compacts session message histories to fit within token limits. Dispatches to…, Compact messages according to the specified strategy. If messages already fit…, Keep the newest messages that fit within the token budget. Iterates from the…, Create a summary of older messages and keep recent ones within budget. Splits…, Configuration for session context compaction. Attributes: strategy: The…, Create an extractive summary from a list of messages. Takes key content from…, Keep the last window_size messages plus overlap context from older ones. Takes… (+21 more)
+### Community 65 - "CompactionConfig"
+Cohesion: 0.09
+Nodes (18): CompactionConfig, Configuration for session context compaction. Attributes: strategy: The…, Tests for the SessionCompactor class., Truncate strategy should keep newest messages that fit., When all messages fit, truncate should return them unchanged., Summarize strategy should produce a summary message plus recent messages., When all messages fit, summarize should return them unchanged., Sliding window should keep exactly window_size recent messages. (+10 more)
 
-### Community 66 - "context_trigger.py"
-Cohesion: 0.08
-Nodes (19): ConditionExpression, NotCondition, datetime, Context trigger configuration - rules for context compaction and clearing.…, Logical NOT (negation) of a single condition. Attributes: condition: The…, Create an AND condition, replacing any previously set expression. Args:…, Create an OR condition, replacing any previously set expression. Args:…, Create a NOT condition, replacing any previously set expression. Args:… (+11 more)
+### Community 66 - "ConditionExpression"
+Cohesion: 0.10
+Nodes (15): Index every document with pending work. Pending means marked ``stale`` by the…, Ids of the documents with pending indexing work, in pass order. Exists for the…, Load this company's pending documents in a stable order. Pending means never…, ConditionExpression, NotCondition, Logical NOT (negation) of a single condition. Attributes: condition: The…, Create an AND condition, replacing any previously set expression. Args:…, Create an OR condition, replacing any previously set expression. Args:… (+7 more)
 
 ### Community 67 - "ValueError"
-Cohesion: 0.09
-Nodes (41): Validate configuration for a specific adapter type. Args: adapter_type: The…, Get the capabilities advertised by an adapter type. Args: adapter_type: The…, list_available_providers(), Any, Universal API Schema Translation Layer (UASTL) — from OpenCompany. Config-…, Resolve an adapter_type to a registry key and config dict. This replaces the…, List all configured providers with their availability status., resolve_provider() (+33 more)
+Cohesion: 0.10
+Nodes (39): Get the capabilities advertised by an adapter type. Args: adapter_type: The…, list_available_providers(), Any, Universal API Schema Translation Layer (UASTL) — from OpenCompany. Config-…, Resolve an adapter_type to a registry key and config dict. This replaces the…, List all configured providers with their availability status., resolve_provider(), Initialize the permit pool. Args: cap: Maximum concurrent sub-agents per lead.… (+31 more)
 
 ### Community 68 - "CompanyWorkflow"
-Cohesion: 0.04
-Nodes (51): get_scenario(), Demo Scenarios - pre-defined workflow demonstrations for NexusCorp. Provides…, Retrieve a scenario by its ID. Args: scenario_id: The scenario identifier to…, A demo scenario configuration. Defines a complete scenario with its objective,…, Execute this scenario as a CompanyWorkflow. Creates a CompanyWorkflow with the…, Scenario, ApprovalEngineProtocol, BudgetEnforcerProtocol (+43 more)
+Cohesion: 0.07
+Nodes (37): get_scenario(), Demo Scenarios - pre-defined workflow demonstrations for NexusCorp. Provides…, Retrieve a scenario by its ID. Args: scenario_id: The scenario identifier to…, A demo scenario configuration. Defines a complete scenario with its objective,…, Execute this scenario as a CompanyWorkflow. Creates a CompanyWorkflow with the…, Scenario, ApprovalEngineProtocol, BudgetEnforcerProtocol (+29 more)
 
 ### Community 69 - "TenantViolation"
 Cohesion: 0.17
@@ -1531,9 +1577,9 @@ Nodes (11): Any, Exception, Validate that a company_id is present and is a valid
 Cohesion: 0.07
 Nodes (32): get_node(), list_categories(), list_nodes(), Any, Nodes API — workflow node registry listing, search, and execution., List all available workflow nodes, optionally filtered., List all node categories with counts., Get a specific node definition by ID. (+24 more)
 
-### Community 71 - "routes/obsidian.py"
-Cohesion: 0.08
-Nodes (37): description, ge, le, Query, FailedNote, get_obsidian_status(), index_obsidian_vault(), IndexAcceptedResponse (+29 more)
+### Community 71 - "obsidian_service.py"
+Cohesion: 0.07
+Nodes (29): AsyncSession, _T, Run one vault operation, committing on success and rolling back on failure.…, _run_vault_operation(), What one scan found and did. Every list holds vault-relative paths, so a caller…, Notes successfully read from the vault this scan., A flat summary suitable for logging or an API response., ScanResult (+21 more)
 
 ### Community 72 - "HermesAdapter"
 Cohesion: 0.07
@@ -1544,76 +1590,76 @@ Cohesion: 0.09
 Nodes (31): AdapterCapabilitiesResponse, AdapterTypeResponse, execute_task(), ExecuteTaskRequest, get_adapter_capabilities(), list_adapters(), list_agent_sessions(), list_cli_backends() (+23 more)
 
 ### Community 74 - "ControlRegistry"
-Cohesion: 0.04
-Nodes (38): _default_persist_path(), Path, Resolve the registry's persistence file under the configured data dir., AgentControl, ControlRegistry, Path, Control Registry - per-agent operator control state. Ported from munder-…, Load state from the persist file if it exists. (+30 more)
+Cohesion: 0.05
+Nodes (34): AgentControl, ControlRegistry, Path, Control Registry - per-agent operator control state. Ported from munder-…, Load state from the persist file if it exists., Set or clear the paused flag for an agent., Set or clear the auto-delivery pause flag for an agent., Add or remove a tool from the gated set for an agent. (+26 more)
 
-### Community 75 - "Any"
-Cohesion: 0.24
-Nodes (6): Any, Get the current resource usage for a session. Args: session_id: The session to…, Execute code in a Docker container or fall back to local sandbox. When Docker…, Execute code in a Docker container with resource limits. Args: code: The code…, Report that Docker was unavailable, without executing the code. Nothing runs…, Create a new isolated session for evaluating a proposal. Creates a copy-on-…
+### Community 75 - "ResourceLimitExceeded"
+Cohesion: 0.15
+Nodes (10): Any, Exception, Execute a callable within the session's resource limits. Runs the callable,…, Get the current resource usage for a session. Args: session_id: The session to…, Raised when a sandbox execution exceeds its resource limits. Attributes:…, Execute code in a Docker container or fall back to local sandbox. When Docker…, Execute code in a Docker container with resource limits. Args: code: The code…, Report that Docker was unavailable, without executing the code. Nothing runs… (+2 more)
 
-### Community 76 - "ToolRegistry"
-Cohesion: 0.06
-Nodes (31): CatalogEntry, Tool Registry - manages registration, discovery, and metadata for all available…, Definition of a single tool parameter. Attributes: name: Parameter name. type:…, Register a new tool in the registry. Args: tool: The tool definition to…, Remove a tool from the registry. Args: tool_id: The tool to remove. Returns:…, Retrieve a tool by its ID. Args: tool_id: The unique tool identifier. Returns:…, List tools with optional filters. Args: company_id: Filter by company. None…, Grant an agent access to a tool. Args: agent_id: The agent to grant access to.… (+23 more)
+### Community 76 - "CatalogEntry"
+Cohesion: 0.10
+Nodes (15): CatalogEntry, Register a catalog entry discovered from a connection. Args: entry: The catalog…, Return all catalog entries discovered from a specific connection. Args:…, List catalog entries with optional filters. Args: company_id: Filter by…, In-memory representation of a discovered tool from a connection. Attributes:…, Tests for ToolRegistry catalog entry methods., Can register and retrieve a catalog entry., discover_from_connection returns entries for a specific connection. (+7 more)
 
 ### Community 77 - "CLIRegistry"
-Cohesion: 0.03
-Nodes (53): _AiderBackendInfo, _ClaudeBackendInfo, CLIBackendInfo, CLIRegistry, _CodexBackendInfo, _HermesBackendInfo, _KiroBackendInfo, Any (+45 more)
+Cohesion: 0.02
+Nodes (90): dict, CLI Adapter - generalized CLI subprocess adapter for multiple AI backends.…, _AiderBackendInfo, _ClaudeBackendInfo, CLIBackendInfo, CLIRegistry, _CodexBackendInfo, _HermesBackendInfo (+82 more)
 
 ### Community 78 - "compute_next_fire"
-Cohesion: 0.06
-Nodes (39): is_leader(), Convenience check used at the top of background service loops., compute_next_fire(), _fire_trigger(), _interval_seconds(), _next_cron_field_match(), _parse_cron_next_fire(), _parse_datetime() (+31 more)
+Cohesion: 0.08
+Nodes (29): compute_next_fire(), _fire_trigger(), _interval_seconds(), _next_cron_field_match(), _parse_cron_next_fire(), _parse_datetime(), Any, datetime (+21 more)
 
 ### Community 79 - "LayeredMemoryStore"
-Cohesion: 0.02
-Nodes (69): LayeredMemoryStore, Return the current configuration., Return the current L1 session summaries (read-only view)., Return the current L2 per-agent facts (read-only view)., Return the current L3 shared knowledge (read-only view)., Serialize an L1Summary to a JSON-compatible dict., Atomically write L1 ring buffer state to the persist file., Serialize a Fact to a JSON-compatible dict. (+61 more)
+Cohesion: 0.03
+Nodes (63): LayeredMemoryStore, Path, Initialize the layered memory store. Args: config: Configuration for layer…, Return the current configuration., Return the current L1 session summaries (read-only view)., Return the current L2 per-agent facts (read-only view)., Return the current L3 shared knowledge (read-only view)., Return the path for L1 persistence file, derived from persist_path. (+55 more)
 
-### Community 80 - "PersistentHeartbeatService"
-Cohesion: 0.04
-Nodes (55): HeartbeatRun, InvocationSource, LivenessState, Enum, SQLModel, str, Heartbeat run model with rich process and liveness tracking., Liveness states for a heartbeat run. (+47 more)
+### Community 80 - "main.py"
+Cohesion: 0.02
+Nodes (123): get_registry(), Return the module-level ControlRegistry instance., Degradation dashboard endpoint for system capability status. Provides a GET…, Server-Sent Events (SSE) endpoint for real-time event streaming. Provides a GET…, _get_backend(), get_rotation_status(), list_needs_rotation(), Any (+115 more)
 
 ### Community 81 - ".evaluate"
 Cohesion: 0.50
 Nodes (3): Any, Evaluate a single criterion. Override for LLM-based evaluation. Default…, Evaluate a task result against quality criteria. In a full implementation, this…
 
-### Community 82 - "models_router/__init__.py"
-Cohesion: 0.03
-Nodes (58): OnBudgetExceeded, Model Router - multi-provider LLM abstraction with task-based selection and…, BudgetExceededError, check_budget_preflight(), estimate_min_call_cost(), Exception, Pre-flight budget estimation — refuse a call *before* it is dispatched.…, Raised pre-dispatch when the next call would reach or exceed the limit. (+50 more)
+### Community 82 - "estimate_min_call_cost"
+Cohesion: 0.06
+Nodes (30): OnBudgetExceeded, BudgetExceededError, check_budget_preflight(), estimate_min_call_cost(), Exception, Pre-flight budget estimation — refuse a call *before* it is dispatched.…, Raised pre-dispatch when the next call would reach or exceed the limit., Estimate the minimum USD cost of one upcoming LLM call. Args: model: Model… (+22 more)
 
 ### Community 83 - "BaseFurnitureAsset"
 Cohesion: 0.07
 Nodes (5): BaseFurnitureAsset, CabinetAsset, ChairAsset, DeskAsset, ServerRackAsset
 
-### Community 84 - "RAGPipeline"
-Cohesion: 0.01
-Nodes (234): DOCXParser, get_parser_for_extension(), PDFParser, Document conversion parsers for PDF and DOCX files. Extends the RAG pipeline's…, Return appropriate parser for file extension, or None if unsupported., Extracts text from PDF files page-by-page using pypdfium2. Each page becomes…, Extracts text from DOCX files paragraph-by-paragraph using python-docx. Each…, cosine_similarity() (+226 more)
+### Community 84 - "BM25Ranker"
+Cohesion: 0.04
+Nodes (49): AsyncSession, Initialize RAGPipeline with a database session and optional components. Args:…, BM25Ranker, CrossEncoderRanker, Any, Protocol, Ranker, Compute corpus statistics for BM25 scoring. Args: doc_tokens_list: List of… (+41 more)
 
 ### Community 85 - "access.py"
 Cohesion: 0.15
 Nodes (10): AccessGrant, datetime, Secret Access Control - permission management for secret access. Provides fine-…, A grant of access to a secret for an agent. Attributes: id: Unique grant…, Grant time-limited access to a secret. Args: secret_id: The secret to grant…, Grant one-time access to a secret. The grant is consumed after the first…, Get all active (non-revoked, non-expired) grants. Args: agent_id: Filter by…, Store a grant in all indices. (+2 more)
 
 ### Community 86 - "fixture"
-Cohesion: 0.10
-Nodes (13): asyncio, fixture, Verify _recent_changes is pruned to max_recent_changes., Events beyond max_recent_changes are pruned., Most recent events are kept after pruning, oldest are dropped., Verify failing subscribers don't block others., A sync callback raising does not prevent others from being called., An async callback raising does not prevent others from being called. (+5 more)
+Cohesion: 0.05
+Nodes (24): asyncio, fixture, patch, With multiple sessions, missing session_id does not route to first., Verify _recent_changes is pruned to max_recent_changes., Default max_recent_changes is 1000., max_recent_changes can be set via constructor., Events beyond max_recent_changes are pruned. (+16 more)
 
 ### Community 87 - "asyncio"
 Cohesion: 0.06
 Nodes (26): asyncio, broadcast removes clients that fail to receive., subscribe_channel adds client to the specified channel., unsubscribe_channel removes client from the channel., broadcast_to_channel sends data only to channel subscribers., Tests for the RealtimeEventBus class., Published events are delivered to subscribed queues., Publishing fans out to all subscribers of a topic. (+18 more)
 
 ### Community 89 - "_Request"
-Cohesion: 0.05
-Nodes (85): is_public_path(), Whether ``path`` is reachable without a credential., parametrize, Which paths answer without a credential., Login, setup, health, metrics and the docs need no caller., Everything else requires a credential., TestPublicPaths, _company() (+77 more)
+Cohesion: 0.07
+Nodes (75): _company(), _CountResult, _create_session(), _list_session(), _ManyResult, _OneResult, asyncio, fixture (+67 more)
 
 ### Community 90 - "WebhookDeliveryQueue"
 Cohesion: 0.04
-Nodes (65): Any, Webhook Persistent Delivery Queue - file-backed queue with retry and dead…, Persist current state to file atomically. Writes to a temporary file in the…, Add a delivery to the pending queue. Args: delivery: The webhook delivery to…, Remove and return the next ready delivery from the queue. A delivery is ready…, Acknowledge successful delivery, removing it from tracking. Looks for the…, A single outbound webhook delivery attempt., Report a delivery failure, applying retry logic or dead-lettering. Looks for… (+57 more)
+Nodes (58): Webhook Persistent Delivery Queue - file-backed queue with retry and dead…, Persist current state to file atomically. Writes to a temporary file in the…, Add a delivery to the pending queue. Args: delivery: The webhook delivery to…, Remove and return the next ready delivery from the queue. A delivery is ready…, Acknowledge successful delivery, removing it from tracking. Looks for the…, Report a delivery failure, applying retry logic or dead-lettering. Looks for…, Return the list of dead-lettered deliveries. Returns: List of deliveries that…, Return the number of pending deliveries. Returns: Count of deliveries in the… (+50 more)
 
 ### Community 91 - "ConfigGovernance"
-Cohesion: 0.05
-Nodes (32): ConfigChange, ConfigGovernance, ConfigValidationRule, _get_fernet(), Any, Fernet, Configuration Governance - Runtime config safety. Provides configuration change…, Initialize configuration governance. Args: current_environment: The current… (+24 more)
+Cohesion: 0.06
+Nodes (27): ConfigChange, ConfigGovernance, ConfigValidationRule, _get_fernet(), Any, Fernet, Configuration Governance - Runtime config safety. Provides configuration change…, Initialize configuration governance. Args: current_environment: The current… (+19 more)
 
 ### Community 92 - "_make_registry"
-Cohesion: 0.04
-Nodes (46): _make_registry(), Comprehensive tests for the ControlRegistry module., Tests for the steer guidance queue., Steer entries are dequeued in FIFO order., Steer entries longer than 10KB are truncated., Steer entries are trimmed of leading/trailing whitespace., Empty or whitespace-only steer text is not enqueued., take_steer for an unknown agent returns None. (+38 more)
+Cohesion: 0.03
+Nodes (50): _make_registry(), Comprehensive tests for the ControlRegistry module., Tests for the steer guidance queue., Steer entries are dequeued in FIFO order., Steer entries longer than 10KB are truncated., Steer entries are trimmed of leading/trailing whitespace., Empty or whitespace-only steer text is not enqueued., take_steer for an unknown agent returns None. (+42 more)
 
 ### Community 93 - "vault.py"
 Cohesion: 0.19
@@ -1623,13 +1669,13 @@ Nodes (11): Secret Management - encrypted vault and access control for sensitive
 Cohesion: 0.21
 Nodes (7): Path, Resolve the path to the JSON embeddings file. Uses embeddings_path if…, Load stored embeddings from the JSON file. Returns an empty dict if the file…, Atomically write embeddings data to the JSON file. Writes to a temporary file…, Fallback mine using LocalEmbeddingProvider when mempalace is unavailable. Reads…, Fallback search using cosine similarity over stored embeddings. Computes a…, Search using in-process embedding provider regardless of mempalace…
 
-### Community 95 - "ThoughtTree"
-Cohesion: 0.06
-Nodes (20): Score a node using the LLM to assess its quality. Asks the LLM to evaluate how…, Find the highest-scoring path from root to a leaf node. Traverses the tree and…, Remove branches with scores below the given threshold. Recursively removes…, A tree structure for organizing and evaluating reasoning paths. The ThoughtTree…, Initialize the thought tree with a root node. Args: root: The root ThoughtNode…, Generate child thoughts for a given node using the LLM. Sends a prompt to the…, ThoughtTree, Test that expand limits children to the branching factor. (+12 more)
+### Community 95 - "ThoughtNode"
+Cohesion: 0.05
+Nodes (31): Any, Tree-of-Thought (ToT) Reasoning Engine. Implements a tree-based reasoning…, Score a node using the LLM to assess its quality. Asks the LLM to evaluate how…, Find the highest-scoring path from root to a leaf node. Traverses the tree and…, Remove branches with scores below the given threshold. Recursively removes…, A single node in the reasoning tree. Each node represents a thought or…, Tree-of-Thought Task Planner. Uses tree-based exploration to decompose complex…, Return the configured branching factor. (+23 more)
 
 ### Community 96 - "secrets.py"
 Cohesion: 0.08
-Nodes (42): bind_secret(), create_secret(), _encrypt(), list_secrets(), _make_fernet(), Any, BaseModel, CurrentCompanyId (+34 more)
+Nodes (42): Company export/import endpoints — portable, secret-scrubbed archives. Thin HTTP…, bind_secret(), create_secret(), _encrypt(), list_secrets(), Any, BaseModel, CurrentCompanyId (+34 more)
 
 ### Community 97 - "RBACManager"
 Cohesion: 0.06
@@ -1639,73 +1685,73 @@ Nodes (32): Whether this principal's role permits an action on a resource type.,
 Cohesion: 0.08
 Nodes (24): Redis Streams-based hive backend for distributed messaging. Uses Redis Streams…, Initialize with a Redis connection URL. Args: redis_url: Redis connection…, Build the Redis stream key for an agent's inbox., Build the Redis stream key for an agent's outbox., Build the Redis hash key for the agent registry., Check whether enough time has passed to attempt recovery. If the backend is…, Mark the backend as unavailable and record the failure time., Write a message to the sender's outbox stream. Args: msg: The message to send. (+16 more)
 
-### Community 99 - "WebhookServer"
-Cohesion: 0.07
-Nodes (32): Any, WebhookServer - production-grade inbound HTTP handler for external…, Constant-time secret comparison using hmac.compare_digest. When endpoint is…, Fixed-window rate limiter. Bounds total work before any parse or crypto runs.…, Handle an inbound POST request through the full pipeline. Pipeline: global rate…, Handle a GET request for token-based task status lookup. The lookup runs even…, Validate data against a JSON Schema string. Invalid or empty schemas mean…, Inbound webhook HTTP handler with secret gating, rate limiting, and schema… (+24 more)
+### Community 99 - "test_obsidian_writeback_preconditions.py"
+Cohesion: 0.05
+Nodes (47): requires_git, export_vault_files(), import_vault_files(), Rebuild a bundle from an archive, tolerating an archive without one. An archive…, Collect one company's note files as vault-relative text. Tenant isolation is…, Restore note files into one company's vault. Every path is re-validated through…, The vault half of a company archive. Attributes: files: Vault-relative path to…, The archive representation. Vault-relative paths only. (+39 more)
 
 ### Community 100 - "AgentLifecycleManager"
 Cohesion: 0.08
 Nodes (26): AgentLifecycleManager, LifecycleError, Agent, Any, AsyncSession, Exception, Move agent to configuring state and apply configuration. Args: agent_id: The…, Wake an agent and create an active adapter session. Transitions: idle/ready ->… (+18 more)
 
 ### Community 101 - "FernetSecretBackend"
-Cohesion: 0.04
-Nodes (39): FernetSecretBackend, Fernet-based encrypted secret backend with PBKDF2 key derivation. Derives a…, Whether the backend is operational (key was derived successfully). Returns:…, Decrypt and return the secret value for the given reference. Args: ref:…, Check whether a secret exists for the given reference. Args: ref: Reference key…, Check whether a secret needs rotation based on its policy. A secret needs…, Return all secret references that need rotation. Checks each secret that has a…, Tests for the FernetSecretBackend class. (+31 more)
+Cohesion: 0.05
+Nodes (36): _make_fernet(), Fernet, Derive the row-encryption key from the app secret, or None if unsafe. Fail-…, _derive_fernet_key(), FernetSecretBackend, Encrypted Secret Backend - Fernet-based at-rest encryption for integration…, Fernet-based encrypted secret backend with PBKDF2 key derivation. Derives a…, Load encrypted secrets for this company from the `secrets` table. (+28 more)
 
 ### Community 102 - "identity.py"
 Cohesion: 0.11
 Nodes (26): build_working_context(), BuildContextRequest, get_agent_soul(), list_soul_templates(), list_soul_templates_full(), _load_souls(), Any, BaseModel (+18 more)
 
 ### Community 103 - "HiveAgentMeta"
-Cohesion: 0.06
-Nodes (34): FileHiveBackend, Path, File-based hive backend using the filesystem for state. This extracts the…, Initialize with the hive root directory path. Args: root: Path to the hive…, Return the hive root directory path., Create the base hive directory structure if not present., Read the registry.json file., Write the registry.json file. (+26 more)
+Cohesion: 0.07
+Nodes (32): FileHiveBackend, File-based hive backend using the filesystem for state. This extracts the…, Read the registry.json file., Write the registry.json file., Move a message from inbox/ to inbox/.done/. Args: agent_id: The agent that…, Return all registered agents. Returns: Dictionary mapping agent IDs to their…, Register an agent and create its workspace directories. Args: meta: The agent…, Unregister (archive) an agent. Does not delete files. Args: agent_id: The agent… (+24 more)
 
 ### Community 104 - "SmartRetryWithEscalation"
-Cohesion: 0.03
-Nodes (73): EscalationAction, FailureDiagnosis, Any, Enum, str, Smart Retry with Escalation - intelligent retry with failure diagnosis and…, Initialize the smart retry handler. Args: max_retries: Maximum number of retry…, Execute a task with smart retry and escalation logic. The execute_fn should… (+65 more)
+Cohesion: 0.07
+Nodes (31): Initialize the smart retry handler. Args: max_retries: Maximum number of retry…, Retries failed tasks with intelligent escalation based on error patterns. Wraps…, SmartRetryWithEscalation, asyncio, Attempt history records both failures and final success., Tests for permanent blocker detection (same error 3+ times)., Same error repeated 3 times triggers REPORT_BLOCKER., Permanent blocker detection stops retrying early. (+23 more)
 
 ### Community 105 - "ApprovalService"
 Cohesion: 0.05
-Nodes (63): ApprovalCreate, ApprovalDecision, ApprovalResponse, ApprovalSignatureCreate, approve(), create_approval(), list_pending_approvals(), Any (+55 more)
+Nodes (75): Ed25519PrivateKey, ApprovalCreate, ApprovalDecision, ApprovalResponse, ApprovalSignatureCreate, approve(), create_approval(), list_pending_approvals() (+67 more)
 
 ### Community 106 - "ClosingTimeController"
-Cohesion: 0.07
-Nodes (21): ClosingTimeController, ClosingTimeEvent, ClosingTimePhase, StrEnum, Initialize the ClosingTimeController. Args: send_message: Callable (to, act,…, Return the list of emitted protocol events., Return the set of worker agent IDs being waited on., Return the set of workers that have sent ACK. (+13 more)
+Cohesion: 0.08
+Nodes (18): ClosingTimeController, ClosingTimeEvent, Initialize the ClosingTimeController. Args: send_message: Callable (to, act,…, Return the list of emitted protocol events., Return the set of worker agent IDs being waited on., Return the set of workers that have sent ACK., Check if the closing time protocol is currently active. Returns: True if the…, Kick off the closing time protocol. Validates that the god agent is live,… (+10 more)
 
 ### Community 107 - "LLMCircuitBreaker"
-Cohesion: 0.12
-Nodes (12): _is_transient(), LLMCircuitBreaker, BaseException, Initialize the circuit breaker around an LLM callable. Args: llm_callable: The…, Return the current circuit state., Return the current consecutive failure count., Execute the LLM call with circuit breaker protection. Args: prompt: The prompt…, Handle a successful LLM call. (+4 more)
+Cohesion: 0.20
+Nodes (7): LLMCircuitBreaker, Return the current consecutive failure count., Execute the LLM call with circuit breaker protection. Args: prompt: The prompt…, Handle a successful LLM call., Handle a failed LLM call., Manually reset the circuit breaker to closed state., Circuit breaker that wraps an async LLM callable. Tracks consecutive failures…
 
 ### Community 108 - "obsidian/__init__.py"
-Cohesion: 0.01
-Nodes (258): CompletedProcess, requires_git, Knowledge models for organizational knowledge base and experience tracking., Who performed a vault write (ADR 0002 §20 control 9). Control 9 says audit…, canonical_vault_path(), normalize_subtree(), Per-agent, per-path write authorization for the vault (ADR 0002 §20 control…, The vault-relative path a request actually names, after normalization. This is… (+250 more)
+Cohesion: 0.04
+Nodes (72): CompletedProcess, canonical_vault_path(), Per-agent, per-path write authorization for the vault (ADR 0002 §20 control…, The vault-relative path a request actually names, after normalization. This is…, One agent's authority to write under one subtree of one company's vault.…, VaultWriteGrant, EmbeddingPolicyError, Exception (+64 more)
 
-### Community 109 - "Any"
-Cohesion: 0.12
-Nodes (26): add_contribution(), delete_meeting(), end_meeting(), get_action_items(), get_meeting(), get_minutes(), get_template(), list_templates() (+18 more)
+### Community 109 - "MeetingConductor"
+Cohesion: 0.05
+Nodes (64): ActionItemResponse, add_contribution(), ContributionRequest, delete_meeting(), end_meeting(), get_action_items(), get_meeting(), get_minutes() (+56 more)
 
 ### Community 110 - "HiveMessage"
-Cohesion: 0.08
-Nodes (32): Pluggable backends for HiveManager multi-agent coordination. Defines a…, Write a message to the sender's outbox directory. Args: msg: The message to…, Write a message to a recipient's inbox directory. Args: agent_id: The target…, Read all pending messages from an agent's inbox. Args: agent_id: The agent…, Hive Manager - file-based multi-agent coordination layer. Directory layout:…, AgentStatus, HiveMessage, MessageAct (+24 more)
+Cohesion: 0.11
+Nodes (15): Write a message to the sender's outbox directory. Args: msg: The message to…, Write a message to a recipient's inbox directory. Args: agent_id: The target…, Read all pending messages from an agent's inbox. Args: agent_id: The agent…, HiveMessage, A single message in the hive protocol., HiveRouter, Hive Router - drains outbox messages into recipient inboxes., Routes messages from agent outboxes to recipient inboxes. (+7 more)
 
 ### Community 111 - "ImprovementProposer"
-Cohesion: 0.05
-Nodes (38): LLMImprovementProposer, Any, LLM-enhanced Improvement Proposer - uses LLM for intelligent proposal…, Parse the LLM JSON response into a proposal dict. Args: response: Raw LLM…, Generate a heuristic proposal when LLM fails. Uses the fallback proposer's…, Generates improvement proposals using an LLM with heuristic fallback. Uses a…, Initialize the LLM-enhanced improvement proposer. Args: llm_callable: Async…, Generate an improvement proposal using the LLM. Sends the company context to… (+30 more)
+Cohesion: 0.06
+Nodes (30): LLMImprovementProposer, Any, Parse the LLM JSON response into a proposal dict. Args: response: Raw LLM…, Generate a heuristic proposal when LLM fails. Uses the fallback proposer's…, Generates improvement proposals using an LLM with heuristic fallback. Uses a…, Initialize the LLM-enhanced improvement proposer. Args: llm_callable: Async…, Generate an improvement proposal using the LLM. Sends the company context to…, ImprovementProposer (+22 more)
 
-### Community 112 - "runtime/__init__.py"
+### Community 112 - "utcnow"
 Cohesion: 0.02
-Nodes (111): abandon_stale(), build_checkpoint_state(), CheckpointManager, CheckpointStatus, DurableCheckpointService, ExecutionCheckpoint, load_latest(), mark_completed() (+103 more)
+Nodes (155): get_profile(), _own_profile(), ProfileResponse, ProfileUpdate, Any, AsyncSession, BaseModel, DbSession (+147 more)
 
 ### Community 113 - "triggers/__init__.py"
-Cohesion: 0.05
-Nodes (42): Inbound message classifier - determines if a message is a directive or…, Trigger history - ledger of trigger activations and their outcomes. Maintains a…, A single entry in the trigger history ledger. Attributes: id: Unique entry…, Capped ledger of trigger history entries. Maintains at most…, Initialize an empty ledger., Add an entry to the ledger, dropping the oldest if at capacity. Args: entry:…, Retrieve entries from the ledger. Args: limit: Maximum number of entries to…, TriggerHistoryEntry (+34 more)
+Cohesion: 0.04
+Nodes (55): classify_inbound_kind(), Inbound message classifier - determines if a message is a directive or…, Classify inbound text as either a directive or communication. Classification…, Trigger history - ledger of trigger activations and their outcomes. Maintains a…, A single entry in the trigger history ledger. Attributes: id: Unique entry…, Capped ledger of trigger history entries. Maintains at most…, Initialize an empty ledger., Add an entry to the ledger, dropping the oldest if at capacity. Args: entry:… (+47 more)
 
 ### Community 114 - "_run"
 Cohesion: 0.03
-Nodes (46): fixture, patch, create_session stores system prompt in conversation history., _do_execute returns success on 200 response., _do_execute retries on 429 and succeeds after retry., _do_execute returns failure on non-200/429 response., Azure OpenAI adapter reports expected capabilities., Test Bedrock adapter configuration validation. (+38 more)
+Nodes (54): fixture, patch, create_session stores system prompt in conversation history., _do_execute returns success on 200 response., _do_execute retries on 429 and succeeds after retry., _do_execute returns failure on non-200/429 response., Azure OpenAI adapter reports expected capabilities., Test Bedrock adapter configuration validation. (+46 more)
 
 ### Community 115 - "TaskFlow"
 Cohesion: 0.05
-Nodes (46): _coerce_uuid(), execute_task_activity(), ExecuteTaskInput, ExecuteTaskOutput, Temporal Activities — the actual work units (retryable, timeout-safe). Every…, Parse a UUID, falling back to a fresh one for non-UUID demo identifiers., Activity: run one task through its adapter. This is ``TaskFlow._do_execute``…, Input for the execute_task activity. Carries the resolved agent and adapter… (+38 more)
+Nodes (45): _coerce_uuid(), execute_task_activity(), ExecuteTaskInput, ExecuteTaskOutput, Parse a UUID, falling back to a fresh one for non-UUID demo identifiers., Activity: run one task through its adapter. This is ``TaskFlow._do_execute``…, Input for the execute_task activity. Carries the resolved agent and adapter…, Output from the execute_task activity. (+37 more)
 
 ### Community 116 - "_run"
 Cohesion: 0.03
@@ -1720,16 +1766,16 @@ Cohesion: 0.12
 Nodes (13): IncidentData, Any, Create a new incident. Args: title: Short descriptive title. severity: Severity…, Auto-detect and create an incident from a governance event. Triggers on: -…, Update the severity of an incident. Args: incident_id: The incident to update.…, Add a timeline event to an incident. Args: incident_id: The incident to update.…, Resolve an incident. Args: incident_id: The incident to resolve.…, A single event in an incident timeline. Attributes: id: Unique event… (+5 more)
 
 ### Community 119 - "TestSecretScanner"
-Cohesion: 0.07
-Nodes (20): Bits of entropy per character, for a non-empty string., Scan note text for credential material. Args: text: The full note content about…, Scan raw bytes destined for a note file. Bytes rather than text is the writer's…, scan_bytes(), scan_text(), shannon_entropy(), parametrize, Fail closed: only a clean scan permits a write. Every fixture below is… (+12 more)
+Cohesion: 0.08
+Nodes (22): Secret scanning for vault writes (ADR 0002 §20 control 7). A write that…, What a scan concluded. Attributes: outcome: One of ``clean``,…, Whether a write may proceed. Only a clean scan permits one., Bits of entropy per character, for a non-empty string., Scan note text for credential material. Args: text: The full note content about…, Scan raw bytes destined for a note file. Bytes rather than text is the writer's…, scan_bytes(), scan_text() (+14 more)
 
 ### Community 120 - "LLMMessage"
 Cohesion: 0.23
 Nodes (9): Anthropic LLM Provider - async implementation of the LLMProvider protocol., Google (Gemini) LLM Provider - async implementation of the LLMProvider protocol., LLMMessage, LLMResponse, LLM Provider abstraction - defines the protocol all providers must implement., Response from an LLM provider. Attributes: content: The generated text content.…, A single message in a conversation. Attributes: role: The message role (system,…, Ollama LLM Provider - async implementation of the LLMProvider protocol for… (+1 more)
 
 ### Community 121 - "TimelineEventType"
-Cohesion: 0.15
-Nodes (12): Any, Enum, str, Replay Engine - reconstruct task execution timelines for debugging and audit.…, Record a timeline event for a task. Creates a TimelineEvent with the current…, Build a complete TaskReplay for the given task. Sorts events by timestamp,…, Types of events that can occur in a task's timeline. Values: CREATED: Task was…, Computed statistics for a task's execution replay. Attributes:… (+4 more)
+Cohesion: 0.20
+Nodes (10): Enum, str, Replay Engine - reconstruct task execution timelines for debugging and audit.…, Build a complete TaskReplay for the given task. Sorts events by timestamp,…, Types of events that can occur in a task's timeline. Values: CREATED: Task was…, Computed statistics for a task's execution replay. Attributes:…, Complete replay of a task's execution timeline. Attributes: task_id: The task…, ReplayStats (+2 more)
 
 ### Community 122 - "ProfileResolver"
 Cohesion: 0.14
@@ -1740,12 +1786,12 @@ Cohesion: 0.08
 Nodes (25): compilerOptions, allowImportingTsExtensions, baseUrl, isolatedModules, jsx, lib, module, moduleDetection (+17 more)
 
 ### Community 124 - "validate.py"
-Cohesion: 0.13
-Nodes (23): count_bullets(), extract_code_blocks(), extract_fenced_spans(), extract_headings(), extract_indented_code_blocks(), extract_inline_codes(), extract_paths(), extract_urls() (+15 more)
+Cohesion: 0.05
+Nodes (65): benchmark_pair(), count_tokens(), main(), print_table(), Path, main(), print_usage(), backup_dir_for() (+57 more)
 
 ### Community 125 - "_run"
-Cohesion: 0.06
-Nodes (26): fixture, Tests for NEXUS Workflow Integration - delegation chain logic, task flow. Tests…, Test TaskFlow single task execution with governance., Valid company UUID string., Create a TaskFlow with a registered agent., execute_task creates a TaskExecution record., TaskFlow selects an agent matching required capabilities., TaskFlow fails if no agent matches capabilities. (+18 more)
+Cohesion: 0.04
+Nodes (40): fixture, Tests for NEXUS Workflow Integration - delegation chain logic, task flow. Tests…, Second step in trace is CTO decomposing tasks., Engineer steps execute tasks from CTO decomposition., QA step reviews execution results., WorkflowTrace records all steps with timing and cost., Budget enforcer is called during engineer execution., Budget denied causes engineer step to fail and records the denial. (+32 more)
 
 ### Community 126 - "LLMFactExtractor"
 Cohesion: 0.08
@@ -1755,9 +1801,9 @@ Nodes (33): LLMFactExtractor, Check if the rate limit has been exceeded. Counts 
 Cohesion: 0.07
 Nodes (30): MemoryEntry, MemoryStore, Any, AsyncSession, MemoryRecord, Path, Retrieve memories from all tiers, starting with hot. Checks hot cache first,…, In-memory representation of a memory record. (+22 more)
 
-### Community 128 - "Agent"
-Cohesion: 0.03
-Nodes (107): agent_profiling(), Any, DbSession, Agent performance profiling — per-agent latency/cost/success dashboards.…, Return performance metrics for every agent in the company. Metrics derive from…, agent_heartbeat(), AgentCreate, AgentResponse (+99 more)
+### Community 128 - "agent.py"
+Cohesion: 0.04
+Nodes (51): hire_from_manifest(), hire_team(), HireFromManifestRequest, HireTeamRequest, HireTeamResponse, Any, BaseModel, DbSession (+43 more)
 
 ### Community 129 - "TokenCounter"
 Cohesion: 0.08
@@ -1772,24 +1818,24 @@ Cohesion: 0.09
 Nodes (13): HiveBackend, AgentStatus, Protocol, Protocol defining the pluggable hive backend interface. All methods are async…, Write a message to the sender's outbox. Args: msg: The message to send., Deliver a message to a recipient's inbox. Args: agent_id: The target agent ID.…, Read all pending messages for an agent. Args: agent_id: The agent whose inbox…, Mark a message as processed. Args: agent_id: The agent that processed the… (+5 more)
 
 ### Community 132 - "StatisticalFailureAnalyzer"
-Cohesion: 0.05
-Nodes (28): Any, Compare successful and failed executions to find differentiators. Args:…, Find stages that slow down execution. Each execution dict should have…, Calculate cost per quality unit for different approaches. Each execution dict…, Group failures by common factors to identify root causes. Each execution dict…, Extended failure analyzer with statistical significance testing. Combines…, Initialize with parent FailureAnalyzer and a StatisticalAnalyzer instance., Test if a failure pattern is statistically significant vs baseline. Uses… (+20 more)
+Cohesion: 0.04
+Nodes (40): FailureAnalyzer, Any, Failure Analyzer - root cause analysis and success factor extraction. Analyzes…, Compare successful and failed executions to find differentiators. Args:…, Analyzes execution failures to identify root causes and improvement…, Find stages that slow down execution. Each execution dict should have…, Calculate cost per quality unit for different approaches. Each execution dict…, Group failures by common factors to identify root causes. Each execution dict… (+32 more)
 
 ### Community 133 - "ApprovalEngine"
-Cohesion: 0.22
-Nodes (8): ApprovalEngine, Any, Persist current state to file atomically. Writes to a temporary file in the…, Serialize an ApprovalRequest to a JSON-compatible dictionary., Deserialize an ApprovalRequest from a dictionary., Submit a new approval request. Checks auto-approval policies first. If the…, Process a pending approval with a human decision. Args: approval_id: The…, Manages the approval lifecycle: submission, auto-approve checks, and decisions.…
+Cohesion: 0.16
+Nodes (11): ApprovalEngine, ApprovalRequest, Persist current state to file atomically. Writes to a temporary file in the…, Serialize an ApprovalRequest to a JSON-compatible dictionary., A request for approval before executing a gated operation. Attributes: id:…, Check if a request qualifies for automatic approval. Auto-approves based on: -…, Check if a request matches all conditions of a policy. Args: request: The…, Get all pending approval requests. Args: company_id: Filter by company. None… (+3 more)
 
 ### Community 134 - "Fact"
-Cohesion: 0.03
-Nodes (76): find_duplicates(), is_duplicate(), jaccard_similarity(), Jaccard similarity deduplication for memory facts. Provides tokenization,…, Find all pairs of duplicate facts within a list. Performs pairwise Jaccard…, Tokenize text into a set of lowercase words, filtering stopwords. Splits on…, Compute Jaccard similarity coefficient between two token sets. Jaccard…, Check if a new fact is a duplicate of any existing fact. Compares the new fact… (+68 more)
+Cohesion: 0.04
+Nodes (72): find_duplicates(), is_duplicate(), jaccard_similarity(), Jaccard similarity deduplication for memory facts. Provides tokenization,…, Find all pairs of duplicate facts within a list. Performs pairwise Jaccard…, Tokenize text into a set of lowercase words, filtering stopwords. Splits on…, Compute Jaccard similarity coefficient between two token sets. Jaccard…, Check if a new fact is a duplicate of any existing fact. Compares the new fact… (+64 more)
 
 ### Community 135 - "PersistentDecisionQueueManager"
 Cohesion: 0.04
-Nodes (43): DecisionQueueItemRecord, SQLModel, Decision queue item database model for persistent triage state. The queue…, A persisted item in a decision queue. Mirrors the in-memory `DecisionQueueItem`…, _naive_utc(), _now(), PersistentDecisionQueueManager, async_sessionmaker (+35 more)
+Nodes (45): DecisionQueueItemRecord, SQLModel, Decision queue item database model for persistent triage state. The queue…, A persisted item in a decision queue. Mirrors the in-memory `DecisionQueueItem`…, _naive_utc(), _now(), PersistentDecisionQueueManager, async_sessionmaker (+37 more)
 
 ### Community 136 - "execute_node"
 Cohesion: 0.14
-Nodes (25): execute_node_endpoint(), NodeExecuteRequest, NodeExecuteResponse, BaseModel, CurrentCompanyId, Parameters for executing a node., Result of a node execution., Execute a workflow node with the supplied parameters. Only nodes with a… (+17 more)
+Nodes (21): execute_node(), ExecutorRegistry, get_default_registry(), NodeExecutor, An async executor function bound to one or more node IDs., Execute a node by ID with timeout enforcement., Registry mapping node_id -> executor., A browse-only node would advertise a tool that cannot run. (+13 more)
 
 ### Community 137 - "workspaces.py"
 Cohesion: 0.15
@@ -1797,7 +1843,7 @@ Nodes (20): activate_workspace(), create_workspace(), delete_workspace(), list_w
 
 ### Community 138 - "ChannelRouter"
 Cohesion: 0.04
-Nodes (40): ChannelInterface, ChannelRouter, DiscordChannel, Any, Protocol, Initialize the Slack channel. Args: channel_name: The Slack channel name (e.g.,…, Post a message to Slack via the configured incoming webhook. Args: message: The…, Receive the next message from the Slack channel inbox. Returns: A Message… (+32 more)
+Nodes (36): ChannelInterface, ChannelRouter, DiscordChannel, Any, Protocol, Initialize the Slack channel. Args: channel_name: The Slack channel name (e.g.,…, Post a message to Slack via the configured incoming webhook. Args: message: The…, Receive the next message from the Slack channel inbox. Returns: A Message… (+28 more)
 
 ### Community 139 - "setup_demo_company"
 Cohesion: 0.06
@@ -1816,40 +1862,40 @@ Cohesion: 0.06
 Nodes (28): CallbackRegistration, HTTPAdapter, Any, datetime, TaskResult, Build request headers from configuration. Supports Bearer token, API key, and…, Execute a task via HTTP request to the configured endpoint. Args: session: The…, Registration record for a webhook callback handler. Stores the callback URL,… (+20 more)
 
 ### Community 143 - "MemoryRecord"
-Cohesion: 0.06
-Nodes (49): archive_memory(), delete_memory(), get_memory(), list_all_memories(), memory_health(), memory_stats(), MemoryUpdate, Any (+41 more)
+Cohesion: 0.04
+Nodes (61): archive_memory(), delete_memory(), get_memory(), list_all_memories(), memory_health(), memory_stats(), MemoryUpdate, Any (+53 more)
 
 ### Community 144 - "routes/okr.py"
 Cohesion: 0.19
 Nodes (25): add_key_result(), AddKeyResultRequest, AtRiskResponse, _compute_progress(), create_objective(), CreateObjectiveRequest, get_at_risk_objectives(), get_objective() (+17 more)
 
-### Community 145 - "goals.py"
-Cohesion: 0.09
-Nodes (32): create_goal(), delete_goal(), execute_goal(), get_goal(), get_goal_stats(), GoalCreate, GoalResponse, GoalUpdate (+24 more)
-
-### Community 146 - "CostEvent"
+### Community 145 - "SparseRetriever"
 Cohesion: 0.04
-Nodes (58): BudgetPolicy, CostEvent, SQLModel, Budget policies and cost tracking models., Defines budget limits for a scope (company, department, agent, project)., Records an individual cost event (LLM call, tool usage, etc.). Doubles as the…, BudgetCheckResult, BudgetService (+50 more)
+Nodes (48): DenseRetriever, HybridRetriever, Any, Add documents to the retriever's document store. Args: docs: List of document…, Retriever using BM25 scoring from nexus.memory.retriever. Uses the existing…, Retrieve documents using BM25 scoring. Delegates to the BM25 search function…, Add documents to the retriever's document store. Args: docs: List of document…, Retriever combining dense and sparse strategies with configurable weighting.… (+40 more)
 
-### Community 147 - "degradation.py"
-Cohesion: 0.21
-Nodes (11): _check_mempalace(), _check_rate_limiter_backend(), _check_temporal(), degradation_status(), JSONResponse, Degradation dashboard endpoint for system capability status. Provides a GET…, Check mempalace (layered memory) availability. Returns: Dict with 'status' and…, Check durable-workflow (Temporal) availability. The integration is… (+3 more)
+### Community 146 - "BudgetService"
+Cohesion: 0.03
+Nodes (90): agent_profiling(), Any, DbSession, Agent performance profiling — per-agent latency/cost/success dashboards.…, Return performance metrics for every agent in the company. Metrics derive from…, BudgetPolicyCreate, BudgetPolicyResponse, BudgetUsageResponse (+82 more)
 
-### Community 148 - "temporal/workflows.py"
-Cohesion: 0.06
-Nodes (47): call_llm_activity(), decompose_task_activity(), DecomposeTaskInput, LLMCallInput, LLMCallOutput, activity_defn, Any, Activity: Route a task to the best available agent. Returns the agent_id of the… (+39 more)
+### Community 147 - "CodeParser"
+Cohesion: 0.04
+Nodes (41): DOCXParser, get_parser_for_extension(), PDFParser, Document conversion parsers for PDF and DOCX files. Extends the RAG pipeline's…, Return appropriate parser for file extension, or None if unsupported., Extracts text from PDF files page-by-page using pypdfium2. Each page becomes…, Extracts text from DOCX files paragraph-by-paragraph using python-docx. Each…, CodeParser (+33 more)
+
+### Community 148 - "test_temporal_activity_layer.py"
+Cohesion: 0.12
+Nodes (13): fixture, Phase 0.4a — the Temporal activity layer. Covers the three invariants ADR 0001…, A local time-skipping Temporal server, or skip when it cannot start. The SDK…, A retried workflow shows one billed LLM call, not two., Acceptance: the worker dies mid-run and a fresh worker resumes the run. The run…, A billed activity killed in flight fails the run rather than re-charging. This…, A billed call and a retry-safe call must not share a retry ceiling., temporal_env() (+5 more)
 
 ### Community 149 - "policies.py"
 Cohesion: 0.09
 Nodes (35): create_policy(), disable_policy(), evaluate_policies(), list_policies(), PolicyCreate, PolicyEvaluateRequest, PolicyEvaluateResponse, PolicyResponse (+27 more)
 
 ### Community 150 - "KnowledgePlaza"
-Cohesion: 0.07
-Nodes (19): KnowledgePlaza, AsyncSession, Acquire an advisory page lock with auto-expiry. Attempts to lock a page for…, Release a page lock if held by the specified agent. Only the agent that holds…, Check if a page is currently locked (respecting expiry). Args: page_id: UUID of…, List all distinct categories for a company's knowledge pages. Returns unique…, Collaborative knowledge base for publishing and searching versioned pages.…, Initialize KnowledgePlaza with a database session. Args: db: An async… (+11 more)
-
-### Community 151 - "Trigger"
 Cohesion: 0.03
-Nodes (91): get_agent_log_summary(), get_agent_logs(), Any, CurrentCompanyId, DbSession, Agent execution log endpoints., Get execution logs for an agent. Uses TriggerExecution records as the source of…, Summary stats for agent execution logs. (+83 more)
+Nodes (46): ExperienceManager, AsyncSession, Extract success patterns from past experiences. Aggregates successful…, Manager for recording, retrieving, and analyzing agent experiences. The…, Make an experience visible to a target team scope. Updates the experience…, Initialize ExperienceManager with a database session. Args: db: An async…, Record a new experience from a completed task. Stores the agent's experience…, Find experiences similar to a given description. Searches past experiences… (+38 more)
+
+### Community 151 - "TriggerExecution"
+Cohesion: 0.10
+Nodes (31): get_agent_log_summary(), get_agent_logs(), Any, CurrentCompanyId, DbSession, Agent execution log endpoints., Get execution logs for an agent. Uses TriggerExecution records as the source of…, Summary stats for agent execution logs. (+23 more)
 
 ### Community 152 - "Benchmark"
 Cohesion: 0.06
@@ -1860,8 +1906,8 @@ Cohesion: 0.06
 Nodes (23): IntegrationRecord, IntegrationRegistry, Integration Registry - manages external service integrations with encrypted…, Store an encrypted secret for an integration. Uses the record's secret_ref as…, Check whether an integration has a stored secret. Args: id: The integration…, Retrieve the decrypted secret for an integration (internal use only). This…, Return all records with secret presence indicated but not exposed. Replaces the…, Represents a registered external integration. Attributes: id: Unique… (+15 more)
 
 ### Community 154 - "ToolAuditStore"
-Cohesion: 0.03
-Nodes (68): SQLModel, Tool invocation audit model - records every tool execution for compliance and…, Audit record for a single tool execution attempt. Captures the full lifecycle…, ToolInvocation, AuditStats, datetime, Tool audit store - in-memory audit trail with query and statistics capabilities., Aggregated statistics from tool invocation audit records. Attributes:… (+60 more)
+Cohesion: 0.06
+Nodes (31): In-memory audit store for tool invocation records. Provides recording,…, Initialize the audit store with an empty record list., ToolAuditStore, datetime, Tests for ToolAuditStore record, query, and stats methods., Helper to create a ToolInvocation with sensible defaults., record() adds invocation to internal storage., query() with no filters returns all records. (+23 more)
 
 ### Community 155 - "dependencies"
 Cohesion: 0.11
@@ -1876,8 +1922,8 @@ Cohesion: 0.07
 Nodes (23): allocate_budget(), Persona, Manages an agent's identity, memory namespace, and working context. Each…, Initialize a Persona for a specific agent. Args: agent_id: Unique identifier…, Clear all memories in this agent's namespace., Persist this persona's state to the in-memory store. Saves the soul definition…, Load a persona from the in-memory store. Updates access order for LRU tracking.…, Split tokens proportionally between identity, memory, and task. Allocates the… (+15 more)
 
 ### Community 158 - "control.py"
-Cohesion: 0.11
-Nodes (26): ControlActionResponse, gate_tool(), GateToolRequest, get_snapshot(), halt_agent(), pause_agent(), PauseRequest, BaseModel (+18 more)
+Cohesion: 0.09
+Nodes (31): ControlActionResponse, _default_persist_path(), gate_tool(), GateToolRequest, get_snapshot(), halt_agent(), pause_agent(), PauseRequest (+23 more)
 
 ### Community 159 - "budget_enforcer.py"
 Cohesion: 0.03
@@ -1888,48 +1934,48 @@ Cohesion: 0.16
 Nodes (17): create_plaza_post(), list_plaza_posts(), PlazaPostCreate, PlazaPostResponse, Any, BaseModel, CurrentCompanyId, DbSession (+9 more)
 
 ### Community 161 - "GroupManager"
-Cohesion: 0.05
-Nodes (30): GroupManager, HandoffIntent, Any, Add a new member to a group. Args: group_id: UUID of the target group.…, Remove a member from a group. Args: group_id: UUID of the target group.…, An immutable, fully-resolved decision to deliver one handoff. Staging resolves…, Broadcast a message to all members of a group. Creates a message for each group…, Send a targeted message to a specific agent within a group context. The message… (+22 more)
+Cohesion: 0.06
+Nodes (25): GroupManager, Any, Add a new member to a group. Args: group_id: UUID of the target group.…, Remove a member from a group. Args: group_id: UUID of the target group.…, Broadcast a message to all members of a group. Creates a message for each group…, Send a targeted message to a specific agent within a group context. The message…, Manages group-based communication for multi-agent collaboration. Supports…, Retrieve message history for a group. Returns messages ordered by creation time… (+17 more)
 
 ### Community 162 - "StatisticalAnalyzer"
 Cohesion: 0.04
 Nodes (36): Initialize the A/B test framework. Args: statistical_analyzer: Optional…, Any, Performs statistical analysis for evolution metrics. All methods use only…, Compute confidence interval using normal approximation. Args: data: Sample…, Determine if treatment is a significant improvement over control. Combines…, Compute statistical significance using Welch's t-test. Performs a two-sample…, Approximate z-score for a given confidence level. Uses the rational…, Approximate two-tailed p-value from a t-distribution. Uses the regularized… (+28 more)
 
-### Community 163 - "LocalEmbeddingProvider"
+### Community 163 - "RAGPipeline"
 Cohesion: 0.02
-Nodes (111): backfill(), Backfill embedding_vector for knowledge_chunks that have none. Run after the…, get_embedding_provider(), LocalEmbeddingProvider, NullEmbeddingProvider, OllamaEmbeddingProvider, OpenAIEmbeddingProvider, Embedding Provider — pluggable vector embedding generation for RAG. Supports… (+103 more)
+Nodes (83): OpenAIEmbeddingProvider, Embedding provider using OpenAI's text-embedding API., RAGPipeline, Split a document into chunks using the specified strategy. Supports multiple…, Split content on double newlines into paragraph chunks. Args: content: Text to…, Split content on markdown headers (lines starting with #). Each section…, Split content into fixed-size character chunks with overlap. Uses a 10% overlap…, Store document chunks as KnowledgeChunk records. Creates a KnowledgeChunk for… (+75 more)
 
-### Community 164 - "ProviderRegistry"
-Cohesion: 0.07
-Nodes (30): LLMProviderSpec, ModelCapabilities, ProviderRegistry, LLM Provider Registry with self-registration at import time. Provides a…, Capabilities metadata for a specific LLM model., Specification for an LLM provider including models, pricing, and capabilities., Singleton registry for LLM providers with task-based routing. Providers self-…, Register a provider spec in the registry. (+22 more)
+### Community 164 - "models_router/__init__.py"
+Cohesion: 0.02
+Nodes (76): ModelCapabilityResolver, ModelLimits, Per-model context window and max-output resolution. Compaction needs to know…, Look up an exact model's context window in the provider registry., Token limits for a model. Attributes: context_window: Total tokens the model…, Resolves a model id to its context window and max output tokens., Return the token limits for ``model``. The registry is authoritative for the…, Model Router - multi-provider LLM abstraction with task-based selection and… (+68 more)
 
 ### Community 165 - "WebhookHandler"
 Cohesion: 0.11
 Nodes (14): Any, Webhook Handler - manages webhook registrations and routes incoming payloads to…, Remove a webhook registration. Args: registration_id: The registration to…, A registered webhook endpoint mapped to a trigger. Attributes: id: Unique…, Handle an incoming webhook request. Matches the path to a registered webhook…, List webhook registrations with optional filters. Args: company_id: Filter by…, Retrieve recent webhook events. Args: limit: Maximum events to return. Returns:…, An incoming webhook event to be processed. Attributes: id: Unique event… (+6 more)
 
-### Community 166 - "meetings.py"
-Cohesion: 0.12
-Nodes (23): list_meetings(), Meeting API endpoints - scheduling, conducting, and recording meetings., List meetings for a company., Meeting conductor for running meeting sessions. Handles the execution lifecycle…, Meetings module for structured agent collaboration sessions. Provides…, MeetingScheduler, datetime, Meeting scheduler for creating and managing scheduled meetings. Handles the… (+15 more)
+### Community 166 - "ToolRegistry"
+Cohesion: 0.06
+Nodes (48): ObsidianDocument, A vault note NEXUS has seen, and the state of its derived index., An agent acting through a granted tool., Decides whether an actor may write one vault path. Example: >>> authorizer =…, Legacy shape with no authorization authority., Authorize one write, returning the canonical path it applies to. The order…, VaultWriteAuthorizer, content_hash() (+40 more)
 
 ### Community 167 - "_make_controller"
 Cohesion: 0.04
-Nodes (41): _make_controller(), Comprehensive tests for the ClosingTimeController module., start() enqueues steer notes for god and all workers., start() works fine when no control_registry is provided., start() with only god live sets empty worker roster., Tests for ACK message handling in on_routed()., ACK from a known worker adds it to the acked set., ACK from an agent not in the worker roster is ignored. (+33 more)
+Nodes (43): ClosingTimePhase, StrEnum, Protocol phases for the closing time shutdown sequence. Values: STARTED:…, _make_controller(), Tests for ACK message handling in on_routed()., ACK from a known worker adds it to the acked set., ACK from an agent not in the worker roster is ignored., ACK message not targeting god is ignored. (+35 more)
 
 ### Community 168 - "GuardrailChain"
-Cohesion: 0.04
-Nodes (46): GuardrailChain, Any, GuardrailChain - runs multiple guardrails in sequence with configurable…, Run all guardrails' validate_tool_call in sequence. Args: tool_name: Name of…, Run a validation method on all guardrails in sequence. Args: method_name: The…, Chains multiple async guardrails and runs them in sequence. Features: -…, Run validate_tool_call on all guardrails in sequence. Args: tool_name: Name of…, Initialize the guardrail chain. Args: guardrails: Initial list of guardrails to… (+38 more)
+Cohesion: 0.07
+Nodes (29): GuardrailChain, Any, GuardrailChain - runs multiple guardrails in sequence with configurable…, Run all guardrails' validate_tool_call in sequence. Args: tool_name: Name of…, Run a validation method on all guardrails in sequence. Args: method_name: The…, Chains multiple async guardrails and runs them in sequence. Features: -…, Run validate_tool_call on all guardrails in sequence. Args: tool_name: Name of…, Initialize the guardrail chain. Args: guardrails: Initial list of guardrails to… (+21 more)
 
-### Community 169 - "MeetingConductor"
-Cohesion: 0.06
-Nodes (22): MeetingConductor, AsyncSession, Extract action items from meeting minutes text. Parses text looking for action…, Generate and store meeting minutes from agent contributions. Creates a…, Conducts meetings through their execution lifecycle. Manages the transition of…, End a meeting, transitioning it to completed status. Sets the meeting status to…, Create action item records from a list of item descriptions. Each item dict…, Initialize the conductor with a database session. Args: db: An async SQLAlchemy… (+14 more)
+### Community 169 - "TestMeetingConductorPureLogic"
+Cohesion: 0.11
+Nodes (10): Tests for MeetingConductor pure logic methods (no DB)., generate_agenda includes prompt and expected_format from template., generate_agenda handles empty template gracefully., extract_action_items finds ACTION: prefixed lines., extract_action_items finds TODO: prefixed lines., extract_action_items finds markdown checkbox lines., extract_action_items finds all pattern types in one text., extract_action_items handles case variations of ACTION/TODO. (+2 more)
 
 ### Community 170 - "arch_guard.py"
 Cohesion: 0.12
 Nodes (31): AnnAssign, Assign, expr, Module, check_r1(), check_r2(), check_r3(), check_r4() (+23 more)
 
-### Community 171 - "tools/__init__.py"
-Cohesion: 0.05
-Nodes (53): RateLimitConfig, AutonomyDecision, AutonomyGate, classify_action(), _coerce_level(), correlation_id(), db_policy_loader(), Any (+45 more)
+### Community 171 - "factory.py"
+Cohesion: 0.06
+Nodes (46): RateLimitConfig, AutonomyDecision, AutonomyGate, classify_action(), _coerce_level(), correlation_id(), db_policy_loader(), Any (+38 more)
 
 ### Community 172 - "lib/render-report.mjs"
 Cohesion: 0.08
@@ -1959,21 +2005,21 @@ Nodes (13): latency_stats(), _percentile(), Metric calculation functions for mod
 Cohesion: 0.09
 Nodes (18): ChangePromoter, Any, Check if a canary deployment is degrading. Args: proposal_id: The proposal…, Promotes approved evolution proposals to production. All promotion operations…, Revert a promoted change and update status. Args: proposal_id: The proposal to…, Get all promotions and rollbacks for a company. Args: company_id: The company…, Initialize the promoter. Args: db: Optional async database session for…, Promote a proposal to production. CRITICAL: Raises ValueError if approval_id is… (+10 more)
 
-### Community 179 - "TaskPlanner"
-Cohesion: 0.06
-Nodes (32): LLMTaskPlanner, Any, LLM-enhanced Task Planner - uses LLM for intelligent task decomposition., Parse the LLM JSON response into SubTask objects. Args: response: Raw LLM…, Task planner that uses an LLM for intelligent decomposition. Uses a…, Initialize the LLM-enhanced task planner. Args: llm_callable: Async function…, Decompose a task into subtasks using the LLM. Sends the task description and…, Any (+24 more)
+### Community 179 - "LLMTaskPlanner"
+Cohesion: 0.07
+Nodes (25): LLMTaskPlanner, Any, LLM-enhanced Task Planner - uses LLM for intelligent task decomposition., Parse the LLM JSON response into SubTask objects. Args: response: Raw LLM…, Task planner that uses an LLM for intelligent decomposition. Uses a…, Decompose a task into subtasks using the LLM. Sends the task description and…, Task Planner - decomposes complex tasks into ordered subtasks with dependencies., A decomposed unit of work derived from a parent task. Attributes: id: Unique… (+17 more)
 
 ### Community 180 - "lineOf"
 Cohesion: 0.06
 Nodes (47): apply(), COUNT_CLAIM_TYPES, metadata, rewriteCount(), apply(), metadata, apply(), metadata (+39 more)
 
 ### Community 181 - "asyncio"
-Cohesion: 0.05
-Nodes (32): A2AProtocol, Any, Broadcast a message to all agents in a company. Sends the same message content…, Send a message scoped to a specific team of agents. Similar to broadcast but…, Retrieve message history for an agent (sent or received). Returns messages…, Check if a correlation_id has already been delivered. Args: correlation_id: The…, Agent-to-Agent messaging protocol with at-least-once delivery semantics.…, Initialize the A2A protocol. Args: db: Optional AsyncSession for database… (+24 more)
+Cohesion: 0.04
+Nodes (42): A2AProtocol, Any, Broadcast a message to all agents in a company. Sends the same message content…, Send a message scoped to a specific team of agents. Similar to broadcast but…, Retrieve message history for an agent (sent or received). Returns messages…, Check if a correlation_id has already been delivered. Args: correlation_id: The…, Agent-to-Agent messaging protocol with at-least-once delivery semantics.…, Initialize the A2A protocol. Args: db: Optional AsyncSession for database… (+34 more)
 
-### Community 182 - "CompanySettings"
-Cohesion: 0.16
-Nodes (17): CompanySettingsResponse, CompanySettingsUpdate, get_company_settings(), Any, BaseModel, DbSession, PathCompanyId, put (+9 more)
+### Community 182 - "TextParser"
+Cohesion: 0.04
+Nodes (34): Split text into sentences using punctuation boundaries. Args: text: Text to…, Merge chunks smaller than min_chunk_size with adjacent chunks. Args: chunks:…, Parser for plain text documents. Splits text on paragraphs (double newlines) or…, Parse plain text into paragraph/sentence chunks. First splits on double…, TextParser, Any, Build a ranker instance from configuration. Args: config: Dict with 'type' key…, Build a retriever instance from configuration. Args: config: Dict with 'type'… (+26 more)
 
 ### Community 183 - "EvaluationConfig"
 Cohesion: 0.07
@@ -1984,12 +2030,12 @@ Cohesion: 0.11
 Nodes (13): RateLimitResult, Result of a rate limit check. Attributes: allowed: Whether the request is…, Check if a request is within rate limits (O(1) operation). Checks all…, Consume a token from all applicable rate limiters. Actually deducts the token,…, Check rate limit for a specific agent., Check rate limit for a specific company., Check rate limit for a specific resource., Get or create a token bucket for an agent. (+5 more)
 
 ### Community 185 - "test_mcp_server.py"
-Cohesion: 0.05
-Nodes (80): authenticate(), default_read_policy(), exposed_nodes(), input_schema_for(), load_policy_engine(), main(), MCPServer, PolicyRule (+72 more)
+Cohesion: 0.08
+Nodes (55): exposed_nodes(), Classify a node as ``read`` or ``write`` for policy evaluation., The node definitions that have an executor bound, keyed by node id. A browse-…, risk_level_for(), _drive(), _engine(), asyncio, PolicyRule (+47 more)
 
 ### Community 186 - "StructuralGuardrail"
-Cohesion: 0.03
-Nodes (50): Any, Perform the actual structural validation. Args: data: The data to validate.…, Validate data against the configured JSON schema (basic checks). Supports type…, Validates output against structural constraints. Checks: - max_length: Maximum…, Initialize the structural guardrail. Args: name: Identifier for this guardrail.…, The guardrail's identifier., Validate input against structural constraints. Args: input: The input data to…, Validate output against structural constraints. Args: output: The output data… (+42 more)
+Cohesion: 0.06
+Nodes (25): Validates output against structural constraints. Checks: - max_length: Maximum…, The guardrail's identifier., StructuralGuardrail, Tests for StructuralGuardrail JSON schema validation., Dict passes schema type 'object' check., String fails schema type 'object' check., String passes schema type 'string' check., Dict fails schema type 'string' check. (+17 more)
 
 ### Community 187 - "gates/index.mjs"
 Cohesion: 0.05
@@ -1999,25 +2045,25 @@ Nodes (43): gate(), metadata, unique(), extractColdStarts(), gate(), metadata, G
 Cohesion: 0.07
 Nodes (23): CostTracker, InvocationRecord, Cost Tracker - records LLM invocations and computes costs. Prices come from…, Record an LLM invocation and compute its cost. Args: provider: The LLM provider…, Get total cost in cents, optionally filtered. Args: company_id: Filter by…, Get invocation records, optionally filtered. Args: company_id: Filter by…, Record of a single LLM invocation with cost data. Attributes: id: Unique record…, Override the price for one model, shadowing the central table. Args: model: The… (+15 more)
 
-### Community 189 - "NexusPlugin"
-Cohesion: 0.09
-Nodes (28): Plugin SDK for NEXUS extensibility. Provides a protocol-based plugin system…, discover_plugins(), load_plugin(), PluginLoader, Path, Plugin loader for discovering and loading NEXUS plugins. Provides safe,…, Load a plugin from a Python file path. Imports the module, finds the plugin…, High-level plugin loader for managing plugin discovery and loading. Wraps the… (+20 more)
+### Community 189 - "PluginRegistry"
+Cohesion: 0.07
+Nodes (32): _HookHandler, HookManager, HookPoint, Any, Enum, Hook system for NEXUS plugin extensibility. Provides hook points throughout the…, Register a handler for a specific hook point. Args: hook_point: The hook point…, Unregister a named handler from a hook point. Args: hook_point: The hook point… (+24 more)
 
-### Community 190 - "test_plugin_sdk.py"
+### Community 190 - "load_plugin"
+Cohesion: 0.16
+Nodes (10): load_plugin(), Path, Load a plugin from a Python file path. Imports the module, finds the plugin…, Initialize the plugin loader. Args: plugin_directory: Optional directory path…, Load a plugin from a specific file path. Args: path: Path to the Python file…, Tests for plugin loading from files., load_plugin loads and instantiates a valid plugin., load_plugin returns None for non-existent files. (+2 more)
+
+### Community 191 - "NexusPlugin"
 Cohesion: 0.12
-Nodes (10): Tests for the NEXUS Plugin SDK. Validates plugin protocol conformance,…, Tests for the HookPoint enum., All six hook points are defined., Exactly 6 hook points are defined., Tests for plugin loading from files., load_plugin loads and instantiates a valid plugin., load_plugin returns None for non-existent files., load_plugin returns None for files without a plugin class. (+2 more)
-
-### Community 191 - "_find_plugin_class"
-Cohesion: 0.18
-Nodes (8): _find_plugin_class(), Any, Find a class in a module that implements the NexusPlugin protocol. Scans all…, Any, Called when the plugin is loaded and registered. Perform any initialization,…, Called when the plugin is unloaded and unregistered. Perform any cleanup,…, Return tool definitions provided by this plugin. Each tool is a dictionary…, Return hook handlers provided by this plugin. Keys are hook point names…
+Nodes (14): _find_plugin_class(), Any, Find a class in a module that implements the NexusPlugin protocol. Scans all…, NexusPlugin, Any, Protocol, Protocol defining the interface for NEXUS plugins. All plugins must implement…, Called when the plugin is loaded and registered. Perform any initialization,… (+6 more)
 
 ### Community 192 - "test_session_compaction.py"
-Cohesion: 0.08
-Nodes (24): CompactionStrategy, Enum, Session context compaction for managing conversation history within token…, Available strategies for compacting session context. TRUNCATE: Keep newest…, Simple token estimation utilities for context window management. Provides a…, compactor(), counter(), long_messages() (+16 more)
+Cohesion: 0.14
+Nodes (14): compactor(), counter(), long_messages(), fixture, Tests for session context compaction and token estimation. Covers: TokenCounter…, Tests for the CompactionConfig dataclass., Default config should have expected values., Custom config should use provided values. (+6 more)
 
 ### Community 193 - "app"
 Cohesion: 0.12
-Nodes (15): app(), Create a test FastAPI app with version middleware., anyio_backend(), client(), fixture, Use asyncio backend for anyio., Create an async HTTP client for testing., Verifies RequestIDMiddleware correlation headers on FastAPI endpoints. (+7 more)
+Nodes (13): app(), Create a test FastAPI app with version middleware., anyio_backend(), client(), fixture, Use asyncio backend for anyio., Create an async HTTP client for testing., Verifies RequestIDMiddleware correlation headers on FastAPI endpoints. (+5 more)
 
 ### Community 194 - "ABTestFramework"
 Cohesion: 0.04
@@ -2036,12 +2082,12 @@ Cohesion: 0.07
 Nodes (23): Initialize the LLM evolution advisor. Args: llm_callable: Async function that…, Any, Promote a skill version to active status. CRITICAL: Raises ValueError if…, Manages skill version lifecycle with approval-gated promotion. Tracks skill…, Reactivate the previous version of a skill. Args: skill_id: The skill to roll…, Initialize skill evolution manager. Args: db: Optional async database session…, Get all versions of a skill. Args: skill_id: The skill to get history for.…, Create a new skill version record. Args: company_id: The company owning the… (+15 more)
 
 ### Community 198 - "Path"
-Cohesion: 0.05
-Nodes (38): persist_file(), fixture, Path, skipif, Tests for FernetSecretBackend file persistence, atomic writes, and key rotation., Tests for file permission enforcement., Persistence file has 0o600 permissions (owner read/write only)., Tests for key rotation functionality. (+30 more)
+Cohesion: 0.04
+Nodes (42): persist_file(), fixture, Path, skipif, Tests for FernetSecretBackend file persistence, atomic writes, and key rotation., Tests for file permission enforcement., Persistence file has 0o600 permissions (owner read/write only)., Tests for key rotation functionality. (+34 more)
 
 ### Community 199 - "WebSocketManager"
-Cohesion: 0.08
-Nodes (18): Any, WebSocket, WebSocket connection manager for real-time client communication. Manages active…, Broadcast a JSON message to all connected clients. Args: data: Dictionary…, Subscribe a client to a named channel. Args: client_id: UUID string of the…, Unsubscribe a client from a named channel. Args: client_id: UUID string of the…, Broadcast a JSON message to all clients subscribed to a channel. Args: channel:…, Manages WebSocket connections and channel subscriptions. Tracks active… (+10 more)
+Cohesion: 0.06
+Nodes (21): Any, WebSocket, WebSocket connection manager for real-time client communication. Manages active…, Broadcast a JSON message to all connected clients. Args: data: Dictionary…, Subscribe a client to a named channel. Args: client_id: UUID string of the…, Unsubscribe a client from a named channel. Args: client_id: UUID string of the…, Broadcast a JSON message to all clients subscribed to a channel. Args: channel:…, Manages WebSocket connections and channel subscriptions. Tracks active… (+13 more)
 
 ### Community 200 - "ContextBuilder"
 Cohesion: 0.08
@@ -2051,13 +2097,13 @@ Nodes (18): ContextBuilder, Set the projected cost for the action. Args: amount:
 Cohesion: 0.18
 Nodes (10): App(), ThemeTab(), ThemeTabProps, ErrorBoundary, Props, State, applyTheme(), getActiveTheme() (+2 more)
 
-### Community 202 - "main.py"
-Cohesion: 0.01
-Nodes (214): Headers, _get_redis_rate_limiter(), GovernanceMiddleware, Any, ASGIApp, Receive, Scope, Send (+206 more)
+### Community 202 - "Principal"
+Cohesion: 0.02
+Nodes (159): Depends, Headers, get_current_company_id(), get_optional_principal(), get_principal(), get_scoped_company_id(), Any, Build a dependency that admits only principals holding a permission. Applied… (+151 more)
 
 ### Community 203 - "AgentInfo"
 Cohesion: 0.08
-Nodes (23): AgentInfo, Agent state information for watchdog patrol. Provides all necessary agent data…, Patrol does not check idle agents for stuck state., Tests for detecting budget-exceeded agents., Patrol pauses agent that exceeded its monthly budget., Patrol does not pause agent within budget., Patrol does not check agents with zero budget (unlimited)., Tests for detecting circuit-broken agents. (+15 more)
+Nodes (23): AgentInfo, Agent state information for watchdog patrol. Provides all necessary agent data…, Patrol does not check idle agents for stuck state., Tests for detecting orphaned tasks., Patrol detects tasks assigned to a terminated agent., Patrol detects tasks assigned to an agent in error state., Patrol does not flag terminated agent with no assigned tasks., Tests for detecting budget-exceeded agents. (+15 more)
 
 ### Community 204 - "test_alembic_migration.py"
 Cohesion: 0.09
@@ -2067,29 +2113,29 @@ Nodes (16): parametrize, Tests for Alembic migration completeness and validity.,
 Cohesion: 0.06
 Nodes (33): AndCondition, OrCondition, Logical OR of multiple conditions. At least one child condition must evaluate…, Numeric threshold comparison against a context metric. Looks up…, Create a threshold condition, replacing any previously set expression. Args:…, Logical AND of multiple conditions. All child conditions must evaluate to True…, ThresholdCondition, AndCondition short-circuits: stops on first False. If the first condition is… (+25 more)
 
-### Community 206 - "get_leader_election"
+### Community 206 - "is_leader"
 Cohesion: 0.12
-Nodes (10): get_leader_election(), LeaderElection, NoopLeaderElection, Redis lease-based leader election for singleton background services. Multi-…, Redis-backed leader lease., Acquire or renew the lease for `name`. True when this instance leads., Release the lease (only if we still hold it)., Always-leader fallback used when Redis is not configured or reachable. (+2 more)
+Nodes (12): get_leader_election(), is_leader(), LeaderElection, NoopLeaderElection, Redis lease-based leader election for singleton background services. Multi-…, Redis-backed leader lease., Acquire or renew the lease for `name`. True when this instance leads., Release the lease (only if we still hold it). (+4 more)
 
 ### Community 207 - "PolicyGuardrail"
-Cohesion: 0.03
-Nodes (52): PolicyGuardrail, Any, Validate content against blocked patterns, paths, and commands. Args: data: The…, Validates content against configurable security and policy rules. Checks: -…, Initialize the policy guardrail. Args: name: Identifier for this guardrail.…, The guardrail's identifier., Validate input against policy rules. Args: input: The input data to validate.…, Validate output against policy rules. Args: output: The output data to… (+44 more)
+Cohesion: 0.06
+Nodes (25): PolicyGuardrail, Validates content against configurable security and policy rules. Checks: -…, Initialize the policy guardrail. Args: name: Identifier for this guardrail.…, The guardrail's identifier., build_guardrail_chain(), Assemble the production guardrail chain. Args: allowed_tools: Optional tool-…, Tests for PolicyGuardrail blocked patterns., Output matching a blocked pattern fails. (+17 more)
 
 ### Community 208 - "MeetingTemplates"
 Cohesion: 0.09
-Nodes (18): MeetingTemplates, Meeting templates for structured agent collaboration sessions. Provides…, Get the design review meeting template. A structured review session for…, Get the priority alignment meeting template. A consensus-building session for…, Get the daily standup meeting template. A brief synchronization meeting where…, Get all available meeting templates indexed by meeting type. Returns: Dict…, Get the planning meeting template. A session for defining goals, assessing…, Provides structured templates for different meeting types. Each template… (+10 more)
+Nodes (18): MeetingTemplates, Get the design review meeting template. A structured review session for…, Get the priority alignment meeting template. A consensus-building session for…, Get the daily standup meeting template. A brief synchronization meeting where…, Get all available meeting templates indexed by meeting type. Returns: Dict…, Get the planning meeting template. A session for defining goals, assessing…, Provides structured templates for different meeting types. Each template…, Get the retrospective meeting template. A reflective session for identifying… (+10 more)
 
-### Community 209 - "MemoryScopeManager"
-Cohesion: 0.15
-Nodes (11): MemoryScope, MemoryScopeManager, AsyncSession, MemoryRecord, Check if an agent can access a specific memory. Args: agent_id: The agent…, Represents an accessible memory scope for an agent., Generate a unique key for this scope., Manages memory visibility and access control based on organizational hierarchy.… (+3 more)
+### Community 209 - "test_obsidian_wikilinks.py"
+Cohesion: 0.08
+Nodes (41): extract_wikilinks(), frontmatter_links(), normalize_target(), note_links(), Any, Wikilink extraction for vault notes (ADR 0002 §14, proposal §7). Obsidian's…, Return targets declared in frontmatter ``related``. ADR 0002 §14 counts…, Every target a note relates to, from its body and its frontmatter. Args:… (+33 more)
 
-### Community 210 - "SkillService"
-Cohesion: 0.09
-Nodes (19): Any, AsyncSession, Exception, Register a new skill in the company's skill registry. Args: company_id: The…, Raised when the company's skill policy refuses a skill assignment. Carries the…, Assign a skill to an agent with a proficiency level. Args: agent_id: The agent…, Get all skills assigned to an agent. Args: agent_id: The agent to query.…, Find all agents that have a specific skill. Args: skill_id: The skill to search… (+11 more)
+### Community 210 - "ToolExecutor"
+Cohesion: 0.06
+Nodes (23): Any, Initialize the tool executor. Args: timeout_seconds: Maximum time for a single…, Set the permission checker function. Args: checker: Async function(agent_id,…, Execute a tool with full permission and safety checks. Performs permission…, Create and record a ToolInvocation in the audit store if configured. Args:…, Verify the agent has permission to use the tool. Args: agent_id: The requesting…, Check if the agent is within rate limits. Args: agent_id: The requesting agent.…, Record a successful tool call for rate limiting. Args: agent_id: The agent that… (+15 more)
 
-### Community 211 - "tool_catalog"
-Cohesion: 0.03
-Nodes (53): get_setup_status(), probe_tool(), Enum, str, Tool Catalog - discoverable prerequisite and engine tools with setup probing.…, Return the full tool catalog including engine entries from provider presets.…, Probe whether a binary is available on the system PATH. Args: bin_name: Name of…, Return catalog entries annotated with their availability on the current system.… (+45 more)
+### Community 211 - "tools/__init__.py"
+Cohesion: 0.04
+Nodes (47): Tool Registry - unified tool interface with MCP protocol support and…, get_setup_status(), probe_tool(), Enum, str, Tool Catalog - discoverable prerequisite and engine tools with setup probing.…, Return the full tool catalog including engine entries from provider presets.…, Probe whether a binary is available on the system PATH. Args: bin_name: Name of… (+39 more)
 
 ### Community 212 - "DelegationEngine"
 Cohesion: 0.09
@@ -2100,8 +2146,8 @@ Cohesion: 0.14
 Nodes (10): HiringManager, Any, Hiring and onboarding management for AI agents. Handles job description…, Manages the hiring lifecycle for AI agents within a company., Evaluate whether an agent passes probation. Args: task_history: List of task…, Suggest best team based on skill overlap and team composition. team_agents maps…, Generate a structured job description. Args: role: The role title. department:…, Derive preferred (nice-to-have) skills based on role context. Args: role: The… (+2 more)
 
 ### Community 214 - "ProposalEvaluator"
-Cohesion: 0.09
-Nodes (17): ProposalEvaluator, Any, Proposal Evaluator - scores proposals and checks promotion criteria. Evaluates…, Evaluates evolution proposals against baseline performance. Creates evaluation…, Check if improvement is statistically significant. Uses a simple heuristic:…, Check if an evaluation meets promotion criteria. Args: evaluation: Evaluation…, Reject a proposal with detailed explanation. Args: proposal_id: The proposal to…, Initialize the evaluator. Args: db: Optional async database session for… (+9 more)
+Cohesion: 0.10
+Nodes (16): ProposalEvaluator, Any, Evaluates evolution proposals against baseline performance. Creates evaluation…, Check if improvement is statistically significant. Uses a simple heuristic:…, Check if an evaluation meets promotion criteria. Args: evaluation: Evaluation…, Reject a proposal with detailed explanation. Args: proposal_id: The proposal to…, Initialize the evaluator. Args: db: Optional async database session for…, Evaluate a proposal based on sandbox vs baseline results. Creates an evaluation… (+8 more)
 
 ### Community 215 - "EvolutionObserver"
 Cohesion: 0.09
@@ -2120,8 +2166,8 @@ Cohesion: 0.18
 Nodes (9): OpenAIProvider, Any, Stream a completion from OpenAI token by token. Args: messages: Conversation…, Estimate token count for the given text. Uses a simple character-based…, Initialize the OpenAI provider. Args: api_key: OpenAI API key. base_url: Base…, Build request headers with authentication. Returns: Dictionary of HTTP headers., Convert LLMMessage objects to OpenAI API format. Args: messages: List of…, Generate a completion using the OpenAI API. Args: messages: Conversation… (+1 more)
 
 ### Community 219 - "Backend Engineer Agent Role"
-Cohesion: 0.40
-Nodes (6): Idempotent Operation Requirement, Backend Engineer Agent Role, Inline Data Quality Checks, ETL Pipeline Patterns (Batch/Micro-batch/Streaming/CDC), Data Engineer Agent Role, Schema Design Principles
+Cohesion: 0.15
+Nodes (15): Partial Failure Handling, Idempotent Operation Requirement, Backend Engineer Agent Role, Inline Data Quality Checks, ETL Pipeline Patterns (Batch/Micro-batch/Streaming/CDC), Zero-Downtime Migration Strategy, Data Engineer Agent Role, Schema Design Principles (+7 more)
 
 ### Community 220 - "What You Must Do When Invoked"
 Cohesion: 0.07
@@ -2140,16 +2186,16 @@ Cohesion: 0.10
 Nodes (33): _check_schema_currency(), Warn when a SQLite dev database is behind the repository's migrations. The…, _engine_for(), asyncio, LogCaptureFixture, Tests for the configuration validator module. Verifies that validate_config()…, validate_config never raises exceptions, regardless of config state., Log warning when Redis is unreachable. (+25 more)
 
 ### Community 224 - "evolution/__init__.py"
-Cohesion: 0.06
-Nodes (34): A/B Test Framework - experiment design, execution, and early stopping. Provides…, Agent Evolution - versioned agent configuration with approval-gated promotion.…, Failure Analyzer - root cause analysis and success factor extraction. Analyzes…, Evolution Engine - continuous improvement and self-optimization for NEXUS. The…, LLM Evolution Advisor - LLM-driven agent and skill evolution guidance. Provides…, Evolution Observer - tracks executions and detects patterns and anomalies.…, Change Promoter - applies approved changes with governance gates. CRITICAL: The…, Skill Evolution - versioned skill management with approval-gated promotion.… (+26 more)
+Cohesion: 0.05
+Nodes (41): A/B Test Framework - experiment design, execution, and early stopping. Provides…, Agent Evolution - versioned agent configuration with approval-gated promotion.…, Proposal Evaluator - scores proposals and checks promotion criteria. Evaluates…, Evolution Engine - continuous improvement and self-optimization for NEXUS. The…, LLM Evolution Advisor - LLM-driven agent and skill evolution guidance. Provides…, LLM-enhanced Improvement Proposer - uses LLM for intelligent proposal…, Evolution Observer - tracks executions and detects patterns and anomalies.…, Change Promoter - applies approved changes with governance gates. CRITICAL: The… (+33 more)
 
 ### Community 225 - "price_for"
-Cohesion: 0.07
-Nodes (19): ModelPrice, price_for(), Resolve a model id to its price row by family, falling back to Sonnet. Keyword…, USD per million tokens for one model family., Tests for the per-model pricing module (nexus.models_router.pricing)., Tests for price_for() keyword matching., o1-mini and o3-mini are far cheaper than full o1, so they get own rows., Bare gpt-4 costs 3x gpt-4-turbo; gpt-4.1 is a Turbo-generation price. (+11 more)
+Cohesion: 0.04
+Nodes (37): estimate_cost_usd(), ModelPrice, price_for(), Resolve a model id to its price row by family, falling back to Sonnet. Keyword…, Token split used by the cost estimator (matches AgentUsage token fields)., Estimate USD cost for a token split using the model's fallback price row. Used…, USD per million tokens for one model family., TokenSplit (+29 more)
 
-### Community 226 - "compress.py"
-Cohesion: 0.15
-Nodes (24): backup_dir_for(), build_compress_prompt(), build_fix_prompt(), call_claude(), compress_file(), first_nonblank_line(), is_sensitive_path(), Path (+16 more)
+### Community 226 - "routes/communication.py"
+Cohesion: 0.08
+Nodes (41): BroadcastRequest, create_group(), CreateGroupRequest, EventResponse, get_agent_inbox(), get_group_messages(), GroupResponse, list_events() (+33 more)
 
 ### Community 227 - "manifest.json"
 Cohesion: 0.15
@@ -2171,9 +2217,9 @@ Nodes (9): PerformanceManager, Any, Performance management for agents. Calculate
 Cohesion: 0.14
 Nodes (5): _FernetEncryptor, Fallback obfuscation using XOR with a key + base64 encoding. WARNING: This is…, Initialize the secret vault. Args: encryption_key: Optional encryption key. If…, Encryption using cryptography.fernet.Fernet., _TestOnlyXOREncryptor
 
-### Community 232 - "ExperienceManager"
-Cohesion: 0.15
-Nodes (13): ExperienceManager, AsyncSession, Extract success patterns from past experiences. Aggregates successful…, Manager for recording, retrieving, and analyzing agent experiences. The…, Initialize ExperienceManager with a database session. Args: db: An async…, asyncio, Tests for ExperienceManager with mock database., record_experience creates an ExperienceRecord. (+5 more)
+### Community 232 - "Path"
+Cohesion: 0.06
+Nodes (23): Path, Tests for opt-in JSON file persistence across modules. Covers ControlRegistry,…, Persisted file is always valid JSON after mutations., Tests for PhaseMachine file persistence., PhaseMachine saves phase state and loads on init., PhaseMachine without persist_path works identically., PhaseMachine with non-existent persist_path starts fresh., Full lifecycle transitions are all persisted. (+15 more)
 
 ### Community 233 - "OllamaProvider"
 Cohesion: 0.19
@@ -2183,13 +2229,13 @@ Nodes (8): OllamaProvider, Any, Stream a completion from Ollama token by token. 
 Cohesion: 0.20
 Nodes (8): Any, Retry with Budget - retries failed tasks up to limits or budget exhaustion., Outcome of a retry-enabled execution. Attributes: task_id: The task that was…, Retries failed tasks up to a maximum count or until budget is exhausted. Tracks…, Initialize the retry handler. Args: max_retries: Maximum number of retry…, Execute a task with retry logic bounded by attempts and budget. The execute_fn…, RetryResult, RetryWithBudget
 
-### Community 235 - "TestPluginLoaderClass"
-Cohesion: 0.25
-Nodes (5): Tests for the PluginLoader class., PluginLoader.discover finds plugins in configured directory., PluginLoader.discover returns empty when no directory is set., PluginLoader.load loads a specific plugin file., TestPluginLoaderClass
+### Community 235 - "PluginLoader"
+Cohesion: 0.16
+Nodes (9): PluginLoader, High-level plugin loader for managing plugin discovery and loading. Wraps the…, Discover available plugins in the configured directory. Returns: List of…, Get the list of previously discovered plugin metadata. Returns: List of…, Tests for the PluginLoader class., PluginLoader.discover finds plugins in configured directory., PluginLoader.discover returns empty when no directory is set., PluginLoader.load loads a specific plugin file. (+1 more)
 
 ### Community 236 - "_scrub_arguments"
-Cohesion: 0.07
-Nodes (23): Any, RateLimitConfig, Initialize the tool executor. Args: timeout_seconds: Maximum time for a single…, Scrub sensitive fields from tool arguments before audit storage. Keys…, Recursively scrub sensitive values from nested structures. Args: value: Any…, Create and record a ToolInvocation in the audit store if configured. Args:…, Retrieve recent audit log entries. Args: limit: Maximum entries to return.…, Rate limit configuration for tool execution. Attributes: max_calls_per_minute:… (+15 more)
+Cohesion: 0.10
+Nodes (17): Scrub sensitive fields from tool arguments before audit storage. Keys…, Recursively scrub sensitive values from nested structures. Args: value: Any…, _scrub_arguments(), _scrub_value(), Keys containing 'token' are scrubbed., Keys containing 'key' are scrubbed., Scrubbing matches regardless of case., Arguments without sensitive keys are passed through unchanged. (+9 more)
 
 ### Community 237 - "NEXUS Dashboard Application"
 Cohesion: 0.26
@@ -2197,7 +2243,7 @@ Nodes (12): Dashboard HTML Entry Point, NEXUS Mission Control Branding, VITE_AUT
 
 ### Community 238 - "execution/sandbox.py"
 Cohesion: 0.06
-Nodes (39): Evolution Sandbox - isolated execution environment for proposals. Proposal code…, Code execution sandboxes (Phase 3.1)., get_backend(), Judge0Backend, _lease(), LeaseHeld, LocalExecutionDisabled, LocalSubprocessBackend (+31 more)
+Nodes (37): Evolution Sandbox - isolated execution environment for proposals. Proposal code…, Code execution sandboxes (Phase 3.1)., get_backend(), Judge0Backend, _lease(), LeaseHeld, LocalExecutionDisabled, LocalSubprocessBackend (+29 more)
 
 ### Community 239 - "client.ts"
 Cohesion: 0.07
@@ -2208,8 +2254,8 @@ Cohesion: 0.10
 Nodes (13): Any, Serialize the evaluation result to a dictionary. Returns: Dictionary…, Create an EvaluationResult from a dictionary. Args: data: Dictionary with…, Any, Serialize the report to a dictionary. Returns: Dictionary representation of the…, Create an EvaluationReport from a dictionary. Args: data: Dictionary with…, Tests for the EvaluationResult dataclass., EvaluationResult can be created with all fields. (+5 more)
 
 ### Community 242 - "_make_session_factory"
-Cohesion: 0.11
-Nodes (21): _make_record(), _make_session_factory(), datetime, Tests for PersistentCircuitBreaker - database-backed circuit breaker. Tests…, Circuit opens when consecutive failures reach the threshold., If the circuit is already open, additional failures do not re-trigger., Create a mock async_sessionmaker that yields the given session. Wraps the…, Resetting closes the circuit and zeros the failure count. (+13 more)
+Cohesion: 0.10
+Nodes (22): _make_record(), _make_session_factory(), datetime, Tests for PersistentCircuitBreaker - database-backed circuit breaker. Tests…, Circuit opens when consecutive failures reach the threshold., If the circuit is already open, additional failures do not re-trigger., Tests for PersistentCircuitBreaker.record_success., A success resets the consecutive failure counter to 0. (+14 more)
 
 ### Community 243 - "governance/incidents.py"
 Cohesion: 0.29
@@ -2220,8 +2266,8 @@ Cohesion: 0.18
 Nodes (9): Built-in Policies - pre-configured safety policies for NEXUS governance. These…, datetime, Policy Evaluation Context - request context builder for policy evaluation., Set environment context. Args: time: Override timestamp (defaults to now).…, PolicyDecision, Policy Engine - deterministic policy evaluation with caching and versioning., Result of a policy evaluation. Attributes: allowed: Whether the action is…, Policy Engine sub-package - policy evaluation, context building, and built-in… (+1 more)
 
 ### Community 245 - "PolicyEngine"
-Cohesion: 0.07
-Nodes (28): Policy, PolicyEngine, Remove a policy from the engine. Args: policy_name: Name of the policy to…, Get a policy by name. Args: policy_name: Name of the policy. Returns: The…, Get the cached version number for a policy. Args: policy_name: Name of the…, A named policy containing one or more rules. Attributes: id: Unique policy…, Deterministic policy evaluation engine. Evaluates policies against a…, Initialize the policy engine. (+20 more)
+Cohesion: 0.08
+Nodes (19): PolicyEngine, Remove a policy from the engine. Args: policy_name: Name of the policy to…, Get a policy by name. Args: policy_name: Name of the policy. Returns: The…, Get the cached version number for a policy. Args: policy_name: Name of the…, Evaluate all enabled policies against the given context. Evaluation order: 1.…, Check if a rule's conditions match the given context. All specified conditions…, Deterministic policy evaluation engine. Evaluates policies against a…, Initialize the policy engine. (+11 more)
 
 ### Community 246 - "RateLimiter"
 Cohesion: 0.15
@@ -2240,28 +2286,28 @@ Cohesion: 0.08
 Nodes (45): compareVersion(), HERE, isKnownUrl(), LIBRARY_PATH, libraryForStack(), loadLibrary(), lookupSkillRule(), lookupUrl() (+37 more)
 
 ### Community 250 - "Histogram"
-Cohesion: 0.11
-Nodes (13): Histogram, Record an observation. Args: value: The observed value. labels: Optional label…, Get total observation count across all labels., Get total sum of observations across all labels., Get cumulative bucket counts for specific labels. Args: labels: Label dict to…, A distribution metric with configurable buckets. Tracks count, sum, and per-…, Tests for the Histogram metric class., Histogram starts empty. (+5 more)
+Cohesion: 0.09
+Nodes (16): Histogram, Any, Record an observation. Args: value: The observed value. labels: Optional label…, Get total observation count across all labels., Get total sum of observations across all labels., Get cumulative bucket counts for specific labels. Args: labels: Label dict to…, Collect all metric samples for rendering. Returns: List of dicts with labels,…, Collect all metric samples for rendering. Returns: List of dicts with 'labels'… (+8 more)
 
 ### Community 251 - "field_validator"
 Cohesion: 0.18
 Nodes (6): field_validator, Validate capabilities list (max 12 items, each truncated to 40 chars)., Validate homepage URL is https., Validate model ID against safe character set., Validate provider against known provider list., Validate command flags against the default-deny safe-flag allowlist. Rules: -…
 
 ### Community 252 - "Software Architect Agent Role"
-Cohesion: 0.25
-Nodes (8): API Boundary Table Section, Mermaid Component Diagram Section, Mermaid Data Flow Sequence Section, Architecture Design Document Template, Technology Choices With Rationale Section, Architecture Decision Records, Reversible Decision Preference, Software Architect Agent Role
+Cohesion: 0.18
+Nodes (11): API Boundary Table Section, Mermaid Component Diagram Section, Mermaid Data Flow Sequence Section, Architecture Design Document Template, Technology Choices With Rationale Section, Deployment Strategies (Rolling/Blue-Green/Canary/Recreate), Architecture Decision Records, Reversible Decision Preference (+3 more)
 
-### Community 253 - "tenant_scope"
-Cohesion: 0.11
-Nodes (14): M, Select, A ``SELECT`` over ``model`` already filtered to one tenant (Phase 5.2). The…, tenant_scope(), The company this reader is bound to., Not a property of Task in particular., 5.2.2 -- the helper that injects the filter., The helper returns a Select, so routes keep chaining onto it. (+6 more)
+### Community 253 - "test_tool_governance.py"
+Cohesion: 0.05
+Nodes (24): Tests for the tool governance system: models, policy engine, profile resolver,…, Tests for ToolProfile SQLModel instantiation., ToolProfile can be created with minimal required fields., ToolProfile can be created with deny default action., Tests for ToolProfileBinding SQLModel instantiation., ToolProfileBinding can target an agent., ToolProfileBinding can target a department., ToolProfileBinding can target a company. (+16 more)
 
 ### Community 254 - "Soul"
 Cohesion: 0.11
 Nodes (21): NEXUS Demo Configuration - company bootstrapping and scenario execution.…, AgentConfig, BudgetPolicy, _deterministic_id(), Demo Company Setup - idempotent bootstrapper for NexusCorp. Creates a fully…, Skill assignment for an agent. Attributes: agent_id: UUID of the agent with…, Tool access permission for an agent. Attributes: agent_id: UUID of the agent…, Generate a deterministic UUID from a name for idempotent setup. Args: name: The… (+13 more)
 
-### Community 255 - "routes/chat.py"
-Cohesion: 0.05
-Nodes (62): ChatMessage, _add_message(), _call_llm(), chat_with_agent(), chat_with_agent_stream(), ChatMessage, ChatRequest, ChatResponse (+54 more)
+### Community 255 - "stored_messages"
+Cohesion: 0.18
+Nodes (9): ChatMessage, chat_db(), fixture, Real SQLite, with the module's session factory pointed at it., Every persisted chat message, oldest first., `_persist_from_generator` opens its own session on purpose., A persistence problem must not break a response already streaming., stored_messages() (+1 more)
 
 ### Community 256 - "dashboard/package.json"
 Cohesion: 0.20
@@ -2291,9 +2337,9 @@ Nodes (7): LLMProvider, Any, Protocol, Protocol defining the interface for all L
 Cohesion: 0.07
 Nodes (22): Get statistics about the current execution chain. Args: execution_chain: The…, Counter, _MetricsRegistry, Global registry for all application metrics., Register a metric in the global registry. Args: metric: The metric instance to…, Get a metric by name. Args: name: The metric name. Returns: The metric…, Get all registered metrics. Returns: Dict mapping metric names to instances., Reset all metrics (for testing). (+14 more)
 
-### Community 263 - "parse_skill_frontmatter"
-Cohesion: 0.06
-Nodes (34): list_local_skills(), LocalSkill, parse_skill_frontmatter(), Local skills discovery: scan filesystem for skill definitions. Discovers skills…, Walk a directory for folders containing SKILL.md and parse them. Each…, Discover all local skills from known provider directories. Scans bundled, user-…, A locally discovered skill definition. Attributes: id: Unique identifier in…, Extract name and description from YAML frontmatter in a SKILL.md file. Handles… (+26 more)
+### Community 263 - "scan_skill_dir"
+Cohesion: 0.09
+Nodes (23): list_local_skills(), LocalSkill, Local skills discovery: scan filesystem for skill definitions. Discovers skills…, Walk a directory for folders containing SKILL.md and parse them. Each…, Discover all local skills from known provider directories. Scans bundled, user-…, A locally discovered skill definition. Attributes: id: Unique identifier in…, scan_skill_dir(), Path (+15 more)
 
 ### Community 264 - "ErrorBoundary"
 Cohesion: 0.22
@@ -2311,9 +2357,9 @@ Nodes (26): Build the full Redis key with prefix., Check whether enough time has
 Cohesion: 0.04
 Nodes (46): 1. Governance Depth (Unmatched), 1. System Verification, 2. Architecture Overview, 2. Four-Layer Memory Architecture (Industry-Leading), 3. Evolution Subsystem (Unique), 3. Per-Subsystem Ratings, 4.1 MetaGPT (`metagpt/`), 4.2 PraisonAI (`praisonai-agents/`) (+38 more)
 
-### Community 268 - "hive_task.py"
-Cohesion: 0.25
-Nodes (8): HiveTask, BaseModel, Enum, str, Hive Task - kanban-style task ledger for agent coordination., Status of a task in the hive ledger., A task in the hive's kanban ledger., TaskStatus
+### Community 268 - "ToolInvocation"
+Cohesion: 0.08
+Nodes (22): SQLModel, Tool invocation audit model - records every tool execution for compliance and…, Audit record for a single tool execution attempt. Captures the full lifecycle…, ToolInvocation, AuditStats, datetime, Tool audit store - in-memory audit trail with query and statistics capabilities., Aggregated statistics from tool invocation audit records. Attributes:… (+14 more)
 
 ### Community 269 - "TestCase"
 Cohesion: 0.10
@@ -2327,9 +2373,9 @@ Nodes (46): 10. What's Missing for Full Autonomy, 11. System Statistics, 1. Exec
 Cohesion: 0.04
 Nodes (46): 10. Risk Assessment, 1. What the Frontend Currently Has, 2. What Already Exists in Backend, 2a. Agent CRUD Endpoints (FULLY WORKING), 2b. Hire Manifest System (NOT EXPOSED VIA API), 2c. Agent Archetypes (NOT EXPOSED VIA API), 2d. Agent Template Files (NOT EXPOSED VIA API), 2e. CLI Backend Registry (PARTIALLY EXPOSED) (+38 more)
 
-### Community 272 - "get_redis"
-Cohesion: 0.09
-Nodes (20): Drop the Redis fast-path key when a circuit closes. A stale key would block a…, Record a failure for an agent and persist to DB. Increments the consecutive…, Check if the circuit breaker is open for an agent (from DB). If the cooldown…, The Redis key naming one agent's open circuit., Publish an open circuit to every replica via Redis. The key carries the…, _trip_key(), get_redis(), get_redis_url() (+12 more)
+### Community 272 - "api/middleware.py"
+Cohesion: 0.03
+Nodes (70): M, Select, _get_redis_rate_limiter(), GovernanceMiddleware, Any, ASGIApp, Receive, Scope (+62 more)
 
 ### Community 273 - "validate_against_schema"
 Cohesion: 0.06
@@ -2339,17 +2385,17 @@ Nodes (27): _check_type(), Any, _python_type_name(), Schema validator - minimal 
 Cohesion: 0.29
 Nodes (8): Data Fetching Hooks (useApi/usePolling/useAgents), 30-Second Auto-Refresh Polling, Dashboard Source Layout, WCAG 2.1 AA Accessibility Requirement, Atomic Component Architecture, Loading/Error/Empty State Requirement, Frontend Engineer Agent Role, Server vs Client State Separation
 
-### Community 275 - ".get_provider"
-Cohesion: 0.12
-Nodes (13): Get a provider spec by name, or None if not found., get_provider returns None for unknown provider name., Test that built-in specs have correct capabilities metadata., OpenAI gpt-4o has correct capabilities., Anthropic claude-sonnet-4-20250514 has correct capabilities., Ollama llama3 has correct capabilities (limited)., Google gemini-1.5-pro has correct capabilities., DeepSeek deepseek-chat has correct capabilities. (+5 more)
+### Community 275 - "UserProfile"
+Cohesion: 0.17
+Nodes (28): Company, create_user(), delete_user(), get_user(), list_users(), patch_user(), Any, BaseModel (+20 more)
 
 ### Community 276 - "ManifestRegistry"
 Cohesion: 0.11
 Nodes (19): ManifestRegistry, Path, Registry for discovering, loading, and importing hire manifests from a…, Initialize the registry with a root directory path. Args: root: Path to the…, Return all loaded manifests sorted by name., Look up a manifest by name. Args: name: The manifest name to look up. Returns:…, Path, Tests for the ManifestRegistry class. (+11 more)
 
-### Community 277 - "MonkeyPatch"
-Cohesion: 0.24
-Nodes (6): MonkeyPatch, With a known agent, the guard also resolves that agent's autonomy tier., Without an agent the tier cannot be resolved, so only guardrails run., A call the policy refuses outright is not sent for human approval., A bug inside a check must not take out legitimate work., TestAutonomyGating
+### Community 277 - "writer.py"
+Cohesion: 0.11
+Nodes (22): _hash_text(), _naive_utc(), ObsidianWriteError, Any, datetime, Exception, Path, Controlled Obsidian note replacement (ADR 0002 §20 controls 7–13). This is… (+14 more)
 
 ### Community 278 - "Clawith - Repository Analysis"
 Cohesion: 0.04
@@ -2369,7 +2415,7 @@ Nodes (43): fake_src(), guard(), _keys(), _load_guard(), fixture, Tests for the 
 
 ### Community 282 - "asyncio"
 Cohesion: 0.08
-Nodes (26): _FakeBackend, asyncio, Path, Tests for the multi-backend code sandbox (Phase 3.1)., 3.1.5 — two runs cannot share a sandbox., A concurrent run with a different run_id is refused., The lease holder may execute again inside its own lease., A finished run frees the sandbox for anyone else. (+18 more)
+Nodes (28): _FakeBackend, asyncio, Path, Tests for the multi-backend code sandbox (Phase 3.1)., 3.1.5 — two runs cannot share a sandbox., A concurrent run with a different run_id is refused., The lease holder may execute again inside its own lease., A finished run frees the sandbox for anyone else. (+20 more)
 
 ### Community 283 - "EmailChannel"
 Cohesion: 0.25
@@ -2379,21 +2425,21 @@ Nodes (4): EmailChannel, Email notification channel via SMTP., Send notification
 Cohesion: 0.05
 Nodes (43): 10. Extension Points, 11. Licensing, 12. Dependencies, 1. Architecture, 2. Runtime, 3. Agent System, 4. Skills, 5-Layer Agent Stack (+35 more)
 
-### Community 285 - "PolicyContext"
-Cohesion: 0.10
-Nodes (22): PolicyContext, Full context for evaluating policies against a request. Contains all…, PolicyRule, A single rule within a policy. Attributes: rule_type: Type of rule (allow,…, Evaluate all enabled policies against the given context. Evaluation order: 1.…, Check if a rule's conditions match the given context. All specified conditions…, Among multiple deny policies, the highest priority one wins., Tests for condition matching logic in policy rules. (+14 more)
+### Community 285 - "Policy"
+Cohesion: 0.11
+Nodes (26): PolicyContext, Full context for evaluating policies against a request. Contains all…, Policy, PolicyRule, A single rule within a policy. Attributes: rule_type: Type of rule (allow,…, A named policy containing one or more rules. Attributes: id: Unique policy…, Among multiple deny policies, the highest priority one wins., Tests for condition matching logic in policy rules. (+18 more)
 
 ### Community 286 - "RotationPolicy"
-Cohesion: 0.04
-Nodes (37): Set a rotation policy for a specific secret reference. Args: ref: The secret…, Get the rotation policy for a specific secret reference. Args: ref: The secret…, Policy defining when a secret should be rotated. Attributes: max_age_days:…, Validate rotation policy values., RotationPolicy, backend(), fixture, Tests for Secret Rotation Automation. (+29 more)
+Cohesion: 0.05
+Nodes (32): Set a rotation policy for a specific secret reference. Args: ref: The secret…, Get the rotation policy for a specific secret reference. Args: ref: The secret…, Policy defining when a secret should be rotated. Attributes: max_age_days:…, Validate rotation policy values., RotationPolicy, backend(), fixture, Tests for Secret Rotation Automation. (+24 more)
 
 ### Community 287 - "test_knowledge_plaza_collab.py"
 Cohesion: 0.18
 Nodes (14): agent_id(), company_id(), mock_db(), other_agent_id(), page_id(), plaza(), fixture, Tests for Knowledge Plaza real-time collaboration features. Validates… (+6 more)
 
 ### Community 288 - "QA Engineer Agent Role"
-Cohesion: 0.33
-Nodes (6): Review Priority Markers (Blocker/Suggestion/Nit), Code Reviewer Agent Role, RICE Prioritization Framework, Flaky Tests Are Bugs, Regression Test Before Fix (Red then Green), QA Engineer Agent Role
+Cohesion: 0.25
+Nodes (8): Review Priority Markers (Blocker/Suggestion/Nit), Code Reviewer Agent Role, RICE Prioritization Framework, Systematic Edge Case Generation, Flaky Tests Are Bugs, Regression Test Before Fix (Red then Green), QA Engineer Agent Role, STRIDE Threat Model
 
 ### Community 289 - "test_hire_manifest.py"
 Cohesion: 0.07
@@ -2408,8 +2454,8 @@ Cohesion: 0.09
 Nodes (37): byRoute(), gate(), metadata, ratioOverThreshold(), round2(), sumRows(), extractErrors(), extractFromStatusRows() (+29 more)
 
 ### Community 292 - "AgentAdapter"
-Cohesion: 0.10
-Nodes (13): AgentAdapter, Any, Protocol, Send a heartbeat signal to confirm the session is alive. Args: session: The…, Pause the agent session, suspending any active execution. Args: session: The…, Resume a paused agent session. Args: session: The paused agent session.…, Terminate the agent session and release all resources. Args: session: The agent…, Get the list of capabilities supported by this adapter. Args: session: The… (+5 more)
+Cohesion: 0.09
+Nodes (14): AgentAdapter, Any, Protocol, Send a heartbeat signal to confirm the session is alive. Args: session: The…, Get the current status of an agent session. Args: session: The agent session to…, Pause the agent session, suspending any active execution. Args: session: The…, Resume a paused agent session. Args: session: The paused agent session.…, Terminate the agent session and release all resources. Args: session: The agent… (+6 more)
 
 ### Community 293 - "test_chunk_source_migration.py"
 Cohesion: 0.12
@@ -2424,44 +2470,44 @@ Cohesion: 0.05
 Nodes (42): 10. Extension Points, 11. Licensing, 12. Dependencies, 1. Architecture, 2. Runtime, 3. Agent System, 4. Skills, 5. Memory (+34 more)
 
 ### Community 296 - "CircuitBreakerRecord"
-Cohesion: 0.11
-Nodes (23): CircuitBreakerRecord, SQLModel, Circuit Breaker database model for persistent state., Persistent record of a circuit breaker state for an agent. Each row tracks the…, _make_session_factory(), A recovered agent must not stay blocked for the rest of the TTL., An operator reset has to take effect on every worker, not just this one., The fast path may only ever add blocking, never remove it. (+15 more)
+Cohesion: 0.12
+Nodes (20): CircuitBreakerRecord, SQLModel, Circuit Breaker database model for persistent state., Persistent record of a circuit breaker state for an agent. Each row tracks the…, _make_session_factory(), A recovered agent must not stay blocked for the rest of the TTL., An operator reset has to take effect on every worker, not just this one., The auto-close path retracts the broadcast too. The key's TTL is the cooldown,… (+12 more)
 
 ### Community 297 - "UI/UX Pro Max - Design Intelligence"
 Cohesion: 0.05
 Nodes (41): 1. Accessibility (CRITICAL), 2. Touch & Interaction (CRITICAL), 3. Performance (HIGH), 4. Layout & Responsive (HIGH), 5. Typography & Color (MEDIUM), 6. Animation (MEDIUM), 7. Style Selection (MEDIUM), 8. Charts & Data (LOW) (+33 more)
 
 ### Community 298 - "SRE Agent Role"
-Cohesion: 0.14
-Nodes (15): Zero-Downtime Migration Strategy, Ten-Stage CI/CD Pipeline, Deployment Strategies (Rolling/Blue-Green/Canary/Recreate), DevOps Engineer Agent Role, Tested Rollback Path, Runtime Secret Injection, LCP Under 2.5s Performance Budget, Test Pyramid (Unit/Integration/E2E) (+7 more)
+Cohesion: 0.29
+Nodes (7): Ten-Stage CI/CD Pipeline, LCP Under 2.5s Performance Budget, Test Pyramid (Unit/Integration/E2E), Chaos Engineering Practice, SRE Agent Role, SLO and Error Budget Framework, Toil Automation Rule
 
 ### Community 299 - "persona.py"
 Cohesion: 0.09
 Nodes (18): NEXUS Agent Identity System - personality, memory, and context management. This…, ContextBudget, _estimate_tokens(), Any, Agent Persona - memory namespace and working context assembly. The Persona…, Estimate token count for a string. Uses a simple heuristic of ~4 characters per…, Truncate text to fit within a token budget. Args: text: The text to truncate.…, Add a memory entry to this agent's namespace. Args: memory: A dictionary… (+10 more)
 
-### Community 300 - "KnowledgePage"
-Cohesion: 0.10
-Nodes (13): Make an experience visible to a target team scope. Updates the experience…, Record a new experience from a completed task. Stores the agent's experience…, Find experiences similar to a given description. Searches past experiences…, Notify all subscribers of a page change event. Creates a PageChangeEvent and…, Publish a new knowledge page to the plaza. Creates a new versioned knowledge…, Update an existing knowledge page, incrementing its version. Fetches the page…, Search knowledge pages using BM25 text retrieval. Searches all published pages…, Get the version history of a knowledge page. Returns all versions of the… (+5 more)
+### Community 300 - "test_obsidian_temporal.py"
+Cohesion: 0.09
+Nodes (17): _chunk_contents(), asyncio, Tests for the durable Obsidian indexing workflow (ADR 0002 §23, Phase 1C).…, The HTTP surface over the query., A progress poll takes no session: it is a Temporal read only., The starter's contract, without needing a Temporal server., One id per company is what makes Temporal reject a concurrent run., WorkflowAlreadyStartedError is not an RPCError, so it needs its own clause.… (+9 more)
 
 ### Community 301 - "investigation-brief.mjs"
 Cohesion: 0.11
 Nodes (39): absoluteBriefPath(), briefRoots(), buildBrief(), cachePolicyGuidance(), capBriefFiles(), citationSubset(), closestAncestorLayoutFiles(), inferFrameworkPlaybook() (+31 more)
 
-### Community 302 - "._do_execute"
-Cohesion: 0.33
-Nodes (4): Any, TaskResult, Execute a task via Ollama REST API. Supports both chat and generate endpoints…, Validate that required Ollama configuration keys are present. Args: config:…
+### Community 302 - "TestVaultWriteAuthorization"
+Cohesion: 0.07
+Nodes (8): The chain: company, agent, tool, subtree — on the canonical path., ``Projects`` must not authorize ``ProjectsSecret`` — segment-wise, not string-…, The confused-deputy case: a path that *starts* inside the grant. Compared as…, On Windows ``projects/plan.md`` and ``Projects/Plan.md`` are one file. Refusing…, A grant in company A must not authorize a write in company B., A path check must never stand in for an access check., A decision is not a write: nothing is created by authorizing., TestVaultWriteAuthorization
 
-### Community 303 - ".check_auto_approve"
-Cohesion: 0.22
-Nodes (7): AutoApprovalPolicy, Add an auto-approval policy. Args: policy: The policy to add., Check if a request qualifies for automatic approval. Auto-approves based on: -…, Check if a request matches all conditions of a policy. Args: request: The…, Policy that defines conditions for automatic approval. Attributes: id: Unique…, on_approval_needed callback does NOT fire for auto-approved requests., test_on_approval_needed_does_not_fire_for_auto_approved()
+### Community 303 - "governance/approvals.py"
+Cohesion: 0.25
+Nodes (6): AutoApprovalPolicy, Compatibility facade over database-backed :class:`ApprovalService`. New code…, Add an auto-approval policy. Args: policy: The policy to add., Policy that defines conditions for automatic approval. Attributes: id: Unique…, on_approval_needed callback does NOT fire for auto-approved requests., test_on_approval_needed_does_not_fire_for_auto_approved()
 
 ### Community 304 - "._get_config"
 Cohesion: 0.33
 Nodes (3): Get the minimum remaining requests across all applicable limits. Args:…, Get rate limit headers for HTTP responses. Returns standard rate limit headers…, Get the most specific config available.
 
-### Community 305 - "TestCallbackRoutingNoFallback"
-Cohesion: 0.12
-Nodes (11): patch, With multiple sessions, missing session_id does not route to first., Run an async coroutine synchronously., Interactive mode sets awaiting_input=True when streaming starts., Non-interactive mode uses communicate() without _stream_output., Verify callback routing rejects payloads missing session_id., Payload without session_id is rejected (no fallback iteration)., Payload with empty string session_id is rejected. (+3 more)
+### Community 305 - "SessionCompactor"
+Cohesion: 0.13
+Nodes (11): Compacts session message histories to fit within token limits. Dispatches to…, Compact messages according to the specified strategy. If messages already fit…, Keep the newest messages that fit within the token budget. Iterates from the…, Create a summary of older messages and keep recent ones within budget. Splits…, Create an extractive summary from a list of messages. Takes key content from…, Keep the last window_size messages plus overlap context from older ones. Takes…, Build an overlap context string from older messages. Takes content from the…, Count total tokens across all messages. Sums the estimated token count for the… (+3 more)
 
 ### Community 306 - "Central API Client (src/api/client.ts)"
 Cohesion: 0.40
@@ -2471,13 +2517,13 @@ Nodes (5): API Base URL and Dev Proxy, Central API Client (src/api/client.ts), R
 Cohesion: 0.05
 Nodes (41): 1. Recommended Base, 2. Components to Reuse (Use As-Is or Near As-Is), 3. Components to Adapt (Modify for NEXUS), 4. Components to Build (New Development), 5. Dependencies, 6. Risks, 7. Phase 1 Implementation Plan, Agent/AI Dependencies (+33 more)
 
-### Community 308 - "TestCLIAdapterBuildArgs"
-Cohesion: 0.10
-Nodes (11): Test CLIAdapter._build_args produces correct arguments per backend., Claude backend uses -p flag for non-interactive prompt execution., Claude backend appends extra args after -p prompt., Codex backend uses --quiet and passes prompt as positional arg., Codex backend includes extra args before the prompt., Aider backend uses --message and --yes flags., Aider backend appends extra args after --yes., Kiro CLI passes prompt via stdin, minimal args. (+3 more)
+### Community 308 - "TestFernetSecretBackend"
+Cohesion: 0.08
+Nodes (14): Tests for the FernetSecretBackend class., Encrypted value can be decrypted back to original plaintext., Backend handles unicode strings correctly., has() returns True for stored references., has() returns False for non-existent references., delete() removes the stored secret., delete() does not raise when reference does not exist., Backend refuses operations when no key is provided. (+6 more)
 
 ### Community 309 - ".__init__"
-Cohesion: 0.40
-Nodes (3): Path, Initialize the approval engine. Args: persist_path: Optional path to a JSON…, Load persisted state from the JSON file. If the file does not exist or is…
+Cohesion: 0.20
+Nodes (7): Any, Path, Load persisted state from the JSON file. If the file does not exist or is…, Deserialize an ApprovalRequest from a dictionary., Read approval state through the shared service., Duck-typed async lookup used by AutonomyGate., Initialize the approval engine. Args: persist_path: Optional path to a JSON…
 
 ### Community 310 - "workspace-resolver.mjs"
 Cohesion: 0.10
@@ -2485,11 +2531,11 @@ Nodes (39): DEFAULT_RESOLVE_OPTIONS, detectMonorepoRoot(), escapeRegExp(), expan
 
 ### Community 311 - "TestIsolatedSandbox"
 Cohesion: 0.05
-Nodes (30): IsolatedSandbox, Exception, Isolated Sandbox - resource-limited execution environment for proposals.…, Execute a callable within the session's resource limits. Runs the callable,…, Raised when a sandbox execution exceeds its resource limits. Attributes:…, Forcefully terminate a session. Marks the session as aborted so no further…, Remove a session and all its state. Args: session_id: The session to clean up., Resource-isolated sandbox for evaluating evolution proposals. Tracks cost,… (+22 more)
+Nodes (25): IsolatedSandbox, Forcefully terminate a session. Marks the session as aborted so no further…, Remove a session and all its state. Args: session_id: The session to clean up., Resource-isolated sandbox for evaluating evolution proposals. Tracks cost,…, Initialize the isolated sandbox with resource limits. Args: max_cost_cents:…, proposal_id(), fixture, Tests for the Isolated Sandbox module. Validates IsolatedSandbox resource… (+17 more)
 
-### Community 312 - "test_realtime_websocket.py"
-Cohesion: 0.12
-Nodes (14): event_bus(), manager(), mock_websocket(), fixture, Tests for the real-time WebSocket subsystem. Validates WebSocketManager,…, Tests for the RealtimeEvent dataclass., RealtimeEvent can be created with minimal arguments., RealtimeEvent can be created with all fields specified. (+6 more)
+### Community 312 - "TestRealtimeEvent"
+Cohesion: 0.20
+Nodes (6): Tests for the RealtimeEvent dataclass., RealtimeEvent can be created with minimal arguments., RealtimeEvent can be created with all fields specified., to_dict produces a JSON-serializable dictionary., Event type constants are defined correctly., TestRealtimeEvent
 
 ### Community 313 - "getManifestPath"
 Cohesion: 0.67
@@ -2501,51 +2547,51 @@ Nodes (4): handleAutonomousCEOActions(), recordAuditLog(), saveAgentsConfig(), s
 
 ### Community 316 - "SSRFGuard"
 Cohesion: 0.04
-Nodes (47): Guard against Server-Side Request Forgery (SSRF) attacks. Provides methods to…, Check whether an IP address is safe (not in any blocked range). Handles…, Resolve a hostname and check ALL returned addresses for safety. Uses…, Validate URL protocol enforcement. HTTPS is required for remote hosts. HTTP is…, SSRFGuard, guard(), asyncio, fixture (+39 more)
+Nodes (39): Guard against Server-Side Request Forgery (SSRF) attacks. Provides methods to…, Check whether an IP address is safe (not in any blocked range). Handles…, Resolve a hostname and check ALL returned addresses for safety. Uses…, Validate URL protocol enforcement. HTTPS is required for remote hosts. HTTP is…, SSRFGuard, guard(), fixture, Safe IPv4-mapped IPv6 addresses should pass. (+31 more)
 
 ### Community 317 - "_store"
-Cohesion: 0.06
-Nodes (32): agents(), company_id(), fixture, Tests for Phase 2.3 — layered memory L2/L3 persisted to memory_records. Covers:…, 2.3.3 — dedup compares against rows, not an in-process list., A near-duplicate is refused by a store that never saw the original., Dedup does not swallow an unrelated fact., At capacity, the oldest row is dropped rather than the newest refused. (+24 more)
+Cohesion: 0.05
+Nodes (36): agents(), company_id(), fixture, Tests for Phase 2.3 — layered memory L2/L3 persisted to memory_records. Covers:…, 2.3.3 — dedup compares against rows, not an in-process list., A near-duplicate is refused by a store that never saw the original., Dedup does not swallow an unrelated fact., At capacity, the oldest row is dropped rather than the newest refused. (+28 more)
 
-### Community 320 - "profile.py"
-Cohesion: 0.15
-Nodes (18): get_profile(), _own_profile(), ProfileResponse, ProfileUpdate, Any, AsyncSession, BaseModel, DbSession (+10 more)
+### Community 320 - "test_models.py"
+Cohesion: 0.08
+Nodes (19): Tests for all SQLModel table classes. Validates that models can be instantiated…, Tests for the Goal model., Goal can be created with required fields., Tests for the Project model., Project can be created with required fields., Tests for the BudgetPolicy model., BudgetPolicy can be created with required fields., Tests for the MemoryRecord model. (+11 more)
 
 ### Community 321 - "DockerSandbox"
 Cohesion: 0.07
-Nodes (23): DockerSandbox, Container-isolated sandbox using Docker for execution. Runs experiments via…, Initialize the Docker sandbox. Checks Docker availability at init time. If…, Detect whether Docker is available on this system. Returns: True if the…, Initialize the exception. Args: resource: The resource type breached (e.g.,…, Tests for DockerSandbox (nexus.evolution.isolated_sandbox.DockerSandbox)., Test Docker execution that times out., Tests for Docker detection logic. (+15 more)
+Nodes (24): DockerSandbox, Isolated Sandbox - resource-limited execution environment for proposals.…, Container-isolated sandbox using Docker for execution. Runs experiments via…, Initialize the Docker sandbox. Checks Docker availability at init time. If…, Detect whether Docker is available on this system. Returns: True if the…, Initialize the exception. Args: resource: The resource type breached (e.g.,…, Tests for DockerSandbox (nexus.evolution.isolated_sandbox.DockerSandbox)., Test Docker execution that times out. (+16 more)
 
 ### Community 322 - "make_secret_backend"
-Cohesion: 0.06
-Nodes (25): EnvSecretBackend, KeyringSecretBackend, make_secret_backend(), async_sessionmaker, AsyncSession, Path, Initialize the Fernet secret backend. Args: secret_key: Application secret used…, Load encrypted secrets from the persistence file. Reads the JSON file at… (+17 more)
+Cohesion: 0.05
+Nodes (27): EnvSecretBackend, KeyringSecretBackend, make_secret_backend(), async_sessionmaker, AsyncSession, Path, Initialize the Fernet secret backend. Args: secret_key: Application secret used…, Load encrypted secrets from the persistence file. Reads the JSON file at… (+19 more)
 
 ### Community 323 - "OpenCompany - Repository Analysis"
 Cohesion: 0.05
 Nodes (38): 10. Extension Points, 11. Licensing, 12. Dependencies, 1. Architecture, 2. Runtime, 3. Agent System, 4. Skills, 5. Memory (+30 more)
 
 ### Community 324 - "ExecutionResult"
-Cohesion: 0.08
-Nodes (21): ExecutionResult, Any, Path, Backend-specific execution. Called with validated arguments., Execute `code` and return a backend-independent result. Args: code: Source to…, Lease identity: one sandbox per (backend, workspace)., Validate the workspace directory (3.1.6)., Run code in a fresh E2B sandbox, uploading only the workspace. (+13 more)
+Cohesion: 0.07
+Nodes (22): ExecutionResult, Any, Path, Backend-specific execution. Called with validated arguments., Execute `code` and return a backend-independent result. Args: code: Source to…, Lease identity: one sandbox per (backend, workspace)., Validate the workspace directory (3.1.6)., Run code in a fresh E2B sandbox, uploading only the workspace. (+14 more)
 
-### Community 325 - "rejection_for"
-Cohesion: 0.06
-Nodes (35): Whether a request must present a matching CSRF token., Compare the cookie and header tokens in constant time. An absent or empty value…, requires_csrf(), tokens_match(), JSONResponse, Receive, Scope, Send (+27 more)
+### Community 325 - "TestThroughTheApp"
+Cohesion: 0.21
+Nodes (8): fixture, TestClient, The same policy, exercised through the real middleware stack., A client over the application, without running its lifespan. The rejections…, A router that never declared a dependency is still protected., The header the API used to trust no longer authenticates anything., Liveness must answer without a credential for orchestrators., TestThroughTheApp
 
 ### Community 330 - "gate-investigations.mjs"
 Cohesion: 0.09
 Nodes (32): applyAuthDisqualifier(), AUTH_ROUTE_REGEX, isAuthRoute(), CandidateContractError, candidateLabel(), nonEmptyString(), VALID_SCOPES, validateCandidate() (+24 more)
 
 ### Community 331 - "make_gate"
-Cohesion: 0.12
-Nodes (12): FakeApproval, FakeApprovals, make_gate(), Any, Tests for Phase 3.4 - per-agent, per-action autonomy policy., L1 runs, L2 runs + notifies, L3 blocks., Minimal stand-in for the Approval row., The executor blocks a level-3 call and runs it after approval. (+4 more)
+Cohesion: 0.14
+Nodes (10): FakeApproval, FakeApprovals, make_gate(), Any, Tests for Phase 3.4 - per-agent, per-action autonomy policy., L1 runs, L2 runs + notifies, L3 blocks., Minimal stand-in for the Approval row., In-memory approval store keyed by correlation ID. (+2 more)
 
 ### Community 336 - "test_middleware_rate_limiting.py"
 Cohesion: 0.22
 Nodes (10): company_id(), middleware(), asyncio, fixture, Tests for Redis-backed rate limiting selection in GovernanceMiddleware (R-02)., test_anonymous_requests_skip_limiters(), test_fallback_to_in_memory_when_no_redis(), test_fallback_when_redis_raises() (+2 more)
 
 ### Community 338 - "HookContext"
-Cohesion: 0.07
-Nodes (18): HookContext, Context object passed to hook handlers during execution. Provides relevant…, Tests for the HookContext dataclass., HookContext has sensible defaults., HookContext accepts custom values., Tests for the HookManager class., Registering a handler increments the handler count., Multiple handlers can be registered for the same hook point. (+10 more)
+Cohesion: 0.06
+Nodes (19): HookContext, Context object passed to hook handlers during execution. Provides relevant…, MultiHookPlugin, fixture, Tests for the HookManager class., Provide a fresh HookManager instance., Registering a handler increments the handler count., Multiple handlers can be registered for the same hook point. (+11 more)
 
 ### Community 339 - "TestIntegrationRegistry"
 Cohesion: 0.09
@@ -2559,9 +2605,9 @@ Nodes (36): Best practices, CustomBounce, CustomEase, CustomWiggle, Development,
 Cohesion: 0.07
 Nodes (26): applyDollarStrip(), stripDollarLiterals(), metadata, STRING_FIELDS, metadata, STRING_FIELDS, metadata, STRING_FIELDS (+18 more)
 
-### Community 342 - "ToolPolicyEngine"
-Cohesion: 0.08
-Nodes (21): PolicyDecision, Any, Evaluate policies for a tool access request. Evaluates active policies in…, Check if a policy's conditions match the request. Args: policy: The policy to…, Result of a policy evaluation. Attributes: allowed: Whether the action is…, Evaluates tool access policies in priority order. Policies are evaluated…, Initialize the policy engine. Args: default_effect: Default effect when no…, Load policies into the engine, sorted by priority. Args: policies: List of… (+13 more)
+### Community 342 - "mcp_server.py"
+Cohesion: 0.06
+Nodes (37): default_read_policy(), load_policy_engine(), main(), PolicyRule, MCP server - exposes selected internal tools to external MCP clients over…, Load one company's active tool policies into an engine. The default effect is…, The baseline for a company with no tool policies: read-risk tools only. Write-…, Awaitable ``readline`` over real stdin, on every platform.… (+29 more)
 
 ### Community 343 - "Munder Difflin Feature Import Plan"
 Cohesion: 0.06
@@ -2587,17 +2633,17 @@ Nodes (34): 10. Extension Points, 11. Licensing, 12. Dependencies, 1. Architectu
 Cohesion: 0.07
 Nodes (20): audit_db(), audit_logger(), _load_migration(), _make_audit_db(), fixture, Path, Tests for Compliance Framework - rules, health checks, and violations. Tests…, Tests for PersistentAuditLogger hash chain and operations. (+12 more)
 
-### Community 349 - "_make_agent"
+### Community 349 - "test_hive_manager.py"
 Cohesion: 0.08
-Nodes (24): _make_agent(), Path, unregister_agent should mark agent as archived., update_status should change the agent's status., Tests for message sending and inbox management., send_message should write JSON to the sender's outbox., get_inbox should read messages from an agent's inbox., mark_processed should move message from inbox/ to inbox/.done/. (+16 more)
+Nodes (27): _make_agent(), _make_message(), Path, Tests for hive_manager module - file-based agent coordination., unregister_agent should mark agent as archived., update_status should change the agent's status., Tests for message sending and inbox management., send_message should write JSON to the sender's outbox. (+19 more)
 
 ### Community 350 - "_setup_hive"
 Cohesion: 0.12
 Nodes (25): _make_message(), Path, Tests for hive_router module - message routing from outbox to inbox., Message to 'human' should be delivered to god as proxy., Tests for hop cap enforcement., Messages with hops >= HOP_CAP should NOT be delivered., Tests for file operations during routing., Delivered messages should be moved from outbox/ to outbox/.sent/. (+17 more)
 
-### Community 351 - "._make_app"
-Cohesion: 0.06
-Nodes (25): MetricsMiddleware, ASGIApp, Receive, Scope, Send, ASGI middleware that tracks HTTP request metrics. Records: -…, Initialize the middleware. Args: app: The next ASGI application in the chain., FastAPI (+17 more)
+### Community 351 - "test_logging_telemetry.py"
+Cohesion: 0.08
+Nodes (21): FastAPI, Tests for structured logging, correlation IDs, and telemetry. Covers: -…, Tests for the RequestIDMiddleware ASGI middleware., Create a test FastAPI app with RequestIDMiddleware., Middleware generates a UUID if X-Request-ID header is absent., Middleware uses the provided X-Request-ID header value., Middleware sets correlation_id context var for the request scope., Non-HTTP scopes pass through without modification. (+13 more)
 
 ### Community 352 - "Three.js Shaders"
 Cohesion: 0.06
@@ -2608,32 +2654,32 @@ Cohesion: 0.14
 Nodes (32): candidateTarget(), contradictsNoChangeReason(), evidenceText(), hasImplementationGradeObservationAction(), hasStaleNextCacheApiObservation(), hasUnsafeBotProtectionObservation(), hasUnsupportedCacheLifeCdnClaim(), hasUnsupportedCacheLifeCdnText() (+24 more)
 
 ### Community 354 - "RealtimeEventBus"
-Cohesion: 0.12
-Nodes (12): Queue, StreamingResponse, Server-Sent Events stream of live company activity for the Pulse ticker. The…, stream_company_activity(), Get the number of subscribers for a topic. Args: topic: The topic to query.…, List all topics with active subscribers. Returns: List of topic strings that…, Async pub/sub event bus with topic-based routing and bounded queues.…, Initialize the real-time event bus with empty subscriptions. (+4 more)
+Cohesion: 0.08
+Nodes (19): Queue, StreamingResponse, Server-Sent Events stream of live company activity for the Pulse ticker. The…, stream_company_activity(), Get the number of subscribers for a topic. Args: topic: The topic to query.…, List all topics with active subscribers. Returns: List of topic strings that…, Async pub/sub event bus with topic-based routing and bounded queues.…, Initialize the real-time event bus with empty subscriptions. (+11 more)
 
 ### Community 355 - "asyncio"
-Cohesion: 0.08
-Nodes (20): asyncio, Multiple subscriptions return unique IDs., notify_subscribers calls registered sync callbacks with event., notify_subscribers calls registered async callbacks with event., All subscribers for a company receive the event., Subscribers only receive events for their subscribed company., Tests for get_recent_changes functionality., get_recent_changes returns events after the given timestamp. (+12 more)
+Cohesion: 0.17
+Nodes (9): asyncio, notify_subscribers calls registered async callbacks with event., Tests for get_recent_changes functionality., get_recent_changes returns events after the given timestamp., get_recent_changes excludes events before the timestamp., get_recent_changes only returns events for the specified company., get_recent_changes limits results to the specified count., get_recent_changes default limit is 50. (+1 more)
 
 ### Community 356 - "MemoryReflector"
 Cohesion: 0.10
 Nodes (21): MemoryReflector, Auto-condenses oversized memory files using a 3-region structure. The reflector…, Initialize the MemoryReflector. Args: settings: Configuration for thresholds…, Check whether a memory file should be condensed. The dual trigger: bytes > pct%…, Create a summarizer callable for use with condense(). Returns a synchronous…, Configuration for the memory reflector auto-condense system. Attributes:…, ReflectSettings, Tests for the MemoryReflector.should_condense threshold logic. (+13 more)
 
-### Community 357 - ".call_tool"
-Cohesion: 0.19
-Nodes (11): _error(), Any, Whether policy permits this node, and the reason either way., The tools this company's policies allow, in MCP ``tools/list`` shape., Authorize and run one tool call, in MCP ``tools/call`` result shape. A refusal…, Dispatch one JSON-RPC request, or None for a notification. A notification (no…, Wrap a successful result as a JSON-RPC response., Wrap a failure as a JSON-RPC error response. (+3 more)
+### Community 357 - "MCPServer"
+Cohesion: 0.11
+Nodes (22): dump_json(), load_json(), Any, Path, Small atomic JSON persistence helpers for process registries., Write JSON atomically so a crash cannot leave a partial registry., _error(), input_schema_for() (+14 more)
 
-### Community 358 - "FakeRequest"
-Cohesion: 0.07
-Nodes (23): executions(), FakeRequest, fresh_rate_limits(), fixture, MonkeyPatch, A caller sending plain text should not be silently dropped., The core security property: rejections must not leak existence., A trigger with no inbound_secret is not reachable from outside. (+15 more)
+### Community 358 - "Trigger"
+Cohesion: 0.09
+Nodes (17): A trigger that fires agents proactively based on conditions. Trigger types…, Trigger, executions(), FakeRequest, A caller sending plain text should not be silently dropped., The core security property: rejections must not leak existence., A trigger with no inbound_secret is not reachable from outside., A cron trigger's secret must not make it externally firable. (+9 more)
 
 ### Community 359 - "Three.js Loaders"
 Cohesion: 0.06
 Nodes (32): ArrayBuffer, Async/Promise Loading, Blob URL, Built-in Cache, Caching, CubeTextureLoader, Custom Asset Manager, Custom Path/URL (+24 more)
 
 ### Community 360 - "SubagentPermits"
-Cohesion: 0.11
-Nodes (15): Any, Delegation permits - caps how many sub-agents a lead runs concurrently. A lead…, Hold a permit for the duration of a block, releasing on every exit. Args:…, Return how many permits remain free for a lead. Args: lead_id: The lead agent.…, Return how many permits a lead currently holds. Args: lead_id: The lead agent.…, Release every permit held by a lead, for crash recovery. Args: lead_id: The…, Concurrency permits for sub-agent delegation, scoped per lead agent.…, Initialize the permit pool. Args: cap: Maximum concurrent sub-agents per lead.… (+7 more)
+Cohesion: 0.12
+Nodes (14): Any, Delegation permits - caps how many sub-agents a lead runs concurrently. A lead…, Hold a permit for the duration of a block, releasing on every exit. Args:…, Return how many permits remain free for a lead. Args: lead_id: The lead agent.…, Return how many permits a lead currently holds. Args: lead_id: The lead agent.…, Release every permit held by a lead, for crash recovery. Args: lead_id: The…, Concurrency permits for sub-agent delegation, scoped per lead agent.…, Acquire a permit for one sub-agent under a lead. Waits in FIFO order when the… (+6 more)
 
 ### Community 361 - "TestAllArchetypesPopulated"
 Cohesion: 0.10
@@ -2659,9 +2705,9 @@ Nodes (24): AlertSeverity, CostAlert, _decode_scope(), _encode_scope(), StrEnum,
 Cohesion: 0.08
 Nodes (22): ExtractionRule, FactExtractor, Extract facts from text using all configured rules. Applies each extraction…, A regex-based rule for extracting facts from text. Attributes: pattern: Regex…, Extracts structured facts from agent output text using regex rules. Each rule…, Initialize the extractor with a set of extraction rules. Args: rules: List of…, Return the standard set of extraction rules. Includes rules for: - 'learned…, Initialize the LLM-based fact extractor. Args: llm_callable: Async function… (+14 more)
 
-### Community 367 - "RunCompletionReason"
-Cohesion: 0.17
-Nodes (33): Enum, str, Why a run (goal drive or subtask execution) reached a terminal state. Every…, RunCompletionReason, db_returning(), _empty_result(), make_agent(), make_goal() (+25 more)
+### Community 367 - "test_completion_reasons.py"
+Cohesion: 0.18
+Nodes (29): db_returning(), _empty_result(), make_agent(), make_goal(), make_task(), asyncio, Phase 1.1 — every completion reason is reachable. The acceptance test for the…, Drive _execute_subtasks for one task with a patched LLM. (+21 more)
 
 ### Community 368 - "Compose Graphics"
 Cohesion: 0.06
@@ -2691,9 +2737,9 @@ Nodes (44): CompanyImportRequest, export_company(), import_company(), Any, BaseM
 Cohesion: 0.06
 Nodes (16): Tests for PerformanceManager scoring and recommendations., Empty history returns 0., Perfect metrics yield high score., Mixed results give moderate score., Returns correct metrics breakdown., Empty history returns zeroes., Agents are ranked by score., High score yields promote recommendation. (+8 more)
 
-### Community 375 - "test_failure_alchemy.py"
-Cohesion: 0.07
-Nodes (22): alchemist(), fixture, Tests for the Failure Alchemy system. Validates that the FailureAlchemist…, Tests that different error types produce contextually appropriate antibodies., Timeout errors produce antibodies about timeout guards., Budget errors produce antibodies about budget checking., Permission errors produce antibodies about verifying permissions., Not found errors produce antibodies about confirming resource existence. (+14 more)
+### Community 375 - "TestDifferentErrorPatterns"
+Cohesion: 0.14
+Nodes (8): Tests that different error types produce contextually appropriate antibodies., Timeout errors produce antibodies about timeout guards., Budget errors produce antibodies about budget checking., Permission errors produce antibodies about verifying permissions., Not found errors produce antibodies about confirming resource existence., Rate limit errors produce antibodies about rate limiting., Memory errors produce antibodies about checking available memory., TestDifferentErrorPatterns
 
 ### Community 376 - "patch"
 Cohesion: 0.09
@@ -2704,8 +2750,8 @@ Cohesion: 0.07
 Nodes (29): Basic Raycasting, Box Selection, Camera Controls, Click to Select, DragControls, Efficient Raycasting, Event Handling Best Practices, FirstPersonControls (+21 more)
 
 ### Community 378 - "test_memory_graph_frontend_contract.py"
-Cohesion: 0.18
-Nodes (16): linked_vault_graph(), The memory graph payload against the dashboard's TypeScript contract. The…, A -> B by wikilink, plus a dangling target, through the real pipeline., ``MemoryGraphData`` declares exactly these, and the page reads all four., The frontend needs to tell a note apart from a memory without guessing. Three…, A missing note is a derived node, not a registered document., Vault paths are vault-relative; the root is host layout and stays here., test_a_dangling_target_is_marked_and_carries_no_path() (+8 more)
+Cohesion: 0.06
+Nodes (51): graph(), linked_vault_graph(), fixture, Path, The memory graph payload against the dashboard's TypeScript contract. The…, A temporary vault root. The development vault is never written to., The real operator path: register the vault, then index it., A -> B by wikilink, plus a dangling target, through the real pipeline. (+43 more)
 
 ### Community 379 - "TestDemoScenarios"
 Cohesion: 0.07
@@ -2732,8 +2778,8 @@ Cohesion: 0.07
 Nodes (28): Bonus fix discovered during Phase 0, Deferred (per decision), K-01 Knowledge search actually reaches the RAG pipeline ✅ DONE (2026-08-26), NVLabsCompany — Gap Closure Plan, Phase 0 — Correctness Fixes ✅ DONE (2026-08-26), Phase 1 — Finish Partially Built Subsystems (~3 weeks), Phase 2 — Production Hardening (~4 weeks), Phase 3 — Enterprise & Integration Gaps (+20 more)
 
 ### Community 385 - "ApiKey"
-Cohesion: 0.11
-Nodes (26): ApiKeyCreate, ApiKeyCreateResponse, ApiKeyResponse, create_api_key(), delete_api_key(), list_api_keys(), Any, BaseModel (+18 more)
+Cohesion: 0.08
+Nodes (36): ApiKeyCreate, ApiKeyCreateResponse, ApiKeyResponse, create_api_key(), delete_api_key(), list_api_keys(), Any, BaseModel (+28 more)
 
 ### Community 386 - "SamplePlugin"
 Cohesion: 0.09
@@ -2788,8 +2834,8 @@ Cohesion: 0.04
 Nodes (48): HireManifest, BaseModel, Portable agent role template - a JSON spec describing a configured agent role., Name of exactly 40 characters should be accepted., Tests for model field validation., Shell metacharacters in model IDs should be rejected., Real-world model IDs should be accepted., Model IDs longer than 80 characters should be rejected. (+40 more)
 
 ### Community 399 - "TestMineAgent"
-Cohesion: 0.10
-Nodes (15): Path, Return error result when mine subprocess fails., Skip re-mining when memory.md has not changed., Re-mine when memory.md modification time changes., Tests for SemanticMemoryManager.mine_all()., Mine all agent directories with memory.md files., Mining flag prevents concurrent mine_all calls., Handle non-existent agents directory gracefully. (+7 more)
+Cohesion: 0.09
+Nodes (16): Path, Tests for the semantic memory manager module., Return error result when mine subprocess fails., Skip re-mining when memory.md has not changed., Re-mine when memory.md modification time changes., Tests for SemanticMemoryManager.mine_all()., Mine all agent directories with memory.md files., Mining flag prevents concurrent mine_all calls. (+8 more)
 
 ### Community 400 - "Hooks"
 Cohesion: 0.08
@@ -2811,17 +2857,17 @@ Nodes (24): arrayAt(), deploymentRegressionDecision(), dropWithObservation(), fo
 Cohesion: 0.12
 Nodes (10): BaseHTTPRequestHandler, Popen, BackendController, Handler, Backend supervisor daemon — start/stop/restart the NEXUS API from the UI. A…, Kill the process and its children, cross-platform., Best-effort: kill whatever listens on `port` (Windows netstat path)., Minimal JSON HTTP handler for the supervisor endpoints. (+2 more)
 
-### Community 405 - "cli.py"
-Cohesion: 0.22
-Nodes (13): main(), print_usage(), detect_file_type(), _is_code_line(), _is_json_content(), _is_yaml_content(), Path, Return True if the file is natural language and should be compressed. (+5 more)
+### Community 405 - "test_smart_retry.py"
+Cohesion: 0.10
+Nodes (21): EscalationAction, FailureDiagnosis, Enum, str, Smart Retry with Escalation - intelligent retry with failure diagnosis and…, Actions that can be taken when retries are insufficient. Values: RETRY:…, Diagnosis of a failure pattern after analysis. Attributes: error_pattern: The…, fixture (+13 more)
 
-### Community 406 - ".route_to_provider"
-Cohesion: 0.17
-Nodes (9): Select the best provider based on task requirements. Args: task_type: Type of…, Test route_to_provider task-based routing., route_to_provider selects a provider supporting vision., route_to_provider prefers local provider when prefer_local=True., route_to_provider filters by minimum context window., route_to_provider selects provider with tool support., route_to_provider returns None when no provider matches., route_to_provider filters by streaming support. (+1 more)
+### Community 406 - "TriggerExecutor"
+Cohesion: 0.12
+Nodes (17): _naive(), Any, async_sessionmaker, AsyncSession, datetime, Trigger Executor - fires triggers and records execution results. Execution…, Register a handler for a specific action type. Args: action_type: The action…, Fire a trigger and execute its configured action. Creates an execution record,… (+9 more)
 
-### Community 407 - "worktree.py"
-Cohesion: 0.33
-Nodes (5): MergeResult, Worktree Isolation - git worktree management for parallel agent execution.…, Result of merging a worktree branch into the main repository. Attributes:…, Information about a created worktree. Attributes: worktree_path: Absolute path…, WorktreeInfo
+### Community 407 - "revoke_session"
+Cohesion: 0.09
+Nodes (23): OptionalPrincipal, _clear_cookies(), issue_csrf(), list_invites(), logout(), CurrentPrincipal, delete, RequireAdmin (+15 more)
 
 ### Community 408 - "SwiftUI Gestures deep-dive"
 Cohesion: 0.08
@@ -2840,8 +2886,8 @@ Cohesion: 0.18
 Nodes (22): summarizeClaimResults(), applyQualityFloor(), grade(), gradeRecommendation(), isAccountScope(), roundTo(), scoreActionability(), scoreEvidence() (+14 more)
 
 ### Community 412 - "React View Transitions"
-Cohesion: 0.07
-Nodes (28): Accessibility, Animation Triggers, Availability, Choosing Animation Style, Common Patterns, Composing Shared Elements with List Identity, Core Concepts, Critical Placement Rule (+20 more)
+Cohesion: 0.08
+Nodes (25): Accessibility, Animation Triggers, Availability, Choosing Animation Style, Core Concepts, Critical Placement Rule, CSS Pseudo-Elements, Full Compiled Document (+17 more)
 
 ### Community 413 - "Per-Page Dependencies"
 Cohesion: 0.08
@@ -2851,9 +2897,9 @@ Nodes (24): `/activity` (Activity), `/agents` (Agents), `/approvals` (Approvals)
 Cohesion: 0.08
 Nodes (24): For /graphify add and --watch, For /graphify query, For the commit hook and native CLAUDE.md integration, For --update and --cluster-only, /graphify, Honesty Rules, Interpreter guard for subcommands, Part A - Structural extraction for code files (+16 more)
 
-### Community 415 - "ThoughtNode"
-Cohesion: 0.06
-Nodes (30): Any, A single node in the reasoning tree. Each node represents a thought or…, Tree-of-Thought Task Planner. Uses tree-based exploration to decompose complex…, Initialize the ToT planner. Args: llm_callable: Async function that accepts a…, Return the configured branching factor., Return the configured maximum depth., Return the configured beam width., Decompose a task using tree-of-thought exploration. Builds a thought tree by… (+22 more)
+### Community 415 - "TestToTPlanner"
+Cohesion: 0.10
+Nodes (13): mock_llm(), Create a mock LLM callable that returns valid JSON., Tests for ToTPlanner task decomposition and fallback behavior., Test successful tree-based task decomposition., Test fallback to linear planning when LLM raises exception., Test fallback when LLM returns invalid JSON during expansion., Test that branching_factor is properly stored., Test that max_depth is properly stored. (+5 more)
 
 ### Community 416 - "test_evaluation_framework.py"
 Cohesion: 0.09
@@ -2880,8 +2926,8 @@ Cohesion: 0.11
 Nodes (15): Manager for embedding-based semantic memory using mempalace CLI. Provides mine…, Clear the cached binary path for re-detection., SemanticMemoryManager, Tests for _get_embeddings_path resolution., Explicit embeddings_path is used directly., When only palace_path is set, derives embeddings path., When neither path is set, returns None., embeddings_path takes precedence over palace_path derivation. (+7 more)
 
 ### Community 422 - "LLMCriticEvaluator"
-Cohesion: 0.05
-Nodes (44): CriticEvaluator, EvaluationCriteria, EvaluationResult, Critic/Evaluator - evaluates task results for quality and correctness., The result of a critic evaluation on task output. Attributes: task_id: The task…, A single evaluation criterion. Attributes: name: Identifier for the criterion.…, Evaluates task results against configurable quality criteria. The critic…, Initialize the evaluator. Args: quality_threshold: Minimum score (0-1) to pass… (+36 more)
+Cohesion: 0.04
+Nodes (49): CriticEvaluator, EvaluationCriteria, EvaluationResult, Critic/Evaluator - evaluates task results for quality and correctness., The result of a critic evaluation on task output. Attributes: task_id: The task…, A single evaluation criterion. Attributes: name: Identifier for the criterion.…, Evaluates task results against configurable quality criteria. The critic…, Initialize the evaluator. Args: quality_threshold: Minimum score (0-1) to pass… (+41 more)
 
 ### Community 423 - "ReplayEngine"
 Cohesion: 0.11
@@ -2936,8 +2982,8 @@ Cohesion: 0.15
 Nodes (14): ModelEvaluator, Evaluator that runs benchmarks against a model via an adapter function. The…, asyncio, Tests for the ModelEvaluator class., ModelEvaluator runs benchmark and returns EvaluationResult., ModelEvaluator computes correct accuracy for partial matches., ModelEvaluator measures wall-clock latency for each test case., ModelEvaluator computes cost metrics. (+6 more)
 
 ### Community 436 - "TestWebSocketAuth"
-Cohesion: 0.14
-Nodes (9): Tests for WebSocket authentication enforcement., A stand-in WebSocket whose scope carries the given principal., _authenticate_websocket closes with 1008 when no principal resolved., A handshake that never reached the auth middleware is rejected., A company_id in the query string grants nothing on its own., WebSocketManager stores company_id when provided at connect time., broadcast_to_company sends only to connections with matching company_id., Disconnecting a client removes the company_id association. (+1 more)
+Cohesion: 0.17
+Nodes (12): _authenticate_websocket(), WebSocket, Return the handshake's principal, closing the socket if there is none. Closing…, Accept a WebSocket connection and handle real-time communication. The caller…, websocket_endpoint(), Tests for WebSocket authentication enforcement., A stand-in WebSocket whose scope carries the given principal., _authenticate_websocket closes with 1008 when no principal resolved. (+4 more)
 
 ### Community 437 - "test_approvals_persistence.py"
 Cohesion: 0.12
@@ -2983,13 +3029,13 @@ Nodes (6): AgentProviderPreset, Structured descriptor for how a provider CLI is 
 Cohesion: 0.13
 Nodes (18): ceo_query_api(), CeoApiClient, get_budget(), get_dashboard(), list_agents(), list_goals(), list_tasks(), Any (+10 more)
 
-### Community 448 - "ContextRule"
-Cohesion: 0.11
-Nodes (15): ContextRule, ContextTriggerConfig, A single context management rule. Attributes: enabled: Whether this rule is…, Configuration for context management triggers. Attributes: compact: Rule for…, Ensure existing ContextRule and DEFAULT_CONTEXT_TRIGGER still work., ContextRule should still be importable and functional., ContextTriggerConfig should still be importable and functional., DEFAULT_CONTEXT_TRIGGER should have original values. (+7 more)
+### Community 448 - "context_trigger.py"
+Cohesion: 0.07
+Nodes (22): ContextRule, ContextTriggerConfig, datetime, Context trigger configuration - rules for context compaction and clearing.…, A single context management rule. Attributes: enabled: Whether this rule is…, Create a time condition, replacing any previously set expression. Args: after:…, Configuration for context management triggers. Attributes: compact: Rule for…, Tests for condition expression system in context_trigger module. (+14 more)
 
-### Community 449 - "WatchdogConfig"
-Cohesion: 0.20
-Nodes (10): Initialize the watchdog. Args: config: Optional configuration for patrol…, Configuration for watchdog patrol behavior. Attributes:…, WatchdogConfig, asyncio, Tests for start/stop background patrol lifecycle., start_background_patrol creates an asyncio task., stop() cancels the background patrol task cleanly., Background patrol runs with an agents_provider function. (+2 more)
+### Community 449 - "watchdog.py"
+Cohesion: 0.13
+Nodes (15): Enum, str, Watchdog Auto-Recovery - periodic patrol to detect and recover unhealthy…, Initialize the watchdog. Args: config: Optional configuration for patrol…, Actions the watchdog can take to recover agents. Values: RESET_IDLE: Reset a…, Configuration for watchdog patrol behavior. Attributes:…, RecoveryAction, WatchdogConfig (+7 more)
 
 ### Community 450 - "TestBuiltinPolicies"
 Cohesion: 0.09
@@ -3059,9 +3105,9 @@ Nodes (19): Animation (HIGH), Core Rendering (CRITICAL), Creating a New Rule, De
 Cohesion: 0.16
 Nodes (8): open_decisions(), Clearing the status is what takes an agent off the queue., One bad escalation must not stop the rest of the patrol., Every decision filed, oldest first., An agent parked in needs_recovery has to reach a human., A condition that persists must not file a decision per tick., TestFailureHandling, TestNeedsRecoveryEscalation
 
-### Community 467 - "HookPoint"
-Cohesion: 0.15
-Nodes (11): _HookHandler, HookPoint, Any, Enum, Hook system for NEXUS plugin extensibility. Provides hook points throughout the…, Register a handler for a specific hook point. Args: hook_point: The hook point…, Unregister a named handler from a hook point. Args: hook_point: The hook point…, Execute all handlers for a hook point with error isolation. Each handler is… (+3 more)
+### Community 467 - "_is_workflow_fatal"
+Cohesion: 0.13
+Nodes (15): A vault root is configured but unusable. Distinct from…, VaultConfigurationError, _is_workflow_fatal(), Whether a failure is about the environment rather than this document. The…, parametrize, One answer for both, so neither leaks whether the run exists., One of the vault security exceptions, by class name., Which failures belong to one document, and which to the whole run. Isolating an… (+7 more)
 
 ### Community 468 - "TestDelegationEngine"
 Cohesion: 0.12
@@ -3071,9 +3117,9 @@ Nodes (11): asyncio, Tests for DelegationEngine task delegation., Agent with bes
 Cohesion: 0.10
 Nodes (11): Tests for HiringManager hiring and onboarding workflows., Generates structured JD with all required fields., Creates agent config dict from template., Returns 4 onboarding steps., Agent with good history passes probation., Agent with low completion fails., Empty history fails probation., Too few tasks fails probation. (+3 more)
 
-### Community 470 - "test_hive_protocol.py"
-Cohesion: 0.10
-Nodes (14): Tests for hive_protocol module - FIPA-lite message schema., Tests for module-level constants., HOP_CAP should be 12., REPLY_OBLIGATING_ACTS should contain exactly request, query, propose., Tests for MessageAct enum., All 7 acts should have correct string values., Tests for requires_reply_for_act helper., Only REQUEST, QUERY, PROPOSE should obligate a reply. (+6 more)
+### Community 470 - "hive_protocol.py"
+Cohesion: 0.08
+Nodes (26): Pluggable backends for HiveManager multi-agent coordination. Defines a…, Hive Manager - file-based multi-agent coordination layer. Directory layout:…, AgentStatus, MessageAct, Enum, str, Hive Protocol - FIPA-lite message schema for multi-agent coordination., Speech acts for agent-to-agent communication (FIPA-lite). (+18 more)
 
 ### Community 471 - "test_workflow_routes.py"
 Cohesion: 0.17
@@ -3091,25 +3137,25 @@ Nodes (18): 1. Ease on containerAnimation, 2. ScrollTrigger on a child tween in 
 Cohesion: 0.11
 Nodes (18): 1. Deprecated `.animation` form (no value binding), 2. Animating frame size directly, 3. Scale to 0 (the vanish-into-nothing trap), 4. `withAnimation` inside `body`, Animatable / @Animatable, Animation API decision tree, Anti-Patterns (BAD / GOOD), Gestures (+10 more)
 
-### Community 475 - "realtime/__init__.py"
-Cohesion: 0.18
-Nodes (8): Real-time event bus for topic-based pub/sub with asyncio.Queue subscribers.…, Typed event dataclasses for the real-time streaming subsystem. Defines the core…, Real-time streaming subsystem for WebSocket and Server-Sent Events. This module…, Server-Sent Events (SSE) streaming support. Provides the EventStream class that…, Tests for the SSE endpoint and event stream formatting. Validates EventStream…, Tests for SSE tenant-scoped event filtering., _event_generator skips events scoped to a different company., TestSSETenantIsolation
+### Community 475 - "RealtimeEvent"
+Cohesion: 0.10
+Nodes (21): _event_generator(), Generate SSE events from the event bus with filtering. Creates a subscriber…, Real-time event bus for topic-based pub/sub with asyncio.Queue subscribers.…, Any, Typed event dataclasses for the real-time streaming subsystem. Defines the core…, A typed event for real-time streaming to connected clients. Represents a single…, Serialize the event to a JSON-compatible dictionary. Returns: Dictionary…, RealtimeEvent (+13 more)
 
 ### Community 476 - "2. Evidence-Based Subsystem Breakdown & 10/10 Requirements"
 Cohesion: 0.11
 Nodes (18): 1. Executive Summary & Comparative Scorecard, 2.10 3D Office & Real-Time Visualization, 2.11 Deployment, Infrastructure & DevOps, 2.1 Backend Architecture & API Surface, 2.2 Governance, Safety & Financial Guardrails, 2.3 Autonomy, GoalLoop & Orchestration, 2.4 Auth, Identity & Multi-Tenancy, 2.5 Memory Architecture & Compaction (+10 more)
 
 ### Community 477 - "required_signatures_for"
-Cohesion: 0.24
-Nodes (7): How many distinct signatures an approval of this shape needs. Args:…, required_signatures_for(), Quorum is decided by the approval's shape, not by the caller., A deployment is not a one-operator decision., Everything else keeps the historical single-approver behaviour., A request can carry any label; the amount at stake still gates it., TestRequiredSignatures
+Cohesion: 0.13
+Nodes (12): Any, How many distinct signatures an approval of this shape needs. Args:…, required_signatures_for(), Any, datetime, Check if an operation can be auto-approved based on queue policies. Evaluates…, Create a new approval request. Args: company_id: The company this approval…, Quorum is decided by the approval's shape, not by the caller. (+4 more)
 
 ### Community 478 - "SecretVault"
 Cohesion: 0.25
 Nodes (6): Encrypted secret storage with versioning and access logging. Secrets are stored…, SecretVault, Helper to run async coroutines in tests., Tests for SecretVault encryption and storage., run_async(), TestSecretVault
 
-### Community 479 - ".__init__"
+### Community 479 - "sso_callback"
 Cohesion: 0.15
-Nodes (7): Path, Initialize the layered memory store. Args: config: Configuration for layer…, Return the path for L1 persistence file, derived from persist_path., Deserialize a dict back to an L1Summary instance., Load L1 ring buffer state from the persist file if it exists., Deserialize a dict back to a Fact instance., Load L2 and L3 state from the persist file if it exists.
+Nodes (18): AsyncOAuth2Client, Any, DbSession, Response, Handle OIDC callback after IdP authorization. Exchanges code for tokens,…, sso_callback(), _build_client(), _discover_metadata() (+10 more)
 
 ### Community 480 - "test_devops_enterprise.py"
 Cohesion: 0.14
@@ -3173,11 +3219,11 @@ Nodes (11): Manages reversible operations with rollback capabilities. Records al
 
 ### Community 495 - "PhaseMachine"
 Cohesion: 0.03
-Nodes (77): PhaseMachine, PhaseTransitionError, Enum, Exception, Path, str, Phase Machine - team collaboration state machine for leader-driven workflows.…, Load state from the persist file if it exists. (+69 more)
+Nodes (67): PhaseMachine, PhaseTransitionError, Enum, Exception, Path, str, Phase Machine - team collaboration state machine for leader-driven workflows.…, Load state from the persist file if it exists. (+59 more)
 
-### Community 496 - "classify_inbound_kind"
-Cohesion: 0.15
-Nodes (11): classify_inbound_kind(), Classify inbound text as either a directive or communication. Classification…, Questions containing imperative verbs are directives., Imperative statements are directives., Non-question text without imperative verbs is still directive., Question words without trailing '?' are directives., Do/does/did questions are communication., Tests for classify_inbound_kind function. (+3 more)
+### Community 496 - "_run_workflow"
+Cohesion: 0.16
+Nodes (12): _outcome(), Execute the real workflow in a time-skipping Temporal environment., The workflow, run by Temporal, over stubbed activities., One activity per document, and each result lands in the right bucket., Nothing pending means one listing activity and nothing else., A failed document is recorded; the rest still get indexed., A document deregistered mid-run is not an error and not a result., Batching a large first index is the listing activity's job, not the loop's. (+4 more)
 
 ### Community 497 - "TestControlAPI"
 Cohesion: 0.15
@@ -3279,13 +3325,13 @@ Nodes (10): KnowledgeManager, File-backed knowledge store with ingest, search, a
 Cohesion: 0.17
 Nodes (10): merge_pinned(), Append hoisted durable facts to the pinned set, skipping duplicates. Args:…, Tests for the merge_pinned helper., New lines are appended to the existing set., Lines already present are not duplicated., Empty hoist list returns original unchanged., Empty old list with new hoist works correctly., Hoist lines are trimmed before comparison. (+2 more)
 
-### Community 522 - "lib/budget-summary.mjs"
-Cohesion: 0.33
-Nodes (10): buildBudgetSummary(), buildChatPreview(), buildExactChatMessage(), buildOptions(), buildPrintCheck(), buildQuestionPayload(), buildQuestionText(), renderBudgetSummaryMarkdown() (+2 more)
-
-### Community 523 - "TimelineEvent"
+### Community 522 - "test_scheduler_persistence.py"
 Cohesion: 0.13
-Nodes (10): A single event in a task's execution timeline. Attributes: timestamp: When the…, TimelineEvent, started_at and completed_at come from STARTED and COMPLETED events., Tests for get_delegation_chain., Delegation chain returns agents in order of first appearance., Delegation chain contains only unique agent IDs., Empty list returned for a task with no events., Empty list returned when no DELEGATED events exist. (+2 more)
+Nodes (13): company_and_agent(), fixture, Tests for Phase 0.5 — one scheduler. Covers: - ``compute_next_fire`` for every…, A session factory over a file-backed SQLite DB with all tables created., Accept criterion: execution history is queryable., A completed execution leaves a row behind., A handler exception is recorded on the row, not swallowed., An unregistered action type still leaves an auditable row. (+5 more)
+
+### Community 523 - "TestDelegationChain"
+Cohesion: 0.17
+Nodes (7): Tests for get_delegation_chain., Delegation chain returns agents in order of first appearance., Delegation chain contains only unique agent IDs., Empty list returned for a task with no events., Empty list returned when no DELEGATED events exist., DELEGATED events without agent_id are excluded from chain., TestDelegationChain
 
 ### Community 524 - "validate_command_flags"
 Cohesion: 0.17
@@ -3299,17 +3345,17 @@ Nodes (9): Tests for AlertThreshold dataclass validation., Test creating a valid
 Cohesion: 0.17
 Nodes (15): asyncio, LogCaptureFixture, Tests for graceful shutdown hooks in the NEXUS lifespan. Verifies that the…, Calling registry.reset() multiple times is safe., ControlRegistry._persist() is a no-op when persist_path is None., Verify telemetry metrics are NOT cleared during shutdown. The shutdown no…, Verify ControlRegistry singleton is persisted on shutdown., Verify that the shutdown sequence logs a completion message. (+7 more)
 
-### Community 527 - "MessageTooLargeError"
-Cohesion: 0.18
-Nodes (8): CompactionPass, MessageTooLargeError, Exception, One incremental compaction pass. Attributes: summary: The five-field summary of…, Initialize the SessionCompactor with a TokenCounter instance., Compact a thread into successive batches, each fitting the budget. Greedily…, Build a pass from a filled batch, watermarked at its last message., A single message does not fit in the compaction budget. Raised instead of…
+### Community 527 - "compaction.py"
+Cohesion: 0.17
+Nodes (9): CompactionStrategy, MessageTooLargeError, Enum, Exception, Session context compaction for managing conversation history within token…, Initialize the SessionCompactor with a TokenCounter instance., Available strategies for compacting session context. TRUNCATE: Keep newest…, A single message does not fit in the compaction budget. Raised instead of… (+1 more)
 
 ### Community 528 - "TestNexusPluginProtocol"
 Cohesion: 0.12
 Nodes (9): Tests for NexusPlugin protocol conformance., SamplePlugin instances satisfy the NexusPlugin protocol., FailingPlugin instances satisfy the NexusPlugin protocol., MultiHookPlugin instances satisfy the NexusPlugin protocol., Non-plugin objects do not satisfy the protocol., PluginMetadata stores all required fields., PluginMetadata has sensible defaults., PluginStatus enum has all expected values. (+1 more)
 
 ### Community 529 - "TestReplayStats"
-Cohesion: 0.12
-Nodes (9): Tests for ReplayStats computation., Duration is computed from first to last event timestamp., Duration is None when fewer than two events exist., Total cost is the sum of all event costs., Total retries counts RETRIED events., Delegation depth counts unique agents from DELEGATED events., Event count reflects total number of events., started_at is None if no STARTED event exists. (+1 more)
+Cohesion: 0.14
+Nodes (8): Tests for ReplayStats computation., Duration is None when fewer than two events exist., Total cost is the sum of all event costs., Total retries counts RETRIED events., Delegation depth counts unique agents from DELEGATED events., Event count reflects total number of events., started_at is None if no STARTED event exists., TestReplayStats
 
 ### Community 530 - "Pipeline"
 Cohesion: 0.13
@@ -3336,8 +3382,8 @@ Cohesion: 0.13
 Nodes (13): Common changes, Contributing to `vercel-optimize`, Output contracts, Rules, Contributing, Install, License, Requirements (+5 more)
 
 ### Community 536 - "display-labels.mjs"
-Cohesion: 0.19
-Nodes (13): formatNumberLike(), formatSignalPart(), formatSignalValue(), humanizeKey(), KIND_LABELS, normalizeObservedWindowUnits(), PUBLIC_ASSIGNMENT_LABELS, REQUEST_COUNT_KINDS (+5 more)
+Cohesion: 0.12
+Nodes (23): buildBudgetSummary(), buildChatPreview(), buildExactChatMessage(), buildOptions(), buildPrintCheck(), buildQuestionPayload(), buildQuestionText(), renderBudgetSummaryMarkdown() (+15 more)
 
 ### Community 537 - "Recommendations"
 Cohesion: 0.13
@@ -3371,21 +3417,21 @@ Nodes (14): 1.1 Canvas host — `Dashboard.tsx`, 1.2 Node type registry, 1.3 Nod
 Cohesion: 0.13
 Nodes (15): 2.10 Tools (`src/nexus/tools/`) - PRODUCTION, 2.11 Workflows (`src/nexus/workflows/`) - PRODUCTION, 2.12 Triggers (`src/nexus/triggers/`) - PRODUCTION, 2.13 Templates (`src/nexus/templates/`) - PRODUCTION, 2.14 Models Router (`src/nexus/models_router/`) - PRODUCTION, 2.1 Adapters (`src/nexus/adapters/`) - PRODUCTION, 2.2 Orchestration (`src/nexus/orchestration/`) - PRODUCTION, 2.3 Governance (`src/nexus/governance/`) - PRODUCTION (+7 more)
 
-### Community 545 - "MCPClient"
-Cohesion: 0.14
-Nodes (9): MCPClient, Any, List all tools available on the connected MCP server. Returns: List of MCPTool…, Invoke a tool on the connected MCP server. Args: tool_name: The name of the…, Disconnect from the MCP server and clean up resources., Client for the Model Context Protocol (MCP). Provides methods to connect to an…, Initialize the MCP client. Args: timeout_seconds: Default timeout for server…, Whether the client is currently connected to a server. (+1 more)
+### Community 545 - ".call_tool"
+Cohesion: 0.40
+Nodes (3): Any, Invoke a tool on the connected MCP server. Args: tool_name: The name of the…, Connect to an MCP server and perform initialization. Sends the initialize…
 
 ### Community 546 - "KgMeta"
 Cohesion: 0.21
 Nodes (12): KgHit, KgMeta, KnowledgeStatus, BaseModel, Knowledge Graph types - Pydantic models for the file-backed knowledge store., A single search result from the knowledge store. Attributes: doc_id: The…, Overall status summary of the knowledge store. Attributes: enabled: Whether the…, Metadata for a single ingested document in the knowledge store. Attributes: id:… (+4 more)
 
 ### Community 547 - "test_meetings.py"
-Cohesion: 0.16
-Nodes (13): agent_a_id(), agent_b_id(), company_id(), mock_db(), fixture, Tests for the Meetings module. Validates MeetingScheduler, MeetingConductor,…, Provide a fixed company UUID for tests., Provide a fixed agent A UUID for tests. (+5 more)
+Cohesion: 0.14
+Nodes (14): Meeting templates for structured agent collaboration sessions. Provides…, agent_a_id(), agent_b_id(), company_id(), mock_db(), fixture, Tests for the Meetings module. Validates MeetingScheduler, MeetingConductor,…, Provide a fixed company UUID for tests. (+6 more)
 
-### Community 548 - "TestMeetingScheduler"
-Cohesion: 0.17
-Nodes (9): asyncio, Tests for MeetingScheduler scheduling and cancellation., Scheduler stores the provided db session., schedule_meeting creates a Meeting and MeetingParticipant records., schedule_meeting stores recurrence_rule when provided., schedule_meeting sets recurrence_rule to None for one-off meetings., cancel_meeting sets status to cancelled., cancel_meeting raises ValueError when meeting not found. (+1 more)
+### Community 548 - "MeetingScheduler"
+Cohesion: 0.10
+Nodes (18): MeetingScheduler, AsyncSession, datetime, Get upcoming scheduled meetings for a company or specific agent. Returns…, Reschedule a meeting to a new time. Updates the scheduled_at field of an…, Schedules and manages meetings between agents. Provides methods to create…, Initialize the scheduler with a database session. Args: db: An async SQLAlchemy…, Schedule a new meeting with participants. Creates a Meeting record and… (+10 more)
 
 ### Community 549 - "cavecrew/SKILL.md"
 Cohesion: 0.14
@@ -3467,9 +3513,9 @@ Nodes (9): count_sections(), Count level-2 (`## `) headings in text. Only counts
 Cohesion: 0.19
 Nodes (9): is_safe_flag(), Check if a flag token is in the safe allowlist (case-insensitive name match).…, Tests for the is_safe_flag function., Known safe flags should return True., Safe flags with =value should still return True., Flag name matching should be case-insensitive., Unknown flags should return False., Non-flag tokens (no leading dash) should return False. (+1 more)
 
-### Community 569 - "normalize_model"
-Cohesion: 0.27
-Nodes (4): normalize_model(), Strip variant suffix so ``claude-opus-4-8[1m]`` resolves to ``claude-…, Tests for normalize_model()., TestNormalizeModel
+### Community 569 - "IndexResult"
+Cohesion: 0.12
+Nodes (11): IndexResult, What one indexing pass did. Attributes: indexed: Vault paths chunked and…, A flat summary suitable for logging or an API response., Chunk and embed every document the scanner left stale. Takes the same per-…, ``POST /index`` either submits the workflow or indexes inline — never both., With Temporal on, the request submits work and touches nothing itself., Reporting zeros for an unfinished run would be a lie., Temporal disabled or unreachable keeps the old behaviour exactly. (+3 more)
 
 ### Community 570 - "_run"
 Cohesion: 0.19
@@ -3483,13 +3529,13 @@ Nodes (8): Tests for heuristic summarization fallback., Heuristic returns first 
 Cohesion: 0.14
 Nodes (8): Tests for _extract_durable_facts method., Lines with 'decided', 'decision', or 'chose' are extracted., Lines with file path patterns are extracted., Lines with 8+ hex character strings are extracted., Lines with $ amounts or % are extracted., Duplicate lines across sections are not repeated., Empty evicted list returns empty results., TestExtractDurableFacts
 
-### Community 573 - "format_sse"
-Cohesion: 0.20
-Nodes (8): format_sse(), Format a RealtimeEvent as an SSE data line. Args: event: The event to format.…, Async generator yielding SSE-formatted event strings. Blocks on the internal…, Tests for SSE event formatting., format_sse produces correct SSE data line format., format_sse includes id, event_type, channel, payload, timestamp., format_sse handles None channel and source_agent_id., TestSSEFormatting
+### Community 573 - "parse_skill_frontmatter"
+Cohesion: 0.15
+Nodes (11): parse_skill_frontmatter(), Extract name and description from YAML frontmatter in a SKILL.md file. Handles…, Tests for parse_skill_frontmatter function., Parse standard inline name and description values., Parse block scalar description with | indicator., Parse block scalar description with > (folded) indicator., Parse quoted name and description values., Return empty dict when no frontmatter present. (+3 more)
 
-### Community 574 - "TestTick"
-Cohesion: 0.17
-Nodes (7): Tests for the tick() timeout enforcement method., First tick() call records the start timestamp without emitting timeout., tick() does not emit TIMEOUT before TIMEOUT_SECONDS has elapsed., tick() emits TIMEOUT and deactivates once TIMEOUT_SECONDS elapses., tick() is a no-op when the protocol is not active., tick() is a no-op after the protocol has already completed., TestTick
+### Community 574 - "normalize_subtree"
+Cohesion: 0.12
+Nodes (11): SQLModel, Database-backed per-agent authority for one vault subtree., VaultWriteGrantRecord, normalize_subtree(), Persist one normalized subtree grant., Revoke matching grants without deleting audit history., Legacy shape only; database callers must use ``grant_async``., Legacy no-op shape; database callers must use ``revoke_async``. (+3 more)
 
 ### Community 575 - "GitNexus Guide"
 Cohesion: 0.18
@@ -3499,9 +3545,9 @@ Nodes (10): Always Start Here, Control & data dependence (`pdg_query`), GitNexus
 Cohesion: 0.14
 Nodes (9): Tests for SemanticMemoryManager embedding fallback. Verifies that when…, Tests for search_with_embeddings always using in-process path., search_with_embeddings uses in-process path regardless of mempalace., search_with_embeddings works when mempalace is unavailable., Tests verifying existing behavior when mempalace IS available., When mempalace is available, mine_agent uses subprocess as before., When mempalace is available, search uses subprocess as before., TestExistingBehaviorUnchanged (+1 more)
 
-### Community 577 - "semantic.py"
-Cohesion: 0.09
-Nodes (15): EmbeddingModel, Enum, str, Semantic memory manager: embedding-based retrieval via mempalace CLI. Wraps the…, Supported embedding models for semantic memory. Attributes: MINILM: MiniLM…, Initialize the semantic memory manager. Args: palace_path: Optional path to the…, Tests for the semantic memory manager module., Tests for SemanticMemoryManager.status() and availability. (+7 more)
+### Community 577 - "TestSemanticMemoryStatus"
+Cohesion: 0.14
+Nodes (8): Tests for SemanticMemoryManager.status() and availability., Report unavailable when mempalace not on PATH., Report available when mempalace is found., Binary lookup is cached after first call., reset_bin_cache allows re-detection., EmbeddingModel enum has correct values., Can initialize with different embedding model., TestSemanticMemoryStatus
 
 ### Community 578 - "TestCompanyIdValidation"
 Cohesion: 0.14
@@ -3599,13 +3645,13 @@ Nodes (12): adapter(), agent_id(), config(), fixture, Tests for HTTP Adapter web
 Cohesion: 0.24
 Nodes (5): get_preset(), Look up a provider preset by ID, falling back to Claude for unknown IDs. Args:…, fixture, Verify key metadata values for the Pi preset., TestPiPreset
 
-### Community 602 - "MultiHookPlugin"
-Cohesion: 0.10
-Nodes (7): FailingPlugin, MultiHookPlugin, Any, Registering a plugin that fails on_load marks it as error., A plugin that raises exceptions during lifecycle methods., A plugin with multiple hooks has them all registered., A plugin with multiple hooks at different priorities.
+### Community 602 - "FailingPlugin"
+Cohesion: 0.17
+Nodes (4): FailingPlugin, Any, Registering a plugin that fails on_load marks it as error., A plugin that raises exceptions during lifecycle methods.
 
-### Community 603 - "PageChangeEvent"
-Cohesion: 0.20
-Nodes (8): PageChangeEvent, datetime, Get recent page change events for a company since a given timestamp. Returns…, Represents a change event for a knowledge page. Captures metadata about a page…, Tests for PageChangeEvent dataclass fields., PageChangeEvent has correct fields and defaults., PageChangeEvent can include custom metadata., TestPageChangeEvent
+### Community 603 - "TaskPlanner"
+Cohesion: 0.13
+Nodes (10): Initialize the LLM-enhanced task planner. Args: llm_callable: Async function…, Any, Return subtasks whose dependencies are all completed. Args: subtasks: The full…, Decomposes complex tasks into ordered subtasks with dependency tracking. The…, Initialize the planner. Args: max_subtasks: Maximum number of subtasks to…, Break a complex task into ordered subtasks with dependencies. This method…, Produce a simple linear decomposition as a fallback. Args: task_id: The parent…, Check that subtask dependencies form a valid DAG. Args: subtasks: The list of… (+2 more)
 
 ### Community 604 - "Caveman Compress"
 Cohesion: 0.17
@@ -3651,9 +3697,9 @@ Nodes (11): Feels Cheap / Flat, Feels Too Fast / Jarring, Feels Too Slow, Incons
 Cohesion: 0.17
 Nodes (11): Animated Sine Wave, Animating with TimelineView, `Canvas` API Basics, Canvas (SwiftUI Native Drawing), Canvas vs Metal Shader, Gradient Mesh (moving anchors), Particle Trail (cursor-following), Performance (+3 more)
 
-### Community 615 - "._persist"
-Cohesion: 0.10
-Nodes (11): Load encrypted secrets for this company from the `secrets` table., Read all non-revoked secret rows for this company. Returns: Mapping of secret…, Make the `secrets` table match `self._store` exactly. Upserts every ref…, Write the store to whichever backing store is configured (if any)., Persist encrypted secrets to disk atomically. Serializes self._store to JSON…, Encrypt and store a secret value under the given reference. Fail-closed:…, Delete the secret for the given reference (idempotent). Persists the removal to…, Rotate the encryption key, re-encrypting all stored secrets. Decrypts all… (+3 more)
+### Community 615 - "TestGuardrailProtocolConformance"
+Cohesion: 0.12
+Nodes (9): Tests that implementations satisfy the GuardrailProtocol., StructuralGuardrail satisfies GuardrailProtocol at runtime., PolicyGuardrail satisfies GuardrailProtocol at runtime., GuardrailProtocol supports isinstance() checks., StructuralGuardrail exposes a name property., PolicyGuardrail exposes a name property., GuardrailResult has correct default values., GuardrailResult stores metadata correctly. (+1 more)
 
 ### Community 616 - "Doctrine"
 Cohesion: 0.17
@@ -3680,8 +3726,8 @@ Cohesion: 0.17
 Nodes (11): 2.1 Real Rate Limiting, 2.2 Real Budget Enforcement, 2.3 Policy Engine, Completion Tracking, Completion Tracking, Completion Tracking, Completion Tracking, NVLabsCompany — Shared Development Task List (+3 more)
 
 ### Community 622 - "test_reasoning.py"
-Cohesion: 0.28
-Nodes (8): fixture, Tests for the Tree-of-Thought Reasoning Engine. Validates ThoughtNode,…, Provide a fixed task UUID for tests., Provide a root ThoughtNode for tree tests., Provide a ThoughtTree with a root node., root_node(), task_id(), tree()
+Cohesion: 0.12
+Nodes (14): fixture, Tests for the Tree-of-Thought Reasoning Engine. Validates ThoughtNode,…, Provide a fixed task UUID for tests., Provide a root ThoughtNode for tree tests., Provide a ThoughtTree with a root node., Tests for ThoughtNode dataclass., Test that a ThoughtNode can be created with default values., Test ThoughtNode creation with explicit values. (+6 more)
 
 ### Community 623 - "_BudgetTracker"
 Cohesion: 0.18
@@ -3703,17 +3749,17 @@ Nodes (6): Check if the mempalace binary is available. Returns: True if mempalac
 Cohesion: 0.21
 Nodes (7): Split text into chunks by double-newline or fixed size. First attempts to split…, Tests for the text chunking logic., Text is split on double-newline boundaries., Paragraphs exceeding chunk_size are further split., Empty text returns empty list., Whitespace-only text returns empty list., TestChunkText
 
-### Community 628 - "TestPluginDiscovery"
-Cohesion: 0.20
-Nodes (6): Tests for plugin discovery from directories., discover_plugins finds plugins in a directory., discover_plugins skips files starting with underscore., discover_plugins returns empty list for non-existent directory., discover_plugins skips files without NexusPlugin classes., TestPluginDiscovery
+### Community 628 - "discover_plugins"
+Cohesion: 0.21
+Nodes (8): discover_plugins(), Discover plugins from a directory by scanning Python files. Looks for Python…, Tests for plugin discovery from directories., discover_plugins finds plugins in a directory., discover_plugins skips files starting with underscore., discover_plugins returns empty list for non-existent directory., discover_plugins skips files without NexusPlugin classes., TestPluginDiscovery
 
-### Community 629 - "TestSandboxedImport"
-Cohesion: 0.20
-Nodes (6): Tests for the sandboxed_import function., sandboxed_import loads a valid Python module., sandboxed_import returns None for modules with import errors., sandboxed_import returns None for non-existent files., sandboxed_import returns None for modules with syntax errors., TestSandboxedImport
+### Community 629 - "sandboxed_import"
+Cohesion: 0.21
+Nodes (8): Import a Python module from a file path in a restricted namespace. Catches…, sandboxed_import(), Tests for the sandboxed_import function., sandboxed_import loads a valid Python module., sandboxed_import returns None for modules with import errors., sandboxed_import returns None for non-existent files., sandboxed_import returns None for modules with syntax errors., TestSandboxedImport
 
-### Community 630 - "BaseModel"
-Cohesion: 0.15
-Nodes (13): ActionItemResponse, ContributionRequest, MeetingResponse, MeetingTemplateResponse, MinutesResponse, BaseModel, Request body for scheduling a meeting., Response model for a meeting. (+5 more)
+### Community 630 - "VaultAuthorizationError"
+Cohesion: 0.16
+Nodes (9): Whether per-agent authorization applies to this actor., _covers(), Exception, Load active subtrees from persistent state., Authorize using fresh database state, safe for independent workers., Authorize a write by any actor kind, returning the canonical path. An agent…, Whether a normalized subtree contains a canonical vault-relative path. Compared…, A write was refused because the actor is not authorized for that path. (+1 more)
 
 ### Community 631 - "TestLifecycleValidTransitions"
 Cohesion: 0.17
@@ -3727,9 +3773,9 @@ Nodes (17): Tests for BudgetEnforcer and CostTracker. Tests real budget enforcem
 Cohesion: 0.20
 Nodes (9): After Indexing, analyze — Build or refresh the index, clean — Delete the index, Commands, GitNexus CLI Commands, list — Show all indexed repos, status — Check index freshness, Troubleshooting (+1 more)
 
-### Community 634 - "routes/audit.py"
-Cohesion: 0.29
-Nodes (9): audit_log_stats(), list_audit_logs(), Any, DbSession, Audit log query endpoints for Settings > Audit Logs tab., List audit log entries with optional filters., Verify the audit hash chain's integrity. Recomputes each entry's hash over the…, Audit log statistics (total entries, by action type). (+1 more)
+### Community 634 - "test_guardrails.py"
+Cohesion: 0.14
+Nodes (9): Tests for the async guardrail system. Covers: protocol conformance, chain fail-…, Tests for StructuralGuardrail tool call validation., Structural guardrail passes all tool calls., Tests for PolicyGuardrail dangerous command detection., Output containing a dangerous command fails., Output without dangerous commands passes., Dangerous commands detected in tool call arguments., TestPolicyGuardrailDangerousCommands (+1 more)
 
 ### Community 635 - "test_incidents.py"
 Cohesion: 0.17
@@ -3764,24 +3810,24 @@ Cohesion: 0.17
 Nodes (7): Tests for OKRManager risk detection., Test risk detection with no objectives returns empty list., Test that objectives with low progress are detected as at risk., Test that healthy objectives are not flagged as at risk., Test that no objectives are flagged when time is below 70%., Test that completed objectives are not flagged., TestOKRManagerRiskDetection
 
 ### Community 643 - "CompactionSummary"
-Cohesion: 0.18
-Nodes (7): CompactionSummary, Structured five-field summary of one batch of compacted messages. Attributes:…, Render the summary as a labelled block for injection as a message., Build a five-field summary from messages without calling an LLM. Classifies…, Return the first sentence of ``content``, capped at ``max_chars``., Tests for the structured five-field summary., TestCompactionSummary
+Cohesion: 0.27
+Nodes (5): CompactionSummary, Structured five-field summary of one batch of compacted messages. Attributes:…, Render the summary as a labelled block for injection as a message., Tests for the structured five-field summary., TestCompactionSummary
 
 ### Community 644 - "TestRecordAndRollback"
 Cohesion: 0.17
 Nodes (7): Tests for basic operation recording and rollback., Operations can be recorded with all fields., A single operation can be rolled back., Rolling back a nonexistent operation fails., Cannot rollback an already-rolled-back operation., get_operations by default excludes rolled-back operations., TestRecordAndRollback
 
 ### Community 645 - "TestDatabasePersistence"
-Cohesion: 0.17
-Nodes (7): The `secrets` table replaces the in-memory dict and JSON file., Store a secret, rebuild the backend, read it back., A deleted secret does not come back after a restart., Re-encrypting an existing ref updates the row and its version., After rotate_key, the new key reads the DB and the old one cannot., With a session factory, no JSON file is written., TestDatabasePersistence
+Cohesion: 0.10
+Nodes (11): The `secrets` table replaces the in-memory dict and JSON file., Store a secret, rebuild the backend, read it back., A deleted secret does not come back after a restart., Re-encrypting an existing ref updates the row and its version., After rotate_key, the new key reads the DB and the old one cannot., With a session factory, no JSON file is written., PBKDF2 runs once per key per process (0.3.2)., A second backend with the same key does not re-derive. (+3 more)
 
 ### Community 646 - "_check_llm"
 Cohesion: 0.21
 Nodes (8): _check_llm(), Check LLM provider reachability by verifying API keys are configured. Returns:…, Test LLM check with only Anthropic key set., Test LLM check with no API keys set., Tests for LLM provider check., Test LLM check with both API keys set., Test LLM check with only OpenAI key set., TestCheckLLM
 
-### Community 647 - "stop_fingerprint"
-Cohesion: 0.24
-Nodes (7): Build a stable fingerprint of a run's observable progress. Two patrols that see…, stop_fingerprint(), Tests for the stop-fingerprint helper., The same run state produces the same fingerprint., New output changes the fingerprint., A new continuation attempt changes the fingerprint., TestStopFingerprint
+### Community 647 - "HeartbeatRun"
+Cohesion: 0.14
+Nodes (17): HeartbeatRun, InvocationSource, LivenessState, Enum, SQLModel, str, Heartbeat run model with rich process and liveness tracking., Liveness states for a heartbeat run. (+9 more)
 
 ### Community 648 - "caveman-commit"
 Cohesion: 0.18
@@ -3899,9 +3945,9 @@ Nodes (11): 6.10 Activity Page Real-Time Feed, 6.1 Autonomous Orchestration Coor
 Cohesion: 0.20
 Nodes (9): _check_redis(), _get_redis_client(), Get or create a module-scoped Redis client singleton. Returns: The shared Redis…, Check Redis connectivity by attempting a PING. Reuses a module-scoped Redis…, Tests for Redis connectivity check., Test Redis check when connection succeeds., Test Redis check when connection fails., Test Redis check when redis module raises. (+1 more)
 
-### Community 677 - "scan_and_index"
-Cohesion: 0.29
-Nodes (10): graph(), Path, The real operator path: register the vault, then index it., The headline: real files, real scan and index, one A -> B edge., Derive-on-read is what makes the refresh button meaningful., scan_and_index(), test_a_wikilink_between_two_notes_reaches_the_payload(), test_an_edited_note_changes_the_payload_on_the_next_fetch() (+2 more)
+### Community 677 - "TestStructuralGuardrailLengths"
+Cohesion: 0.14
+Nodes (8): Tests for StructuralGuardrail length validation., Output within max_length passes., Output exceeding max_length fails., Output meeting min_length passes., Output below min_length fails., Output within both min and max passes., Output below min when both constraints exist fails., TestStructuralGuardrailLengths
 
 ### Community 678 - "TestRegexPatterns"
 Cohesion: 0.20
@@ -4007,9 +4053,9 @@ Nodes (9): _handle_agents(), _handle_status(), _handle_task(), Any, Telegram rem
 Cohesion: 0.22
 Nodes (8): graphify reference: extra exports and benchmark, Step 6b - Wiki (only if --wiki flag), Step 7 - Neo4j export (only if --neo4j or --neo4j-push flag), Step 7a - FalkorDB export (only if --falkordb or --falkordb-push flag), Step 7b - SVG export (only if --svg flag), Step 7c - GraphML export (only if --graphml flag), Step 7d - MCP server (only if --mcp flag), Step 8 - Token reduction benchmark (only if total_words > 5000)
 
-### Community 705 - "ApprovalRequest"
-Cohesion: 0.20
-Nodes (6): ApprovalRequest, Approval Engine - manages approval requests, decisions, and auto-approve…, A request for approval before executing a gated operation. Attributes: id:…, Get all pending approval requests. Args: company_id: Filter by company. None…, Retrieve an approval request by ID. Args: approval_id: The approval identifier.…, Return resolved approvals for a company, sorted by decision time. Filters for…
+### Community 705 - "TestWorkflowDeterminism"
+Cohesion: 0.16
+Nodes (8): AST, Activity imports must sit inside ``imports_passed_through()``. Temporal's…, Embedding is billed per call, so a Temporal retry would charge twice. ADR 0001…, A workflow the worker does not know about would queue forever., Temporal replays workflow code, so the body must be pure orchestration. A clock…, No clock, no randomness, no file handles inside the workflow., The body names no session, no reader, no indexer, no HTTP client., TestWorkflowDeterminism
 
 ### Community 706 - "IngestResult"
 Cohesion: 0.24
@@ -4063,17 +4109,17 @@ Nodes (6): Tests for incident listing and filtering., All incidents can be liste
 Cohesion: 0.20
 Nodes (6): Tests for stats counting documents and modalities., stats returns correct doc_count and chunk_count., stats on empty store returns zeros., stats counts documents by modality correctly., stats updates after document removal., TestStats
 
-### Community 719 - "KnowledgeChunk"
-Cohesion: 0.08
-Nodes (25): Store document chunks as KnowledgeChunk records. Creates a KnowledgeChunk for…, Drop every chunk of one source document, without committing. Filtering on…, Replace a page's chunks with ``chunks`` inside the caller's transaction.…, KnowledgeChunk, A chunked segment of a knowledge page for retrieval and embedding. Chunks break…, _chunk(), asyncio, Tests for the /knowledge/search route wiring to RAGPipeline. The route used to… (+17 more)
+### Community 719 - "rag.py"
+Cohesion: 0.02
+Nodes (131): backfill(), Backfill embedding_vector for knowledge_chunks that have none. Run after the…, cosine_similarity(), EmbeddingProvider, get_embedding_provider(), Protocol, Embedding Provider — pluggable vector embedding generation for RAG. Supports…, Compute cosine similarity between two float vectors. (+123 more)
 
 ### Community 720 - "TestLLMCircuitBreakerBasic"
 Cohesion: 0.20
 Nodes (6): Basic tests for the LLM circuit breaker., Test that calls pass through when circuit is closed., Test that circuit opens after N consecutive failures., Test that fallback is returned when circuit is open., Test that a success resets the consecutive failure counter., TestLLMCircuitBreakerBasic
 
-### Community 721 - "watchdog.py"
-Cohesion: 0.29
-Nodes (7): PatrolReport, Enum, str, Watchdog Auto-Recovery - periodic patrol to detect and recover unhealthy…, Report summarizing the results of a single patrol run. Attributes: timestamp:…, Actions the watchdog can take to recover agents. Values: RESET_IDLE: Reset a…, RecoveryAction
+### Community 721 - "TestPatrolReport"
+Cohesion: 0.20
+Nodes (7): PatrolReport, Report summarizing the results of a single patrol run. Attributes: timestamp:…, Tests for patrol report accuracy., PatrolReport correctly counts the number of agents checked., PatrolReport correctly counts total issues found., PatrolReport shows zero issues for healthy agents., TestPatrolReport
 
 ### Community 722 - "TestLLMSummarizer"
 Cohesion: 0.20
@@ -4212,8 +4258,8 @@ Cohesion: 0.25
 Nodes (5): Tests for fail-open and the consecutive-parse-failure cap., A single judge error fails open rather than blocking the run., A deliberately broken judge pauses instead of spinning., A successful evaluation resets the consecutive failure count., TestJudgeFailureHandling
 
 ### Community 757 - "test_breaker_trip_propagation.py"
-Cohesion: 0.13
-Nodes (8): BrokenRedis, FakeRedis, fixture, Tests for cross-worker circuit breaker trip propagation. A trip recorded on one…, The three Redis calls the breaker uses, backed by a dict., A Redis that fails every call, standing in for an outage., Patch the breaker's Redis lookup with an in-process fake., redis()
+Cohesion: 0.20
+Nodes (6): FakeRedis, fixture, Tests for cross-worker circuit breaker trip propagation. A trip recorded on one…, The three Redis calls the breaker uses, backed by a dict., Patch the breaker's Redis lookup with an in-process fake., redis()
 
 ### Community 758 - "TestFactory"
 Cohesion: 0.22
@@ -4335,21 +4381,21 @@ Nodes (5): Tests for the PROVIDER_PRESETS mapping., All 11 providers are present
 Cohesion: 0.17
 Nodes (7): create_soul(), Create a new Soul with the given attributes. Convenience factory function for…, create_soul creates a Soul with minimal required args., create_soul creates a Soul with all optional args provided., customize_soul returns new Soul with specified overrides., customize_soul leaves the original Soul unmodified., customize_soul ignores fields not present on Soul.
 
-### Community 789 - "TestOrphanedTaskDetection"
-Cohesion: 0.25
-Nodes (5): Tests for detecting orphaned tasks., Patrol detects tasks assigned to a terminated agent., Patrol detects tasks assigned to an agent in error state., Patrol does not flag terminated agent with no assigned tasks., TestOrphanedTaskDetection
+### Community 789 - "test_plugin_sdk.py"
+Cohesion: 0.14
+Nodes (9): Tests for the NEXUS Plugin SDK. Validates plugin protocol conformance,…, Tests for the HookPoint enum., All six hook points are defined., Exactly 6 hook points are defined., Tests for the HookContext dataclass., HookContext has sensible defaults., HookContext accepts custom values., TestHookContext (+1 more)
 
 ### Community 790 - "TestCancelWorkCallback"
 Cohesion: 0.25
 Nodes (5): Tests for cancel_work_callback invocation on hard_stop., cancel_work_callback is invoked when budget is denied., cancel_work_callback is not called for allowed spending., cancel_work_callback works independently of auto_pause_callback., TestCancelWorkCallback
 
-### Community 791 - ".record_tool_use"
-Cohesion: 0.38
-Nodes (4): Any, Record a tool call for loop detection. A new (name+input) key counts as forward…, Build a deduplication key from tool name and truncated input. String values…, Serialize object to JSON, truncating string values > 250 chars.
+### Community 791 - "._validate"
+Cohesion: 0.19
+Nodes (7): Any, Perform the actual structural validation. Args: data: The data to validate.…, Validate data against the configured JSON schema (basic checks). Supports type…, Initialize the structural guardrail. Args: name: Identifier for this guardrail.…, Validate input against structural constraints. Args: input: The input data to…, Validate output against structural constraints. Args: output: The output data…, Validate a tool call (structural guardrail passes all tool calls). Args:…
 
-### Community 792 - "test_memory_knowledge_and_vault_nodes_coexist"
-Cohesion: 0.29
-Nodes (7): fixture, A temporary vault root. The development vault is never written to., A company with both memories and notes gets one graph, not two., session_factory(), test_memory_knowledge_and_vault_nodes_coexist(), ts_sources(), vault()
+### Community 792 - "TestProgressQueryHandler"
+Cohesion: 0.17
+Nodes (9): ObsidianIndexProgress, Counts so far, for a caller holding the workflow id. A query rather than a…, How far the run has got, answered from workflow state. Counts only, no vault…, The workflow answers "how far along" from its own state., Before the listing activity returns, the total is 0, not a guess., A query may be replayed, so it must not mutate or run an activity. Checked…, A query result crosses the same boundary as everything else., TestProgressQueryHandler (+1 more)
 
 ### Community 793 - "TestHelmChartArchitecture"
 Cohesion: 0.20
@@ -4387,17 +4433,17 @@ Nodes (5): Tests for the wrap_llm_callable factory function., Test that factory 
 Cohesion: 0.20
 Nodes (6): Security audit tests for Dockerfiles and Compose files., Dockerfile.prod must adhere to non-root and hardened multi-stage standards., dashboard/Dockerfile.prod must use multi-stage build and unprivileged runtime., dashboard/nginx.conf must enforce modern security headers and SPA routing., Dev and prod docker compose files must be properly decoupled., TestContainerSecurityAudit
 
-### Community 802 - "scripts/benchmark.py"
-Cohesion: 0.60
-Nodes (5): benchmark_pair(), count_tokens(), main(), print_table(), Path
+### Community 802 - "test_failure_alchemy.py"
+Cohesion: 0.18
+Nodes (11): alchemist(), fixture, Tests for the Failure Alchemy system. Validates that the FailureAlchemist…, Create a fresh FailureAlchemist instance for testing., Tests that multiple failures accumulate artifacts correctly., Multiple analyze_failure calls accumulate all artifacts., Provide a fixed UUID for task-related tests., Provide a fixed UUID for agent-related tests. (+3 more)
 
 ### Community 803 - "graphify reference: query, path, explain"
 Cohesion: 0.33
 Nodes (5): For /graphify explain, For /graphify path, graphify reference: query, path, explain, Step 0 — Constrained query expansion (REQUIRED before traversal), Step 1 — Traversal
 
-### Community 804 - "TestAzureOpenAIAdapterConfig"
-Cohesion: 0.14
-Nodes (8): Test Azure OpenAI adapter configuration validation., Create an AzureOpenAIAdapter instance., validate_config raises when api_key is missing., validate_config raises when model is missing., validate_config raises when azure_endpoint is missing., validate_config raises when api_version is missing., validate_config succeeds with all required keys., TestAzureOpenAIAdapterConfig
+### Community 804 - "TestSafeResolve"
+Cohesion: 0.21
+Nodes (8): asyncio, Tests for SSRFGuard.safe_resolve()., Resolving a host with only public IPs should return safe=True., Resolving a host with any private IP should return safe=False., If ANY address is blocked, the whole resolution is unsafe., DNS resolution failure should return safe=False., Duplicate addresses should be deduplicated., TestSafeResolve
 
 ### Community 805 - "SoulTemplate"
 Cohesion: 0.33
@@ -4411,13 +4457,13 @@ Nodes (6): Tests for loading embeddings gracefully., Loading non-existent file r
 Cohesion: 0.17
 Nodes (15): _compute_decay_score(), get_memory_graph(), _infer_node_type(), Any, DbSession, MemoryRecord, PathCompanyId, Memory Graph API — derive graph visualization from memory records. (+7 more)
 
-### Community 808 - "Security Engineer Agent Role"
-Cohesion: 0.33
-Nodes (6): Partial Failure Handling, Systematic Edge Case Generation, Immutable Audit Trail, Security Engineer Agent Role, STRIDE Threat Model, Incident Response Lifecycle
+### Community 808 - "create_trigger"
+Cohesion: 0.26
+Nodes (9): create_trigger(), Request body for creating a trigger., Create a new trigger for an agent. When the caller does not pin…, TriggerCreate, Accept criterion: a cron trigger created via API fires after a restart., The create route seeds next_fire_at so the row alone is schedulable., An explicit next_fire_at is not overwritten by the computation., A cron trigger persisted before a restart fires on the next tick. The tick runs… (+1 more)
 
-### Community 809 - "FakeMCPClient"
-Cohesion: 0.17
-Nodes (8): FakeMCPClient, make_session(), Any, fixture, A minimal session; neither adapter path needs a live backend., Stands in for a live MCP server; records what it was asked to run., `MCPAdapter._do_execute` loops tool calls directly., TestMCPToolGuarding
+### Community 809 - "guard_tool_call"
+Cohesion: 0.08
+Nodes (18): guard_tool_call(), Screen one tool call, for dispatch paths that cannot use a ToolExecutor. The…, FakeMCPClient, make_session(), Any, fixture, MonkeyPatch, With a known agent, the guard also resolves that agent's autonomy tier. (+10 more)
 
 ### Community 810 - "TestEmptyTaskHandling"
 Cohesion: 0.25
@@ -4431,13 +4477,13 @@ Nodes (5): Tests for isolation between multiple tasks., Events recorded for one 
 Cohesion: 0.25
 Nodes (7): Test that datetime.utcnow() has been fully removed from the codebase. Scans all…, Verify zero occurrences of datetime.utcnow() in src/nexus/., Verify model files use datetime.now(timezone.utc) in Field defaults., Verify governance modules use timezone-aware datetimes., test_no_datetime_utcnow_in_source(), test_no_utcnow_in_governance(), test_timezone_utc_pattern_used_in_models()
 
-### Community 813 - "TestHalt"
-Cohesion: 0.33
-Nodes (4): Tests for the halt functionality., Halting an agent sets the halt flag., should_halt for an unknown agent returns False., TestHalt
+### Community 813 - "TestArtifactRetrieval"
+Cohesion: 0.17
+Nodes (8): Antibody, Retrieve all generated antibodies. Returns: List of all Antibody artifacts…, A defensive rule extracted from a failure to prevent recurrence. Attributes:…, Tests for get_antibodies, get_vaccines, get_catalysts methods., get_antibodies returns all antibodies from analyzed failures., get_vaccines returns all vaccines from analyzed failures., get_catalysts returns only non-None catalysts from systemic failures., TestArtifactRetrieval
 
-### Community 814 - "test_degradation_endpoint.py"
-Cohesion: 0.12
-Nodes (13): _check_embedding(), Check embedding provider status based on API key availability. Returns: Dict…, fixture, Tests for the degradation dashboard endpoint., Tests for embedding provider check., Test embedding check with OpenAI key configured., Test embedding check with no API key., Tests for mempalace availability check. (+5 more)
+### Community 814 - "degradation_status"
+Cohesion: 0.06
+Nodes (29): _check_docker(), _check_embedding(), _check_mempalace(), _check_rate_limiter_backend(), _check_temporal(), degradation_status(), JSONResponse, Check embedding provider status based on API key availability. Returns: Dict… (+21 more)
 
 ### Community 815 - "Algorithms Reference"
 Cohesion: 0.29
@@ -4491,9 +4537,9 @@ Nodes (7): 2.1 Avoid Barrel File Imports, 2.2 Conditional Module Loading, 2.3 De
 Cohesion: 0.29
 Nodes (7): Common Patterns, Composing Shared Elements with List Identity, Enter/Exit, Force Re-Enter with `key`, Layout Displacement Morph, List Reorder, Suspense Fallback to Content
 
-### Community 828 - "_ts_union"
-Cohesion: 0.33
-Nodes (6): A node type the union does not list renders through an untested fallback., ``EDGE_TYPE_COLORS`` is keyed by the union, so a gap is a compile error.…, The string members of an exported TS union type., test_every_edge_type_has_a_colour(), test_node_types_are_all_in_the_frontend_union(), _ts_union()
+### Community 828 - "_tick"
+Cohesion: 0.23
+Nodes (10): async_sessionmaker, AsyncSession, Single scheduler tick: find and fire due triggers., Main scheduler loop — ticks every TICK_INTERVAL seconds. With multiple…, Start the background scheduler task., _scheduler_loop(), start_scheduler(), _tick() (+2 more)
 
 ### Community 829 - "Dark navy mission-control redesign of the NVLABS dashboard"
 Cohesion: 0.29
@@ -4572,8 +4618,8 @@ Cohesion: 0.29
 Nodes (7): 9.1 GoalLoop Integration in Orchestrator, 9.2 SmartRetry REASSIGN Action, 9.3 SmartRetry DECOMPOSE Action, 9.4 Auto-Evaluate Evolution Proposals, 9.5 Worktree Isolation from Orchestrator, 9.6 WebSocket Broadcast from Orchestrator, Priority 9: Autonomous Intelligence (Phase 3)
 
 ### Community 848 - "llm_circuit_breaker.py"
-Cohesion: 0.33
-Nodes (6): CircuitState, LLMCircuitBreakerConfig, Enum, LLM Circuit Breaker - wraps async LLM callables with failure protection. When N…, States for the circuit breaker., Configuration for the LLM circuit breaker. Attributes: failure_threshold:…
+Cohesion: 0.22
+Nodes (8): CircuitState, _is_transient(), BaseException, Enum, LLM Circuit Breaker - wraps async LLM callables with failure protection. When N…, Return the current circuit state., States for the circuit breaker., Determine if an exception is transient (infrastructure failure). Transient…
 
 ### Community 849 - "tmp_path_file"
 Cohesion: 0.29
@@ -4583,9 +4629,9 @@ Nodes (7): agent_id(), company_id(), fixture, Return a path to a non-existent JS
 Cohesion: 0.33
 Nodes (5): asyncio, Tests for leader election (R-02 remainder)., No REDIS_URL configured -> NoopLeaderElection singleton., test_get_leader_election_solo_without_redis(), test_is_leader_falls_back_to_true_on_error()
 
-### Community 851 - "TestIsOpen"
-Cohesion: 0.33
-Nodes (4): Tests for PersistentCircuitBreaker.is_open., Returns True when there is an open circuit record in DB., Returns False when no open circuit record exists., TestIsOpen
+### Community 851 - "TestStart"
+Cohesion: 0.17
+Nodes (7): start() enqueues steer notes for god and all workers., start() works fine when no control_registry is provided., start() with only god live sets empty worker roster., Tests for the start() method., start() returns an error when god is not in the live list., start() with a live god sends brief, steers agents, returns ok., TestStart
 
 ### Community 852 - "caveman-discover/SKILL.md"
 Cohesion: 0.33
@@ -4747,9 +4793,9 @@ Nodes (4): Tenant Guard - Hard tenant isolation enforcement. Provides middleware
 Cohesion: 0.33
 Nodes (3): Summarize evicted sections using LLM or heuristic fallback. When…, Heuristic summarization fallback when no LLM is available. Takes the first 2…, Scan evicted sections for lines containing durable facts. Identifies lines…
 
-### Community 895 - "_check_docker"
-Cohesion: 0.29
-Nodes (6): _check_docker(), Check Docker availability via shutil.which. Returns: Dict with 'status'…, Tests for Docker availability check., Test Docker check when binary is found., Test Docker check when binary is not found., TestCheckDocker
+### Community 895 - "TestAnalyzeFailure"
+Cohesion: 0.17
+Nodes (7): Catalyst is generated after 3+ occurrences of the same pattern., analyze_failure produces a complete FailureLearning with all fields., Tests for FailureAlchemist.analyze_failure method., analyze_failure produces a valid Antibody with rule and severity., analyze_failure produces a valid Vaccine with scenario and root cause., Catalyst is None for non-systemic (first occurrence) errors., TestAnalyzeFailure
 
 ### Community 896 - "Phase 11: Real-Time & Polish"
 Cohesion: 0.40
@@ -4783,9 +4829,9 @@ Nodes (4): Test poll timeout when max_polls is exhausted., Polling returns timeo
 Cohesion: 0.33
 Nodes (4): Test adapter capabilities include webhook_callback., get_capabilities includes webhook_callback., get_capabilities includes all expected capabilities., TestCapabilities
 
-### Community 904 - "default_criteria"
-Cohesion: 0.40
-Nodes (5): default_criteria(), fixture, Provide a fixed task UUID for tests., Provide the default criteria list., task_id()
+### Community 904 - "TestSubscribeNotify"
+Cohesion: 0.17
+Nodes (7): Multiple subscriptions return unique IDs., notify_subscribers calls registered sync callbacks with event., All subscribers for a company receive the event., Subscribers only receive events for their subscribed company., Tests for subscribe/notify flow., subscribe() returns a unique subscription ID string., TestSubscribeNotify
 
 ### Community 905 - "test_llm_circuit_breaker.py"
 Cohesion: 0.33
@@ -4815,17 +4861,17 @@ Nodes (3): For --cluster-only, For --update (incremental re-extraction), graphif
 Cohesion: 0.22
 Nodes (7): ParallelResult, Any, Parallel Executor - runs multiple tasks concurrently with configurable limits., Result of a single task execution within a parallel batch. Attributes: task_id:…, Aggregated result of a parallel execution batch. Attributes: results:…, Execute tasks in parallel with bounded concurrency. Each task dictionary is…, TaskResult
 
-### Community 912 - "Transition Types"
-Cohesion: 0.50
-Nodes (4): `router.back()` and Browser Back Button, Shared Element Readiness, Transition Types, Types and Suspense
+### Community 912 - "TestTokenize"
+Cohesion: 0.17
+Nodes (7): Tests for the tokenize function., Splits text into lowercase tokens., Strips punctuation from tokens., Filters out single characters except 'i' and 'a'., Empty string returns empty list., Numbers are kept as tokens., TestTokenize
 
 ### Community 913 - ".soul"
 Cohesion: 0.50
 Nodes (3): setter, Get the agent's current soul definition., Set the agent's soul definition.
 
 ### Community 914 - "TestReset"
-Cohesion: 0.50
-Nodes (3): Tests for PersistentCircuitBreaker.reset., If no record exists, reset is a no-op., TestReset
+Cohesion: 0.33
+Nodes (4): Tests for PersistentCircuitBreaker.reset., Resetting closes the circuit and zeros the failure count., If no record exists, reset is a no-op., TestReset
 
 ### Community 916 - "test_replay_engine.py"
 Cohesion: 0.33
@@ -4835,9 +4881,9 @@ Nodes (4): Tests for the Replay Engine - timeline reconstruction for debugging a
 Cohesion: 0.33
 Nodes (4): Tests for list_tasks_with_events., No tasks are listed when no events have been recorded., All tasks with events are listed., TestListTasksWithEvents
 
-### Community 920 - ".resolve"
-Cohesion: 0.11
-Nodes (14): Resolve the token budget available to conversation history. ``(context_window -…, resolve_compaction_budget(), ModelCapabilityResolver, ModelLimits, Per-model context window and max-output resolution. Compaction needs to know…, Look up an exact model's context window in the provider registry., Token limits for a model. Attributes: context_window: Total tokens the model…, Resolves a model id to its context window and max output tokens. (+6 more)
+### Community 920 - "resolve_compaction_budget"
+Cohesion: 0.36
+Nodes (4): Resolve the token budget available to conversation history. ``(context_window -…, resolve_compaction_budget(), Tests for budget derivation from a model's context window., TestResolveCompactionBudget
 
 ### Community 922 - "TestQueryFilterInjection"
 Cohesion: 0.33
@@ -4855,9 +4901,9 @@ Nodes (4): Tests that violations are properly recorded., Failed validations reco
 Cohesion: 0.33
 Nodes (6): _detect_page_type(), format_page_override_md(), _generate_intelligent_overrides(), Format a page-specific override file with intelligent AI-generated content., Generate intelligent overrides based on page type using layered search. Uses…, Detect page type from context and search results.
 
-### Community 926 - "TestTriggerMode"
-Cohesion: 0.33
-Nodes (4): Tests for TriggerMode enum., TriggerMode should have exactly 3 values., Default trigger mode should be strict., TestTriggerMode
+### Community 926 - "TestBaseTool"
+Cohesion: 0.17
+Nodes (7): Tests for the BASE_TOOLS list., BASE_TOOLS contains exactly 4 entries., uv tool entry has correct properties., mempalace tool entry has correct properties., git tool entry has correct properties., node tool entry has correct properties., TestBaseTool
 
 ### Community 927 - "skills/caveman-learn — the Caveman Learn editing skill (MIT, public)"
 Cohesion: 0.40
@@ -5099,9 +5145,9 @@ Nodes (5): Phase 3.1 — Sandbox abstraction · L · R9, Phase 3.2 — Worktree 
 Cohesion: 0.40
 Nodes (5): 0.1 — Install Babylon.js dependencies, 0.2 — Create BabylonCanvas React wrapper, 0.3 — Create scene entry point, 0.4 — Camera setup, Phase 0: Foundation & Migration Setup
 
-### Community 987 - "task_id"
-Cohesion: 0.67
-Nodes (3): fixture, Provide a fixed task UUID for tests., task_id()
+### Community 987 - "ParsedNote"
+Cohesion: 0.18
+Nodes (7): _NoAliasLoader, ParsedNote, YAML frontmatter extraction for vault notes (ADR 0002 §13). ``MarkdownParser``…, SafeLoader that refuses YAML aliases. ``safe_load`` blocks arbitrary object…, A vault note split into frontmatter and body. Attributes: metadata: Parsed…, The ``nexus_id`` frontmatter value, if the note carries one., The ``type`` frontmatter value (ADR 0002 §7), if present.
 
 ### Community 988 - "ENH-09: Vector Search / Embeddings"
 Cohesion: 0.40
@@ -5130,6 +5176,10 @@ Nodes (4): 🏛️ Application Architecture & Subsystem Knowledge, Navi — Chie
 ### Community 995 - "System Persona & Soul"
 Cohesion: 0.40
 Nodes (4): 🏛️ Application Architecture & Subsystem Knowledge, NVLabs System Orchestrator Archetype Template, 🎯 Primary Responsibilities & Execution Directives, System Persona & Soul
+
+### Community 997 - "BrokenRedis"
+Cohesion: 0.20
+Nodes (6): BrokenRedis, A Redis outage degrades to the previous behaviour, it does not fail open., The database is the record of truth, so containment survives., A failed broadcast must not swallow the trip itself., A Redis that fails every call, standing in for an outage., TestRedisOutage
 
 ### Community 999 - "ponytail-debt/SKILL.md"
 Cohesion: 0.50
@@ -5219,6 +5269,10 @@ Nodes (3): For --cluster-only, For --update (incremental re-extraction), graphif
 Cohesion: 0.50
 Nodes (3): plugin, $schema, .opencode/plugins/graphify.js
 
+### Community 1025 - "test_config_governance_encryption.py"
+Cohesion: 0.18
+Nodes (5): gov(), asyncio, fixture, Tests for config governance sensitive-value encryption (R-05 gap closure)., test_derived_key_stable_across_calls()
+
 ### Community 1026 - "TestFullExecuteWith202"
 Cohesion: 0.50
 Nodes (3): Test full execute_task flow with 202 async response., execute_task with 202 response triggers polling., TestFullExecuteWith202
@@ -5227,9 +5281,21 @@ Nodes (3): Test full execute_task flow with 202 async response., execute_task wi
 Cohesion: 0.50
 Nodes (3): Test that terminate cleans up callback handlers., terminate removes callback registrations for the session., TestTerminateCleanup
 
+### Community 1028 - "is_public_path"
+Cohesion: 0.24
+Nodes (8): is_public_path(), Whether ``path`` is reachable without a credential., parametrize, Which paths answer without a credential., Login, setup, health, metrics and the docs need no caller., Everything else requires a credential., TestPublicPaths, test_scim_paths_are_not_public_to_the_auth_middleware()
+
 ### Community 1029 - "TestTypesImportable"
 Cohesion: 0.50
 Nodes (3): Verify all types are importable from nexus.memory.reflector_types., All expected types can be imported., TestTypesImportable
+
+### Community 1030 - "failure_alchemy.py"
+Cohesion: 0.22
+Nodes (8): ArtifactType, FailureLearning, Enum, str, Failure Alchemy - transforms failed tasks into protective artifacts. Converts…, Types of learning artifacts produced from failures. Values: ANTIBODY: A…, Emit a learning event to the event bus for audit trail. Args: learning: The…, Complete learning output from analyzing a single failure. Attributes: antibody:…
+
+### Community 1031 - ".compact_incremental"
+Cohesion: 0.22
+Nodes (6): CompactionPass, One incremental compaction pass. Attributes: summary: The five-field summary of…, Compact a thread into successive batches, each fitting the budget. Greedily…, Build a pass from a filled batch, watermarked at its last message., Build a five-field summary from messages without calling an LLM. Classifies…, Return the first sentence of ``content``, capped at ``max_chars``.
 
 ### Community 1033 - "11. Monorepo"
 Cohesion: 0.67
@@ -5303,9 +5369,33 @@ Nodes (3): 10. Synchronization Strategy, NEXUS → Obsidian, Obsidian → NEXUS
 Cohesion: 0.67
 Nodes (3): 2. Core Architectural Principle, NEXUS owns operational truth, Obsidian owns human-readable knowledge
 
-### Community 1226 - "TestKdfMemoization"
-Cohesion: 0.33
-Nodes (4): PBKDF2 runs once per key per process (0.3.2)., A second backend with the same key does not re-derive., The KDF cost matches the Phase 0.3 target., TestKdfMemoization
+### Community 1076 - "TestCLIAdapterInRegistry"
+Cohesion: 0.20
+Nodes (6): Test that CLIAdapter is properly registered in AdapterRegistry., CLIAdapter is registered under 'cli' key in default registry., AdapterRegistry can create a CLIAdapter instance., Auto-registered registry has all 7 default adapters including 'cli'., get_capabilities returns CLI adapter capabilities from registry., TestCLIAdapterInRegistry
+
+### Community 1208 - "TestGuardrailChainValidation"
+Cohesion: 0.20
+Nodes (6): Tests for GuardrailChain validation execution., Empty chain passes all validations., Chain runs validate_input on all guardrails., Chain runs validate_output on all guardrails., Chain runs validate_tool_call on all guardrails., TestGuardrailChainValidation
+
+### Community 1218 - "TestGuardrailChainFailClosed"
+Cohesion: 0.20
+Nodes (6): Tests for fail-closed exception handling., With fail_closed=True, exceptions become failures., With fail_closed=False, exceptions propagate., Fail-closed works for validate_tool_call as well., Fail-closed with fail_fast=False continues after exception., TestGuardrailChainFailClosed
+
+### Community 1224 - "TestGuardrailChainIntegration"
+Cohesion: 0.20
+Nodes (6): Integration tests combining multiple guardrails., Chain with both structural and policy guardrails works., Context dict is passed to all guardrails., Chain handles None context gracefully., Full pipeline: tool call validation with multiple guardrails., TestGuardrailChainIntegration
+
+### Community 1225 - "test_knowledge_rag_search_route.py"
+Cohesion: 0.29
+Nodes (9): _chunk(), asyncio, Tests for the /knowledge/search route wiring to RAGPipeline. The route used to…, The pipeline result dicts are unpacked, including combined_score., A pipeline failure still answers from the substring fallback., RAGPipeline.search() calls db.exec(), which the app session must expose., test_pipeline_search_uses_exec_available_on_session(), test_search_falls_back_when_pipeline_raises() (+1 more)
+
+### Community 1226 - ".from_dict"
+Cohesion: 0.22
+Nodes (5): Any, Serialize to a JSON-compatible dictionary., Deserialize from a dictionary., Load persisted state on initialization., Load state from the persistence file. If the file does not exist or is invalid,…
+
+### Community 1227 - "._validate_content"
+Cohesion: 0.28
+Nodes (5): Any, Validate content against blocked patterns, paths, and commands. Args: data: The…, Validate input against policy rules. Args: input: The input data to validate.…, Validate output against policy rules. Args: output: The output data to…, Validate a tool call against the allowed tools whitelist. Args: tool_name: Name…
 
 ### Community 1228 - "persistent_circuit_breaker.py"
 Cohesion: 0.33
@@ -5320,44 +5410,184 @@ Cohesion: 0.17
 Nodes (6): Lock, In-memory sliding window rate limiter keyed by company UUID. Each company gets…, Record a request and return (remaining, allowed). Returns: Tuple of (requests…, _SlidingWindowRateLimiter, Initialize the histogram. Args: name: Metric name (Prometheus-compatible).…, Initialize the counter. Args: name: Metric name (Prometheus-compatible).…
 
 ### Community 1231 - "VaultIndexer"
-Cohesion: 0.06
-Nodes (31): ObsidianDocument, SQLModel, Obsidian vault document identity and index state (ADR 0002 §17). The vault owns…, A vault note NEXUS has seen, and the state of its derived index., _chunk_text(), IndexResult, _is_retryable(), _provider_model() (+23 more)
+Cohesion: 0.05
+Nodes (42): _chunk_text(), _is_retryable(), _provider_model(), AsyncSession, BaseException, Chunks and embeds one company's registered vault notes. Example: >>> indexer =…, Bind an indexer to a company's vault and database session. Args: db: Async…, Index one document by id, whatever its current status. Used to force a reindex… (+34 more)
 
-### Community 1232 - ".collect"
-Cohesion: 0.40
-Nodes (3): Any, Collect all metric samples for rendering. Returns: List of dicts with labels,…, Collect all metric samples for rendering. Returns: List of dicts with 'labels'…
+### Community 1232 - "TimelineEvent"
+Cohesion: 0.22
+Nodes (6): Any, Record a timeline event for a task. Creates a TimelineEvent with the current…, A single event in a task's execution timeline. Attributes: timestamp: When the…, TimelineEvent, Duration is computed from first to last event timestamp., started_at and completed_at come from STARTED and COMPLETED events.
+
+### Community 1233 - "MetricsMiddleware"
+Cohesion: 0.22
+Nodes (7): MetricsMiddleware, ASGIApp, Receive, Scope, Send, ASGI middleware that tracks HTTP request metrics. Records: -…, Initialize the middleware. Args: app: The next ASGI application in the chain.
 
 ### Community 1234 - "verify_backup.sh"
 Cohesion: 0.83
 Nodes (3): cleanup(), log(), verify_backup.sh script
 
-### Community 1235 - "routes/evolution.py"
-Cohesion: 0.04
-Nodes (86): ABTestRequest, approve_proposal(), ChangeHistoryEntry, create_proposal(), create_skill_version(), CreateProposalRequest, CreateSkillVersionRequest, diagnose_agent_failures() (+78 more)
+### Community 1235 - "_post"
+Cohesion: 0.01
+Nodes (256): agent_heartbeat(), AgentCreate, AgentResponse, AgentUpdate, clone_agent(), create_agent(), delegate_task(), DelegateTaskRequest (+248 more)
+
+### Community 1236 - "fixture"
+Cohesion: 0.22
+Nodes (9): clear_scan_locks(), no_vault(), fixture, Keep per-company locks from leaking between tests., Keep these tests on the synchronous index path, off any real Temporal. ``POST…, A configured vault root with company A's vault created., The integration disabled, which is the default configuration., synchronous_index_path() (+1 more)
+
+### Community 1237 - "fresh_rate_limits"
+Cohesion: 0.25
+Nodes (8): fresh_rate_limits(), fixture, MonkeyPatch, A failed run is still an execution an operator should see., Each test gets its own rate-limit windows. The server instance is process-wide…, Never call a real model; record that the agent would have run., stub_llm(), TestFailureRecording
+
+### Community 1238 - "execute_node_endpoint"
+Cohesion: 0.29
+Nodes (8): execute_node_endpoint(), NodeExecuteRequest, NodeExecuteResponse, BaseModel, CurrentCompanyId, Parameters for executing a node., Result of a node execution., Execute a workflow node with the supplied parameters. Only nodes with a…
+
+### Community 1239 - "get_correlation_id"
+Cohesion: 0.29
+Nodes (6): get_correlation_id(), Retrieve the current correlation ID from context. Returns: The correlation ID…, Tests for get_correlation_id()., Returns None when no correlation_id is set., Returns the value that was set in the context var., TestGetCorrelationId
+
+### Community 1241 - "semantic.py"
+Cohesion: 0.29
+Nodes (6): EmbeddingModel, Enum, str, Semantic memory manager: embedding-based retrieval via mempalace CLI. Wraps the…, Supported embedding models for semantic memory. Attributes: MINILM: MiniLM…, Initialize the semantic memory manager. Args: palace_path: Optional path to the…
 
 ### Community 1242 - ".add_response_action"
 Cohesion: 0.50
 Nodes (3): Add a response action to an incident. Supported action types: pause_agents,…, An action taken in response to an incident. Attributes: id: Unique action…, ResponseAction
 
+### Community 1243 - "TestGuardrailChainBasic"
+Cohesion: 0.25
+Nodes (5): Removing a non-existent guardrail returns False., Chain exposes fail_fast and fail_closed properties., Tests for basic GuardrailChain functionality., Chain supports adding and removing guardrails., TestGuardrailChainBasic
+
+### Community 1247 - "TestGuardrailChainFailFast"
+Cohesion: 0.25
+Nodes (5): Tests for fail-fast short-circuit behavior., With fail_fast=True, chain stops on first failure., With fail_fast=False, chain collects violations from all guardrails., Fail-fast reports the name of the first failing guardrail., TestGuardrailChainFailFast
+
+### Community 1248 - "TestStructuralGuardrailFields"
+Cohesion: 0.25
+Nodes (5): Tests for StructuralGuardrail required fields validation., Dict with all required fields passes., Dict missing required fields fails., Required fields check is skipped for non-dict data., TestStructuralGuardrailFields
+
+### Community 1249 - "TestDefaultDeny"
+Cohesion: 0.25
+Nodes (5): Tests for default-deny behavior when no policies match., An engine with no policies defaults to deny., An action that matches no policy conditions is denied., A disabled policy is not evaluated, leading to default deny., TestDefaultDeny
+
+### Community 1250 - "TestRotationHistory"
+Cohesion: 0.25
+Nodes (5): Tests for rotation_history tracking., Test that rotation history starts empty., Test manually updating rotation history., Test that rotation history affects check_rotation_needed., TestRotationHistory
+
+### Community 1251 - "TestCompactionStrategy"
+Cohesion: 0.25
+Nodes (5): Tests for the CompactionStrategy enum., TRUNCATE should have correct value., SUMMARIZE should have correct value., SLIDING_WINDOW should have correct value., TestCompactionStrategy
+
+### Community 1252 - "Common Patterns"
+Cohesion: 0.29
+Nodes (7): Common Patterns, Composing Shared Elements with List Identity, Enter/Exit, Force Re-Enter with `key`, Layout Displacement Morph, List Reorder, Suspense Fallback to Content
+
+### Community 1253 - ".__init__"
+Cohesion: 0.29
+Nodes (4): Path, Initialize with the hive root directory path. Args: root: Path to the hive…, Return the hive root directory path., Create the base hive directory structure if not present.
+
+### Community 1254 - ".execute_with_smart_retry"
+Cohesion: 0.29
+Nodes (5): Any, Execute a task with smart retry and escalation logic. The execute_fn should…, Diagnose the failure pattern from collected errors. Applies the diagnosis…, Outcome of a smart retry execution with escalation information. Extends the…, SmartRetryResult
+
+### Community 1255 - "TestEventBusIntegration"
+Cohesion: 0.33
+Nodes (5): asyncio, Tests for emit_learning_event method., emit_learning_event publishes to the event bus when available., emit_learning_event does nothing if no event bus is configured., TestEventBusIntegration
+
+### Community 1256 - "Micro-Phase 1.1: Request Idempotency Middleware & Ledger (F3)"
+Cohesion: 0.33
+Nodes (5): 1. Problem Statement, 2. Technical Invariants, 3. Database Schema, 4. Middleware Implementation Logic, Micro-Phase 1.1: Request Idempotency Middleware & Ledger (F3)
+
+### Community 1259 - "TestNotifyIntegration"
+Cohesion: 0.33
+Nodes (4): Tests for notify_subscribers wired into publish_page and update_page., publish_page triggers notify_subscribers with 'created' type., update_page triggers notify_subscribers with 'updated' type., TestNotifyIntegration
+
+### Community 1260 - "test_a_link_cannot_reach_another_companys_note"
+Cohesion: 0.33
+Nodes (6): fixture, Two companies with the same note title stay separate graphs., session_factory(), test_a_link_cannot_reach_another_companys_note(), test_another_tenants_notes_never_appear(), vault()
+
+### Community 1261 - "TestTriggerConfigDto"
+Cohesion: 0.33
+Nodes (4): TriggerConfig survives as a DTO with no scheduling behaviour., from_model carries every scheduling field across., The second, in-memory scheduler is gone., TestTriggerConfigDto
+
+### Community 1262 - "Micro-Phase 1.2: Atomic Budget Reservation & Overcommit Protection (F2)"
+Cohesion: 0.40
+Nodes (4): 1. Problem Statement, 2. Technical Invariants, 3. Implementation Blueprint, Micro-Phase 1.2: Atomic Budget Reservation & Overcommit Protection (F2)
+
+### Community 1263 - "Micro-Phase 2: True Database Verification Engine & Test Split (F1)"
+Cohesion: 0.40
+Nodes (4): 1. Problem Statement, 2. Technical Invariants, 3. Implementation Blueprint, Micro-Phase 2: True Database Verification Engine & Test Split (F1)
+
+### Community 1264 - "Micro-Phase 3: Operational Guardrails & Fault Tolerance (F5)"
+Cohesion: 0.40
+Nodes (4): 1. Problem Statement, 2. Technical Invariants, 3. Implementation Blueprint, Micro-Phase 3: Operational Guardrails & Fault Tolerance (F5)
+
+### Community 1265 - "Micro-Phase 4: Database-Level Row-Level Security (F4)"
+Cohesion: 0.40
+Nodes (4): 1. Problem Statement, 2. Technical Invariants, 3. Implementation Blueprint, Micro-Phase 4: Database-Level Row-Level Security (F4)
+
+### Community 1266 - "Micro-Phase 5: Real-Time SSE/WS Event Pipeline"
+Cohesion: 0.40
+Nodes (4): 1. Problem Statement, 2. Technical Invariants, 3. Implementation Blueprint, Micro-Phase 5: Real-Time SSE/WS Event Pipeline
+
+### Community 1267 - "LearningEventBusProtocol"
+Cohesion: 0.40
+Nodes (4): LearningEventBusProtocol, Protocol, Protocol for emitting learning events for audit trail., Initialize the failure alchemist. Args: event_bus: Optional event bus for…
+
+### Community 1269 - "NEXUS / NVLabsCompany — Production Readiness & 10/10 Architecture Master Plan"
+Cohesion: 0.50
+Nodes (3): 1. Overview & Architecture Thesis, 2. Micro-Phase Roadmap Breakdown, NEXUS / NVLabsCompany — Production Readiness & 10/10 Architecture Master Plan
+
+### Community 1270 - "LLMCircuitBreakerConfig"
+Cohesion: 0.50
+Nodes (3): LLMCircuitBreakerConfig, Initialize the circuit breaker around an LLM callable. Args: llm_callable: The…, Configuration for the LLM circuit breaker. Attributes: failure_threshold:…
+
+### Community 1271 - "Vaccine"
+Cohesion: 0.50
+Nodes (3): Retrieve all generated vaccines. Returns: List of all Vaccine artifacts created…, A test scenario derived from a real failure. Attributes: scenario: Description…, Vaccine
+
+### Community 1272 - ".__init__"
+Cohesion: 0.50
+Nodes (3): async_sessionmaker, AsyncSession, Bind authorizer to coarse tool access and persistent path grants.
+
+### Community 1273 - "TestArtifactTypes"
+Cohesion: 0.50
+Nodes (3): Tests for the ArtifactType enum., ArtifactType enum has correct values., TestArtifactTypes
+
+### Community 1274 - "TestApprovalModel"
+Cohesion: 0.50
+Nodes (3): Tests for the Approval model., Approval can be created with required fields., TestApprovalModel
+
+### Community 1275 - "TestCompanyMembershipModel"
+Cohesion: 0.50
+Nodes (3): Tests for the CompanyMembership model., CompanyMembership can be created with required fields., TestCompanyMembershipModel
+
+### Community 1277 - "build_parser"
+Cohesion: 0.67
+Nodes (3): ArgumentParser, build_parser(), Command line interface for the bootstrap command.
+
+### Community 1278 - "_read_password"
+Cohesion: 0.67
+Nodes (3): Namespace, Take the password from ``--password``, or ask for it twice., _read_password()
+
 ## Knowledge Gaps
-- **4688 isolated node(s):** `name`, `version`, `license`, `private`, `type` (+4683 more)
+- **4709 isolated node(s):** `name`, `version`, `license`, `private`, `type` (+4704 more)
   These have ≤1 connection - possible missing edges or undocumented components.
 - **174 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `Agent` connect `Agent` to `AgentSession`, `_post`, `watchdog_service.py`, `db`, `timedelta`, `MemoryRecord`, `goals.py`, `temporal/workflows.py`, `models/__init__.py`, `Trigger`, `tools.py`, `skills.py`, `routes/workflows.py`, `tools/__init__.py`, `_get`, `routes/hr.py`, `Message`, `_store`, `telegram_bot.py`, `main.py`, `test_chat_adapter_resolution.py`, `compute_next_fire`, `PersistentHeartbeatService`, `MemoryScopeManager`, `SkillService`, `routes/evolution.py`, `TestNeedsRecoveryEscalation`, `AgentLifecycleManager`, `identity.py`, `SmartRetryWithEscalation`, `runtime/__init__.py`, `TaskFlow`, `CompanyPortabilityService`, `tenant_scope`, `routes/chat.py`?**
-  _High betweenness centrality (0.045) - this node is a cross-community bridge._
-- **Why does `AdapterRegistry` connect `AgentSession` to `CLIAdapter`, `ValueError`, `ClaudeCodeAdapter`, `routes/workflows.py`, `HermesAdapter`, `adapters.py`, `HTTPAdapter`, `TaskFlow`, `_run`, `routes/chat.py`?**
-  _High betweenness centrality (0.024) - this node is a cross-community bridge._
-- **Why does `PluginRegistry` connect `main.py` to `.register`, `SamplePlugin`, `HookPoint`, `NexusPlugin`?**
-  _High betweenness centrality (0.023) - this node is a cross-community bridge._
-- **Are the 95 inferred relationships involving `Agent` (e.g. with `agent_profiling()` and `agent_heartbeat()`) actually correct?**
-  _`Agent` has 95 INFERRED edges - model-reasoned connections that need verification._
+- **Why does `Agent` connect `_post` to `agent.py`, `_get`, `watchdog_service.py`, `db`, `test_scheduler_persistence.py`, `MemoryRecord`, `api/middleware.py`, `BudgetService`, `deps.py`, `models/__init__.py`, `skills.py`, `routes/workflows.py`, `ToolRegistry`, `factory.py`, `routes/hr.py`, `timedelta`, `_store`, `telegram_bot.py`, `test_chat_adapter_resolution.py`, `CLIRegistry`, `compute_next_fire`, `main.py`, `TestNeedsRecoveryEscalation`, `secrets.py`, `routes/communication.py`, `AgentLifecycleManager`, `identity.py`, `utcnow`, `CompanyPortabilityService`?**
+  _High betweenness centrality (0.046) - this node is a cross-community bridge._
+- **Why does `AdapterRegistry` connect `AgentSession` to `CLIAdapter`, `ValueError`, `ClaudeCodeAdapter`, `routes/workflows.py`, `HermesAdapter`, `adapters.py`, `HTTPAdapter`, `_post`, `TaskFlow`, `_run`, `TestCLIAdapterInRegistry`?**
+  _High betweenness centrality (0.017) - this node is a cross-community bridge._
+- **Why does `SubagentPermits` connect `SubagentPermits` to `ValueError`, `DelegationEngine`, `Message`?**
+  _High betweenness centrality (0.015) - this node is a cross-community bridge._
+- **Are the 97 inferred relationships involving `Agent` (e.g. with `agent_profiling()` and `agent_heartbeat()`) actually correct?**
+  _`Agent` has 97 INFERRED edges - model-reasoned connections that need verification._
 - **Are the 14 inferred relationships involving `AgentSession` (e.g. with `AnthropicAdapter` and `AzureOpenAIAdapter`) actually correct?**
   _`AgentSession` has 14 INFERRED edges - model-reasoned connections that need verification._
 - **What connects `name`, `version`, `license` to the rest of the system?**
-  _4688 weakly-connected nodes found - possible documentation gaps or missing edges._
+  _4709 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `AgentSession` be split into smaller, more focused modules?**
-  _Cohesion score 0.013465085638998682 - nodes in this community are weakly interconnected._
+  _Cohesion score 0.013376383763837638 - nodes in this community are weakly interconnected._

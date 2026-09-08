@@ -161,6 +161,9 @@ class RAGPipeline:
                 bm25_weight=config.get("bm25_weight", 0.6),
                 overlap_weight=config.get("overlap_weight", 0.4),
             )
+        elif ranker_type == "rrf":
+            from nexus.knowledge.rankers import RRFRanker
+            return RRFRanker(top_k=top_k, k=config.get("k", 60))
         elif ranker_type == "pipeline":
             ranker_configs = config.get("rankers", [])
             pipeline = RerankerPipeline()

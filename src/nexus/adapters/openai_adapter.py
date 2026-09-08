@@ -114,6 +114,7 @@ class OpenAIAdapter(BaseAdapter):
         headers = {
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
+            "Idempotency-Key": f"{session.session_id}:{hashlib.sha256(prompt.encode()).hexdigest()[:16]}",
         }
 
         # Retry with exponential backoff on rate limits
