@@ -71,3 +71,6 @@ graphify-out/cache/
 # Any vault a developer keeps inside the working tree by convention.
 /vaults/
 .obsidian/
+
+graphify-out/
+
