@@ -337,6 +337,12 @@ class BudgetService:
                 check.message = "Budget exceeded (atomic reservation check failed)"
                 return False, None, check
 
+        if not matched_policy_id:
+            # No policy governs this scope -> unlimited, so there is nothing to
+            # hold. Writing a reservation row here would leave an orphaned hold
+            # that no policy counter tracks and no settle path decrements.
+            return True, None, check
+
         now = datetime.now(timezone.utc).replace(tzinfo=None)
         reservation = CostEvent(
             company_id=company_id,
@@ -352,6 +358,56 @@ class BudgetService:
         self._db.add(reservation)
         await self._db.commit()
         return True, reservation, check
+
+    async def reserve_chain(
+        self,
+        company_id: uuid.UUID,
+        estimate_cents: int,
+        agent_id: uuid.UUID | None = None,
+        provider: str = "unknown",
+        model: str | None = None,
+        ttl_seconds: int = RESERVATION_TTL_SECONDS,
+    ) -> tuple[bool, list[uuid.UUID], BudgetCheckResult]:
+        """Reserve against the full applicable policy chain, most-restrictive-wins.
+
+        Tier 2 (WP-22g): a call must fit under EVERY scope that governs it — the
+        company wall AND the agent's own cap. Holds against each scope that has a
+        policy; if any one is denied, every partial hold already taken is rolled
+        back via release_reservation, so a refusal leaves no orphaned holds.
+
+        Returns (allowed, reservation_ids, last_check). reservation_ids is empty
+        when no scope had a policy (unlimited) — the caller still proceeds.
+        """
+        scopes: list[tuple[str, uuid.UUID]] = [("company", company_id)]
+        if agent_id is not None:
+            scopes.append(("agent", agent_id))
+
+        held: list[uuid.UUID] = []
+        last_check = BudgetCheckResult(
+            allowed=True, remaining_cents=0, used_cents=0, limit_cents=0,
+            warn_threshold_reached=False, message="No budget policy configured",
+        )
+        for scope_type, scope_id in scopes:
+            allowed, reservation, check = await self.reserve(
+                company_id=company_id,
+                estimate_cents=estimate_cents,
+                scope_type=scope_type,
+                scope_id=scope_id,
+                agent_id=agent_id,
+                provider=provider,
+                model=model,
+                ttl_seconds=ttl_seconds,
+            )
+            last_check = check
+            if not allowed:
+                # Roll back every hold taken for the earlier scopes.
+                for rid in held:
+                    await self.release_reservation(rid)
+                return False, [], check
+            if reservation is not None:
+                held.append(reservation.id)
+
+        return True, held, last_check
 
     async def commit_reservation(
         self,

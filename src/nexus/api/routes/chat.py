@@ -677,10 +677,11 @@ async def _reserve_budget(
             # BudgetService already scopes to active policies and to the policy's
             # own window, so a monthly cap stays monthly rather than becoming a
             # lifetime one.
-            allowed, reservation, result = await BudgetService(budget_db).reserve(
+            allowed, reservation_ids, result = await BudgetService(
+                budget_db
+            ).reserve_chain(
                 company_id=agent.company_id,
                 estimate_cents=estimate_cents,
-                scope_type="company",
                 agent_id=agent.id,
                 provider=agent.adapter_type or "anthropic",
                 model=config.get("model"),
@@ -708,7 +709,7 @@ async def _reserve_budget(
             result.limit_cents / 100.0,
         )
 
-    return reservation.id if reservation else None
+    return reservation_ids or None
 
 
 async def _settle_budget(
@@ -735,6 +736,21 @@ async def _settle_budget(
     """
     if reservation_id is None:
         return
+    # _reserve_budget returns a list of holds (one per policy scope: company +
+    # agent). Settle every one. A bare id is still accepted for back-compat.
+    ids = reservation_id if isinstance(reservation_id, list) else [reservation_id]
+    for rid in ids:
+        await _settle_one(rid, cost_cents, input_tokens, output_tokens, model)
+
+
+async def _settle_one(
+    reservation_id: Any,
+    cost_cents: int,
+    input_tokens: int = 0,
+    output_tokens: int = 0,
+    model: str | None = None,
+) -> None:
+    """Settle or release a single hold."""
     try:
         from nexus.database import async_session_factory
         from nexus.services.budget_service import BudgetService
