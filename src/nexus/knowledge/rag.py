@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 
 from nexus.knowledge.embeddings import cosine_similarity
+from nexus.knowledge.rankers import RRFRanker
 from nexus.memory.retriever import search as bm25_search, tokenize
 from nexus.models.knowledge import (
     EMBEDDING_DIM,
@@ -492,48 +493,79 @@ class RAGPipeline:
         if self.embedding_provider is not None:
             query_embedding = await self.embedding_provider.embed(query)
 
-        # On PostgreSQL/pgvector, let the index pick candidates by `<=>` distance
-        # instead of fetching every row and doing cosine in Python.
-        sql_distances: dict[Any, float] = {}
-        chunks = await self._vector_candidates(company_id, query_embedding, top_k, sql_distances)
-        if chunks is None:
-            statement = select(KnowledgeChunk).where(
-                KnowledgeChunk.company_id == company_id
-            )
-            result = await self.db.exec(statement)
-            chunks = list(result.all())
+        # Candidate pool size >= 50 (or 5 * top_k)
+        pool_size = max(50, top_k * 5)
 
-        if not chunks:
+        # 1. Vector Channel: retrieve top vector candidates
+        sql_distances: dict[Any, float] = {}
+        vector_candidate_chunks = await self._vector_candidates(company_id, query_embedding, pool_size, sql_distances)
+        
+        # 2. All company chunks fallback or base corpus for BM25
+        statement = select(KnowledgeChunk).where(KnowledgeChunk.company_id == company_id)
+        result = await self.db.exec(statement)
+        all_chunks = list(result.all())
+
+        if not all_chunks:
             return []
 
-        # BM25 search over chunk content
-        memories = [c.content for c in chunks]
-        bm25_results = bm25_search(query, memories, top_k=top_k)
+        # BM25 ranking across all company chunks
+        memories = [c.content for c in all_chunks]
+        bm25_hits = bm25_search(query, memories, top_k=pool_size)
 
-        # Build results with hybrid scoring
-        results: list[dict] = []
-        for idx, bm25_score_val in bm25_results:
-            chunk = chunks[idx]
-            # Compute vector similarity
-            if chunk.id in sql_distances:
-                vector_score = max(0.0, 1.0 - sql_distances[chunk.id])
-            else:
-                vector_score = self._compute_vector_similarity(
-                    query, chunk.content, query_embedding, chunk.embedding_vector
-                )
-            # Combined score: weighted average (BM25 dominant, vector as supplement)
-            combined_score = 0.7 * bm25_score_val + 0.3 * vector_score
-
-            results.append({
+        bm25_channel: list[dict[str, Any]] = []
+        for idx, score in bm25_hits:
+            chunk = all_chunks[idx]
+            bm25_channel.append({
+                "id": str(chunk.id),
                 "chunk": chunk,
-                "bm25_score": bm25_score_val,
-                "vector_score": vector_score,
-                "combined_score": combined_score,
+                "bm25_score": score,
             })
 
-        # Sort by combined score
-        results.sort(key=lambda x: x["combined_score"], reverse=True)
-        return results[:top_k]
+        vector_channel: list[dict[str, Any]] = []
+        if vector_candidate_chunks:
+            for chunk in vector_candidate_chunks:
+                dist = sql_distances.get(chunk.id, 1.0)
+                v_score = max(0.0, 1.0 - dist)
+                vector_channel.append({
+                    "id": str(chunk.id),
+                    "chunk": chunk,
+                    "vector_score": v_score,
+                })
+        else:
+            scored_vecs = []
+            for chunk in all_chunks:
+                v_score = self._compute_vector_similarity(
+                    query, chunk.content, query_embedding, chunk.embedding_vector
+                )
+                scored_vecs.append((v_score, chunk))
+            scored_vecs.sort(key=lambda x: x[0], reverse=True)
+            for v_score, chunk in scored_vecs[:pool_size]:
+                vector_channel.append({
+                    "id": str(chunk.id),
+                    "chunk": chunk,
+                    "vector_score": v_score,
+                })
+
+        # Reciprocal Rank Fusion of both channels before final truncation
+        rrf = RRFRanker(top_k=top_k, k=60)
+        channels = [bm25_channel]
+        if vector_channel:
+            channels.append(vector_channel)
+
+        fused = rrf.fuse(channels)
+        for item in fused:
+            if "bm25_score" not in item:
+                item["bm25_score"] = 0.0
+            if "vector_score" not in item:
+                chunk = item.get("chunk")
+                item["vector_score"] = self._compute_vector_similarity(
+                    query,
+                    chunk.content if chunk else "",
+                    query_embedding,
+                    chunk.embedding_vector if chunk else None,
+                )
+
+        return fused
 
     async def _vector_candidates(
         self,

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   ShieldAlert,
   CheckCircle2,
@@ -14,6 +14,7 @@ import { EmptyState } from '@/components/common/EmptyState';
 import { apiClient } from '@/api/client';
 import { getActiveCompanyId } from '@/config';
 import { useEventStream } from '@/hooks/useEventStream';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 
 interface GovernanceApproval {
   id: string;
@@ -49,36 +50,42 @@ function mapApproval(raw: Record<string, unknown>): GovernanceApproval {
 }
 
 export function Approvals() {
+  const queryClient = useQueryClient();
+  const companyId = getActiveCompanyId();
+
+  const { data: initialData, error: queryError } = useQuery({
+    queryKey: ['approvals', companyId],
+    queryFn: async () => {
+      const res = await apiClient.get<Record<string, unknown>[]>(
+        `/api/v1/companies/${companyId}/approvals/pending`
+      );
+      return res.map(mapApproval);
+    },
+  });
+
   const [approvals, setApprovals] = useState<GovernanceApproval[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  const isMountedRef = useRef(true);
   useEffect(() => {
-    isMountedRef.current = true;
-    return () => {
-      isMountedRef.current = false;
-    };
-  }, []);
+    if (initialData) {
+      setApprovals(initialData);
+      setLoadError(null);
+    }
+  }, [initialData]);
+
+  useEffect(() => {
+    if (queryError) {
+      setLoadError('Failed to load approvals from the backend.');
+    }
+  }, [queryError]);
 
   const loadApprovals = useCallback(async () => {
     try {
-      const res = await apiClient.get<Record<string, unknown>[]>(
-        `/api/v1/companies/${getActiveCompanyId()}/approvals/pending`
-      );
-      if (isMountedRef.current) {
-        setApprovals(res.map(mapApproval));
-        setLoadError(null);
-      }
-    } catch (err) {
-      if (isMountedRef.current) {
-        setLoadError('Failed to load approvals from the backend.');
-      }
+      await queryClient.invalidateQueries({ queryKey: ['approvals', companyId] });
+    } catch {
+      setLoadError('Failed to load approvals from the backend.');
     }
-  }, []);
-
-  useEffect(() => {
-    loadApprovals();
-  }, [loadApprovals]);
+  }, [queryClient, companyId]);
 
   // Real-time approval updates via SSE
   useEventStream('approvals', useCallback((event: any) => {

@@ -26,14 +26,10 @@ from nexus.database import get_session
 
 
 async def get_db(request: Request) -> AsyncGenerator[AsyncSession, None]:
-    """Provide an async database session with transaction-local tenant context (F4)."""
+    """Provide an async database session with tenant context (WP-9)."""
     principal = get_principal_from_scope(request.scope)
-    async for session in get_session():
-        if principal and principal.company_id and not settings.database_url.startswith("sqlite"):
-            await session.execute(
-                text("SELECT set_config('nexus.company_id', :cid, true)"),
-                {"cid": str(principal.company_id)},
-            )
+    cid = principal.company_id if principal else None
+    async for session in get_session(company_id=cid):
         yield session
 
 

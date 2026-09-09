@@ -297,6 +297,19 @@ class TestRRFRanker:
         assert ranked[1]["id"] in ["doc1", "doc2"]
         assert ranked[0]["rrf_score"] > ranked[1]["rrf_score"] or abs(ranked[0]["rrf_score"] - ranked[1]["rrf_score"]) < 1e-6
 
+    def test_rrf_ranker_fuse_distinct_channels(self):
+        """RRFRanker fuses independent ranked channels before top_k truncation (WP-11)."""
+        ranker = RRFRanker(top_k=2, k=60)
+        channel_a = [{"id": "docA", "bm25_score": 10.0}, {"id": "docB", "bm25_score": 5.0}]
+        channel_b = [{"id": "docC", "vector_score": 0.99}, {"id": "docA", "vector_score": 0.80}]
+        
+        fused = ranker.fuse([channel_a, channel_b])
+        assert len(fused) == 2
+        # docA appears in both (rank 1 in A + rank 2 in B) -> highest score
+        assert fused[0]["id"] == "docA"
+        assert fused[0]["rrf_score"] == (1.0 / (60 + 1)) + (1.0 / (60 + 2))
+
+
 
 # ============================================================
 # Retriever Protocol Tests

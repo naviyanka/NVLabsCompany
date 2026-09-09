@@ -1,4 +1,33 @@
 services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: nexus
+      POSTGRES_USER: nexus
+      POSTGRES_PASSWORD: nexus
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./docker/postgres-init:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nexus -d nexus"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://nexus_migrator:nexus_migrator_pass@postgres:5432/nexus
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: alembic upgrade head
+    restart: "no"
+
   backend:
     build:
       context: .
@@ -7,18 +36,24 @@ services:
       - "8000:8000"
     environment:
       - DATABASE_URL=postgresql+asyncpg://nexus_app:nexus_app_pass@postgres:5432/nexus
+      - SYSTEM_DATABASE_URL=postgresql+asyncpg://nexus_system:nexus_system_pass@postgres:5432/nexus
       - REDIS_URL=redis://redis:6379/0
       - AUTH_ENABLED=true
       - CORS_ORIGINS=http://localhost:3000
       - TEMPORAL_HOST=temporal:7233
       - USE_TEMPORAL=true
     depends_on:
-      - postgres
-      - redis
-      - temporal
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_started
+      temporal:
+        condition: service_started
     volumes:
       - ./src:/app/src
-    command: sh -c "alembic upgrade head && uvicorn nexus.main:app --host 0.0.0.0 --port 8000 --reload"
+    command: uvicorn nexus.main:app --host 0.0.0.0 --port 8000 --reload
 
   frontend:
     build:
@@ -30,18 +65,6 @@ services:
       - NEXUS_API_URL=http://backend:8000
     depends_on:
       - backend
-
-  postgres:
-    image: postgres:16-alpine
-    environment:
-      POSTGRES_DB: nexus
-      POSTGRES_USER: nexus
-      POSTGRES_PASSWORD: nexus
-    ports:
-      - "5433:5432"
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-      - ./docker/postgres-init:/docker-entrypoint-initdb.d
 
   redis:
     image: redis:7-alpine
@@ -60,7 +83,8 @@ services:
       - POSTGRES_PWD=nexus
       - POSTGRES_SEEDS=postgres
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
 
   temporal-ui:
     image: temporalio/ui:2.31.2
@@ -76,14 +100,20 @@ services:
       context: .
       dockerfile: Dockerfile
     environment:
-      - DATABASE_URL=postgresql+asyncpg://nexus_system:nexus_system_pass@postgres:5432/nexus
+      - DATABASE_URL=postgresql+asyncpg://nexus_app:nexus_app_pass@postgres:5432/nexus
+      - SYSTEM_DATABASE_URL=postgresql+asyncpg://nexus_system:nexus_system_pass@postgres:5432/nexus
       - REDIS_URL=redis://redis:6379/0
       - TEMPORAL_HOST=temporal:7233
       - USE_TEMPORAL=true
     depends_on:
-      - temporal
-      - postgres
-      - redis
+      temporal:
+        condition: service_started
+      migrate:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
     command: python -m nexus.temporal.worker
 
 volumes:

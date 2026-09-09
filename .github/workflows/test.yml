@@ -15,6 +15,7 @@ jobs:
         with:
           python-version: '3.12'
       - run: python scripts/arch_guard.py
+      - run: python scripts/check_generated_artifacts.py
 
   backend:
     runs-on: ubuntu-latest
@@ -72,6 +73,8 @@ jobs:
       - run: npm ci
         working-directory: dashboard
       - run: npx tsc --noEmit
+        working-directory: dashboard
+      - run: npm test
         working-directory: dashboard
       - run: npx vite build
         working-directory: dashboard

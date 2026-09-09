@@ -35,6 +35,7 @@ import {
   Terminal,
   Zap,
 } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Area,
@@ -78,6 +79,25 @@ const SEVERITY_COLORS: Record<ActivitySeverity, { bg: string; text: string; bord
 const INITIAL_LOGS: ActivityLog[] = [];
 
 export function Activity() {
+  const companyId = getActiveCompanyId();
+
+  const { data: initialData } = useQuery({
+    queryKey: ['activity', companyId],
+    queryFn: async () => {
+      const items = await apiClient.get<ActivityLog[]>(
+        `/api/v1/companies/${companyId}/activity`
+      );
+      if (items && items.length > 0) {
+        return items.map((item, i) => ({
+          ...item,
+          timestamp: item.timestamp || Date.now() - i * 60000,
+          severity: item.severity || (item.status === 'failed' ? 'error' : 'info'),
+        }));
+      }
+      return [];
+    },
+  });
+
   const [logs, setLogs] = useState<ActivityLog[]>(INITIAL_LOGS);
   const [search, setSearch] = useState('');
   const [selectedType, setSelectedType] = useState<string>('all');
@@ -89,28 +109,11 @@ export function Activity() {
   const [viewMode, setViewMode] = useState<'list' | 'terminal' | 'analytics' | 'liveness'>('list');
   const [copiedId, setCopiedId] = useState<boolean>(false);
 
-  // Fetch initial activity logs from API if available
   useEffect(() => {
-    async function loadActivity() {
-      try {
-        const res = await apiClient.get<ActivityLog[]>(
-          `/api/v1/companies/${getActiveCompanyId()}/activity`
-        );
-        const items = res;
-        if (items.length > 0) {
-          const formatted = items.map((item, i) => ({
-            ...item,
-            timestamp: item.timestamp || Date.now() - i * 60000,
-            severity: item.severity || (item.status === 'failed' ? 'error' : 'info'),
-          }));
-          setLogs(formatted);
-        }
-      } catch {
-        // API error — show empty state
-      }
+    if (initialData && initialData.length > 0) {
+      setLogs(initialData);
     }
-    loadActivity();
-  }, []);
+  }, [initialData]);
 
   // Real-time activity stream via SSE — prepends new events immediately
   useEventStream<any>('activity', useCallback((event: any) => {

@@ -37,3 +37,32 @@ async def test_tenant_bulkhead_restores_slots_after_exit():
     # Next call succeeds because slot was released
     async with bulkhead.acquire(cid):
         pass
+
+
+@pytest.mark.asyncio
+async def test_tenant_bulkhead_enforces_global_cap():
+    bulkhead = TenantBulkhead(per_tenant=10, global_cap=2)
+    c1, c2, c3 = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+
+    async with bulkhead.acquire(c1):
+        async with bulkhead.acquire(c2):
+            with pytest.raises(TenantSaturated):
+                async with bulkhead.acquire(c3):
+                    pass
+    assert bulkhead.global_in_flight == 0
+
+
+@pytest.mark.asyncio
+async def test_tenant_bulkhead_bounded_cache():
+    bulkhead = TenantBulkhead(per_tenant=5, global_cap=50, max_cached_tenants=2)
+    c1, c2, c3 = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+
+    async with bulkhead.acquire(c1):
+        pass
+    async with bulkhead.acquire(c2):
+        pass
+    async with bulkhead.acquire(c3):
+        pass
+
+    assert len(bulkhead._tenant_in_flight) <= 2
+

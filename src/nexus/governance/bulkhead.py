@@ -1,10 +1,13 @@
-"""Per-tenant concurrency bulkhead (F5).
+"""Per-tenant concurrency bulkhead (F5 / WP-10).
 
 Prevents a high-throughput tenant from exhausting shared worker execution pools.
+Thread-safe / task-safe tracking of in-flight executions with lock-guarded counters,
+bounded tenant cache, and fast-fail TenantSaturated exception without touching private sem._value.
 """
 
 import asyncio
 import uuid
+from collections import OrderedDict
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
@@ -21,26 +24,56 @@ class TenantSaturated(Exception):
 class TenantBulkhead:
     """Isolates tenant concurrency with global and per-tenant caps."""
 
-    def __init__(self, per_tenant: int = 16, global_cap: int = 128) -> None:
+    def __init__(
+        self,
+        per_tenant: int = 16,
+        global_cap: int = 128,
+        max_cached_tenants: int = 1000,
+    ) -> None:
         self.per_tenant = per_tenant
-        self._global_sem = asyncio.Semaphore(global_cap)
-        self._tenant_sems: dict[uuid.UUID, asyncio.Semaphore] = {}
+        self.global_cap = global_cap
+        self.max_cached_tenants = max_cached_tenants
+        self._global_in_flight: int = 0
+        self._tenant_in_flight: OrderedDict[uuid.UUID, int] = OrderedDict()
         self._lock = asyncio.Lock()
 
-    async def _get_tenant_semaphore(self, company_id: uuid.UUID) -> asyncio.Semaphore:
-        async with self._lock:
-            if company_id not in self._tenant_sems:
-                self._tenant_sems[company_id] = asyncio.Semaphore(self.per_tenant)
-            return self._tenant_sems[company_id]
+    def in_flight(self, company_id: uuid.UUID) -> int:
+        """Read active count for a tenant (snapshot)."""
+        return self._tenant_in_flight.get(company_id, 0)
+
+    @property
+    def global_in_flight(self) -> int:
+        """Read global active count (snapshot)."""
+        return self._global_in_flight
 
     @asynccontextmanager
     async def acquire(self, company_id: uuid.UUID) -> AsyncIterator[None]:
+        """Atomically claim a slot under per-tenant and global caps."""
         async with self._lock:
-            if company_id not in self._tenant_sems:
-                self._tenant_sems[company_id] = asyncio.Semaphore(self.per_tenant)
-            sem = self._tenant_sems[company_id]
-            if sem.locked() and sem._value <= 0:
+            current_tenant = self._tenant_in_flight.get(company_id, 0)
+            if current_tenant >= self.per_tenant or self._global_in_flight >= self.global_cap:
                 raise TenantSaturated(company_id)
 
-        async with self._global_sem, sem:
+            self._tenant_in_flight[company_id] = current_tenant + 1
+            self._tenant_in_flight.move_to_end(company_id)
+            self._global_in_flight += 1
+
+            # Prune inactive tenants if cache size exceeded
+            while len(self._tenant_in_flight) > self.max_cached_tenants:
+                oldest_id, oldest_count = next(iter(self._tenant_in_flight.items()))
+                if oldest_count == 0:
+                    del self._tenant_in_flight[oldest_id]
+                else:
+                    break
+
+        try:
             yield
+        finally:
+            async with self._lock:
+                self._global_in_flight = max(0, self._global_in_flight - 1)
+                if company_id in self._tenant_in_flight:
+                    self._tenant_in_flight[company_id] = max(
+                        0, self._tenant_in_flight[company_id] - 1
+                    )
+                    if self._tenant_in_flight[company_id] == 0 and len(self._tenant_in_flight) > self.max_cached_tenants:
+                        del self._tenant_in_flight[company_id]

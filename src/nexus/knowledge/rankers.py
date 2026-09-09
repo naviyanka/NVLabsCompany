@@ -307,6 +307,36 @@ class RRFRanker:
             return str(item["content"])
         return str(default_idx)
 
+    def fuse(self, channels: list[list[dict[str, Any]]]) -> list[dict[str, Any]]:
+        """Fuse multiple distinct ranking lists (channels) before top_k truncation (WP-11).
+        
+        Formula: score(d) = sum(1.0 / (k + rank_i(d))) across all channels containing d.
+        """
+        if not channels:
+            return []
+
+        item_map: dict[str, dict[str, Any]] = {}
+        scores: dict[str, float] = {}
+
+        for channel in channels:
+            for rank_idx, item in enumerate(channel, start=1):
+                key = self._get_item_key(item, rank_idx)
+                if key not in item_map:
+                    item_map[key] = dict(item)
+                else:
+                    item_map[key].update(item)
+                scores[key] = scores.get(key, 0.0) + (1.0 / (self.k + rank_idx))
+
+        fused: list[dict[str, Any]] = []
+        for key, item in item_map.items():
+            item_copy = dict(item)
+            item_copy["rrf_score"] = scores[key]
+            item_copy["combined_score"] = scores[key]
+            fused.append(item_copy)
+
+        fused.sort(key=lambda x: x["rrf_score"], reverse=True)
+        return fused[:self.top_k]
+
     def rank(self, query: str, results: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Rank results using Reciprocal Rank Fusion on bm25 and vector scores."""
         if not results:
@@ -317,21 +347,7 @@ class RRFRanker:
         # Sort by vector score
         vec_sorted = sorted(results, key=lambda x: x.get("vector_score", 0.0), reverse=True)
 
-        scores: dict[str, float] = {}
-        for rank_idx, item in enumerate(bm25_sorted, start=1):
-            key = self._get_item_key(item, rank_idx)
-            scores[key] = scores.get(key, 0.0) + (1.0 / (self.k + rank_idx))
-
-        for rank_idx, item in enumerate(vec_sorted, start=1):
-            key = self._get_item_key(item, rank_idx)
-            scores[key] = scores.get(key, 0.0) + (1.0 / (self.k + rank_idx))
-
-        for idx, item in enumerate(results):
-            key = self._get_item_key(item, idx + 1)
-            item["rrf_score"] = scores.get(key, 0.0)
-
-        results_sorted = sorted(results, key=lambda x: x.get("rrf_score", 0.0), reverse=True)
-        return results_sorted[:self.top_k]
+        return self.fuse([bm25_sorted, vec_sorted])
 
 
 @dataclass

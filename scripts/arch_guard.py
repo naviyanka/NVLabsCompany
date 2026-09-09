@@ -419,7 +419,31 @@ def check_r6() -> list[tuple[str, str]]:
     return out
 
 
-CHECKS = (check_r1, check_r2, check_r3, check_r4, check_r5, check_r6)
+def check_r7() -> list[tuple[str, str]]:
+    """No set_config('nexus.company_id') calls outside nexus/database.py (WP-9)."""
+    out: list[tuple[str, str]] = []
+    for path in iter_py():
+        name = rel(path)
+        # Allowed in database.py and tests
+        if name in ("database.py", "src/nexus/database.py") or name.startswith("tests/"):
+            continue
+        tree = parse(path)
+        if tree is None:
+            continue
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                if "nexus.company_id" in node.value and "set_config" in node.value:
+                    out.append(
+                        (
+                            f"R7 {name}:{node.lineno}",
+                            f"calls set_config('nexus.company_id') directly at line {node.lineno} -- "
+                            "use nexus.database.tenant_session() or get_session() instead",
+                        )
+                    )
+    return out
+
+
+CHECKS = (check_r1, check_r2, check_r3, check_r4, check_r5, check_r6, check_r7)
 
 
 def main(argv: list[str] | None = None) -> int:

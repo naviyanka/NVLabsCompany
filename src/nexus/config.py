@@ -14,6 +14,8 @@ class Settings(BaseSettings):
 
     # Database
     database_url: str = "postgresql+asyncpg://nexus:nexus_dev_password@localhost:5432/nexus"
+    system_database_url: str = ""
+    allow_bypassrls_app_role: bool = False
 
     # Redis
     redis_url: str = "redis://localhost:6379/0"

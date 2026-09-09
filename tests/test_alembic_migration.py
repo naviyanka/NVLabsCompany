@@ -47,6 +47,7 @@ EXPECTED_TABLES = {
     "heartbeat_runs",
     "hr_performance_reviews",
     "hr_training_curricula",
+    "idempotency_records",
     "incident_actions",
     "incident_events",
     "incidents",

@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
 from typing import Any
 
-from sqlalchemy import and_, func, or_, select, update
+from sqlalchemy import and_, case, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from nexus.models.budget import BudgetPolicy, CostEvent
@@ -93,6 +93,9 @@ class BudgetService:
         if company_id:
             stmt = stmt.where(BudgetPolicy.company_id == company_id)
 
+        # Proactively reap any expired reservations so stale holds don't block spend
+        await self.reap_expired_reservations()
+
         result = await self._db.execute(stmt)
         policies = result.scalars().all()
 
@@ -112,11 +115,8 @@ class BudgetService:
             if policy.metric != "cost_cents":
                 continue
 
-            # Get current usage for this window
-            usage = await self._get_window_usage(
-                scope_type, scope_id, policy.window_kind
-            )
-            used = usage.total_cost_cents if usage else 0
+            # Authoritative source of truth: policy counters (WP-12)
+            used = policy.spent_cents + policy.reserved_cents
             remaining = policy.amount - used
             warn_threshold = policy.amount * policy.warn_percent // 100
 
@@ -193,6 +193,22 @@ class BudgetService:
             billing_type=billing_type,
         )
         self._db.add(event)
+
+        if cost_cents > 0:
+            # Atomically update spent_cents on matching company policy
+            await self._db.execute(
+                update(BudgetPolicy)
+                .where(
+                    BudgetPolicy.company_id == company_id,
+                    BudgetPolicy.is_active == True,  # noqa: E712
+                    BudgetPolicy.metric == "cost_cents",
+                )
+                .values(
+                    spent_cents=BudgetPolicy.spent_cents + cost_cents,
+                    updated_at=datetime.now(timezone.utc).replace(tzinfo=None),
+                )
+            )
+
         await self._db.flush()
         return event
 
@@ -299,18 +315,23 @@ class BudgetService:
         if model:
             values["model"] = model
 
-        await self._db.execute(
+        upd_res = await self._db.execute(
             update(CostEvent)
             .where(CostEvent.id == reservation_id, CostEvent.status == "reserved")
             .values(**values)
         )
+        if upd_res.rowcount == 0:
+            return False
 
         if policy_id:
             await self._db.execute(
                 update(BudgetPolicy)
                 .where(BudgetPolicy.id == policy_id)
                 .values(
-                    reserved_cents=func.greatest(0, BudgetPolicy.reserved_cents - old_hold),
+                    reserved_cents=case(
+                        (BudgetPolicy.reserved_cents >= old_hold, BudgetPolicy.reserved_cents - old_hold),
+                        else_=0,
+                    ),
                     spent_cents=BudgetPolicy.spent_cents + actual_spend,
                     updated_at=datetime.now(timezone.utc).replace(tzinfo=None),
                 )
@@ -331,18 +352,23 @@ class BudgetService:
         old_hold = event.cost_cents
         policy_id = event.policy_id
 
-        await self._db.execute(
+        upd_res = await self._db.execute(
             update(CostEvent)
             .where(CostEvent.id == reservation_id, CostEvent.status == "reserved")
             .values(status="released", cost_cents=0, expires_at=None)
         )
+        if upd_res.rowcount == 0:
+            return False
 
         if policy_id and old_hold > 0:
             await self._db.execute(
                 update(BudgetPolicy)
                 .where(BudgetPolicy.id == policy_id)
                 .values(
-                    reserved_cents=func.greatest(0, BudgetPolicy.reserved_cents - old_hold),
+                    reserved_cents=case(
+                        (BudgetPolicy.reserved_cents >= old_hold, BudgetPolicy.reserved_cents - old_hold),
+                        else_=0,
+                    ),
                     updated_at=datetime.now(timezone.utc).replace(tzinfo=None),
                 )
             )
@@ -376,7 +402,10 @@ class BudgetService:
                     update(BudgetPolicy)
                     .where(BudgetPolicy.id == policy_id)
                     .values(
-                        reserved_cents=func.greatest(0, BudgetPolicy.reserved_cents - old_hold),
+                        reserved_cents=case(
+                            (BudgetPolicy.reserved_cents >= old_hold, BudgetPolicy.reserved_cents - old_hold),
+                            else_=0,
+                        ),
                         updated_at=now,
                     )
                 )

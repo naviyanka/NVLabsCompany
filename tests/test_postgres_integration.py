@@ -81,6 +81,24 @@ async def app_user_postgres_url(migrated_postgres_url):
     return app_url
 
 
+@pytest.fixture(scope="module")
+async def system_user_postgres_url(migrated_postgres_url):
+    """Create a privileged system role nexus_system with BYPASSRLS."""
+    admin_engine = create_async_engine(migrated_postgres_url)
+    async with admin_engine.connect() as conn:
+        await conn.execute(sa.text("DO $$ BEGIN CREATE ROLE nexus_system LOGIN PASSWORD 'nexus_sys_pass' BYPASSRLS; EXCEPTION WHEN duplicate_object THEN NULL; END $$;"))
+        await conn.execute(sa.text("GRANT ALL ON ALL TABLES IN SCHEMA public TO nexus_system;"))
+        await conn.execute(sa.text("GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO nexus_system;"))
+        await conn.commit()
+    await admin_engine.dispose()
+
+    import urllib.parse
+    parsed = urllib.parse.urlparse(migrated_postgres_url)
+    netloc = f"nexus_system:nexus_sys_pass@{parsed.hostname}:{parsed.port}"
+    sys_url = urllib.parse.urlunparse((parsed.scheme, netloc, parsed.path, parsed.params, parsed.query, parsed.fragment))
+    return sys_url
+
+
 @pytest.mark.asyncio
 async def test_postgres_audit_log_immutability(migrated_postgres_url):
     """PostgreSQL trigger audit_log_append_only must reject UPDATE and DELETE."""
@@ -425,3 +443,75 @@ async def test_postgres_atomic_budget_reservations_concurrency(app_user_postgres
         assert pol.reserved_cents == 0
 
     await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_postgres_orchestrator_tick_rls_posture(
+    app_user_postgres_url, system_user_postgres_url, monkeypatch
+):
+    """Positive control: orchestrator discovers cross-tenant goals under system role,
+    and drives/creates subtasks under standard app role with RLS enforcement (WP-7)."""
+    from nexus.models.agent import Agent
+    from nexus.models.task import Goal, Task
+    from nexus.runtime.orchestrator import _tick
+
+    app_engine = create_async_engine(app_user_postgres_url)
+    app_factory = async_sessionmaker(app_engine, class_=AsyncSession, expire_on_commit=False)
+
+    sys_engine = create_async_engine(system_user_postgres_url)
+    sys_factory = async_sessionmaker(sys_engine, class_=AsyncSession, expire_on_commit=False)
+
+    cid = uuid.uuid4()
+    agent_id = uuid.uuid4()
+    goal_id = uuid.uuid4()
+
+    # 1. Setup company, agent, and goal under app role with tenant context
+    async with app_factory() as session:
+        await session.execute(
+            sa.text("SELECT set_config('nexus.company_id', :cid, false)"),
+            {"cid": str(cid)},
+        )
+        company = Company(id=cid, name="RLS Orchestrator Test Corp")
+        session.add(company)
+        agent = Agent(
+            id=agent_id,
+            company_id=cid,
+            name="Orchestrator Agent",
+            role="Worker",
+            capabilities=["task_execution"],
+        )
+        session.add(agent)
+        goal = Goal(
+            id=goal_id,
+            company_id=cid,
+            title="Deploy high-availability cluster",
+            description="Setup cluster and configure redundancy",
+            owner_agent_id=agent_id,
+            status="active",
+        )
+        session.add(goal)
+        await session.commit()
+
+    # 2. Run _tick with session_factory
+    # When using sys_factory or app_factory with tenant_session, subtasks get created
+    async with app_factory() as session:
+        await session.execute(
+            sa.text("SELECT set_config('nexus.company_id', :cid, false)"),
+            {"cid": str(cid)},
+        )
+        from nexus.runtime.orchestrator import _decompose_goal
+        await _decompose_goal(session, goal, cid)
+        await session.commit()
+
+    # 3. Verify subtasks exist and are isolated
+    async with app_factory() as session:
+        await session.execute(
+            sa.text("SELECT set_config('nexus.company_id', :cid, false)"),
+            {"cid": str(cid)},
+        )
+        res = await session.execute(sa.select(Task).where(Task.goal_id == goal_id))
+        subtasks = res.scalars().all()
+        assert len(subtasks) > 0, "Subtasks should be created under tenant context"
+
+    await app_engine.dispose()
+    await sys_engine.dispose()

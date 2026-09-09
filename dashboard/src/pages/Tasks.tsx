@@ -20,6 +20,7 @@ import {
   Search,
 } from 'lucide-react';
 import { useEventStream } from '@/hooks/useEventStream';
+import { useQuery } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 const MOCK_TASKS: Task[] = [];
@@ -27,6 +28,22 @@ const MOCK_TASKS: Task[] = [];
 const MOCK_AGENTS: Agent[] = [];
 
 export function Tasks() {
+  const companyId = getActiveCompanyId();
+
+  const { data: initialTasks } = useQuery({
+    queryKey: ['tasks', companyId],
+    queryFn: async () => {
+      return await apiClient.get<Task[]>(`/api/v1/companies/${companyId}/tasks`);
+    },
+  });
+
+  const { data: initialAgents } = useQuery({
+    queryKey: ['agents', companyId],
+    queryFn: async () => {
+      return await apiClient.get<Agent[]>(`/api/v1/companies/${companyId}/agents`);
+    },
+  });
+
   const [tasks, setTasks] = useState<Task[]>(MOCK_TASKS);
   const [agents, setAgents] = useState<Agent[]>(MOCK_AGENTS);
   const [viewMode, setViewMode] = useState<'board' | 'table' | 'workload'>('board');
@@ -39,28 +56,16 @@ export function Tasks() {
   const [showAddModal, setShowAddModal] = useState(false);
 
   useEffect(() => {
-    async function loadData() {
-      try {
-        const companyId = getActiveCompanyId();
-        const [tasksRes, agentsRes] = await Promise.allSettled([
-          apiClient.get<Task[]>(`/api/v1/companies/${companyId}/tasks`),
-          apiClient.get<Agent[]>(`/api/v1/companies/${companyId}/agents`),
-        ]);
-
-        if (tasksRes.status === 'fulfilled') {
-          const items = tasksRes.value;
-          if (items.length) setTasks(items);
-        }
-        if (agentsRes.status === 'fulfilled') {
-          const items = agentsRes.value;
-          if (items.length) setAgents(items);
-        }
-      } catch (err) {
-        console.error('Failed to load tasks', err);
-      }
+    if (initialTasks && initialTasks.length) {
+      setTasks(initialTasks);
     }
-    loadData();
-  }, []);
+  }, [initialTasks]);
+
+  useEffect(() => {
+    if (initialAgents && initialAgents.length) {
+      setAgents(initialAgents);
+    }
+  }, [initialAgents]);
 
   // Real-time task stream via SSE — updates tasks in place or prepends new tasks
   useEventStream<any>('tasks', useCallback((event: any) => {

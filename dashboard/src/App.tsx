@@ -28,8 +28,18 @@ import { Skills } from '@/pages/Skills';
 import { Tasks } from '@/pages/Tasks';
 import { Tools } from '@/pages/Tools';
 import { Workflows } from '@/pages/Workflows';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { lazy, Suspense } from 'react';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
+
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      retry: false,
+      refetchOnWindowFocus: false,
+    },
+  },
+});
 
 // Lazy-load Office page to avoid Three.js bundle cost for users who never visit it
 const LazyOffice = lazy(() => import('@/pages/Office').then((m) => ({ default: m.Office })));
@@ -47,8 +57,9 @@ function OfficeFallback() {
 
 export default function App() {
   return (
-    <AuthProvider>
-      <BrowserRouter>
+    <QueryClientProvider client={queryClient}>
+      <AuthProvider>
+        <BrowserRouter>
         <Routes>
           {/* Reachable without a session — these are how you get one. */}
           <Route path="/login" element={<Login />} />
@@ -91,5 +102,6 @@ export default function App() {
         </Routes>
       </BrowserRouter>
     </AuthProvider>
+    </QueryClientProvider>
   );
 }
