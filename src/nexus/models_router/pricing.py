@@ -251,17 +251,33 @@ def estimate_cost_usd(model: str | None, tokens: TokenSplit) -> float:
     )
 
 
-def estimate_cost_cents(
+def estimate_cost_micros(
     model: str | None, input_tokens: int, output_tokens: int
 ) -> int:
-    """Cost in whole cents for a plain input/output split, rounded up.
+    """Cost in integer micro-USD (10^-6 USD) for a plain input/output split.
 
-    This is what the provider adapters and the cost tracker record. Rounding up
-    keeps a recorded cost from ever landing below what the pre-flight budget
-    guard charged for the same call, which is how the old per-adapter tables
-    drifted into admitting calls the guard had refused.
+    The honest unit for gateway accounting (R11/WP-22d): a real
+    ``$0.0000000001`` charge rounds to 0 micros here instead of being inflated
+    to a whole cent by ``estimate_cost_cents``. Rounded up so a recorded micro
+    cost never lands below the true cost.
     """
     usd = estimate_cost_usd(
         model, TokenSplit(input_tokens=input_tokens, output_tokens=output_tokens)
     )
-    return math.ceil(usd * 100)
+    return math.ceil(usd * 1_000_000)
+
+
+def estimate_cost_cents(
+    model: str | None, input_tokens: int, output_tokens: int
+) -> int:
+    """Cost in whole cents for a plain input/output split.
+
+    This is what the provider adapters and the cost tracker record. It rounds
+    up from micro-USD so a recorded cost never lands below the true cost (which
+    is how the old per-adapter tables drifted into admitting calls the guard
+    had refused), but a genuinely free call (0 micros) records 0 cents rather
+    than being inflated to 1 (R11): ``math.ceil(usd*100)`` used to turn any
+    sub-cent gateway charge into a full cent.
+    """
+    micros = estimate_cost_micros(model, input_tokens, output_tokens)
+    return math.ceil(micros / 10_000)
