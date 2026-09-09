@@ -116,5 +116,20 @@ services:
         condition: service_started
     command: python -m nexus.temporal.worker
 
+  # Optional self-hosted LLM gateway (WP-22). Behind the "gateway" profile so
+  # the default `docker compose up` does not start it; run with
+  # `docker compose --profile gateway up`. Add it in NEXUS as a Connection
+  # pointing at http://gateway:20128/v1, and put "gateway" in
+  # LLM_CONNECTION_HOST_ALLOWLIST so the SSRF guard permits the internal host.
+  gateway:
+    image: diegosouzapw/omniroute:v3.8.50
+    profiles: ["gateway"]
+    ports:
+      - "20128:20128"
+    environment:
+      - REQUIRE_API_KEY=true
+      - MODELS_CATALOG_PREFIX_MODE=alias
+    restart: unless-stopped
+
 volumes:
   pgdata:
