@@ -569,18 +569,67 @@ def _build_system_prompt(agent: Agent, memories: list[dict[str, Any]] | None = N
     return prompt
 
 
-def _resolve_adapter_type(agent: Agent) -> tuple[str, dict[str, Any]]:
+async def _resolve_connection(agent: Agent) -> dict[str, Any] | None:
+    """Load the agent's LLM Connection and resolve its api key, or None.
+
+    Returns a plain dict {wire_format, base_url, api_key} so uastl stays free
+    of model/DB imports. The raw key is resolved from the secret backend by
+    ``api_key_ref``; a missing/unresolvable key yields api_key="".
+    """
+    if not getattr(agent, "connection_id", None):
+        return None
+    from nexus.database import async_session_factory
+    from nexus.models.connection import LLMConnection
+
+    async with async_session_factory() as conn_db:
+        conn = await conn_db.get(LLMConnection, agent.connection_id)
+        if conn is None or not conn.is_active:
+            return None
+        api_key = ""
+        if conn.api_key_ref:
+            # The secret backend singleton is installed at app startup
+            # (main.py -> rotation.set_backend). Resolve the key by ref; a
+            # missing backend or ref leaves api_key empty (fail to no-key).
+            from nexus.api.routes import rotation as _rotation
+
+            backend = getattr(_rotation, "_backend", None)
+            if backend is not None:
+                api_key = await _maybe_await(backend.decrypt(conn.api_key_ref)) or ""
+        return {
+            "wire_format": conn.wire_format,
+            "base_url": conn.base_url,
+            "api_key": api_key,
+        }
+
+
+async def _maybe_await(value: Any) -> Any:
+    """Await value if it is awaitable, else return it (decrypt may be sync)."""
+    import inspect
+
+    if inspect.isawaitable(value):
+        return await value
+    return value
+
+
+def _resolve_adapter_type(
+    agent: Agent, connection: dict[str, Any] | None = None
+) -> tuple[str, dict[str, Any]]:
     """Resolve the adapter type and config from agent settings.
 
     Delegates to the UASTL provider registry (nexus.adapters.uastl), which is
     the single source of truth for adapter resolution. Legacy agent.adapter_type
     values (anthropic/openai/claude/claude_code/cli/ollama/azure/bedrock/google/
     langchain) keep their historical mappings; hermes resolves to the Hermes
-    adapter with Ollama host + OpenRouter key config.
+    adapter with Ollama host + OpenRouter key config. When a resolved LLM
+    Connection is passed, it overrides all of the above (WP-22b). Loading the
+    Connection is async, so callers use :func:`_resolve_connection` first; this
+    stays sync so the existing resolution tests keep working.
     """
     from nexus.adapters.uastl import resolve_provider
 
-    return resolve_provider(agent.adapter_type or "anthropic", agent.model)
+    return resolve_provider(
+        agent.adapter_type or "anthropic", agent.model, connection=connection
+    )
 
 
 async def _reserve_budget(
@@ -608,6 +657,7 @@ async def _reserve_budget(
     """
     from nexus.models_router.preflight import (
         BudgetExceededError,
+        BudgetInfraUnavailable,
         estimate_min_call_cost,
     )
 
@@ -635,9 +685,20 @@ async def _reserve_budget(
                 provider=agent.adapter_type or "anthropic",
                 model=config.get("model"),
             )
-    except Exception as exc:  # noqa: BLE001 - budget lookup must not break chat
-        logger.warning("Budget reservation failed, allowing call: %s", exc)
-        return None
+    except Exception as exc:  # noqa: BLE001
+        # R12: fail closed on budget. If the ledger is unreachable we refuse
+        # the call rather than let unmetered spend through. The old behaviour
+        # (allow on failure) is available behind BUDGET_FAIL_OPEN for operators
+        # who would rather keep serving than enforce during an outage.
+        from nexus.config import settings
+
+        if settings.budget_fail_open:
+            logger.warning("Budget reservation failed, allowing call (fail-open): %s", exc)
+            return None
+        logger.error("Budget reservation failed, refusing call (fail-closed): %s", exc)
+        raise BudgetInfraUnavailable(
+            "Budget ledger is unavailable and BUDGET_FAIL_OPEN is off"
+        ) from exc
 
     if not allowed:
         raise BudgetExceededError(
@@ -718,9 +779,11 @@ async def _call_llm(
     """
     from nexus.adapters.registry import AdapterRegistry
 
-    registry_key, config = _resolve_adapter_type(agent)
+    connection = await _resolve_connection(agent)
+    registry_key, config = _resolve_adapter_type(agent, connection)
 
-    # Check if API key is available
+    # Check if API key is available. A Connection that supplies its own key
+    # satisfies this — the blocker must not fire on the gateway path (WP-22b).
     api_key = config.get("api_key", "")
     if registry_key in ("anthropic", "openai", "azure_openai") and not api_key:
         # No API key configured — create a Secret Proposal for human approval
@@ -945,6 +1008,11 @@ async def _call_llm(
                     0,
                 )
 
+    except BudgetInfraUnavailable:
+        # R12: a fail-closed budget refusal must not be dressed up as a friendly
+        # "can't reach my provider" fallback below — that would let the call be
+        # treated as a soft error and retried. Propagate it as a real refusal.
+        raise
     except Exception as e:
         logger.warning("LLM call failed for agent %s: %s", agent.id, e)
         # Graceful fallback — respond in character without LLM
@@ -1156,7 +1224,8 @@ async def chat_with_agent_stream(
         try:
             from nexus.adapters.registry import AdapterRegistry
 
-            registry_key, config = _resolve_adapter_type(agent)
+            connection = await _resolve_connection(agent)
+            registry_key, config = _resolve_adapter_type(agent, connection)
             api_key = config.get("api_key", "")
 
             # Try true token-level streaming for Anthropic/OpenAI adapters

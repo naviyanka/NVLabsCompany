@@ -70,6 +70,17 @@ class Settings(BaseSettings):
     openai_api_key: str = ""
     anthropic_api_key: str = ""
 
+    # LLM Connections / gateway (WP-22b..k). env_prefix is "", so the env var
+    # name is the field name uppercased.
+    # Comma-separated hostnames exempt from SSRF checks on connection create.
+    llm_connection_host_allowlist: str = ""
+    # R12 inversion switch: budget-infra failure fails closed unless True.
+    budget_fail_open: bool = False
+    # Gateway model-discovery cache TTL, seconds.
+    gateway_catalog_refresh_seconds: int = 900
+    # Opt-in company-wide halt on a Tier 1 quota-exhaustion webhook.
+    gateway_kill_switch_on_quota: bool = False
+
     # Code sandbox (Phase 3.1): "local", "e2b", or "judge0".
     sandbox_backend: str = "local"
     # Local subprocess execution runs untrusted code with host privileges.

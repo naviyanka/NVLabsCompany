@@ -19,6 +19,7 @@ from nexus.api.routes.archetypes import router as archetypes_router
 from nexus.api.routes.audit import router as audit_router
 from nexus.api.routes.auth import router as auth_router
 from nexus.api.routes.budgets import router as budgets_router
+from nexus.api.routes.connections import router as connections_router
 from nexus.api.routes.chat import router as chat_router
 from nexus.api.routes.communication import router as communication_router
 from nexus.api.routes.companies import router as companies_router
@@ -472,6 +473,7 @@ app.include_router(skills_router)
 app.include_router(tools_router)
 app.include_router(approvals_router)
 app.include_router(budgets_router)
+app.include_router(connections_router)
 app.include_router(memory_router)
 app.include_router(triggers_router)
 app.include_router(runs_router)

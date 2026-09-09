@@ -50,6 +50,11 @@ class Agent(SQLModel, table=True):
         default=None, sa_column=Column(JSON)
     )
     model: Optional[str] = Field(default=None, max_length=255)
+    # Optional LLM Connection (WP-22b). When set, dispatch routes to the
+    # connection's base_url via the matching wire-format adapter.
+    connection_id: Optional[uuid.UUID] = Field(
+        default=None, foreign_key="llm_connections.id"
+    )
 
     # Capabilities and identity
     capabilities: Optional[list[str]] = Field(default=None, sa_column=Column(JSON))

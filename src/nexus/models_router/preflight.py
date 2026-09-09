@@ -50,6 +50,15 @@ class BudgetExceededError(Exception):
         )
 
 
+class BudgetInfraUnavailable(Exception):
+    """Raised when the budget ledger is unreachable and fail-open is off (R12).
+
+    Distinct from BudgetExceededError: the cap was not reached, the ledger
+    could not be consulted at all. Callers fail closed (refuse the call) unless
+    settings.budget_fail_open is set.
+    """
+
+
 def estimate_min_call_cost(
     model: str | None,
     prompt_tokens: int,

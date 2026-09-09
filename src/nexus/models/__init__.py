@@ -9,6 +9,7 @@ from nexus.models.budget import BudgetPolicy, CostEvent
 from nexus.models.chat import ChatMessage
 from nexus.models.communication import Event, Group, GroupMember, Message
 from nexus.models.company import Company, CompanyMembership, Department, Team
+from nexus.models.connection import LLMConnection
 from nexus.models.evolution import (
     AgentVersion,
     EvolutionEvaluation,
@@ -75,6 +76,8 @@ __all__ = [
     # Budget
     "BudgetPolicy",
     "CostEvent",
+    # Connections
+    "LLMConnection",
     # Governance
     "Approval",
     "Decision",

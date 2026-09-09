@@ -74,3 +74,6 @@ graphify-out/cache/
 
 graphify-out/
 
+
+# OmniRoute live-probe captures (throwaway, WP-22)
+om_*.json

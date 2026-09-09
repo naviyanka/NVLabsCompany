@@ -143,7 +143,11 @@ PROVIDER_ALIASES: dict[str, str] = {
 }
 
 
-def resolve_provider(adapter_type: str, model: str | None = None) -> tuple[str, dict[str, Any]]:
+def resolve_provider(
+    adapter_type: str,
+    model: str | None = None,
+    connection: "Any | None" = None,
+) -> tuple[str, dict[str, Any]]:
     """Resolve an adapter_type to a registry key and config dict.
 
     This replaces the hardcoded dict in chat.py's _resolve_adapter_type().
@@ -151,10 +155,24 @@ def resolve_provider(adapter_type: str, model: str | None = None) -> tuple[str, 
     Args:
         adapter_type: The agent's configured adapter type.
         model: Optional model override.
+        connection: Optional resolved Connection. When present, its wire_format
+            forces the registry key and its base_url/api_key override the
+            provider defaults — the injection point for the whole integration.
 
     Returns:
         Tuple of (registry_key, config_dict).
     """
+    if connection is not None:
+        # wire_format is "openai" | "anthropic"; those are registry keys as-is.
+        registry_key = connection["wire_format"]
+        config: dict[str, Any] = {
+            "model": model or "",
+            "api_base": connection["base_url"],
+        }
+        if connection.get("api_key"):
+            config["api_key"] = connection["api_key"]
+        return registry_key, config
+
     # Resolve aliases
     provider_name = PROVIDER_ALIASES.get(adapter_type, adapter_type)
     provider = PROVIDERS.get(provider_name)

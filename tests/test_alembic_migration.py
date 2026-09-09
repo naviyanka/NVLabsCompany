@@ -54,6 +54,7 @@ EXPECTED_TABLES = {
     "kill_switch_records",
     "knowledge_chunks",
     "knowledge_pages",
+    "llm_connections",
     "meeting_minutes",
     "meeting_participants",
     "meetings",

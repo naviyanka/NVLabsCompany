@@ -61,6 +61,9 @@ class AnthropicAdapter(BaseAdapter):
         session.metadata["extended_thinking"] = session.config.get(
             "extended_thinking", False
         )
+        # Per-session base URL override (WP-22b: Connection api_base).
+        if "api_base" in session.config:
+            session.metadata["api_base"] = session.config["api_base"]
 
     async def _do_execute(
         self, session: AgentSession, task_id: uuid.UUID, payload: dict[str, Any]
@@ -114,11 +117,12 @@ class AnthropicAdapter(BaseAdapter):
         }
 
         # Retry with exponential backoff on rate limits
+        api_base = session.metadata.get("api_base", self._api_base)
         response_data: dict[str, Any] = {}
         for attempt in range(MAX_RETRIES):
             async with httpx.AsyncClient(timeout=120.0) as client:
                 response = await client.post(
-                    f"{self._api_base}/messages",
+                    f"{api_base}/messages",
                     json=request_body,
                     headers=headers,
                 )
@@ -308,11 +312,12 @@ class AnthropicAdapter(BaseAdapter):
         }
 
         accumulated_text = ""
+        api_base = session.metadata.get("api_base", self._api_base)
 
         async with httpx.AsyncClient(timeout=120.0) as client:
             async with client.stream(
                 "POST",
-                f"{self._api_base}/messages",
+                f"{api_base}/messages",
                 json=request_body,
                 headers=headers,
             ) as response:

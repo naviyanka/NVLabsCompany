@@ -18,6 +18,7 @@ import alembic.command
 from nexus.models.governance import AuditLog
 from nexus.models.company import Company
 from nexus.models.task import Task
+from nexus.models.connection import LLMConnection
 
 
 @pytest.fixture(scope="module")
@@ -224,6 +225,62 @@ async def test_postgres_row_level_security(app_user_postgres_url):
         tasks_a = result.scalars().all()
         assert len(tasks_a) == 1
         assert tasks_a[0].title == "Tenant A Private Task"
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_connection_rls_isolates_companies(app_user_postgres_url):
+    """WP-22b: RLS on llm_connections isolates rows between tenants.
+
+    Fails at baseline because the llm_connections table does not exist.
+    """
+    engine = create_async_engine(app_user_postgres_url)
+    session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+    tenant_a = uuid.uuid4()
+    tenant_b = uuid.uuid4()
+
+    async with session_factory() as session:
+        session.add(Company(id=tenant_a, name="Tenant A"))
+        session.add(Company(id=tenant_b, name="Tenant B"))
+        await session.commit()
+
+    async with session_factory() as session:
+        await session.execute(
+            sa.text("SELECT set_config('nexus.company_id', :cid, false)"),
+            {"cid": str(tenant_a)},
+        )
+        session.add(
+            LLMConnection(
+                id=uuid.uuid4(),
+                company_id=tenant_a,
+                name="A gateway",
+                base_url="https://a.example.com/v1",
+                wire_format="openai",
+            )
+        )
+        await session.commit()
+
+    # Tenant B sees nothing, no WHERE clause
+    async with session_factory() as session:
+        await session.execute(
+            sa.text("SELECT set_config('nexus.company_id', :cid, false)"),
+            {"cid": str(tenant_b)},
+        )
+        result = await session.execute(sa.select(LLMConnection))
+        assert len(result.scalars().all()) == 0
+
+    # Tenant A sees only its own
+    async with session_factory() as session:
+        await session.execute(
+            sa.text("SELECT set_config('nexus.company_id', :cid, false)"),
+            {"cid": str(tenant_a)},
+        )
+        result = await session.execute(sa.select(LLMConnection))
+        conns = result.scalars().all()
+        assert len(conns) == 1
+        assert conns[0].name == "A gateway"
 
     await engine.dispose()
 
