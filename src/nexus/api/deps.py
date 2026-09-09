@@ -17,8 +17,6 @@ from typing import Annotated, Any
 from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from sqlalchemy import text
-
 from nexus.auth.middleware import get_principal_from_scope
 from nexus.auth.principal import Principal
 from nexus.config import settings

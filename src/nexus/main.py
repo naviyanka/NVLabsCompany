@@ -104,6 +104,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             await conn.run_sync(SQLModel.metadata.create_all)
 
     # Seed default company for the dashboard
+    # companies is not RLS-covered - safe on the app session
     from sqlalchemy import select
 
     from nexus.models._time import utcnow
@@ -127,9 +128,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             await session.commit()
 
     # Seed demo data (agents, tasks, etc.)
+    # Everything below writes RLS-covered tables (agents, tasks, etc.) -> tenant_session
+    from nexus.database import tenant_session, system_session
     from nexus.demo.seed import seed_database
-    async with async_session_factory() as session:
+    async with tenant_session(default_company_id) as session:
         counts = await seed_database(session)
+        await session.commit()
         if any(v > 0 for v in counts.values()):
             import logging
             logging.getLogger(__name__).info("Seeded demo data: %s", counts)
@@ -138,13 +142,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     import logging
     _logger = logging.getLogger(__name__)
 
-    # Seed budget tracker with company budget data
+    # Seed budget tracker with company budget data (cross-tenant, policies is RLS-covered -> system_session)
     try:
         from nexus.api.middleware import _budget_tracker, _policy_cache
         from nexus.models.company import Company as CompanyModel
         from nexus.models.policy import Policy as PolicyModel
 
-        async with async_session_factory() as session:
+        async with system_session("lifespan: seed budget tracker and policy cache") as session:
             from sqlalchemy import select as sa_select
             result = await session.execute(sa_select(CompanyModel))
             for company in result.scalars().all():
@@ -172,6 +176,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         _logger = logging.getLogger(__name__)
         _logger.warning("Could not seed budget/policy data: %s", exc)
 
+    # Global non-RLS governance tables: kill_switches, circuit_breakers
     try:
         from nexus.governance.persistent_circuit_breaker import PersistentCircuitBreaker
         from nexus.governance.persistent_kill_switch import PersistentKillSwitch
@@ -194,7 +199,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             exc,
         )
 
-    # Secret vault: DB-backed by default so stored secrets survive a restart
+    # Secret vault: global non-RLS table (stored_secrets)
     try:
         from nexus.api.routes.rotation import set_backend
         from nexus.governance.secret_backend import make_secret_backend
@@ -232,19 +237,22 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         _logger.info("Obsidian vault root validated: %s", vault)
     validate_embedding_policy()
 
-    # Reclaim heartbeat runs whose process died while we were down (Phase 1.3.4)
+    # Reclaim heartbeat runs whose process died while we were down (Phase 1.3.4, WP-15a)
+    # Cross-tenant over RLS-covered tables (heartbeat_runs, agents) -> system_session
     try:
         from nexus.runtime.heartbeat_persistent import PersistentHeartbeatService
-        reclaimed = await PersistentHeartbeatService(async_session_factory).reclaim_orphans()
+        from nexus.database import system_session_factory
+        reclaimed = await PersistentHeartbeatService(system_session_factory).reclaim_orphans()
         if reclaimed:
             _logger.warning("Reclaimed %d orphaned heartbeat run(s)", len(reclaimed))
     except Exception as exc:
         _logger.warning("Heartbeat orphan reclaim failed: %s", exc)
 
     # Automated recovery pass: reconcile interrupted tasks with active checkpoints
+    # Cross-tenant over RLS-covered tables (tasks, checkpoints) -> system_session
     try:
         from nexus.runtime.orchestrator import reconcile_recovery
-        async with async_session_factory() as recovery_db:
+        async with system_session("lifespan: reconcile recovery") as recovery_db:
             recovered_count = await reconcile_recovery(recovery_db)
             if recovered_count:
                 await recovery_db.commit()
@@ -254,11 +262,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # Start the background scheduler for cron/schedule triggers
     from nexus.runtime.scheduler import start_scheduler, stop_scheduler
-    await start_scheduler(async_session_factory)
+    await start_scheduler()
 
     # Start the autonomous orchestration coordinator
     from nexus.runtime.orchestrator import start_orchestrator, stop_orchestrator
-    await start_orchestrator(async_session_factory)
+    await start_orchestrator()
 
     # The watchdog patrol rides the scheduler tick (see runtime/scheduler.py); it
     # detects stuck agents and silently stalled runs, and files a human decision

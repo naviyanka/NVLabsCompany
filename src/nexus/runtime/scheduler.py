@@ -167,10 +167,11 @@ def compute_next_fire(
     return None
 
 
-async def _tick(session_factory: async_sessionmaker[AsyncSession]) -> None:
-    """Single scheduler tick: find and fire due triggers."""
+async def _tick(session_factory: async_sessionmaker[AsyncSession] | None = None) -> None:
+    """Single scheduler tick: find and fire due triggers (WP-15c)."""
     from nexus.models.trigger import Trigger, TriggerExecution
     from nexus.models.agent import Agent
+    from nexus.database import system_session, tenant_session
     from nexus.runtime.redis_utils import try_acquire_leader
 
     # Leader election: only the leader instance processes triggers
@@ -179,8 +180,7 @@ async def _tick(session_factory: async_sessionmaker[AsyncSession]) -> None:
 
     now = datetime.now(timezone.utc).replace(tzinfo=None)
 
-    async with session_factory() as db:
-        # Reap expired budget reservations
+    async with system_session("scheduler tick: reap reservations, find due triggers") as db:
         try:
             from nexus.services.budget_service import BudgetService
             reaped = await BudgetService(db).reap_expired_reservations()
@@ -189,9 +189,9 @@ async def _tick(session_factory: async_sessionmaker[AsyncSession]) -> None:
         except Exception as e:
             logger.debug("Scheduler budget reap error: %s", e)
 
-        # Find active triggers that are due
+        # Triggers is not RLS-covered, discovery is cross-tenant
         stmt = (
-            select(Trigger)
+            select(Trigger.company_id, Trigger.id)
             .where(
                 Trigger.is_active == True,  # noqa: E712
                 Trigger.trigger_type.in_(
@@ -199,29 +199,38 @@ async def _tick(session_factory: async_sessionmaker[AsyncSession]) -> None:
                 ),
                 Trigger.next_fire_at <= now,
             )
-            .limit(20)  # Process up to 20 per tick to avoid long locks
+            .limit(20)
         )
         result = await db.execute(stmt)
-        due_triggers = list(result.scalars().all())
+        due_pairs = result.all()
 
-        if not due_triggers:
-            return
+    if not due_pairs:
+        return
 
-        logger.info("Scheduler tick: %d triggers due", len(due_triggers))
+    logger.info("Scheduler tick: %d triggers due", len(due_pairs))
 
-        for trigger in due_triggers:
-            try:
-                await _fire_trigger(db, trigger, now)
-            except Exception as e:
-                logger.error("Trigger %s fire failed: %s", trigger.id, e)
+    by_company: dict[uuid.UUID, list[uuid.UUID]] = {}
+    for company_id, trigger_id in due_pairs:
+        by_company.setdefault(company_id, []).append(trigger_id)
 
-        await db.commit()
+    for company_id, trigger_ids in by_company.items():
+        async with tenant_session(company_id) as db:
+            triggers = list(
+                (await db.execute(select(Trigger).where(Trigger.id.in_(trigger_ids)))).scalars().all()
+            )
+            for trigger in triggers:
+                try:
+                    await _fire_trigger(db, trigger, now)
+                except Exception as e:
+                    logger.error("Trigger %s fire failed: %s", trigger.id, e)
+            await db.commit()
 
 
 async def _fire_trigger(db: AsyncSession, trigger: Any, now: datetime) -> None:
     """Fire a single trigger: call the agent, send webhook, or both."""
     from nexus.models.trigger import TriggerExecution
     from nexus.models.agent import Agent
+    from sqlalchemy import text
 
     config = trigger.config or {}
 
@@ -264,6 +273,13 @@ async def _fire_trigger(db: AsyncSession, trigger: Any, now: datetime) -> None:
     result = await db.execute(stmt)
     agent = result.scalar_one_or_none()
     if not agent:
+        # Under RLS an unset tenant context is indistinguishable from a deleted agent (WP-15c)
+        ctx = (await db.execute(text("SELECT current_setting('nexus.company_id', true);"))).scalar()
+        if not ctx:
+            raise RuntimeError(
+                f"Trigger {trigger.id}: agent lookup returned nothing with no tenant "
+                "context set - refusing to deactivate"
+            )
         logger.warning("Trigger %s: agent %s not found, deactivating", trigger.id, trigger.agent_id)
         trigger.is_active = False
         db.add(trigger)
@@ -291,12 +307,8 @@ async def _fire_trigger(db: AsyncSession, trigger: Any, now: datetime) -> None:
     logger.info("Fired trigger '%s' → agent %s (%d tokens)", trigger.name, agent.name, tokens_used)
 
 
-async def _scheduler_loop(session_factory: async_sessionmaker[AsyncSession]) -> None:
-    """Main scheduler loop — ticks every TICK_INTERVAL seconds.
-
-    With multiple replicas, only the lease leader fires triggers; followers
-    keep looping cheaply so they can take over when the lease expires.
-    """
+async def _scheduler_loop(session_factory: async_sessionmaker[AsyncSession] | None = None) -> None:
+    """Main scheduler loop — ticks every TICK_INTERVAL seconds."""
     global _running
     from nexus.governance.leader_election import is_leader
 
@@ -322,7 +334,7 @@ async def _scheduler_loop(session_factory: async_sessionmaker[AsyncSession]) -> 
     logger.info("Scheduler stopped")
 
 
-async def start_scheduler(session_factory: async_sessionmaker[AsyncSession]) -> None:
+async def start_scheduler(session_factory: async_sessionmaker[AsyncSession] | None = None) -> None:
     """Start the background scheduler task."""
     global _scheduler_task, _running
     if _scheduler_task is not None:

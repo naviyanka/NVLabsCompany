@@ -1,5 +1,10 @@
--- Initialize database roles for NEXUS (WP-8)
+-- Initialize database roles for NEXUS (WP-8, WP-16a)
 -- PostgreSQL 16+ requires dedicated schema ownership & explicit grant structure.
+-- NOTE: Scripts in /docker-entrypoint-initdb.d execute only on a fresh data directory.
+-- Existing volumes require `docker compose down -v` to re-initialize.
+
+-- 0. Extensions. Created here as bootstrap superuser so nexus_migrator never needs CREATE ON DATABASE.
+CREATE EXTENSION IF NOT EXISTS vector;
 
 -- 1. Migrator role: owns schema public, runs Alembic migrations
 CREATE ROLE nexus_migrator LOGIN PASSWORD 'nexus_migrator_pass';

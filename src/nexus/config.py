@@ -100,6 +100,11 @@ class Settings(BaseSettings):
     app_name: str = "NEXUS"
     app_version: str = "0.1.0"
 
+    # Governance & Concurrency (WP-19b, WP-18e, WP-20)
+    tenant_bulkhead_per_tenant: int = 16
+    budget_reconcile_enabled: bool = True
+    rag_ranker: str = "rrf"
+
     model_config = {
         "env_prefix": "",
         # Anchored to the repository root rather than the process CWD. A bare

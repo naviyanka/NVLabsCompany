@@ -24,6 +24,7 @@ class BudgetPolicy(SQLModel, table=True):
     warn_percent: int = Field(default=80)
     hard_stop_enabled: bool = Field(default=True)
     is_active: bool = Field(default=True)
+    window_started_at: Optional[datetime] = Field(default=None)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
 

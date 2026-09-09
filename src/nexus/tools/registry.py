@@ -188,6 +188,41 @@ class ToolRegistry:
         self._tools[tool.id] = tool
         return tool
 
+    async def persist_tool(self, tool: ToolDefinition) -> Tool:
+        """Upsert one registered tool into DB-backed governance catalog."""
+        if self._session_factory is None:
+            raise RuntimeError("database session factory is required")
+        if tool.company_id is None:
+            raise ValueError("persisted tools require a company")
+        async with self._session_factory() as session:
+            row = await session.get(Tool, tool.id)
+            if row is None:
+                row = Tool(
+                    id=tool.id,
+                    company_id=tool.company_id,
+                    name=tool.name,
+                    description=tool.description,
+                    tool_type=tool.tool_type,
+                    schema_def=tool.parameters,
+                    endpoint=tool.endpoint,
+                    risk_level=tool.risk_level,
+                    is_active=tool.is_active,
+                )
+                session.add(row)
+            elif row.company_id != tool.company_id:
+                raise ValueError("persisted tool belongs to another company")
+            else:
+                row.name = tool.name
+                row.description = tool.description
+                row.tool_type = tool.tool_type
+                row.schema_def = tool.parameters
+                row.endpoint = tool.endpoint
+                row.risk_level = tool.risk_level
+                row.is_active = tool.is_active
+            await session.commit()
+            await session.refresh(row)
+            return row
+
     def unregister_tool(self, tool_id: uuid.UUID) -> bool:
         """Remove a tool from the registry.
 

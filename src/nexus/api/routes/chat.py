@@ -781,6 +781,62 @@ async def _call_llm(
         adapter_registry = AdapterRegistry()
         adapter = adapter_registry.create_adapter(registry_key)
 
+        # Hermes tool calls use same DB-backed ToolAccess, autonomy, approval,
+        # vault-grant, and writer path as every other governed tool.
+        if hasattr(adapter, "register_tool"):
+            from nexus.database import async_session_factory
+            from nexus.tools import (
+                OBSIDIAN_NOTE_REPLACE_NAME,
+                OBSIDIAN_NOTE_REPLACE_SCHEMA,
+                ObsidianNoteReplaceTool,
+                ToolRegistry,
+                build_tool_executor,
+                register_obsidian_note_replace,
+            )
+
+            tool_registry = ToolRegistry(async_session_factory)
+            definition = register_obsidian_note_replace(tool_registry, agent.company_id)
+            await tool_registry.persist_tool(definition)
+            tool_id = definition.id
+
+            async def _execute_obsidian(arguments: dict[str, Any]) -> Any:
+                call_arguments = dict(arguments)
+                # Approval identity comes only from AutonomyGate, never model input.
+                call_arguments.pop("approval_id", None)
+                async with async_session_factory() as tool_db:
+                    executor = build_tool_executor(tool_db, default_autonomy_level=3)
+                    tool = ObsidianNoteReplaceTool(
+                        tool_db,
+                        registry=tool_registry,
+                        session_factory=async_session_factory,
+                        company_id=agent.company_id,
+                        agent_id=agent.id,
+                        tool_id=tool_id,
+                    )
+                    governed = await executor.execute(
+                        agent_id=agent.id,
+                        tool_id=tool_id,
+                        arguments=call_arguments,
+                        execute_fn=tool.execute,
+                        company_id=agent.company_id,
+                        tool_name=OBSIDIAN_NOTE_REPLACE_NAME,
+                    )
+                    if not governed.success:
+                        return governed.output or {
+                            "status": "governance_failure",
+                            "reason": governed.error,
+                        }
+                    return governed.output
+
+            adapter.register_tool(
+                OBSIDIAN_NOTE_REPLACE_NAME,
+                _execute_obsidian,
+                {
+                    "description": "Replace one existing Markdown note through governed vault write controls.",
+                    "parameters": OBSIDIAN_NOTE_REPLACE_SCHEMA["properties"],
+                },
+            )
+
         # Create session with system prompt
         session_config = {**config, "system_prompt": system_prompt}
         session = await adapter.create_session(agent.id, session_config)

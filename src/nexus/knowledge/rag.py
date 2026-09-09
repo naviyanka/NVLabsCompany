@@ -593,7 +593,7 @@ class RAGPipeline:
         except Exception:  # unbound session or a test double
             return None
 
-        pool = max(top_k * 10, 100)
+        pool = max(top_k, 50)
         distance = KnowledgeChunk.embedding_vector.cosine_distance(query_embedding)  # type: ignore[attr-defined]
         statement = (
             select(KnowledgeChunk, distance)
@@ -688,6 +688,10 @@ class RAGPipeline:
         """
         if not results:
             return []
+
+        # If results already carry RRF fusion score, short-circuit reranking
+        if any("rrf_score" in r for r in results):
+            return results[:top_k]
 
         # Use custom ranker if configured
         if self.ranker is not None:

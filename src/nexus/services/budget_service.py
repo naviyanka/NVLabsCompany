@@ -53,6 +53,19 @@ class UsageSummary:
     window_end: datetime
 
 
+def _calculate_window_start(window_kind: str, now: datetime) -> datetime:
+    """Calculate the start timestamp for a given budget window."""
+    if window_kind == "daily":
+        return now.replace(hour=0, minute=0, second=0, microsecond=0)
+    elif window_kind == "weekly":
+        days_since_monday = now.weekday()
+        return (now - timedelta(days=days_since_monday)).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+    else:  # monthly
+        return now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+
 class BudgetService:
     """Service layer for budget enforcement, cost recording, and usage reporting.
 
@@ -62,6 +75,37 @@ class BudgetService:
 
     def __init__(self, db: AsyncSession) -> None:
         self._db = db
+
+    async def _roll_window_if_needed(self, policy: BudgetPolicy, now: datetime) -> None:
+        """Roll spent_cents to 0 if the budget policy crossed its window boundary.
+
+        Live reservations (reserved_cents) do NOT roll across window boundaries.
+        """
+        window_start = _calculate_window_start(policy.window_kind, now)
+        if policy.window_started_at is None:
+            policy.window_started_at = window_start
+            await self._db.execute(
+                update(BudgetPolicy)
+                .where(BudgetPolicy.id == policy.id)
+                .values(window_started_at=window_start)
+            )
+            return
+
+        if policy.window_started_at < window_start:
+            policy.spent_cents = 0
+            policy.window_started_at = window_start
+            await self._db.execute(
+                update(BudgetPolicy)
+                .where(
+                    BudgetPolicy.id == policy.id,
+                    BudgetPolicy.window_started_at < window_start,
+                )
+                .values(
+                    spent_cents=0,
+                    window_started_at=window_start,
+                    updated_at=now,
+                )
+            )
 
     async def check_budget(
         self,
@@ -110,10 +154,14 @@ class BudgetService:
                 message="No budget policy configured",
             )
 
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+
         # Check against the most restrictive active policy
         for policy in policies:
             if policy.metric != "cost_cents":
                 continue
+
+            await self._roll_window_if_needed(policy, now)
 
             # Authoritative source of truth: policy counters (WP-12)
             used = policy.spent_cents + policy.reserved_cents
@@ -162,6 +210,7 @@ class BudgetService:
         output_tokens: int = 0,
         cost_cents: int = 0,
         billing_type: str = "llm_inference",
+        policy_id: uuid.UUID | None = None,
     ) -> CostEvent:
         """Record a cost event.
 
@@ -176,36 +225,60 @@ class BudgetService:
             output_tokens: Number of output tokens.
             cost_cents: Total cost in cents.
             billing_type: Type of charge.
+            policy_id: Optional specific policy to charge. If None, resolves active company policy.
 
         Returns:
             The recorded CostEvent instance.
         """
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        target_policy = None
+
+        if policy_id:
+            p_res = await self._db.execute(select(BudgetPolicy).where(BudgetPolicy.id == policy_id))
+            target_policy = p_res.scalars().first()
+        else:
+            p_res = await self._db.execute(
+                select(BudgetPolicy).where(
+                    BudgetPolicy.company_id == company_id,
+                    BudgetPolicy.scope_type == "company",
+                    BudgetPolicy.is_active == True,  # noqa: E712
+                    BudgetPolicy.metric == "cost_cents",
+                )
+            )
+            target_policy = p_res.scalars().first()
+
+        if target_policy and cost_cents > 0:
+            await self._roll_window_if_needed(target_policy, now)
+            used = target_policy.spent_cents + target_policy.reserved_cents
+            if target_policy.hard_stop_enabled and (used + cost_cents) > target_policy.amount:
+                raise BudgetExceeded(
+                    f"Budget exceeded: cannot record cost of {cost_cents} cents. used={used}, limit={target_policy.amount}"
+                )
+
         event = CostEvent(
             company_id=company_id,
             agent_id=agent_id,
             task_id=task_id,
             project_id=project_id,
+            policy_id=target_policy.id if target_policy else None,
             provider=provider,
             model=model,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             cost_cents=cost_cents,
             billing_type=billing_type,
+            occurred_at=now,
         )
         self._db.add(event)
 
-        if cost_cents > 0:
-            # Atomically update spent_cents on matching company policy
+        if target_policy and cost_cents > 0:
+            # Atomically update spent_cents on the single targeted policy
             await self._db.execute(
                 update(BudgetPolicy)
-                .where(
-                    BudgetPolicy.company_id == company_id,
-                    BudgetPolicy.is_active == True,  # noqa: E712
-                    BudgetPolicy.metric == "cost_cents",
-                )
+                .where(BudgetPolicy.id == target_policy.id)
                 .values(
                     spent_cents=BudgetPolicy.spent_cents + cost_cents,
-                    updated_at=datetime.now(timezone.utc).replace(tzinfo=None),
+                    updated_at=now,
                 )
             )
 
@@ -539,3 +612,78 @@ class BudgetService:
             window_start=window_start,
             window_end=now,
         )
+
+    async def reconcile_budget_counters(self, company_id: uuid.UUID | None = None) -> dict[str, int]:
+        """Reconcile policy spent_cents and reserved_cents against actual CostEvents.
+
+        For each active policy, recomputes:
+        - actual committed spend since policy's current window start
+        - actual active (unexpired) reserved holds
+        And updates policy counters if drift is detected.
+        """
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        stmt = select(BudgetPolicy).where(BudgetPolicy.is_active == True)  # noqa: E712
+        if company_id:
+            stmt = stmt.where(BudgetPolicy.company_id == company_id)
+
+        res = await self._db.execute(stmt)
+        policies = list(res.scalars().all())
+
+        drift_detected = 0
+        reconciled_policies = 0
+
+        for policy in policies:
+            if policy.metric != "cost_cents":
+                continue
+
+            window_start = policy.window_started_at or _calculate_window_start(policy.window_kind, now)
+
+            # 1. Sum committed spend in current window
+            cost_stmt = select(func.coalesce(func.sum(CostEvent.cost_cents), 0)).where(
+                CostEvent.company_id == policy.company_id,
+                CostEvent.status == "committed",
+                CostEvent.occurred_at >= window_start,
+            )
+            if policy.scope_type == "agent":
+                cost_stmt = cost_stmt.where(CostEvent.agent_id == policy.scope_id)
+            elif policy.scope_type == "project":
+                cost_stmt = cost_stmt.where(CostEvent.project_id == policy.scope_id)
+
+            c_res = await self._db.execute(cost_stmt)
+            true_spent = int(c_res.scalar_one_or_none() or 0)
+
+            # 2. Sum live holds
+            hold_stmt = select(func.coalesce(func.sum(CostEvent.cost_cents), 0)).where(
+                CostEvent.company_id == policy.company_id,
+                CostEvent.status == "reserved",
+                or_(CostEvent.expires_at.is_(None), CostEvent.expires_at > now),
+            )
+            if policy.id:
+                hold_stmt = hold_stmt.where(
+                    or_(CostEvent.policy_id == policy.id, CostEvent.policy_id.is_(None))
+                )
+
+            h_res = await self._db.execute(hold_stmt)
+            true_reserved = int(h_res.scalar_one_or_none() or 0)
+
+            if policy.spent_cents != true_spent or policy.reserved_cents != true_reserved:
+                drift_detected += 1
+                policy.spent_cents = true_spent
+                policy.reserved_cents = true_reserved
+                policy.updated_at = now
+                await self._db.execute(
+                    update(BudgetPolicy)
+                    .where(BudgetPolicy.id == policy.id)
+                    .values(
+                        spent_cents=true_spent,
+                        reserved_cents=true_reserved,
+                        updated_at=now,
+                    )
+                )
+            reconciled_policies += 1
+
+        if drift_detected > 0:
+            await self._db.commit()
+
+        return {"policies_checked": reconciled_policies, "drift_fixed": drift_detected}
+

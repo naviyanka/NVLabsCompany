@@ -21,6 +21,14 @@ class TenantSaturated(Exception):
         self.retry_after = retry_after
 
 
+class GlobalSaturated(Exception):
+    """Raised when the process exhausts its global concurrency cap (WP-19d)."""
+
+    def __init__(self, retry_after: int = 5) -> None:
+        super().__init__("Global concurrency cap reached")
+        self.retry_after = retry_after
+
+
 class TenantBulkhead:
     """Isolates tenant concurrency with global and per-tenant caps."""
 
@@ -50,21 +58,22 @@ class TenantBulkhead:
     async def acquire(self, company_id: uuid.UUID) -> AsyncIterator[None]:
         """Atomically claim a slot under per-tenant and global caps."""
         async with self._lock:
+            if self._global_in_flight >= self.global_cap:
+                raise GlobalSaturated()
+
             current_tenant = self._tenant_in_flight.get(company_id, 0)
-            if current_tenant >= self.per_tenant or self._global_in_flight >= self.global_cap:
+            if current_tenant >= self.per_tenant:
                 raise TenantSaturated(company_id)
 
             self._tenant_in_flight[company_id] = current_tenant + 1
             self._tenant_in_flight.move_to_end(company_id)
             self._global_in_flight += 1
 
-            # Prune inactive tenants if cache size exceeded
-            while len(self._tenant_in_flight) > self.max_cached_tenants:
-                oldest_id, oldest_count = next(iter(self._tenant_in_flight.items()))
-                if oldest_count == 0:
-                    del self._tenant_in_flight[oldest_id]
-                else:
-                    break
+            # Prune inactive tenants if cache size exceeded (scan up to 20 oldest items)
+            if len(self._tenant_in_flight) > self.max_cached_tenants:
+                prune_candidates = [k for k, v in list(self._tenant_in_flight.items())[:20] if v == 0]
+                for k in prune_candidates:
+                    del self._tenant_in_flight[k]
 
         try:
             yield
@@ -72,8 +81,8 @@ class TenantBulkhead:
             async with self._lock:
                 self._global_in_flight = max(0, self._global_in_flight - 1)
                 if company_id in self._tenant_in_flight:
-                    self._tenant_in_flight[company_id] = max(
-                        0, self._tenant_in_flight[company_id] - 1
-                    )
-                    if self._tenant_in_flight[company_id] == 0 and len(self._tenant_in_flight) > self.max_cached_tenants:
+                    new_count = max(0, self._tenant_in_flight[company_id] - 1)
+                    if new_count == 0:
                         del self._tenant_in_flight[company_id]
+                    else:
+                        self._tenant_in_flight[company_id] = new_count

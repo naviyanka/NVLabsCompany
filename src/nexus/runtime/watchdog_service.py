@@ -54,11 +54,11 @@ async def _load_active_runs(session: AsyncSession) -> list[HeartbeatRun]:
 
 
 async def _file_decision(
-    session_factory: async_sessionmaker[AsyncSession],
     agent_id: uuid.UUID,
     source_id: uuid.UUID,
     title: str,
     body: str,
+    session_factory: async_sessionmaker[AsyncSession] | None = None,
 ) -> None:
     """Put one open decision on the escalation queue for a human to answer.
 
@@ -66,66 +66,102 @@ async def _file_decision(
     one decision rather than one per tick.
 
     Args:
-        session_factory: Session factory for the decision and queue writes.
         agent_id: The agent the escalation is about; supplies the company.
         source_id: Dedupe key and queue-item source (a run id, or an agent id
             when the escalation is about the agent rather than a single run).
         title: Short summary shown in the queue.
         body: What the operator needs to know to decide.
+        session_factory: Optional session factory override for tests.
     """
     from nexus.governance.decision_queue_persistent import (
         PersistentDecisionQueueManager,
     )
     from nexus.models.governance import Decision
+    from nexus.database import system_session, tenant_session, async_session_factory
 
     if source_id in _escalated:
         return
 
     # Neither the action dict nor HeartbeatRun carries a company, so it comes
     # from the owning agent.
-    async with session_factory() as session:
-        agent = (
-            await session.execute(select(Agent).where(Agent.id == agent_id))
-        ).scalars().first()
-        if agent is None:
-            logger.warning("Cannot escalate: unknown agent %s", agent_id)
-            return
-        company_id = agent.company_id
+    if session_factory is not None:
+        async with session_factory() as session:
+            agent = (
+                await session.execute(select(Agent).where(Agent.id == agent_id))
+            ).scalars().first()
+            if agent is None:
+                logger.warning("Cannot escalate: unknown agent %s", agent_id)
+                return
+            company_id = agent.company_id
 
-        decision = Decision(
-            company_id=company_id, title=title, body=body, status="open"
+            decision = Decision(
+                company_id=company_id, title=title, body=body, status="open"
+            )
+            session.add(decision)
+            await session.commit()
+            await session.refresh(decision)
+            decision_id = decision.id
+
+        manager = PersistentDecisionQueueManager(session_factory)
+        try:
+            await manager.create_queue(ESCALATION_QUEUE, company_id)
+        except Exception:  # noqa: BLE001 - the queue usually already exists
+            pass
+
+        await manager.add_item(
+            queue_name=ESCALATION_QUEUE,
+            decision_id=decision_id,
+            source_kind="system",
+            source_id=source_id,
+            priority=1,
         )
-        session.add(decision)
-        await session.commit()
-        await session.refresh(decision)
-        decision_id = decision.id
+    else:
+        # Production RLS path: discover agent company_id via system_session
+        async with system_session("watchdog: discover agent company") as session:
+            agent = (
+                await session.execute(select(Agent).where(Agent.id == agent_id))
+            ).scalars().first()
+            if agent is None:
+                logger.warning("Cannot escalate: unknown agent %s", agent_id)
+                return
+            company_id = agent.company_id
 
-    manager = PersistentDecisionQueueManager(session_factory)
-    try:
-        await manager.create_queue(ESCALATION_QUEUE, company_id)
-    except Exception:  # noqa: BLE001 - the queue usually already exists
-        pass
+        # Write decision and queue item inside tenant_session(company_id)
+        async with tenant_session(company_id) as session:
+            decision = Decision(
+                company_id=company_id, title=title, body=body, status="open"
+            )
+            session.add(decision)
+            await session.commit()
+            await session.refresh(decision)
+            decision_id = decision.id
 
-    await manager.add_item(
-        queue_name=ESCALATION_QUEUE,
-        decision_id=decision_id,
-        source_kind="system",
-        source_id=source_id,
-        priority=1,
-    )
+        manager = PersistentDecisionQueueManager(async_session_factory)
+        try:
+            await manager.create_queue(ESCALATION_QUEUE, company_id)
+        except Exception:  # noqa: BLE001 - the queue usually already exists
+            pass
+
+        await manager.add_item(
+            queue_name=ESCALATION_QUEUE,
+            decision_id=decision_id,
+            source_kind="system",
+            source_id=source_id,
+            priority=1,
+        )
+
     _escalated.add(source_id)
     logger.warning("Escalated %s for human review: %s", source_id, title)
 
 
 async def _escalate(
-    session_factory: async_sessionmaker[AsyncSession],
-    action: dict[str, object],
+    session_factory: async_sessionmaker[AsyncSession] | None = None,
+    action: dict[str, object] | None = None,
 ) -> None:
-    """File one human decision for a stalled run.
+    """File one human decision for a stalled run."""
+    if action is None:
+        return
 
-    The watchdog never reassigns or cancels on its own -- a stall it cannot
-    explain goes to a person.
-    """
     raw_run_id = action.get("run_id")
     raw_agent_id = action.get("agent_id")
     if raw_run_id is None or raw_agent_id is None:
@@ -133,27 +169,23 @@ async def _escalate(
 
     run_id = uuid.UUID(str(raw_run_id))
     await _file_decision(
-        session_factory,
         agent_id=uuid.UUID(str(raw_agent_id)),
         source_id=run_id,
         title=f"Stalled agent run {run_id}",
         body=str(action.get("reason", "Run stopped producing output.")),
+        session_factory=session_factory,
     )
 
 
 async def _escalate_recovery(
-    session_factory: async_sessionmaker[AsyncSession],
-    agent_id: uuid.UUID,
+    session_factory: async_sessionmaker[AsyncSession] | None = None,
+    agent_id: uuid.UUID | None = None,
 ) -> None:
-    """File a decision for an agent left in ``needs_recovery``.
+    """File a decision for an agent left in ``needs_recovery``."""
+    if agent_id is None:
+        return
 
-    Startup reclaim moves an agent whose process died into ``needs_recovery``,
-    but nothing moved it out again: no code read that status, so a reclaimed
-    agent sat there indefinitely. Surfacing it as a decision is what makes the
-    reclaim visible to someone who can act on it.
-    """
     await _file_decision(
-        session_factory,
         agent_id=agent_id,
         source_id=agent_id,
         title=f"Agent {agent_id} needs recovery",
@@ -161,26 +193,33 @@ async def _escalate_recovery(
             "The agent's run process died and was reclaimed at startup. Decide "
             "whether to resume its work, reassign it, or leave it stopped."
         ),
+        session_factory=session_factory,
     )
 
 
-async def patrol_once(session_factory: async_sessionmaker[AsyncSession]) -> None:
+async def patrol_once(session_factory: async_sessionmaker[AsyncSession] | None = None) -> None:
     """One patrol: load state, run the checks, act on escalations."""
     global _watchdog
+    from nexus.database import system_session
 
     if _watchdog is None:
         _watchdog = Watchdog(config=WatchdogConfig())
 
-    async with session_factory() as session:
-        agents = await _load_agents(session)
-        runs = await _load_active_runs(session)
+    if session_factory is not None:
+        async with session_factory() as session:
+            agents = await _load_agents(session)
+            runs = await _load_active_runs(session)
+    else:
+        async with system_session("watchdog: patrol discovery") as session:
+            agents = await _load_agents(session)
+            runs = await _load_active_runs(session)
 
     report = _watchdog.patrol(agents, runs)
 
     for action in report.actions_taken:
         if action.get("action") == RecoveryAction.ESCALATE_HUMAN.value:
             try:
-                await _escalate(session_factory, action)
+                await _escalate(session_factory=session_factory, action=action)
             except Exception as exc:  # noqa: BLE001 - one failure must not stop the patrol
                 logger.warning("Could not escalate stalled run: %s", exc)
 
@@ -190,7 +229,7 @@ async def patrol_once(session_factory: async_sessionmaker[AsyncSession]) -> None
         if agent.status != NEEDS_RECOVERY:
             continue
         try:
-            await _escalate_recovery(session_factory, agent.agent_id)
+            await _escalate_recovery(session_factory=session_factory, agent_id=agent.agent_id)
         except Exception as exc:  # noqa: BLE001 - one failure must not stop the patrol
             logger.warning("Could not escalate agent %s: %s", agent.agent_id, exc)
 

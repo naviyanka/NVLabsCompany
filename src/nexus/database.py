@@ -57,6 +57,12 @@ if settings.system_database_url:
         expire_on_commit=False,
     )
 
+def get_system_session_factory() -> async_sessionmaker[AsyncSession]:
+    """Return the system session factory (nexus_system) or fallback to app factory."""
+    return _system_session_factory or async_session_factory
+
+system_session_factory = _system_session_factory or async_session_factory
+
 
 @asynccontextmanager
 async def tenant_session(company_id: uuid.UUID) -> AsyncIterator[AsyncSession]:
@@ -122,6 +128,19 @@ async def assert_role_rls_posture() -> None:
                 if not settings.allow_bypassrls_app_role:
                     raise RuntimeError(msg)
                 logger.warning("%s (allow_bypassrls_app_role is True)", msg)
+                return
+
+            # Positive control (WP-15e): with no tenant context set, an RLS-covered table
+            # must return zero rows. A non-zero count means ENABLE ROW LEVEL SECURITY
+            # was never applied, or the policy is permissive.
+            await session.execute(text("RESET nexus.company_id;"))
+            leaked_res = await session.execute(text("SELECT count(*) FROM tasks;"))
+            leaked = leaked_res.scalar_one_or_none() or 0
+            if leaked > 0:
+                raise RuntimeError(
+                    f"DATABASE RLS POSTURE FAILURE: {leaked} rows of 'tasks' are "
+                    "visible with no tenant context set - RLS is not enforcing"
+                )
     except Exception as exc:
         if not settings.allow_bypassrls_app_role and isinstance(exc, RuntimeError):
             raise

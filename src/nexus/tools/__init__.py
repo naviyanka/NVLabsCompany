@@ -1,6 +1,15 @@
 """Tool Registry - unified tool interface with MCP protocol support and permission-based access."""
 
 from nexus.tools.registry import ToolRegistry, ToolDefinition
+from nexus.tools.obsidian import (
+    OBSIDIAN_NOTE_REPLACE_NAME,
+    OBSIDIAN_NOTE_REPLACE_SCHEMA,
+    ObsidianNoteReplaceResult,
+    ObsidianToolExecutionError,
+    ObsidianNoteReplaceTool,
+    obsidian_note_replace_tool_id,
+    register_obsidian_note_replace,
+)
 from nexus.tools.mcp_client import MCPClient
 from nexus.tools.executor import ToolExecutor, ToolResult
 from nexus.tools.factory import (
@@ -40,6 +49,13 @@ from nexus.tools.skills_catalog import (
 __all__ = [
     "ToolRegistry",
     "ToolDefinition",
+    "OBSIDIAN_NOTE_REPLACE_NAME",
+    "OBSIDIAN_NOTE_REPLACE_SCHEMA",
+    "ObsidianNoteReplaceResult",
+    "ObsidianToolExecutionError",
+    "ObsidianNoteReplaceTool",
+    "obsidian_note_replace_tool_id",
+    "register_obsidian_note_replace",
     "MCPClient",
     "ToolExecutor",
     "ToolResult",

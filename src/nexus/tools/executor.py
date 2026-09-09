@@ -282,6 +282,12 @@ class ToolExecutor:
                 )
                 return result
 
+        # Pass autonomy-issued approval identity into writer without letting the
+        # caller choose it. Correlation was computed from original arguments.
+        execution_arguments = dict(arguments)
+        if autonomy_approval_id is not None:
+            execution_arguments["approval_id"] = str(autonomy_approval_id)
+
         # Execute with timeout
         start = datetime.now(timezone.utc)
         try:
@@ -289,7 +295,7 @@ class ToolExecutor:
             # up to _guardrail_max_retries times, since tool output can vary.
             for attempt in range(self._guardrail_max_retries + 1):
                 output = await asyncio.wait_for(
-                    execute_fn(arguments),
+                    execute_fn(execution_arguments),
                     timeout=self._timeout_seconds,
                 )
                 if self._guardrails is None:
@@ -386,6 +392,7 @@ class ToolExecutor:
                 tool_id=tool_id,
                 agent_id=agent_id,
                 success=False,
+                output=getattr(exc, "result", None),
                 error=str(exc),
                 duration_ms=duration_ms,
             )

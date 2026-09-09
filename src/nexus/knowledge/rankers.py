@@ -327,11 +327,17 @@ class RRFRanker:
                     item_map[key].update(item)
                 scores[key] = scores.get(key, 0.0) + (1.0 / (self.k + rank_idx))
 
+        raw_scores = list(scores.values())
+        min_score = min(raw_scores)
+        max_score = max(raw_scores)
+        score_span = max_score - min_score
+
         fused: list[dict[str, Any]] = []
         for key, item in item_map.items():
             item_copy = dict(item)
-            item_copy["rrf_score"] = scores[key]
-            item_copy["combined_score"] = scores[key]
+            raw = scores[key]
+            item_copy["rrf_score"] = raw
+            item_copy["combined_score"] = 1.0 if score_span <= 0 else (raw - min_score) / score_span
             fused.append(item_copy)
 
         fused.sort(key=lambda x: x["rrf_score"], reverse=True)

@@ -10,6 +10,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 import pytest
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlmodel import SQLModel
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -206,3 +207,77 @@ class TestLegacyRowsStillCount:
             )
             assert allowed_again is True
             assert check.used_cents == 0
+
+
+class TestBudgetWindowAndReconciliation:
+    """Tests for window boundary rolls, record_cost guard, and counter reconciliation."""
+
+    async def test_window_roll_resets_spent_cents_not_reserved(self, session_factory):
+        """Crossing window boundary rolls spent_cents to 0 while keeping reserved_cents intact."""
+        company_id = uuid.uuid4()
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        # Policy started last month
+        last_month = (now.replace(day=1) - timedelta(days=5)).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+        async with session_factory() as db:
+            policy = BudgetPolicy(
+                company_id=company_id,
+                scope_type="company",
+                scope_id=company_id,
+                metric="cost_cents",
+                window_kind="monthly",
+                amount=1000,
+                spent_cents=600,
+                reserved_cents=200,
+                window_started_at=last_month,
+                hard_stop_enabled=True,
+            )
+            db.add(policy)
+            await db.commit()
+
+        async with session_factory() as db:
+            service = BudgetService(db)
+            check = await service.check_budget("company", company_id, amount=100)
+            assert check.allowed is True
+            # spent_cents rolled to 0, reserved_cents remains 200 -> used_cents is 200
+            assert check.used_cents == 200
+
+    async def test_record_cost_exceeded_raises_exception(self, session_factory):
+        """record_cost raises BudgetExceeded when hard stop enabled and limit would be breached."""
+        company_id = uuid.uuid4()
+        await _seed_policy(session_factory, company_id, amount=100)
+
+        async with session_factory() as db:
+            service = BudgetService(db)
+            with pytest.raises(Exception) as exc_info:
+                await service.record_cost(company_id, cost_cents=150)
+            assert "Budget exceeded" in str(exc_info.value)
+
+    async def test_reconcile_budget_counters_fixes_drift(self, session_factory):
+        """reconcile_budget_counters restores truth when counters drift from events."""
+        company_id = uuid.uuid4()
+        await _seed_policy(session_factory, company_id, amount=1000)
+
+        async with session_factory() as db:
+            service = BudgetService(db)
+            # Create a real cost event of 150
+            await service.record_cost(company_id, cost_cents=150)
+            await db.commit()
+
+        # Manually corrupt policy spent_cents to simulate drift
+        async with session_factory() as db:
+            policy = (await db.execute(select(BudgetPolicy).where(BudgetPolicy.company_id == company_id))).scalars().first()
+            policy.spent_cents = 999
+            await db.commit()
+
+        # Run reconciler
+        async with session_factory() as db:
+            service = BudgetService(db)
+            res = await service.reconcile_budget_counters(company_id)
+            assert res["drift_fixed"] == 1
+
+        # Check restored value
+        async with session_factory() as db:
+            policy = (await db.execute(select(BudgetPolicy).where(BudgetPolicy.company_id == company_id))).scalars().first()
+            assert policy.spent_cents == 150
+

@@ -446,20 +446,28 @@ async def test_postgres_atomic_budget_reservations_concurrency(app_user_postgres
 
 
 @pytest.mark.asyncio
-async def test_postgres_orchestrator_tick_rls_posture(
+async def test_orchestrator_tick_sees_work_as_app_role(
     app_user_postgres_url, system_user_postgres_url, monkeypatch
 ):
     """Positive control: orchestrator discovers cross-tenant goals under system role,
-    and drives/creates subtasks under standard app role with RLS enforcement (WP-7)."""
+    and drives/creates subtasks under standard app role with RLS enforcement (WP-15b)."""
     from nexus.models.agent import Agent
     from nexus.models.task import Goal, Task
     from nexus.runtime.orchestrator import _tick
+    from nexus.config import settings
+
+    # Wire database settings so system_session and tenant_session connect to test Postgres
+    monkeypatch.setattr(settings, "database_url", app_user_postgres_url)
+    monkeypatch.setattr(settings, "system_database_url", system_user_postgres_url)
 
     app_engine = create_async_engine(app_user_postgres_url)
     app_factory = async_sessionmaker(app_engine, class_=AsyncSession, expire_on_commit=False)
 
     sys_engine = create_async_engine(system_user_postgres_url)
     sys_factory = async_sessionmaker(sys_engine, class_=AsyncSession, expire_on_commit=False)
+
+    monkeypatch.setattr("nexus.database.async_session_factory", app_factory)
+    monkeypatch.setattr("nexus.database._system_session_factory", sys_factory)
 
     cid = uuid.uuid4()
     agent_id = uuid.uuid4()
@@ -492,18 +500,10 @@ async def test_postgres_orchestrator_tick_rls_posture(
         session.add(goal)
         await session.commit()
 
-    # 2. Run _tick with session_factory
-    # When using sys_factory or app_factory with tenant_session, subtasks get created
-    async with app_factory() as session:
-        await session.execute(
-            sa.text("SELECT set_config('nexus.company_id', :cid, false)"),
-            {"cid": str(cid)},
-        )
-        from nexus.runtime.orchestrator import _decompose_goal
-        await _decompose_goal(session, goal, cid)
-        await session.commit()
+    # 2. Invoke real _tick() directly
+    await _tick()
 
-    # 3. Verify subtasks exist and are isolated
+    # 3. Verify subtasks exist under tenant session
     async with app_factory() as session:
         await session.execute(
             sa.text("SELECT set_config('nexus.company_id', :cid, false)"),
@@ -511,7 +511,7 @@ async def test_postgres_orchestrator_tick_rls_posture(
         )
         res = await session.execute(sa.select(Task).where(Task.goal_id == goal_id))
         subtasks = res.scalars().all()
-        assert len(subtasks) > 0, "Subtasks should be created under tenant context"
+        assert len(subtasks) > 0, "Subtasks should be created by real _tick() under tenant context"
 
     await app_engine.dispose()
     await sys_engine.dispose()

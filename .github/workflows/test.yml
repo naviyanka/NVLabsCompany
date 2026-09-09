@@ -16,6 +16,27 @@ jobs:
           python-version: '3.12'
       - run: python scripts/arch_guard.py
       - run: python scripts/check_generated_artifacts.py
+      - run: python scripts/check_test_invocations.py
+
+  compose-boot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Boot docker compose stack (WP-16b)
+        run: |
+          docker compose up -d postgres
+          docker compose run --rm migrate
+          docker compose up -d backend
+      - name: Verify healthy startup and tenant posture
+        run: |
+          for i in $(seq 60); do
+            curl -sf http://localhost:8000/health/live >/dev/null && exit 0
+            sleep 1
+          done
+          echo "backend never booted cleanly"; exit 1
+      - name: Teardown stack
+        if: always()
+        run: docker compose down -v
 
   backend:
     runs-on: ubuntu-latest

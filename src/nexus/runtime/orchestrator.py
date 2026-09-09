@@ -30,14 +30,18 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from nexus.models._time import utcnow
 from nexus.models.task import RunCompletionReason
-from nexus.governance.bulkhead import TenantBulkhead, TenantSaturated
+from nexus.governance.bulkhead import TenantBulkhead, TenantSaturated, GlobalSaturated
+from nexus.config import settings
 
 logger = logging.getLogger(__name__)
 
 _orchestrator_task: asyncio.Task[None] | None = None
 _running = False
 _instance_id = f"orchestrator-{uuid.uuid4().hex[:8]}"
-_tenant_bulkhead = TenantBulkhead(per_tenant=16, global_cap=128)
+_tenant_bulkhead = TenantBulkhead(
+    per_tenant=settings.tenant_bulkhead_per_tenant,
+    global_cap=128,
+)
 
 # How often to scan for active goals (seconds)
 ORCHESTRATION_TICK_INTERVAL = 120  # 2 minutes
@@ -250,10 +254,11 @@ async def reconcile_recovery(db: AsyncSession) -> int:
     return recovered_count
 
 
-async def _tick(session_factory: async_sessionmaker[AsyncSession]) -> None:
-    """Single orchestration tick: find active goals and drive progress."""
+async def _tick(session_factory: async_sessionmaker[AsyncSession] | None = None) -> None:
+    """Single orchestration tick: find active goals and drive progress (WP-15b)."""
     from nexus.models.task import Goal, Task
     from nexus.models.agent import Agent
+    from nexus.database import system_session, tenant_session
     from nexus.runtime.redis_utils import try_acquire_leader
 
     # Leader election: only the leader instance runs orchestration
@@ -266,82 +271,93 @@ async def _tick(session_factory: async_sessionmaker[AsyncSession]) -> None:
     except Exception:
         pass
 
-    async with session_factory() as db:
-        # Release claims held by processes that died, whether they died during
-        # this tick's predecessor or while the whole service was down.
-        recovered = await _reap_stale_subtasks(db)
-        recovered += await _reclaim_stranded_goals(db)
-        # Automated recovery pass: restore eligible tasks with valid checkpoints
-        restored = await reconcile_recovery(db)
-        if recovered or restored:
+    # Phase 1: discovery. Cross-tenant, read-only, BYPASSRLS role.
+    # Discovers active goals and in-progress tasks across tenants for maintenance sweeps.
+    async with system_session("orchestrator tick: discover active goals") as db:
+        rows = (
+            await db.execute(
+                select(Goal.company_id, Goal.id)
+                .where(Goal.status == "active")
+                .where(Goal.owner_agent_id != None)  # noqa: E711
+                .limit(MAX_GOALS_PER_TICK)
+            )
+        ).all()
+
+        # Also discover any companies with tasks that might need sweep/recovery
+        sweep_rows = (
+            await db.execute(
+                select(Task.company_id)
+                .where(Task.status.in_(["in_progress", "needs_recovery"]))
+                .distinct()
+                .limit(20)
+            )
+        ).scalars().all()
+
+    by_company: dict[uuid.UUID, list[uuid.UUID]] = {}
+    for company_id, goal_id in rows:
+        by_company.setdefault(company_id, []).append(goal_id)
+
+    # Ensure companies with in-progress tasks are also swept even if no active goal rows
+    all_companies = set(by_company.keys()) | set(sweep_rows)
+
+    if not all_companies:
+        return
+
+    logger.info("Orchestrator tick: %d companies with active goals or maintenance", len(all_companies))
+
+    # Phase 2: work. One tenant-scoped session per company.
+    for company_id in all_companies:
+        goal_ids = by_company.get(company_id, [])
+        async with tenant_session(company_id) as db:
+            recovered = await _reap_stale_subtasks(db)
+            recovered += await _reclaim_stranded_goals(db)
+            restored = await reconcile_recovery(db)
+            if recovered or restored:
+                await db.commit()
+
+            if goal_ids:
+                goals = list(
+                    (await db.execute(select(Goal).where(Goal.id.in_(goal_ids))))
+                    .scalars()
+                    .all()
+                )
+
+                for goal in goals:
+                    # Temporal-backed durable goal pursuit when enabled
+                    from nexus.temporal.client import is_temporal_enabled, start_goal_workflow
+
+                    if is_temporal_enabled():
+                        workflow_id = await start_goal_workflow(
+                            goal_id=str(goal.id),
+                            company_id=str(goal.company_id),
+                            title=goal.title,
+                            description=goal.description or "",
+                            owner_agent_id=str(goal.owner_agent_id) if goal.owner_agent_id else None,
+                        )
+                        if workflow_id:
+                            logger.info("Goal %s dispatched to Temporal: %s", goal.id, workflow_id)
+                            goal.status = "in_progress"
+                            continue
+
+                    # Multi-turn: try up to 3 iterations per goal per tick
+                    for _iteration in range(3):
+                        try:
+                            prev_status = goal.status
+                            await _drive_goal(db, goal)
+                            if goal.status == prev_status:
+                                break
+                        except Exception as e:
+                            logger.error("Orchestrator: goal %s processing failed: %s", goal.id, e)
+                            break
+
+            for maintenance in (_auto_evaluate_proposals, _memory_maintenance, _agent_heartbeat_wakeup):
+                try:
+                    await maintenance(db)
+                except Exception as e:
+                    logger.debug("%s error: %s", maintenance.__name__, e)
+
             await db.commit()
 
-        # Find active goals that have an owner agent
-        stmt = (
-            select(Goal)
-            .where(Goal.status == "active")
-            .where(Goal.owner_agent_id != None)  # noqa: E711
-            .limit(MAX_GOALS_PER_TICK)
-        )
-        result = await db.execute(stmt)
-        active_goals = list(result.scalars().all())
-
-        if not active_goals:
-            return
-
-        logger.info("Orchestrator tick: %d active goals to process", len(active_goals))
-
-        for goal in active_goals:
-            # Temporal-backed durable goal pursuit when enabled
-            from nexus.temporal.client import is_temporal_enabled, start_goal_workflow
-
-            if is_temporal_enabled():
-                # Dispatch to Temporal — durable, survives crashes
-                workflow_id = await start_goal_workflow(
-                    goal_id=str(goal.id),
-                    company_id=str(goal.company_id),
-                    title=goal.title,
-                    description=goal.description or "",
-                    owner_agent_id=str(goal.owner_agent_id) if goal.owner_agent_id else None,
-                )
-                if workflow_id:
-                    logger.info("Goal %s dispatched to Temporal: %s", goal.id, workflow_id)
-                    # Mark goal as being processed by Temporal so we don't re-dispatch
-                    goal.status = "in_progress"
-                    continue
-                # Temporal unavailable — fall through to in-process execution
-
-            # Multi-turn: try up to 3 iterations per goal per tick
-            for _iteration in range(3):
-                try:
-                    prev_status = goal.status
-                    await _drive_goal(db, goal)
-                    # If goal didn't change status, stop iterating
-                    if goal.status == prev_status:
-                        break
-                except Exception as e:
-                    logger.error("Orchestrator: goal %s processing failed: %s", goal.id, e)
-                    break
-
-        # Auto-evaluate stale evolution proposals (older than 2 minutes in "proposed" status)
-        try:
-            await _auto_evaluate_proposals(db)
-        except Exception as e:
-            logger.debug("Auto-evaluate proposals error: %s", e)
-
-        # Memory maintenance: decay old memories + promote high-value ones to L3
-        try:
-            await _memory_maintenance(db)
-        except Exception as e:
-            logger.debug("Memory maintenance error: %s", e)
-
-        # Agent heartbeat & wakeup: wake idle agents with pending work
-        try:
-            await _agent_heartbeat_wakeup(db)
-        except Exception as e:
-            logger.debug("Heartbeat wakeup error: %s", e)
-
-        await db.commit()
 
 
 async def _drive_goal(db: AsyncSession, goal: Any) -> None:
@@ -373,6 +389,7 @@ async def _drive_goal(db: AsyncSession, goal: Any) -> None:
             )
             lock_acquired = bool(lock_res.scalar())
         except Exception as e:
+            lock_acquired = False
             logger.debug("Advisory lock acquisition skipped or failed: %s", e)
 
     if not lock_acquired:
@@ -469,7 +486,7 @@ async def _drive_goal(db: AsyncSession, goal: Any) -> None:
         # Execute assigned pending subtasks
         pending_assigned = [t for t in subtasks if t.status == "pending" and t.assigned_agent_id]
         if pending_assigned:
-            await _execute_subtasks(db, pending_assigned, company_id)
+            await _execute_subtasks(pending_assigned, company_id)
     finally:
         if is_pg and company_id and lock_acquired:
             try:
@@ -559,33 +576,31 @@ async def _route_subtasks(db: AsyncSession, tasks: list[Any], company_id: uuid.U
     logger.info("Routed %d subtasks to agents", len(tasks))
 
 
-async def _execute_subtasks(db: AsyncSession, tasks: list[Any], company_id: uuid.UUID) -> None:
-    """Execute assigned subtasks by calling the agent's LLM adapter."""
+async def _execute_one_subtask(company_id: uuid.UUID, task_id: uuid.UUID, agent_id: uuid.UUID) -> None:
+    """Execute a single subtask in its own dedicated tenant_session (WP-19a)."""
+    from nexus.database import tenant_session
     from nexus.models.agent import Agent
+    from nexus.models.task import Task
     from nexus.api.routes.chat import _build_system_prompt, _call_llm, _fetch_agent_memories
+    import hashlib
+    import json
+    from nexus.runtime.checkpoint import DurableCheckpointService, ExecutionCheckpoint, mark_completed
+    from nexus.governance.audit_service import record_audit
 
-    for index, task in enumerate(tasks):
-        if index >= MAX_ITERATIONS_PER_GOAL:
-            # Out of iterations for this tick — the rest stay pending and are
-            # picked up next tick, but record why they didn't run now.
-            _finish(task, "pending", RunCompletionReason.max_iterations)
-            db.add(task)
-            continue
+    async with tenant_session(company_id) as db:
+        task = await db.get(Task, task_id)
+        if not task:
+            return
 
-        if not task.assigned_agent_id:
-            continue
-
-        # Load the assigned agent
-        agent_stmt = select(Agent).where(Agent.id == task.assigned_agent_id)
-        result = await db.execute(agent_stmt)
-        agent = result.scalar_one_or_none()
+        agent = await db.get(Agent, agent_id)
         if not agent:
             _finish(task, "failed", RunCompletionReason.error)
-            task.error = f"Assigned agent {task.assigned_agent_id} not found"
+            task.error = f"Assigned agent {agent_id} not found"
             db.add(task)
-            continue
+            await db.commit()
+            return
 
-        # Pre-flight budget check — don't start work we cannot pay for.
+        # Pre-flight budget check
         if agent.budget_monthly_cents and agent.spent_monthly_cents >= agent.budget_monthly_cents:
             _finish(task, "failed", RunCompletionReason.budget_exhausted)
             task.error = (
@@ -593,18 +608,16 @@ async def _execute_subtasks(db: AsyncSession, tasks: list[Any], company_id: uuid
                 f"{agent.budget_monthly_cents} cents"
             )
             db.add(task)
+            await db.commit()
             await _broadcast_orchestrator_event("subtask_failed", {
                 "task_id": str(task.id), "title": task.title[:60],
                 "error": "budget exhausted",
                 "completion_reason": RunCompletionReason.budget_exhausted.value,
             })
             logger.warning("Subtask '%s' skipped: agent %s budget exhausted", task.title[:40], agent.name)
-            continue
+            return
 
-        # Claim the task before spending anything on it. A crash between here
-        # and the terminal write leaves the row in_progress, which is what
-        # _reap_stale_subtasks looks for — without the claim the task looks
-        # fresh and the next tick pays for the same LLM call again.
+        # Claim the task
         task.status = "in_progress"
         task.started_at = utcnow()
         task.updated_at = task.started_at
@@ -612,21 +625,14 @@ async def _execute_subtasks(db: AsyncSession, tasks: list[Any], company_id: uuid
         await db.commit()
 
         try:
-            # Check for active checkpoint to resume from
-            import hashlib
-            import json
-            from nexus.runtime.checkpoint import DurableCheckpointService, ExecutionCheckpoint, mark_completed
-            from nexus.governance.audit_service import record_audit
-
+            # Check for active checkpoint
             checkpoint = None
             try:
                 cp_candidate = await DurableCheckpointService.load_latest(task.id, db)
                 if isinstance(cp_candidate, ExecutionCheckpoint):
                     checkpoint = cp_candidate
             except Exception as cp_err:
-                # A missing or unreadable checkpoint must not stop the work: the
-                # task simply restarts from step 0.
-                logger.debug("Checkpoint check skipped for task %s: %s", getattr(task, "id", None), cp_err)
+                logger.debug("Checkpoint check skipped for task %s: %s", task.id, cp_err)
                 checkpoint = None
 
             resumed_step = 0
@@ -641,20 +647,15 @@ async def _execute_subtasks(db: AsyncSession, tasks: list[Any], company_id: uuid
                 completed_steps = state.get("completed_steps", list(range(resumed_step)))
                 intermediate_results = state.get("intermediate_results", [])
 
-                # Calculate deterministic state hash for audit record
                 state_hash = hashlib.sha256(
                     json.dumps(state, sort_keys=True, default=str).encode("utf-8")
                 ).hexdigest()
 
                 logger.info(
                     "Task %s rehydrating from checkpoint step %d (resuming at step %d, %d completed steps)",
-                    task.id,
-                    step_index,
-                    resumed_step,
-                    len(completed_steps),
+                    task.id, step_index, resumed_step, len(completed_steps),
                 )
 
-                # Emit audit log event: task_resumed_from_checkpoint
                 try:
                     await record_audit(
                         company_id=company_id,
@@ -683,7 +684,6 @@ async def _execute_subtasks(db: AsyncSession, tasks: list[Any], company_id: uuid
                     "state_hash": state_hash,
                 })
 
-                # Inject completed steps and intermediate results into prompt instructions
                 resumption_context = (
                     f"\n\n[CHECKPOINT RESUMPTION CONTEXT]\n"
                     f"Task execution was previously checkpointed at step {step_index}.\n"
@@ -694,12 +694,10 @@ async def _execute_subtasks(db: AsyncSession, tasks: list[Any], company_id: uuid
                     f"Resume directly from step {resumed_step} using the intermediate results above."
                 )
 
-            # Build prompt and execute
             memories = await _fetch_agent_memories(db, agent.id, company_id, limit=5)
             system_prompt = _build_system_prompt(agent, memories=memories)
             prompt = f"Execute this task:\n{task.title}\n{task.description or ''}{resumption_context}"
 
-            # Prepare history messages with intermediate results for context
             history_messages: list[dict[str, Any]] = []
             if intermediate_results:
                 for idx, res in enumerate(intermediate_results):
@@ -722,34 +720,33 @@ async def _execute_subtasks(db: AsyncSession, tasks: list[Any], company_id: uuid
                 )
 
             if NEEDS_HELP_MARKER in (response_text or ""):
-                # The agent decided it cannot finish without a human.
                 _finish(task, "blocked", RunCompletionReason.needs_help)
                 task.result = response_text
                 db.add(task)
+                await db.commit()
                 await _broadcast_orchestrator_event("subtask_blocked", {
                     "task_id": str(task.id), "title": task.title[:60], "agent": agent.name,
                     "completion_reason": RunCompletionReason.needs_help.value,
                 })
                 logger.warning("Subtask '%s' needs human help (%s)", task.title[:40], agent.name)
-                continue
+                return
 
             if not (response_text or "").strip():
-                # Nothing actionable came back — an empty turn is not success.
                 _finish(task, "failed", RunCompletionReason.no_tool_calls)
                 task.error = "Agent produced no output"
                 db.add(task)
+                await db.commit()
                 await _broadcast_orchestrator_event("subtask_failed", {
                     "task_id": str(task.id), "title": task.title[:60], "error": "no output",
                     "completion_reason": RunCompletionReason.no_tool_calls.value,
                 })
                 logger.warning("Subtask '%s' produced no output (%s)", task.title[:40], agent.name)
-                continue
+                return
 
             # Mark as completed
             _finish(task, "completed", RunCompletionReason.goal)
             db.add(task)
 
-            # Record task completion metric
             try:
                 from nexus.observability.metrics import record_task_metrics
                 duration_sec = (utcnow() - task.started_at).total_seconds() if task.started_at else None
@@ -757,7 +754,6 @@ async def _execute_subtasks(db: AsyncSession, tasks: list[Any], company_id: uuid
             except Exception:
                 pass
 
-            # Mark checkpoints completed upon task success
             try:
                 await mark_completed(task.id, db)
             except Exception as cp_err:
@@ -770,25 +766,38 @@ async def _execute_subtasks(db: AsyncSession, tasks: list[Any], company_id: uuid
             })
             logger.info("Subtask '%s' completed by %s (%d tokens)", task.title[:40], agent.name, tokens_used)
 
-            # Self-adaptive trigger: parse [SCHEDULE:] patterns from LLM output
             await _parse_adaptive_triggers(db, agent, response_text, company_id)
+            await db.commit()
 
         except TenantSaturated as e:
-            # Saturated tenant quota: put task back to pending for next tick
             task.status = "pending"
             task.started_at = None
             task.error = f"Tenant concurrency quota reached; will retry (retry_after={e.retry_after}s)"
             db.add(task)
+            await db.commit()
             await _broadcast_orchestrator_event("subtask_deferred", {
                 "task_id": str(task.id), "title": task.title[:60], "agent": agent.name,
                 "error": "tenant_saturated",
             })
             logger.warning("Subtask '%s' deferred: %s", task.title[:40], e)
 
+        except GlobalSaturated as e:
+            task.status = "pending"
+            task.started_at = None
+            task.error = f"Global concurrency cap reached; will retry (retry_after={e.retry_after}s)"
+            db.add(task)
+            await db.commit()
+            await _broadcast_orchestrator_event("subtask_deferred", {
+                "task_id": str(task.id), "title": task.title[:60], "agent": agent.name,
+                "error": "global_saturated",
+            })
+            logger.warning("Subtask '%s' deferred due to global saturation: %s", task.title[:40], e)
+
         except (asyncio.TimeoutError, TimeoutError) as e:
             _finish(task, "failed", RunCompletionReason.timeout)
             task.error = f"Timed out after {SUBTASK_TIMEOUT_SECONDS}s"
             db.add(task)
+            await db.commit()
 
             try:
                 from nexus.observability.metrics import record_task_metrics
@@ -807,6 +816,7 @@ async def _execute_subtasks(db: AsyncSession, tasks: list[Any], company_id: uuid
             _finish(task, "failed", RunCompletionReason.error)
             task.error = str(e)[:2000]
             db.add(task)
+            await db.commit()
 
             try:
                 from nexus.observability.metrics import record_task_metrics
@@ -821,7 +831,19 @@ async def _execute_subtasks(db: AsyncSession, tasks: list[Any], company_id: uuid
             })
             logger.error("Subtask '%s' execution failed: %s", task.title[:40], e)
 
-    await db.flush()
+
+async def _execute_subtasks(tasks: list[Any], company_id: uuid.UUID) -> None:
+    """Execute assigned subtasks concurrently, with per-task tenant sessions (WP-19a)."""
+    runnable = [t for t in tasks[:MAX_ITERATIONS_PER_GOAL] if t.assigned_agent_id]
+    for overflow in tasks[MAX_ITERATIONS_PER_GOAL:]:
+        _finish(overflow, "pending", RunCompletionReason.max_iterations)
+
+    if runnable:
+        await asyncio.gather(
+            *(_execute_one_subtask(company_id, t.id, t.assigned_agent_id) for t in runnable),
+            return_exceptions=True,
+        )
+
 
 
 def _auto_promote_enabled() -> bool:
@@ -1107,12 +1129,8 @@ async def _broadcast_orchestrator_event(event_type: str, data: dict[str, Any]) -
         pass  # WebSocket delivery is best-effort
 
 
-async def _orchestrator_loop(session_factory: async_sessionmaker[AsyncSession]) -> None:
-    """Main orchestrator loop — ticks every ORCHESTRATION_TICK_INTERVAL seconds.
-
-    Lease-gated: with multiple replicas only the leader drives goals, so work
-    is not duplicated. Followers take over automatically when the lease lapses.
-    """
+async def _orchestrator_loop(session_factory: async_sessionmaker[AsyncSession] | None = None) -> None:
+    """Main orchestration loop — ticks every ORCHESTRATION_TICK_INTERVAL seconds."""
     global _running
     from nexus.governance.leader_election import is_leader
 
@@ -1127,7 +1145,7 @@ async def _orchestrator_loop(session_factory: async_sessionmaker[AsyncSession]) 
     logger.info("Autonomous Orchestrator stopped")
 
 
-async def start_orchestrator(session_factory: async_sessionmaker[AsyncSession]) -> None:
+async def start_orchestrator(session_factory: async_sessionmaker[AsyncSession] | None = None) -> None:
     """Start the autonomous orchestration background task."""
     global _orchestrator_task, _running
     if _orchestrator_task is not None:

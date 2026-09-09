@@ -17,6 +17,7 @@ resume after approval instead of creating a second request.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import uuid
 from dataclasses import dataclass
@@ -223,7 +224,38 @@ class AutonomyGate:
             "tool_name": tool_name,
             "agent_id": str(agent_id),
         }
+        approval_type = f"tool_call.{action_type}"
+        if tool_name == "obsidian.note_replace":
+            from nexus.obsidian.security import canonical_vault_path
 
+            requested_path = arguments.get("vault_path") if arguments else None
+            content = arguments.get("content") if arguments else None
+            expected_hash = arguments.get("expected_hash") if arguments else None
+            if company_id is None:
+                return AutonomyDecision(
+                    False,
+                    level,
+                    action_type,
+                    cid,
+                    reason="company context is required for Obsidian approval",
+                )
+            if not isinstance(requested_path, str) or not isinstance(content, str):
+                return AutonomyDecision(
+                    False,
+                    level,
+                    action_type,
+                    cid,
+                    reason="obsidian.note_replace requires vault_path and content",
+                )
+            payload.update(
+                {
+                    "operation": "obsidian.note_replace",
+                    "vault_path": canonical_vault_path(company_id, requested_path),
+                    "previous_hash": expected_hash,
+                    "content_hash": hashlib.sha256(content.encode("utf-8")).hexdigest(),
+                }
+            )
+            approval_type = "obsidian_write"
         if level == 2:
             await self._notify(payload)
             return AutonomyDecision(True, level, action_type, cid, notified=True)
@@ -264,7 +296,7 @@ class AutonomyGate:
         if existing is None:
             await self._approvals.request_approval(
                 company_id=company_id,
-                approval_type=f"tool_call.{action_type}",
+                approval_type=approval_type,
                 requested_by_agent_id=agent_id,
                 payload=payload,
                 approval_id=cid,

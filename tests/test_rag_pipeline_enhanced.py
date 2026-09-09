@@ -308,6 +308,9 @@ class TestRRFRanker:
         # docA appears in both (rank 1 in A + rank 2 in B) -> highest score
         assert fused[0]["id"] == "docA"
         assert fused[0]["rrf_score"] == (1.0 / (60 + 1)) + (1.0 / (60 + 2))
+        assert 0.0 <= fused[0]["combined_score"] <= 1.0
+        assert fused[0]["combined_score"] == 1.0  # highest rank normalized to 1.0
+
 
 
 
