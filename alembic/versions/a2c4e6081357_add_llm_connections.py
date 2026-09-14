@@ -1,6 +1,6 @@
 """add llm_connections table + agents.connection_id + RLS
 
-Revision ID: a1b2c3d4e5f6
+Revision ID: a2c4e6081357
 Revises: f4a5b6c7d8e9
 Create Date: 2026-09-09
 
@@ -17,7 +17,7 @@ from sqlalchemy.dialects import postgresql
 from alembic import op
 
 # revision identifiers, used by Alembic.
-revision: str = 'a1b2c3d4e5f6'
+revision: str = 'a2c4e6081357'
 down_revision: str | None = 'f4a5b6c7d8e9'
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
@@ -48,7 +48,11 @@ def upgrade() -> None:
             sa.Column(
                 "connection_id",
                 uuid_type,
-                sa.ForeignKey("llm_connections.id"),
+                # Named so SQLite batch mode can recreate the table; batch
+                # add_constraint rejects unnamed constraints.
+                sa.ForeignKey(
+                    "llm_connections.id", name="fk_agents_connection_id"
+                ),
                 nullable=True,
             )
         )
