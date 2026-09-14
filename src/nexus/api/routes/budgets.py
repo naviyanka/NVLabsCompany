@@ -7,16 +7,17 @@ writing a policy requires the administrator role.
 """
 
 import uuid
-from datetime import timezone, datetime, timedelta
+from datetime import datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, status
 from pydantic import BaseModel
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, or_, select
 
 from nexus.api.deps import CurrentCompanyId, DbSession, PathCompanyId, RequireAdmin
 from nexus.models._time import utcnow
 from nexus.models.budget import BudgetPolicy, CostEvent
+from nexus.services.budget_service import _calculate_window_start
 
 router = APIRouter(tags=["budgets"])
 
@@ -61,6 +62,27 @@ class BudgetUsageResponse(BaseModel):
     event_count: int
 
 
+def _live_or_committed(now: datetime) -> Any:
+    """Status filter shared by the budget read endpoints.
+
+    Live holds count like settled spend (that is what stops two workers
+    from both passing a check only one fits under); released holds never
+    count; an expired hold stops counting on its own so a worker that died
+    mid-call does not pin the budget forever. Mirrors
+    BudgetService._get_window_usage - keep the two in agreement (R13).
+    """
+    return or_(
+        CostEvent.status == "committed",
+        and_(
+            CostEvent.status == "reserved",
+            or_(
+                CostEvent.expires_at.is_(None),
+                CostEvent.expires_at > now,
+            ),
+        ),
+    )
+
+
 @router.post(
     "/api/v1/companies/{company_id}/budget-policies",
     status_code=status.HTTP_201_CREATED,
@@ -93,12 +115,9 @@ async def create_budget_policy(
     response_model=BudgetUsageResponse,
 )
 async def get_company_budget_usage(
-    company_id: PathCompanyId, db: DbSession
+    company_id: PathCompanyId, db: DbSession, window: str = "monthly"
 ) -> Any:
-    """Get budget usage for a company."""
-    now = utcnow()
-    window_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-
+    """Get budget usage for a company within a window (B5: status-correct)."""
     stmt = select(
         func.coalesce(func.sum(CostEvent.cost_cents), 0),
         func.coalesce(func.sum(CostEvent.input_tokens), 0),
@@ -106,20 +125,19 @@ async def get_company_budget_usage(
         func.count(CostEvent.id),
     ).where(
         CostEvent.company_id == company_id,
-        CostEvent.occurred_at >= window_start,
+        CostEvent.occurred_at >= _calculate_window_start(window, utcnow()),
+        _live_or_committed(utcnow()),
     )
-
     result = await db.execute(stmt)
     row = result.one()
-    total_cost, total_input, total_output, count = row
 
     return BudgetUsageResponse(
         scope_type="company",
         scope_id=company_id,
-        total_cost_cents=int(total_cost),
-        total_input_tokens=int(total_input),
-        total_output_tokens=int(total_output),
-        event_count=int(count),
+        total_cost_cents=int(row[0]),
+        total_input_tokens=int(row[1]),
+        total_output_tokens=int(row[2]),
+        event_count=int(row[3]),
     )
 
 
@@ -128,12 +146,12 @@ async def get_company_budget_usage(
     response_model=BudgetUsageResponse,
 )
 async def get_agent_budget_usage(
-    agent_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId
+    agent_id: uuid.UUID,
+    db: DbSession,
+    company_id: CurrentCompanyId,
+    window: str = "monthly",
 ) -> Any:
-    """Get budget usage for an agent."""
-    now = utcnow()
-    window_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-
+    """Get budget usage for an agent within a window (B5: status-correct)."""
     stmt = select(
         func.coalesce(func.sum(CostEvent.cost_cents), 0),
         func.coalesce(func.sum(CostEvent.input_tokens), 0),
@@ -142,29 +160,29 @@ async def get_agent_budget_usage(
     ).where(
         CostEvent.agent_id == agent_id,
         CostEvent.company_id == company_id,
-        CostEvent.occurred_at >= window_start,
+        CostEvent.occurred_at >= _calculate_window_start(window, utcnow()),
+        _live_or_committed(utcnow()),
     )
-
     result = await db.execute(stmt)
     row = result.one()
-    total_cost, total_input, total_output, count = row
 
     return BudgetUsageResponse(
         scope_type="agent",
         scope_id=agent_id,
-        total_cost_cents=int(total_cost),
-        total_input_tokens=int(total_input),
-        total_output_tokens=int(total_output),
-        event_count=int(count),
+        total_cost_cents=int(row[0]),
+        total_input_tokens=int(row[1]),
+        total_output_tokens=int(row[2]),
+        event_count=int(row[3]),
     )
-
 
 
 @router.get("/api/v1/companies/{company_id}/budgets/cost-trend")
 async def cost_trend(
-    company_id: PathCompanyId, db: DbSession, days: int = 7
+    company_id: PathCompanyId,
+    db: DbSession,
+    days: int = 7,
 ) -> list[dict[str, Any]]:
-    """Daily cost trend for the last N days."""
+    """Daily cost trend for the last N days (B5: status-correct)."""
     now = utcnow()
     results = []
     for i in range(days):
@@ -180,15 +198,16 @@ async def cost_trend(
                 CostEvent.company_id == company_id,
                 CostEvent.occurred_at >= day_start,
                 CostEvent.occurred_at < day_end,
+                _live_or_committed(now),
             )
         )
         r = row.one()
         results.append(
             {
                 "date": day_start.strftime("%Y-%m-%d"),
-                "cost_cents": r[0],
-                "input_tokens": r[1],
-                "output_tokens": r[2],
+                "cost_cents": int(r[0]),
+                "input_tokens": int(r[1]),
+                "output_tokens": int(r[2]),
             }
         )
     return results
