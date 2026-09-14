@@ -8,14 +8,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Python dependencies
-COPY pyproject.toml ./
-RUN pip install --no-cache-dir -e ".[dev]" 2>/dev/null || pip install --no-cache-dir .
-
-# Copy source
+# Copy source first: pyproject sets egg_base=src, so the editable install
+# below fails if src/ is absent at build time.
 COPY src/ ./src/
-COPY alembic/ ./alembic/ 2>/dev/null || true
-COPY alembic.ini ./alembic.ini 2>/dev/null || true
+COPY alembic/ ./alembic/
+COPY alembic.ini ./alembic.ini
+
+# Install Python dependencies
+COPY pyproject.toml README.md ./
+RUN pip install --no-cache-dir -e ".[dev]" 2>/dev/null || pip install --no-cache-dir .
 
 # Set Python path
 ENV PYTHONPATH=/app/src
