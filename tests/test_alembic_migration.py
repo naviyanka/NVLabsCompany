@@ -1,9 +1,17 @@
-"""Tests for Alembic migration completeness and validity."""
+"""Tests for Alembic migration completeness and validity.
+
+Everything is driven off Alembic's own ScriptDirectory. Hardcoded
+file lists are what let the revision map rot once before (duplicate
+id shipped, heads OK but upgrade broken) — never reintroduce one.
+"""
 
 import ast
+import os
 from pathlib import Path
 
 import pytest
+from alembic import command
+from alembic.config import Config
 from sqlalchemy import inspect
 from sqlmodel import SQLModel, create_engine
 
@@ -12,6 +20,9 @@ import nexus.models  # noqa: F401
 
 
 ALEMBIC_VERSIONS_DIR = Path(__file__).resolve().parent.parent / "alembic" / "versions"
+
+# env.py is async: it needs an async driver. aiosqlite is a dev dep.
+SQLITE_URL = "sqlite+aiosqlite:///./_wp23b_chain.db"
 
 EXPECTED_TABLES = {
     "action_items",
@@ -98,109 +109,128 @@ EXPECTED_TABLES = {
     "workspaces",
 }
 
-MIGRATION_FILES = [
-    "db96cb66effc_initial_schema.py",
-    "ca7238bc6797_add_kill_switch_records_table.py",
-    "a1b2c3d4e5f6_add_circuit_breaker_records_table.py",
-]
 
-# Expected migration chain: None -> db96cb66effc -> ca7238bc6797 -> a1b2c3d4e5f6
-MIGRATION_CHAIN = [
-    ("db96cb66effc_initial_schema.py", None, "db96cb66effc"),
-    (
-        "ca7238bc6797_add_kill_switch_records_table.py",
-        "db96cb66effc",
-        "ca7238bc6797",
-    ),
-    (
-        "a1b2c3d4e5f6_add_circuit_breaker_records_table.py",
-        "ca7238bc6797",
-        "a1b2c3d4e5f6",
-    ),
-]
+def _alembic_cfg(db_url: str | None = None) -> Config:
+    cfg = Config("alembic.ini")
+    if db_url:
+        cfg.set_main_option("sqlalchemy.url", db_url)
+    return cfg
 
 
 class TestModelMetadata:
     """Verify all SQLModel tables are discoverable in metadata."""
 
     def test_all_expected_tables_in_metadata(self) -> None:
-        """Import all models and confirm metadata contains all expected tables."""
+        """Metadata contains exactly the expected tables (diff shown on failure)."""
         actual_tables = set(SQLModel.metadata.tables.keys())
-        assert len(actual_tables) == len(EXPECTED_TABLES), (
-            f"Expected {len(EXPECTED_TABLES)} tables, found {len(actual_tables)}: "
-            f"missing={EXPECTED_TABLES - actual_tables}, "
-            f"extra={actual_tables - EXPECTED_TABLES}"
-        )
-        assert actual_tables == EXPECTED_TABLES
+        missing = EXPECTED_TABLES - actual_tables
+        extra = actual_tables - EXPECTED_TABLES
+        assert not missing, f"Missing tables in metadata: {sorted(missing)}"
+        assert not extra, f"Unexpected tables in metadata: {sorted(extra)}"
 
     def test_circuit_breaker_records_in_metadata(self) -> None:
         """Verify circuit_breaker_records table is registered in metadata."""
         assert "circuit_breaker_records" in SQLModel.metadata.tables
 
 
-class TestMigrationFiles:
-    """Verify all migration files exist and are valid Python."""
+class TestRevisionGraph:
+    """Structural checks derived from the live ScriptDirectory, not a list."""
 
-    @pytest.mark.parametrize("filename", MIGRATION_FILES)
-    def test_migration_file_exists(self, filename: str) -> None:
-        """Verify each migration file exists in alembic/versions/."""
-        filepath = ALEMBIC_VERSIONS_DIR / filename
-        assert filepath.exists(), f"Migration file not found: {filepath}"
+    def test_revision_ids_are_unique(self) -> None:
+        """No two version files may declare the same revision id.
 
-    @pytest.mark.parametrize("filename", MIGRATION_FILES)
-    def test_migration_file_is_valid_python(self, filename: str) -> None:
-        """Verify each migration file is syntactically valid Python via ast.parse."""
-        filepath = ALEMBIC_VERSIONS_DIR / filename
-        source = filepath.read_text()
-        try:
-            ast.parse(source)
-        except SyntaxError as e:
-            pytest.fail(f"Migration file {filename} has syntax error: {e}")
+        R14 guard. A duplicate id makes ScriptDirectory raise
+        (duplicate-revision-identifier) at map-build time, so every
+        alembic command — heads, history, upgrade — fails.
+        """
+        ids: list[str] = []
+        for path in ALEMBIC_VERSIONS_DIR.glob("*.py"):
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            for node in ast.walk(tree):
+                value = None
+                if isinstance(node, ast.Assign) and any(
+                    getattr(t, "id", None) == "revision" for t in node.targets
+                ):
+                    if isinstance(node.value, ast.Constant):
+                        value = node.value.value
+                elif isinstance(node, ast.AnnAssign) and getattr(
+                    node.target, "id", None
+                ) == "revision":
+                    if isinstance(node.value, ast.Constant):
+                        value = node.value.value
+                if value is not None:
+                    ids.append(value)
+
+        dupes = {rid for rid in ids if ids.count(rid) > 1}
+        assert not dupes, f"Duplicate revision ids: {sorted(dupes)}"
+
+    def test_revision_graph_is_a_single_chain(self) -> None:
+        """Exactly one head; every revision reachable walking back from it.
+
+        A second head or an unreachable revision means the graph has a
+        fork that `alembic upgrade head` silently ignores.
+        """
+        from alembic.script import ScriptDirectory
+
+        sd = ScriptDirectory.from_config(Config("alembic.ini"))
+        heads = sd.get_heads()
+        assert len(heads) == 1, f"Expected exactly one head, got {heads}"
+
+        walkable = {r.revision for r in sd.walk_revisions()}
+        all_files = {
+            p.name for p in ALEMBIC_VERSIONS_DIR.glob("*.py") if p.name != "__init__.py"
+        }
+        # every version file on disk is part of the walkable lineage
+        unreachable = all_files - {Path(r.path).name for r in sd.walk_revisions()}
+        assert not unreachable, f"Version files not in lineage: {sorted(unreachable)}"
 
 
-class TestMigrationChain:
-    """Verify the migration chain is consistent."""
+class TestChainExecution:
+    """The map building is not the chain executing. Execute it."""
 
-    @pytest.mark.parametrize("filename,expected_down,expected_rev", MIGRATION_CHAIN)
-    def test_migration_chain_consistency(
-        self, filename: str, expected_down: str | None, expected_rev: str
-    ) -> None:
-        """Verify each migration's down_revision points to the previous one."""
-        filepath = ALEMBIC_VERSIONS_DIR / filename
-        source = filepath.read_text()
-        tree = ast.parse(source)
+    def teardown_method(self) -> None:
+        db_path = Path("./_wp23b_chain.db")
+        if db_path.exists():
+            db_path.unlink()
+        for suffix in ("-journal", "-wal", "-shm"):
+            p = Path(str(db_path) + suffix)
+            if p.exists():
+                p.unlink()
 
-        revision_value = None
-        down_revision_value = None
+    def test_full_chain_upgrades_from_empty(self, tmp_path, monkeypatch) -> None:
+        """`alembic upgrade head` runs the whole chain from an empty database.
 
-        for node in ast.walk(tree):
-            # Handle annotated assignments (e.g., revision: str = 'abc')
-            if isinstance(node, ast.AnnAssign):
-                if isinstance(node.target, ast.Name):
-                    if node.target.id == "revision":
-                        if isinstance(node.value, ast.Constant):
-                            revision_value = node.value.value
-                    elif node.target.id == "down_revision":
-                        if isinstance(node.value, ast.Constant):
-                            down_revision_value = node.value.value
-            # Handle plain assignments (e.g., revision = 'abc')
-            elif isinstance(node, ast.Assign):
-                for target in node.targets:
-                    if isinstance(target, ast.Name):
-                        if target.id == "revision":
-                            if isinstance(node.value, ast.Constant):
-                                revision_value = node.value.value
-                        elif target.id == "down_revision":
-                            if isinstance(node.value, ast.Constant):
-                                down_revision_value = node.value.value
+        This is what the compose migrate one-shot runs — the only test
+        that proves the chain executes, not just that the map builds.
+        Dialect-guarded migrations (is_pg) are skipped branches on
+        sqlite; the RLS statements only run against real Postgres in
+        CI (postgres-integration job) and test_postgres_integration.py.
+        """
+        db_file = tmp_path / "chain.db"
+        cfg = Config("alembic.ini")
+        cfg.set_main_option("sqlalchemy.url", f"sqlite+aiosqlite:///{db_file.as_posix()}")
+        command.upgrade(cfg, "head")
 
-        assert revision_value == expected_rev, (
-            f"In {filename}: expected revision={expected_rev!r}, got {revision_value!r}"
-        )
-        assert down_revision_value == expected_down, (
-            f"In {filename}: expected down_revision={expected_down!r}, "
-            f"got {down_revision_value!r}"
-        )
+        engine = create_engine(f"sqlite:///{db_file.as_posix()}")
+        created = set(inspect(engine).get_table_names())
+        engine.dispose()
+
+        missing = EXPECTED_TABLES - created
+        assert not missing, f"Tables missing after full upgrade: {sorted(missing)}"
+        unexpected = created - EXPECTED_TABLES - {"alembic_version"}
+        assert not unexpected, f"Unexpected tables created: {sorted(unexpected)}"
+
+    def test_downgrade_one_then_upgrade_again(self, tmp_path) -> None:
+        """Downgrade one step from head, then upgrade back to head.
+
+        The only thing that ever exercises a downgrade() body.
+        """
+        db_file = tmp_path / "chain.db"
+        cfg = Config("alembic.ini")
+        cfg.set_main_option("sqlalchemy.url", f"sqlite+aiosqlite:///{db_file.as_posix()}")
+        command.upgrade(cfg, "head")
+        command.downgrade(cfg, "-1")
+        command.upgrade(cfg, "head")
 
 
 class TestSchemaCreation:
@@ -211,10 +241,8 @@ class TestSchemaCreation:
         engine = create_engine("sqlite:///:memory:")
         SQLModel.metadata.create_all(engine)
 
-        # Verify tables were created by inspecting the engine
         inspector = inspect(engine)
         created_tables = set(inspector.get_table_names())
         assert "circuit_breaker_records" in created_tables
         assert "kill_switch_records" in created_tables
         assert "agents" in created_tables
-        assert len(created_tables) == len(EXPECTED_TABLES)
