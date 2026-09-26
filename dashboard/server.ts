@@ -5,6 +5,8 @@ import fs from 'fs';
 import path from 'path';
 import { createServer as createViteServer } from 'vite';
 
+import { pipeBody } from './proxyBody';
+
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
 
@@ -133,7 +135,7 @@ app.use(async (req: Request, res: Response, next: NextFunction) => {
     if (contentType) res.setHeader('content-type', contentType);
 
     res.status(upstream.status);
-    res.end(Buffer.from(await upstream.arrayBuffer()));
+    pipeBody(upstream, res);
   } catch {
     // Auth is never faked here. A 401 stays a 401 and an unreachable backend
     // stays an error: a proxy that answered with a synthetic admin identity
@@ -2702,6 +2704,17 @@ app.get('/api/health', (req, res) => {
 // Pulse Line / Live stream
 app.get('/api/v1/companies/:companyId/pulse', (req, res) => {
   res.json(activities);
+});
+
+// Realtime event bus (mirrors backend GET /api/v1/events/stream). The mock has no
+// bus, so it only holds the stream open with keepalives instead of 404-looping.
+app.get('/api/v1/events/stream', (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
+  const keepalive = setInterval(() => safeWrite(res, ': keepalive\n\n'), 30000);
+  req.on('close', () => clearInterval(keepalive));
 });
 
 // SSE Stream for Real-time Activity

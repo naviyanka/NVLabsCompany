@@ -180,6 +180,13 @@ class ClaudeCodeAdapter(BaseAdapter):
             session.metadata.get("timeout", DEFAULT_TIMEOUT_SECONDS),
         )
         extra_args = payload.get("args", [])
+        from nexus.tools.access import check_cli_args
+
+        refused = check_cli_args(extra_args)
+        if refused:
+            return TaskResult(
+                task_id=task_id, agent_id=session.agent_id, success=False, error=refused
+            )
         workspace = self._workspaces.get(session.session_id, ".")
         cli_command = session.metadata.get("cli_command", "claude")
 

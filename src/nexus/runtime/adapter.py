@@ -35,6 +35,10 @@ class AgentSession:
         default_factory=lambda: datetime.now(timezone.utc)
     )
     metadata: dict[str, Any] = field(default_factory=dict)
+    # The server-built nexus.tools.context.ExecutionContext this session's tool
+    # calls act under. Set by the server right after create_session, never
+    # from config: config can carry caller-supplied values, the context cannot.
+    context: Any = None
 
 
 @dataclass

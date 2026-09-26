@@ -58,11 +58,19 @@ class GoalPursuitOutput:
 
 @dataclass
 class PipelineExecutionInput:
-    """Input for the PipelineExecutionWorkflow."""
+    """Input for the PipelineExecutionWorkflow.
+
+    ``context`` is the ExecutionContext.to_dict() of the caller who started the
+    run, with no agent: each stage binds it to that stage's agent. Its role is
+    the one the caller had when the run started and is not re-read for the rest
+    of the run. ``None`` (a run started before this field existed) runs each
+    stage autonomously as its agent.
+    """
     pipeline_id: str
     run_id: str
     company_id: str
     stages: list[dict[str, Any]] = field(default_factory=list)
+    context: dict[str, Any] | None = None
 
 
 @dataclass
@@ -192,6 +200,7 @@ class PipelineExecutionWorkflow:
                     agent_id=agent_id,
                     company_id=input.company_id,
                     prompt=full_prompt,
+                    context=input.context,
                 ),
                 timeout=LLM_TIMEOUT,
                 maximum_attempts=ONCE_ONLY,

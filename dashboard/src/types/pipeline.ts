@@ -5,6 +5,14 @@ export interface PipelineStage {
   status: 'pending' | 'running' | 'completed' | 'failed';
   duration_ms?: number;
   logs?: string;
+  /** Builder fields, stored on the stage so the graph survives a reload. */
+  category?: string;
+  nodeId?: string;
+  params?: Record<string, unknown>;
+  x?: number;
+  y?: number;
+  /** Executor fields (prompt, agent_id, ...) the builder carries over untouched. */
+  [field: string]: unknown;
 }
 
 export interface PipelineRunHistory {

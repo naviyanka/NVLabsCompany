@@ -11,10 +11,17 @@ from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy import select, update
 
-from nexus.api.deps import CurrentCompanyId, DbSession
+from nexus.api.deps import CurrentCompanyId, CurrentPrincipal, DbSession, PathCompanyId, require_permission
 from nexus.models.pipeline import Pipeline, PipelineRun
 
 router = APIRouter(tags=["pipelines"])
+
+# Pipeline definitions decide what agents run and with which prompts: changing
+# one needs pipeline write permission, not just membership of the company.
+WRITE = [require_permission("write", "pipeline")]
+# Starting, pausing and stopping a run is a separate right from editing the
+# definition: one may be granted without the other.
+EXECUTE = [require_permission("execute", "pipeline")]
 
 
 class PipelineCreate(BaseModel):
@@ -64,8 +71,8 @@ async def list_pipelines(company_id: uuid.UUID, db: DbSession, limit: int = 50, 
     return list(result.scalars().all())
 
 
-@router.post("/api/v1/companies/{company_id}/pipelines", status_code=status.HTTP_201_CREATED, response_model=PipelineResponse)
-async def create_pipeline(company_id: uuid.UUID, body: PipelineCreate, db: DbSession) -> Any:
+@router.post("/api/v1/companies/{company_id}/pipelines", status_code=status.HTTP_201_CREATED, response_model=PipelineResponse, dependencies=WRITE)
+async def create_pipeline(company_id: PathCompanyId, body: PipelineCreate, db: DbSession) -> Any:
     """Create a new pipeline."""
     pipeline = Pipeline(company_id=company_id, name=body.name, description=body.description, stages=body.stages, trigger_type=body.trigger_type)
     db.add(pipeline)
@@ -84,7 +91,7 @@ async def get_pipeline(pipeline_id: uuid.UUID, db: DbSession, company_id: Curren
     return pipeline
 
 
-@router.put("/api/v1/pipelines/{pipeline_id}", response_model=PipelineResponse)
+@router.put("/api/v1/pipelines/{pipeline_id}", response_model=PipelineResponse, dependencies=WRITE)
 async def update_pipeline(pipeline_id: uuid.UUID, body: PipelineUpdate, db: DbSession, company_id: CurrentCompanyId) -> Any:
     """Update a pipeline."""
     stmt = select(Pipeline).where(Pipeline.id == pipeline_id, Pipeline.company_id == company_id)
@@ -100,19 +107,28 @@ async def update_pipeline(pipeline_id: uuid.UUID, body: PipelineUpdate, db: DbSe
     return pipeline
 
 
-@router.delete("/api/v1/pipelines/{pipeline_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/api/v1/pipelines/{pipeline_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=WRITE)
 async def delete_pipeline(pipeline_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId) -> None:
     """Delete a pipeline."""
     from sqlalchemy import delete as sa_delete
     stmt = sa_delete(Pipeline).where(Pipeline.id == pipeline_id, Pipeline.company_id == company_id)
-    await db.execute(stmt)
+    if (await db.execute(stmt)).rowcount == 0:
+        raise HTTPException(status_code=404, detail="Pipeline not found")
 
 
 from fastapi import BackgroundTasks
 
 
-async def _execute_pipeline_bg(run_id: uuid.UUID, pipeline_id: uuid.UUID, company_id: uuid.UUID) -> None:
+async def _execute_pipeline_bg(
+    run_id: uuid.UUID,
+    pipeline_id: uuid.UUID,
+    company_id: uuid.UUID,
+    principal: Any = None,
+) -> None:
     """Background task to execute pipeline stages sequentially.
+
+    ``principal`` is the caller who triggered the run; tool calls in the
+    stages are authorised as that principal. ``None`` means autonomous.
 
     Each stage is a dict with:
     - name: stage name
@@ -214,7 +230,9 @@ async def _execute_pipeline_bg(run_id: uuid.UUID, pipeline_id: uuid.UUID, compan
                     agent_obj = task_payload["agent"]
                     memories = await _fetch_agent_memories(db, agent_obj.id, company_id, limit=3)
                     sys_prompt = _build_system_prompt(agent_obj, memories=memories)
-                    text, _, _ = await _call_llm(agent_obj, sys_prompt, task_payload["prompt"], [])
+                    text, _, _ = await _call_llm(
+                        agent_obj, sys_prompt, task_payload["prompt"], [], principal=principal
+                    )
                     return text
 
                 executor = ParallelExecutor(max_concurrency=3, timeout_seconds=120.0)
@@ -289,7 +307,7 @@ async def _execute_pipeline_bg(run_id: uuid.UUID, pipeline_id: uuid.UUID, compan
 
                 # Call the LLM adapter
                 response_text, model_used, tokens_used = await _call_llm(
-                    agent, system_prompt, full_prompt, []
+                    agent, system_prompt, full_prompt, [], principal=principal
                 )
 
                 # Optional quality gate via CriticEvaluator
@@ -304,7 +322,8 @@ async def _execute_pipeline_bg(run_id: uuid.UUID, pipeline_id: uuid.UUID, compan
 
                         async def critic_llm_fn(prompt: str) -> str:
                             t, _, _ = await _call_llm(
-                                agent, system_prompt, prompt, [], temperature=0.0
+                                agent, system_prompt, prompt, [], temperature=0.0,
+                                principal=principal,
                             )
                             return t
 
@@ -403,12 +422,13 @@ async def _execute_pipeline_bg(run_id: uuid.UUID, pipeline_id: uuid.UUID, compan
         await db.commit()
 
 
-@router.post("/api/v1/pipelines/{pipeline_id}/run", status_code=status.HTTP_201_CREATED, response_model=PipelineRunResponse)
+@router.post("/api/v1/pipelines/{pipeline_id}/run", status_code=status.HTTP_201_CREATED, response_model=PipelineRunResponse, dependencies=EXECUTE)
 async def run_pipeline(
     pipeline_id: uuid.UUID,
     background_tasks: BackgroundTasks,
     db: DbSession,
     company_id: CurrentCompanyId,
+    principal: CurrentPrincipal = None,
 ) -> Any:
     """Trigger a pipeline execution with background stage runner."""
     stmt = select(Pipeline).where(Pipeline.id == pipeline_id, Pipeline.company_id == company_id)
@@ -425,21 +445,30 @@ async def run_pipeline(
     from nexus.temporal.client import is_temporal_enabled, start_pipeline_workflow
 
     if is_temporal_enabled():
+        from nexus.tools.context import ExecutionContext
+
+        # The stages' tool calls act for this caller, not as autonomous agents.
+        context = (
+            ExecutionContext.for_principal(principal, source="pipeline").to_dict()
+            if principal is not None
+            else None
+        )
         workflow_id = await start_pipeline_workflow(
             pipeline_id=str(pipeline_id),
             run_id=str(run.id),
             company_id=str(company_id),
             stages=pipeline.stages or [],
+            context=context,
         )
         if workflow_id:
             logger.info("Pipeline %s run %s dispatched to Temporal: %s", pipeline.name, run.id, workflow_id)
         else:
             # Temporal failed to start — fall back to background task
             logger.warning("Temporal unavailable, falling back to BackgroundTasks for pipeline %s", pipeline.name)
-            background_tasks.add_task(_execute_pipeline_bg, run.id, pipeline_id, company_id)
+            background_tasks.add_task(_execute_pipeline_bg, run.id, pipeline_id, company_id, principal)
     else:
         # Non-Temporal mode: use FastAPI BackgroundTasks
-        background_tasks.add_task(_execute_pipeline_bg, run.id, pipeline_id, company_id)
+        background_tasks.add_task(_execute_pipeline_bg, run.id, pipeline_id, company_id, principal)
 
     # Audit: pipeline triggered
     from nexus.governance.audit_service import record_audit
@@ -570,7 +599,7 @@ class PipelineImportBody(BaseModel):
     stages: list[dict[str, Any]] | None = None
 
 
-@router.post("/api/v1/pipelines/{pipeline_id}/pause")
+@router.post("/api/v1/pipelines/{pipeline_id}/pause", dependencies=EXECUTE)
 async def pause_pipeline(pipeline_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId) -> dict:
     """Pause the latest running execution."""
     stmt = select(PipelineRun).where(PipelineRun.pipeline_id == pipeline_id, PipelineRun.company_id == company_id, PipelineRun.status == "running").order_by(PipelineRun.started_at.desc()).limit(1)
@@ -583,7 +612,7 @@ async def pause_pipeline(pipeline_id: uuid.UUID, db: DbSession, company_id: Curr
     return {"run_id": str(run.id), "status": "paused"}
 
 
-@router.post("/api/v1/pipelines/{pipeline_id}/stop")
+@router.post("/api/v1/pipelines/{pipeline_id}/stop", dependencies=EXECUTE)
 async def stop_pipeline(pipeline_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId) -> dict:
     """Stop/cancel the latest running execution."""
     from datetime import timezone, datetime
@@ -598,8 +627,8 @@ async def stop_pipeline(pipeline_id: uuid.UUID, db: DbSession, company_id: Curre
     return {"run_id": str(run.id), "status": "cancelled"}
 
 
-@router.post("/api/v1/companies/{company_id}/pipelines/import", status_code=status.HTTP_201_CREATED, response_model=PipelineResponse)
-async def import_pipeline(company_id: uuid.UUID, body: PipelineCreate, db: DbSession) -> Any:
+@router.post("/api/v1/companies/{company_id}/pipelines/import", status_code=status.HTTP_201_CREATED, response_model=PipelineResponse, dependencies=WRITE)
+async def import_pipeline(company_id: PathCompanyId, body: PipelineCreate, db: DbSession) -> Any:
     """Import a pipeline definition."""
     pipeline = Pipeline(company_id=company_id, name=body.name, description=body.description, stages=body.stages, trigger_type=body.trigger_type)
     db.add(pipeline)

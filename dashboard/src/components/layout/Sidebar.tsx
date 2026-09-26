@@ -10,6 +10,7 @@ import {
   GitBranch,
   GitPullRequest,
   LayoutDashboard,
+  PanelsTopLeft,
   Network,
   Settings,
   Share2,
@@ -51,6 +52,7 @@ const navGroups: NavGroup[] = [
     label: 'OPERATIONS',
     items: [
       { name: 'Ops Floor', to: '/', icon: LayoutDashboard },
+      { name: 'Agent Workspace', to: '/workspace', icon: PanelsTopLeft },
       { name: 'The Plaza Feed', to: '/plaza', icon: Sparkles },
       { name: '3D Virtual Office', to: '/office', icon: Box },
       { name: 'Workforce Agents', to: '/agents', icon: Users },

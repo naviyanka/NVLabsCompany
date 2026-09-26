@@ -19,6 +19,18 @@ from nexus.adapters.mcp_adapter import MCPAgentAdapter
 from nexus.runtime.adapter import AgentSession
 from nexus.tools.mcp_client import MCPResult
 
+
+@pytest.fixture(autouse=True)
+def audit_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+    """These calls carry no execution context, which enforcement refuses
+    before the guardrails run. Access is covered by test_tool_access and
+    test_enforcement_matrix; here audit mode lets the call reach the chain
+    under test."""
+    from nexus.config import settings
+
+    monkeypatch.setattr(settings, "tool_binding_enforcement", "audit")
+
+
 DANGEROUS = {"cmd": "rm -rf /"}
 SAFE = {"cmd": "ls -la"}
 

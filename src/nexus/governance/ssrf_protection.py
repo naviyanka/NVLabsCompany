@@ -151,3 +151,24 @@ def guard_url(url_str: str, field: str = "url") -> str:
     if not guard.is_safe_ip(hostname):
         raise ValueError(f"{field} blocked by SSRF protection: {url_str}")
     return url_str
+
+
+async def guard_outbound_url(url_str: str, field: str = "url") -> str:
+    """Strict SSRF check for user-configured outbound calls (webhooks).
+
+    Stricter than ``guard_url``: the hostname is resolved and every address must
+    be public, so loopback (``localhost``, the supervisor on 127.0.0.1) and
+    names that resolve to private ranges are blocked too.
+
+    ponytail: resolve-then-connect leaves a DNS-rebinding window; pin the
+    resolved IP on the connection if webhooks ever target untrusted DNS.
+
+    Raises:
+        ValueError: If the URL is blocked by SSRF policy.
+    """
+    guard_url(url_str, field)
+    hostname = (urlparse(url_str).hostname or "").strip("[]")
+    resolved = await SSRFGuard().safe_resolve(hostname) if hostname else {"safe": False}
+    if not resolved["safe"]:
+        raise ValueError(f"{field} blocked by SSRF protection: {url_str}")
+    return url_str

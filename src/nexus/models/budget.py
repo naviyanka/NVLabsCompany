@@ -58,6 +58,7 @@ class CostEvent(SQLModel, table=True):
     policy_id: Optional[uuid.UUID] = Field(
         default=None, foreign_key="budget_policies.id", index=True
     )
+    session_id: Optional[uuid.UUID] = Field(default=None, foreign_key="agent_sessions.id", ondelete="SET NULL", index=True)
     provider: str = Field(max_length=100)
     model: Optional[str] = Field(default=None, max_length=255)
     input_tokens: int = Field(default=0)

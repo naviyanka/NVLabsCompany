@@ -77,3 +77,11 @@ graphify-out/
 
 # OmniRoute live-probe captures (throwaway, WP-22)
 om_*.json
+
+# Clubhouse agent manager
+.clubhouse/agents/
+.clubhouse/.local/
+.clubhouse/agents.json
+.clubhouse/agents.json.bak
+.clubhouse/settings.local.json
+.clubhouse/plugin-data-local/

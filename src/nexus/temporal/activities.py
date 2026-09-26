@@ -10,8 +10,8 @@ dispatches through Temporal only when actually inside a workflow, so callers on
 the façade path (``workflows/task_flow.py``) run identical code.
 """
 
-import uuid
 import logging
+import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -27,6 +27,10 @@ class LLMCallInput:
     company_id: str
     prompt: str
     system_prompt: str = ""
+    # ExecutionContext.to_dict() of whoever the server authorized to start the
+    # work, as in ExecuteTaskInput. The call is bound to ``agent_id`` here;
+    # without a context it runs autonomously as that agent.
+    context: dict[str, Any] | None = None
 
 
 @dataclass
@@ -67,6 +71,10 @@ class ExecuteTaskInput:
     adapter_type: str
     payload: dict[str, Any] = field(default_factory=dict)
     config: dict[str, Any] = field(default_factory=dict)
+    # ExecutionContext.to_dict() built by the server that started the flow.
+    # Without it the adapter's tool calls have no identity and are refused
+    # once enforcement is on.
+    context: dict[str, Any] | None = None
 
 
 @dataclass
@@ -89,17 +97,22 @@ async def call_llm_activity(input: LLMCallInput) -> LLMCallOutput:
     This wraps the existing _call_llm function from chat.py.
     Temporal will automatically retry this on rate limits or transient failures.
     """
+    from sqlalchemy import select
+
+    from nexus.api.routes.chat import _build_system_prompt, _call_llm, _fetch_agent_memories
     from nexus.database import async_session_factory
     from nexus.models.agent import Agent
-    from nexus.api.routes.chat import _build_system_prompt, _call_llm, _fetch_agent_memories
-    from sqlalchemy import select
+    from nexus.tools.context import ExecutionContext
 
     try:
         async with async_session_factory() as db:
+            context = ExecutionContext.from_dict(input.context) if input.context else None
             agent_uuid = uuid.UUID(input.agent_id)
             company_uuid = uuid.UUID(input.company_id)
 
-            stmt = select(Agent).where(Agent.id == agent_uuid)
+            stmt = select(Agent).where(
+                Agent.id == agent_uuid, Agent.company_id == company_uuid
+            )
             result = await db.execute(stmt)
             agent = result.scalar_one_or_none()
 
@@ -113,7 +126,7 @@ async def call_llm_activity(input: LLMCallInput) -> LLMCallOutput:
                 system_prompt = input.system_prompt
 
             response_text, model_used, tokens_used = await _call_llm(
-                agent, system_prompt, input.prompt, []
+                agent, system_prompt, input.prompt, [], context=context
             )
 
             return LLMCallOutput(
@@ -133,10 +146,11 @@ async def route_task_activity(input: RouteTaskInput) -> str | None:
 
     Returns the agent_id of the selected agent, or None if no agent available.
     """
+    from sqlalchemy import select
+
     from nexus.database import async_session_factory
     from nexus.models.agent import Agent
     from nexus.orchestration.router import AgentCandidate, AgentRouter
-    from sqlalchemy import select
 
     try:
         async with async_session_factory() as db:
@@ -203,6 +217,7 @@ async def execute_task_activity(input: ExecuteTaskInput) -> ExecuteTaskOutput:
     façade had.
     """
     from nexus.adapters.registry import AdapterRegistry
+    from nexus.tools.context import ExecutionContext
 
     try:
         registry = AdapterRegistry()
@@ -214,6 +229,8 @@ async def execute_task_activity(input: ExecuteTaskInput) -> ExecuteTaskOutput:
         try:
             adapter = registry.create_adapter(input.adapter_type, input.config)
             session = await adapter.create_session(_coerce_uuid(input.agent_id), input.config)
+            if input.context:
+                session.context = ExecutionContext.from_dict(input.context)
             try:
                 result = await adapter.execute_task(
                     session, _coerce_uuid(input.task_id), input.payload

@@ -240,6 +240,10 @@ async def _fire_trigger(db: AsyncSession, trigger: Any, now: datetime) -> None:
         if webhook_url:
             try:
                 import httpx
+
+                from nexus.governance.ssrf_protection import guard_outbound_url
+
+                await guard_outbound_url(webhook_url, "webhook_url")
                 async with httpx.AsyncClient(timeout=30.0) as client:
                     payload = {
                         "trigger_id": str(trigger.id),

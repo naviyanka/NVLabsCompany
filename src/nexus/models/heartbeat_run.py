@@ -35,6 +35,7 @@ class HeartbeatRun(SQLModel, table=True):
     session_id_before: str | None = None
     session_id_after: str | None = None
     process_pid: int | None = None
+    session_id: uuid.UUID | None = Field(default=None, foreign_key="agent_sessions.id", ondelete="SET NULL", index=True)
     exit_code: int | None = None
     signal: str | None = None
     stdout_excerpt: str | None = Field(default=None, max_length=2000)

@@ -6,9 +6,16 @@ from unittest.mock import AsyncMock
 import pytest
 
 from nexus.api.routes import repositories as repo_routes
+from nexus.config import settings
 from nexus.models.repository import Repository
 
 COMPANY_ID = uuid.uuid4()
+
+
+@pytest.fixture(autouse=True)
+def _repository_root(tmp_path, monkeypatch):
+    """Every clone in these tests lives under tmp_path, the configured root."""
+    monkeypatch.setattr(settings, "repository_roots", str(tmp_path))
 
 
 class _OneResult:
@@ -20,15 +27,16 @@ class _OneResult:
 
 
 @pytest.mark.asyncio
-async def test_connect_repo_persists_local_path():
+async def test_connect_repo_persists_local_path(tmp_path):
     session = AsyncMock()
+    clone = tmp_path / "demo"
     body = repo_routes.RepoCreate(
         name="demo",
         url="https://example.com/demo.git",
-        local_path="/srv/clones/demo",
+        local_path=str(clone),
     )
     created = await repo_routes.connect_repo(COMPANY_ID, body, session)
-    assert created.local_path == "/srv/clones/demo"
+    assert created.local_path == str(clone.resolve())
     session.add.assert_called_once()
 
 

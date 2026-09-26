@@ -26,7 +26,9 @@ SQLITE_URL = "sqlite+aiosqlite:///./_wp23b_chain.db"
 
 EXPECTED_TABLES = {
     "action_items",
+    "agent_sessions",
     "agent_skills",
+    "agent_worktrees",
     "agent_versions",
     "agents",
     "api_keys",
@@ -66,6 +68,7 @@ EXPECTED_TABLES = {
     "knowledge_chunks",
     "knowledge_pages",
     "llm_connections",
+    "mcp_bindings",
     "meeting_minutes",
     "meeting_participants",
     "meetings",

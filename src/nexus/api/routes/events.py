@@ -94,7 +94,8 @@ async def _event_generator(
             event_bus.unsubscribe(topic, queue)
 
 
-@router.get("/events/stream")
+@router.get("/api/v1/events/stream")
+@router.get("/events/stream")  # legacy path, kept for existing clients
 async def stream_events(
     request: Request,
     company_id: CurrentCompanyId,

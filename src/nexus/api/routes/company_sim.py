@@ -8,9 +8,10 @@ from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy import select
 
-from nexus.api.deps import DbSession
+from nexus.api.deps import CurrentPrincipal, DbSession, PathCompanyId, require_permission
 from nexus.models.agent import Agent
 from nexus.models.company import Department, Team
+from nexus.realtime.publish import TOPOLOGY_CHANNEL, publish_event
 
 router = APIRouter(tags=["company"])
 
@@ -204,7 +205,8 @@ async def get_reporting_chain(
 # ---------------------------------------------------------------------------
 
 # In-memory delegation store: maps company_id -> list of delegation responses.
-# In production this would use a dedicated DB table.
+# ponytail: process-local and lost on restart; the audit log is the durable
+# record. Move to persisted rows before delegations drive any work.
 _delegation_store: dict[uuid.UUID, list[DelegationResponse]] = {}
 
 
@@ -212,27 +214,70 @@ _delegation_store: dict[uuid.UUID, list[DelegationResponse]] = {}
     "/api/v1/companies/{company_id}/delegations",
     status_code=status.HTTP_201_CREATED,
     response_model=DelegationResponse,
+    dependencies=[require_permission("write", "task")],
 )
 async def delegate_task(
-    company_id: uuid.UUID, body: DelegateTaskRequest, db: DbSession
+    company_id: PathCompanyId, body: DelegateTaskRequest, db: DbSession, principal: CurrentPrincipal
 ) -> Any:
-    """Delegate a task from one agent to another."""
-    from datetime import timezone
+    """Delegate a task from one agent to another.
 
-    delegation_id = uuid.uuid4()
-    now = datetime.now(timezone.utc)
+    The task and both agents must belong to the caller's company, and a caller
+    acting as an agent may only hand off its own work. The delegation is
+    audited and committed before it is listed or announced.
+    """
+    from nexus.governance.audit_service import record_audit
+    from nexus.models.task import Task
+
+    if principal.agent_id is not None and body.from_agent_id != principal.agent_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="An agent may only delegate its own work",
+        )
+    if body.from_agent_id == body.to_agent_id:
+        raise HTTPException(
+            status_code=422,
+            detail="An agent cannot delegate to itself",
+        )
+    found = set(
+        (
+            await db.execute(
+                select(Agent.id).where(
+                    Agent.id.in_([body.from_agent_id, body.to_agent_id]),
+                    Agent.company_id == company_id,
+                )
+            )
+        ).scalars()
+    )
+    for label, agent_id in (("Source", body.from_agent_id), ("Target", body.to_agent_id)):
+        if agent_id not in found:
+            raise HTTPException(status_code=404, detail=f"{label} agent not found")
+    task = (
+        await db.execute(
+            select(Task.id).where(Task.id == body.task_id, Task.company_id == company_id)
+        )
+    ).scalar_one_or_none()
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+
     delegation = DelegationResponse(
-        id=delegation_id,
+        id=uuid.uuid4(),
         task_id=body.task_id,
         from_agent_id=body.from_agent_id,
         to_agent_id=body.to_agent_id,
         reason=body.reason,
-        created_at=now,
+        created_at=datetime.now(timezone.utc),
     )
-    # Persist to in-memory store
-    if company_id not in _delegation_store:
-        _delegation_store[company_id] = []
-    _delegation_store[company_id].append(delegation)
+    details = delegation.model_dump(mode="json")
+    await record_audit(
+        company_id, "delegation.created",
+        actor_type="agent" if principal.agent_id else principal.kind,
+        actor_id=str(principal.agent_id or principal.user_id or principal.api_key_id or ""),
+        resource_type="task", resource_id=str(body.task_id), details=details,
+        db=db, raise_on_error=True,
+    )
+    await db.commit()
+    _delegation_store.setdefault(company_id, []).append(delegation)
+    await publish_event(TOPOLOGY_CHANNEL, "delegation.created", company_id, details)
     return delegation
 
 
@@ -240,9 +285,7 @@ async def delegate_task(
     "/api/v1/companies/{company_id}/delegations",
     response_model=list[DelegationResponse],
 )
-async def list_delegations(
-    company_id: uuid.UUID, db: DbSession
-) -> Any:
+async def list_delegations(company_id: PathCompanyId) -> Any:
     """List delegations for a company.
 
     Uses in-memory store. In production this would query a dedicated table.

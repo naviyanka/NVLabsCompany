@@ -12,16 +12,23 @@ import json
 import logging
 import uuid
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, HTTPException, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
-from nexus.api.deps import CurrentCompanyId, DbSession
+from nexus.api.deps import CurrentCompanyId, CurrentPrincipal, DbSession
+from nexus.auth.principal import Principal
 from nexus.models.agent import Agent
 from nexus.models.memory import MemoryRecord
+from nexus.models_router.preflight import BudgetInfraUnavailable
+
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from nexus.tools.context import ExecutionContext
 
 logger = logging.getLogger(__name__)
 
@@ -96,7 +103,15 @@ async def _get_history_fresh(
 
 
 async def _persist_from_generator(
-    agent_id: uuid.UUID, company_id: uuid.UUID, sender: str, text: str
+    agent_id: uuid.UUID,
+    company_id: uuid.UUID,
+    sender: str,
+    text: str,
+    *,
+    session_id: uuid.UUID | None = None,
+    model_used: str | None = None,
+    tokens_used: int = 0,
+    payload: dict[str, Any] | None = None,
 ) -> None:
     """Persist a message on its own session, for use inside an SSE generator.
 
@@ -106,10 +121,15 @@ async def _persist_from_generator(
     cache and is gone on restart.
     """
     try:
-        from nexus.database import async_session_factory
+        from nexus.database import tenant_session
 
-        async with async_session_factory() as own:
-            await _persist_message_to_db(own, agent_id, company_id, sender, text)
+        # Tenant-scoped so RLS admits the insert and the session seq UPDATE.
+        async with tenant_session(company_id) as own:
+            await _persist_message_to_db(
+                own, agent_id, company_id, sender, text,
+                session_id=session_id, model_used=model_used, tokens_used=tokens_used,
+                payload=payload,
+            )
             await own.commit()
     except Exception as exc:  # noqa: BLE001 - persistence must not break the stream
         logger.warning("Could not persist streamed message for agent %s: %s", agent_id, exc)
@@ -133,21 +153,45 @@ def _add_message(agent_id: str, sender: str, text: str) -> dict[str, Any]:
 
 
 async def _persist_message_to_db(
-    db: "AsyncSession", agent_id: uuid.UUID, company_id: uuid.UUID, sender: str, text: str
-) -> None:
-    """Persist a chat message to the database for durability."""
+    db: "AsyncSession",
+    agent_id: uuid.UUID,
+    company_id: uuid.UUID,
+    sender: str,
+    text: str,
+    *,
+    session_id: uuid.UUID | None = None,
+    model_used: str | None = None,
+    tokens_used: int = 0,
+    payload: dict[str, Any] | None = None,
+) -> Any:
+    """Persist a chat message to the database for durability.
+
+    With a ``session_id`` the row joins that session's timeline and takes the
+    next ``seq``. Returns the stored row, or None if persistence failed.
+    """
     try:
         from nexus.models.chat import ChatMessage as ChatMessageModel
+        seq = None
+        if session_id is not None:
+            from nexus.services.session_service import next_seq
+
+            seq = await next_seq(db, session_id)
         record = ChatMessageModel(
             company_id=company_id,
             agent_id=agent_id,
             sender=sender,
             text=text[:10000],
+            session_id=session_id,
+            seq=seq,
+            model_used=model_used,
+            tokens_used=tokens_used,
+            payload=payload,
         )
         db.add(record)
         await db.flush()
+        return record
     except Exception:
-        pass  # Best-effort persistence, don't break chat flow
+        return None  # Best-effort persistence, don't break chat flow
 
 
 async def _load_history_from_db(
@@ -638,6 +682,7 @@ async def _reserve_budget(
     user_message: str,
     history: list[dict[str, Any]],
     config: dict[str, Any],
+    session_id: uuid.UUID | None = None,
 ) -> Any:
     """Hold the estimated cost of an LLM call before making it.
 
@@ -686,6 +731,8 @@ async def _reserve_budget(
                 provider=agent.adapter_type or "anthropic",
                 model=config.get("model"),
             )
+            if session_id is not None and reservation_ids:
+                await _link_cost_events(budget_db, agent.company_id, reservation_ids, session_id)
     except Exception as exc:  # noqa: BLE001
         # R12: fail closed on budget. If the ledger is unreachable we refuse
         # the call rather than let unmetered spend through. The old behaviour
@@ -710,6 +757,25 @@ async def _reserve_budget(
         )
 
     return reservation_ids or None
+
+
+async def _link_cost_events(
+    db: "AsyncSession", company_id: uuid.UUID, event_ids: list[Any], session_id: uuid.UUID
+) -> None:
+    """Attribute budget holds to a session; settlement updates these rows in place."""
+    try:
+        from sqlalchemy import update
+
+        from nexus.models.budget import CostEvent
+
+        await db.execute(
+            update(CostEvent)
+            .where(CostEvent.company_id == company_id, CostEvent.id.in_(event_ids))
+            .values(session_id=session_id)
+        )
+        await db.commit()
+    except Exception as exc:  # noqa: BLE001 - attribution must not refuse a paid-for call
+        logger.warning("Could not link cost events to session %s: %s", session_id, exc)
 
 
 async def _settle_budget(
@@ -779,6 +845,10 @@ async def _call_llm(
     user_message: str,
     history: list[dict[str, Any]],
     temperature: float | None = None,
+    session_id: uuid.UUID | None = None,
+    principal: Principal | None = None,
+    source: str | None = None,
+    context: ExecutionContext | None = None,
 ) -> tuple[str, str, int]:
     """Call the LLM adapter to get a real response.
 
@@ -789,14 +859,56 @@ async def _call_llm(
         history: Conversation history for context.
         temperature: Optional sampling temperature override. Judges and other
             deterministic callers should pass 0.0.
+        session_id: Optional agent session the call belongs to; its budget
+            holds (and so its settled cost) are attributed to that session.
+        principal: The authenticated caller. Every HTTP route must pass it,
+            so tool calls are authorized with that principal's company and
+            role. ``None`` means autonomous work (scheduler, orchestrator,
+            webhook), which acts as the agent itself with the ``agent`` role.
+        source: Request type recorded with each tool call; defaults to
+            ``chat`` for a principal and ``background`` otherwise.
+        context: A context the server built where the work was authorized
+            and carried here, such as a pipeline run's through a Temporal
+            activity. Used instead of ``principal``: its principal, role and
+            source are kept and it is bound to ``agent``. It must be for the
+            agent's company and name no other agent.
 
     Returns:
         Tuple of (response_text, model_used, tokens_used).
     """
+    from dataclasses import replace
+
     from nexus.adapters.registry import AdapterRegistry
+    from nexus.tools.context import ExecutionContext
 
     connection = await _resolve_connection(agent)
     registry_key, config = _resolve_adapter_type(agent, connection)
+    try:
+        if context is None:
+            execution_context = ExecutionContext.for_call(
+                agent,
+                principal,
+                source=source or ("chat" if principal is not None else "background"),
+                session_id=session_id,
+                adapter=registry_key,
+                model=config.get("model"),
+            )
+        else:
+            if principal is not None:
+                raise ValueError("pass either principal or context, not both")
+            # A run token's context is fixed to its own agent, as in
+            # ExecutionContext.for_principal.
+            if context.company_id != agent.company_id or context.agent_id not in (None, agent.id):
+                raise PermissionError("execution context is for a different company or agent")
+            execution_context = replace(
+                context,
+                agent_id=agent.id,
+                session_id=session_id or context.session_id,
+                adapter=registry_key,
+                model=config.get("model"),
+            )
+    except PermissionError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
 
     # Check if API key is available. A Connection that supplies its own key
     # satisfies this — the blocker must not fire on the gateway path (WP-22b).
@@ -850,7 +962,7 @@ async def _call_llm(
     # character, which would turn a budget refusal into a friendly message and let
     # the call proceed anyway.
     reservation_id = await _reserve_budget(
-        agent, system_prompt, user_message, history, config
+        agent, system_prompt, user_message, history, config, session_id=session_id
     )
     # Filled in only on a billed call; the finally below releases the hold when
     # it stays zero, so every exit path settles exactly once.
@@ -916,9 +1028,11 @@ async def _call_llm(
                 },
             )
 
-        # Create session with system prompt
+        # Tool calls act under the server-built context, never under anything
+        # in config, which an agent's stored adapter settings can supply.
         session_config = {**config, "system_prompt": system_prompt}
         session = await adapter.create_session(agent.id, session_config)
+        session.context = execution_context
 
         # Build conversation messages for context
         messages = []
@@ -1055,6 +1169,231 @@ async def _call_llm(
 
 
 # ---------------------------------------------------------------------------
+# Turn helpers (shared by the legacy per-agent routes and the session routes)
+# ---------------------------------------------------------------------------
+
+
+async def _load_agent(db: "AsyncSession", agent_id: uuid.UUID, company_id: uuid.UUID) -> Agent:
+    """The tenant's agent, or 404."""
+    result = await db.execute(select(Agent).where(Agent.id == agent_id, Agent.company_id == company_id))
+    agent = result.scalar_one_or_none()
+    if agent is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Agent {agent_id} not found",
+        )
+    return agent
+
+
+async def _build_chat_prompt(db: "AsyncSession", agent: Agent, company_id: uuid.UUID, prompt: str) -> str:
+    """System prompt from the agent's soul/persona, memories and live platform data."""
+    agent_memories = await _fetch_agent_memories(db, agent.id, company_id, query=prompt)
+    system_prompt = _build_system_prompt(agent, memories=agent_memories)
+
+    # Inject live platform context (workforce roster, active tasks, goals, live assignment) directly from DB
+    live_platform_context = await _fetch_live_platform_context(db, company_id, prompt, is_ceo=(agent.role == "ceo"), current_agent_id=agent.id)
+    if live_platform_context:
+        system_prompt += (
+            f"\n\n--- LIVE PLATFORM WORKFORCE & TASK DATA ---\n"
+            f"{live_platform_context}\n"
+            f"--- INSTRUCTION: Use this live data for answering and task assignment. "
+            f"Always refer to agents by their real names in this roster (e.g. Punni, Navi). ---"
+        )
+    return system_prompt
+
+
+async def _record_chat_audit(
+    db: "AsyncSession",
+    company_id: uuid.UUID,
+    agent_id: uuid.UUID,
+    prompt: str,
+    response_text: str,
+    model_used: str,
+    tokens_used: int,
+    session_id: uuid.UUID,
+) -> None:
+    """Audit both sides of a turn and record its spend on the in-process tracker."""
+    from nexus.governance.audit_service import record_audit
+
+    await record_audit(
+        company_id, "chat.message_sent",
+        actor_type="user", resource_type="agent", resource_id=str(agent_id),
+        details={"prompt_preview": prompt[:100], "model": model_used, "tokens": tokens_used, "session_id": str(session_id)},
+        db=db,
+    )
+    await record_audit(
+        company_id, "chat.response_generated",
+        actor_type="agent", actor_id=str(agent_id),
+        resource_type="chat",
+        details={"model": model_used, "tokens": tokens_used, "response_preview": response_text[:100], "session_id": str(session_id)},
+        db=db,
+    )
+
+    # Record spend against company budget
+    if tokens_used > 0:
+        from nexus.api.middleware import _budget_tracker
+        # Rough cost estimate: ~$0.003 per 1K input tokens, ~$0.015 per 1K output tokens
+        # Simplified: ~1 cent per 500 tokens
+        estimated_cost_cents = max(1, tokens_used // 500)
+        _budget_tracker.record_spend(company_id, estimated_cost_cents)
+
+
+async def _stream_reply(
+    agent: Agent,
+    company_id: uuid.UUID,
+    system_prompt: str,
+    prompt: str,
+    history: list[dict[str, Any]],
+    session_id: uuid.UUID,
+    principal: Principal | None = None,
+):
+    """Generate SSE events — uses true token streaming when adapter supports it.
+
+    The frontend expects Server-Sent Events with JSON payloads:
+      data: {"type": "chunk", "text": "partial..."}
+      data: {"type": "done", "message": {...}}
+      data: [DONE]
+
+    The reply is stored before or while the client sees it, so a client that
+    disconnects mid-stream does not lose it: a simulated stream stores the
+    whole reply before the first chunk, and a true stream that is cut off
+    stores what was generated so far with ``payload={"partial": true}``.
+    """
+    import anyio
+
+    agent_id = agent.id
+    try:
+        from nexus.adapters.registry import AdapterRegistry
+        from nexus.tools.context import ExecutionContext
+
+        connection = await _resolve_connection(agent)
+        registry_key, config = _resolve_adapter_type(agent, connection)
+        api_key = config.get("api_key", "")
+
+        # Try true token-level streaming for Anthropic/OpenAI adapters
+        use_true_streaming = (
+            registry_key in ("anthropic", "openai")
+            and api_key  # API key must be configured
+        )
+
+        if use_true_streaming:
+            # True streaming: yield tokens as they arrive from the API
+            adapter_registry = AdapterRegistry()
+            adapter = adapter_registry.create_adapter(registry_key)
+
+            session_config = {**config, "system_prompt": system_prompt}
+            session = await adapter.create_session(agent.id, session_config)
+            session.context = ExecutionContext.for_call(
+                agent,
+                principal,
+                source="chat",
+                session_id=session_id,
+                adapter=registry_key,
+                model=config.get("model"),
+            )
+
+            task_id = uuid.uuid4()
+            payload = {"prompt": prompt, "max_tokens": 4096}
+            accumulated = ""
+            finished = False
+
+            try:
+                if hasattr(adapter, "stream_execute"):
+                    async for chunk in adapter.stream_execute(session, task_id, payload):
+                        accumulated += chunk
+                        event = json.dumps({"type": "chunk", "text": chunk})
+                        yield f"data: {event}\n\n"
+                else:
+                    # Fallback for adapters without stream_execute
+                    result = await adapter.execute_task(session, task_id, payload)
+                    accumulated = str(result.output) if result.output else ""
+                    # Emit word-by-word
+                    for i, word in enumerate(accumulated.split(" ")):
+                        chunk = word if i == 0 else " " + word
+                        event = json.dumps({"type": "chunk", "text": chunk})
+                        yield f"data: {event}\n\n"
+                        await asyncio.sleep(0.01)
+                finished = True
+            finally:
+                # A disconnect cancels the generator mid-stream; shield the
+                # cleanup so the adapter is released and the tokens already
+                # generated (and paid for) still reach the transcript.
+                with anyio.CancelScope(shield=True):
+                    await adapter.terminate(session)
+                    if not finished and accumulated:
+                        await _persist_from_generator(
+                            agent_id, company_id, "agent", accumulated,
+                            session_id=session_id, model_used=config.get("model", "unknown"),
+                            tokens_used=len(accumulated.split()) * 2,
+                            payload={"partial": True},
+                        )
+
+            # Store response and emit done
+            model_used = config.get("model", "unknown")
+            tokens_used = len(accumulated.split()) * 2  # Rough estimate
+            agent_msg = _add_message(str(agent_id), "agent", accumulated)
+            await _persist_from_generator(
+                agent_id, company_id, "agent", accumulated,
+                session_id=session_id, model_used=model_used, tokens_used=tokens_used,
+            )
+            done_event = json.dumps({
+                "type": "done",
+                "message": agent_msg,
+                "model_used": model_used,
+                "tokens_used": tokens_used,
+            })
+            yield f"data: {done_event}\n\n"
+            yield "data: [DONE]\n\n"
+        else:
+            # Fallback: call LLM, then emit word-by-word (simulated streaming)
+            response_text, model_used, tokens_used = await _call_llm(
+                agent, system_prompt, prompt, history, session_id=session_id, principal=principal
+            )
+            # Stored before the first chunk, so a disconnect cannot lose it.
+            agent_msg = _add_message(str(agent_id), "agent", response_text)
+            await _persist_from_generator(
+                agent_id, company_id, "agent", response_text,
+                session_id=session_id, model_used=model_used, tokens_used=tokens_used,
+            )
+
+            words = response_text.split(" ")
+            for i, word in enumerate(words):
+                chunk = word if i == 0 else " " + word
+                event = json.dumps({"type": "chunk", "text": chunk})
+                yield f"data: {event}\n\n"
+                await asyncio.sleep(0.02)
+            done_event = json.dumps({
+                "type": "done",
+                "message": agent_msg,
+                "model_used": model_used,
+                "tokens_used": tokens_used,
+            })
+            yield f"data: {done_event}\n\n"
+            yield "data: [DONE]\n\n"
+
+    except Exception as e:
+        logger.error("Streaming chat error for agent %s: %s", agent_id, e)
+        error_event = json.dumps({
+            "type": "error",
+            "text": f"Chat error: {type(e).__name__}: {e}",
+        })
+        yield f"data: {error_event}\n\n"
+        yield "data: [DONE]\n\n"
+
+
+def _sse_response(events) -> StreamingResponse:
+    return StreamingResponse(
+        events,
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+# ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
 
@@ -1066,15 +1405,7 @@ async def get_chat_history(
     company_id: CurrentCompanyId,
 ) -> list[dict[str, Any]]:
     """Get conversation history for an agent."""
-    # Verify agent exists
-    stmt = select(Agent).where(Agent.id == agent_id, Agent.company_id == company_id)
-    result = await db.execute(stmt)
-    agent = result.scalar_one_or_none()
-    if agent is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Agent {agent_id} not found",
-        )
+    await _load_agent(db, agent_id, company_id)
     # Always load from DB (authoritative source for multi-worker consistency)
     history = await _load_history_from_db(db, agent_id, company_id)
     # Update in-memory cache for fast access during streaming
@@ -1089,6 +1420,7 @@ async def chat_with_agent(
     body: ChatRequest,
     db: DbSession,
     company_id: CurrentCompanyId,
+    principal: CurrentPrincipal = None,
 ) -> Any:
     """Send a message to an agent and get a real LLM-powered response.
 
@@ -1097,70 +1429,42 @@ async def chat_with_agent(
     2. Build system prompt from Soul/persona data
     3. Get conversation history for context
     4. Call the LLM adapter (Anthropic/OpenAI/Ollama/CLI)
-    5. Store conversation and return response
+    5. Store conversation (in the agent's default session) and return response
+
+    The turn runs on the default session's pinned adapter/model; if that pin
+    is no longer usable the request fails with 409 before anything is stored.
     """
-    # Load agent
-    stmt = select(Agent).where(Agent.id == agent_id, Agent.company_id == company_id)
-    result = await db.execute(stmt)
-    agent = result.scalar_one_or_none()
-    if agent is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Agent {agent_id} not found",
-        )
+    from nexus.services.session_service import (
+        begin_session_turn,
+        get_or_create_default_session,
+    )
 
-    # Build system prompt from agent's soul/persona and memory context
-    agent_memories = await _fetch_agent_memories(db, agent_id, company_id, query=body.prompt)
-    system_prompt = _build_system_prompt(agent, memories=agent_memories)
-
-    # Inject live platform context (workforce roster, active tasks, goals, live assignment) directly from DB
-    live_platform_context = await _fetch_live_platform_context(db, company_id, body.prompt, is_ceo=(agent.role == "ceo"), current_agent_id=agent_id)
-    if live_platform_context:
-        system_prompt += (
-            f"\n\n--- LIVE PLATFORM WORKFORCE & TASK DATA ---\n"
-            f"{live_platform_context}\n"
-            f"--- INSTRUCTION: Use this live data for answering and task assignment. "
-            f"Always refer to agents by their real names in this roster (e.g. Punni, Navi). ---"
-        )
+    agent = await _load_agent(db, agent_id, company_id)
+    # The legacy per-agent conversation lives in the agent's default session.
+    session = await get_or_create_default_session(db, agent)
+    agent = await begin_session_turn(db, session, agent)
+    system_prompt = await _build_chat_prompt(db, agent, company_id, body.prompt)
 
     # Get history for context (TTL-fresh across workers)
     history = await _get_history_fresh(db, str(agent_id), company_id)
 
     # Store user message
     _add_message(str(agent_id), "user", body.prompt)
-    await _persist_message_to_db(db, agent_id, company_id, "user", body.prompt)
+    await _persist_message_to_db(db, agent_id, company_id, "user", body.prompt, session_id=session.id)
 
     # Call LLM
     response_text, model_used, tokens_used = await _call_llm(
-        agent, system_prompt, body.prompt, history
+        agent, system_prompt, body.prompt, history, session_id=session.id, principal=principal
     )
 
     # Store agent response
     agent_msg = _add_message(str(agent_id), "agent", response_text)
-    await _persist_message_to_db(db, agent_id, company_id, "agent", response_text)
-
-    # Audit: record chat interaction
-    from nexus.governance.audit_service import record_audit
-    await record_audit(
-        company_id, "chat.message_sent",
-        actor_type="user", resource_type="agent", resource_id=str(agent_id),
-        details={"prompt_preview": body.prompt[:100], "model": model_used, "tokens": tokens_used},
-        db=db,
-    )
-    await record_audit(
-        company_id, "chat.response_generated",
-        actor_type="agent", actor_id=str(agent_id),
-        resource_type="chat", details={"model": model_used, "tokens": tokens_used, "response_preview": response_text[:100]},
-        db=db,
+    await _persist_message_to_db(
+        db, agent_id, company_id, "agent", response_text,
+        session_id=session.id, model_used=model_used, tokens_used=tokens_used,
     )
 
-    # Record spend against company budget
-    if tokens_used > 0:
-        from nexus.api.middleware import _budget_tracker
-        # Rough cost estimate: ~$0.003 per 1K input tokens, ~$0.015 per 1K output tokens
-        # Simplified: ~1 cent per 500 tokens
-        estimated_cost_cents = max(1, tokens_used // 500)
-        _budget_tracker.record_spend(company_id, estimated_cost_cents)
+    await _record_chat_audit(db, company_id, agent_id, body.prompt, response_text, model_used, tokens_used, session.id)
 
     return ChatResponse(
         message=ChatMessage(**agent_msg),
@@ -1177,15 +1481,7 @@ async def clear_chat_history(
     company_id: CurrentCompanyId,
 ) -> None:
     """Clear all conversation history for an agent."""
-    # Verify agent exists
-    stmt = select(Agent).where(Agent.id == agent_id, Agent.company_id == company_id)
-    result = await db.execute(stmt)
-    agent = result.scalar_one_or_none()
-    if agent is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Agent {agent_id} not found",
-        )
+    await _load_agent(db, agent_id, company_id)
     _conversations.pop(str(agent_id), None)
 
 
@@ -1195,37 +1491,21 @@ async def chat_with_agent_stream(
     body: ChatRequest,
     db: DbSession,
     company_id: CurrentCompanyId,
+    principal: CurrentPrincipal = None,
 ) -> StreamingResponse:
-    """Send a message to an agent and stream the response via SSE.
+    """Send a message to an agent and stream the response via SSE (see ``_stream_reply``).
 
-    The frontend expects Server-Sent Events with JSON payloads:
-      data: {"type": "chunk", "text": "partial..."}
-      data: {"type": "done", "message": {...}}
-      data: [DONE]
+    Runs on the default session's pin exactly like ``chat_with_agent``.
     """
-    # Load agent
-    stmt = select(Agent).where(Agent.id == agent_id, Agent.company_id == company_id)
-    result = await db.execute(stmt)
-    agent = result.scalar_one_or_none()
-    if agent is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Agent {agent_id} not found",
-        )
+    from nexus.services.session_service import (
+        begin_session_turn,
+        get_or_create_default_session,
+    )
 
-    # Build system prompt from agent's soul/persona and memory context
-    agent_memories = await _fetch_agent_memories(db, agent_id, company_id, query=body.prompt)
-    system_prompt = _build_system_prompt(agent, memories=agent_memories)
-
-    # Inject live platform context (workforce roster, active tasks, goals, live assignment) directly from DB
-    live_platform_context = await _fetch_live_platform_context(db, company_id, body.prompt, is_ceo=(agent.role == "ceo"), current_agent_id=agent_id)
-    if live_platform_context:
-        system_prompt += (
-            f"\n\n--- LIVE PLATFORM WORKFORCE & TASK DATA ---\n"
-            f"{live_platform_context}\n"
-            f"--- INSTRUCTION: Use this live data for answering and task assignment. "
-            f"Always refer to agents by their real names in this roster (e.g. Punni, Navi). ---"
-        )
+    agent = await _load_agent(db, agent_id, company_id)
+    session = await get_or_create_default_session(db, agent)
+    agent = await begin_session_turn(db, session, agent)
+    system_prompt = await _build_chat_prompt(db, agent, company_id, body.prompt)
 
     # Get history for context (TTL-fresh across workers)
     history = await _get_history_fresh(db, str(agent_id), company_id)
@@ -1233,105 +1513,11 @@ async def chat_with_agent_stream(
     # Store user message. The request session is still open here, so this one
     # can go through it; the agent's reply is written later from the generator.
     _add_message(str(agent_id), "user", body.prompt)
-    await _persist_message_to_db(db, agent_id, company_id, "user", body.prompt)
+    await _persist_message_to_db(db, agent_id, company_id, "user", body.prompt, session_id=session.id)
+    # Commit now: the generator writes the reply on its own connection and
+    # bumps the same session row, which must not wait on this transaction.
+    await db.commit()
 
-    async def event_generator():
-        """Generate SSE events — uses true token streaming when adapter supports it."""
-        try:
-            from nexus.adapters.registry import AdapterRegistry
-
-            connection = await _resolve_connection(agent)
-            registry_key, config = _resolve_adapter_type(agent, connection)
-            api_key = config.get("api_key", "")
-
-            # Try true token-level streaming for Anthropic/OpenAI adapters
-            use_true_streaming = (
-                registry_key in ("anthropic", "openai")
-                and api_key  # API key must be configured
-            )
-
-            if use_true_streaming:
-                # True streaming: yield tokens as they arrive from the API
-                adapter_registry = AdapterRegistry()
-                adapter = adapter_registry.create_adapter(registry_key)
-
-                session_config = {**config, "system_prompt": system_prompt}
-                session = await adapter.create_session(agent.id, session_config)
-
-                task_id = uuid.uuid4()
-                payload = {"prompt": body.prompt, "max_tokens": 4096}
-                accumulated = ""
-
-                try:
-                    if hasattr(adapter, "stream_execute"):
-                        async for chunk in adapter.stream_execute(session, task_id, payload):
-                            accumulated += chunk
-                            event = json.dumps({"type": "chunk", "text": chunk})
-                            yield f"data: {event}\n\n"
-                    else:
-                        # Fallback for adapters without stream_execute
-                        result = await adapter.execute_task(session, task_id, payload)
-                        accumulated = str(result.output) if result.output else ""
-                        # Emit word-by-word
-                        for i, word in enumerate(accumulated.split(" ")):
-                            chunk = word if i == 0 else " " + word
-                            event = json.dumps({"type": "chunk", "text": chunk})
-                            yield f"data: {event}\n\n"
-                            await asyncio.sleep(0.01)
-                finally:
-                    await adapter.terminate(session)
-
-                # Store response and emit done
-                agent_msg = _add_message(str(agent_id), "agent", accumulated)
-                await _persist_from_generator(agent_id, company_id, "agent", accumulated)
-                tokens_used = len(accumulated.split()) * 2  # Rough estimate
-                done_event = json.dumps({
-                    "type": "done",
-                    "message": agent_msg,
-                    "model_used": config.get("model", "unknown"),
-                    "tokens_used": tokens_used,
-                })
-                yield f"data: {done_event}\n\n"
-                yield "data: [DONE]\n\n"
-            else:
-                # Fallback: call LLM, then emit word-by-word (simulated streaming)
-                response_text, model_used, tokens_used = await _call_llm(
-                    agent, system_prompt, body.prompt, history
-                )
-
-                words = response_text.split(" ")
-                for i, word in enumerate(words):
-                    chunk = word if i == 0 else " " + word
-                    event = json.dumps({"type": "chunk", "text": chunk})
-                    yield f"data: {event}\n\n"
-                    await asyncio.sleep(0.02)
-
-                agent_msg = _add_message(str(agent_id), "agent", response_text)
-                await _persist_from_generator(agent_id, company_id, "agent", response_text)
-                done_event = json.dumps({
-                    "type": "done",
-                    "message": agent_msg,
-                    "model_used": model_used,
-                    "tokens_used": tokens_used,
-                })
-                yield f"data: {done_event}\n\n"
-                yield "data: [DONE]\n\n"
-
-        except Exception as e:
-            logger.error("Streaming chat error for agent %s: %s", agent_id, e)
-            error_event = json.dumps({
-                "type": "error",
-                "text": f"Chat error: {type(e).__name__}: {e}",
-            })
-            yield f"data: {error_event}\n\n"
-            yield "data: [DONE]\n\n"
-
-    return StreamingResponse(
-        event_generator(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
+    return _sse_response(
+        _stream_reply(agent, company_id, system_prompt, body.prompt, history, session.id, principal)
     )

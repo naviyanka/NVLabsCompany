@@ -178,6 +178,7 @@ class CompanyWorkflow:
         approval_engine: ApprovalEngineProtocol | None = None,
         budget_enforcer: BudgetEnforcerProtocol | None = None,
         adapter_registry: Any | None = None,
+        principal: Any = None,
     ) -> None:
         """Initialize the company workflow orchestrator.
 
@@ -189,8 +190,11 @@ class CompanyWorkflow:
             adapter_registry: Optional AdapterRegistry for real adapter execution.
                 If provided, engineer execution steps are wired through the
                 registry. If None, execution is simulated.
+            principal: The authenticated caller that started the workflow;
+                engineer tool calls are authorised as this principal.
         """
         self.company_id = company_id
+        self._principal = principal
         self._event_bus = event_bus
         self._approval_engine = approval_engine
         self._budget_enforcer = budget_enforcer
@@ -532,6 +536,7 @@ class CompanyWorkflow:
                     adapter = self._adapter_registry.create_adapter(adapter_type, config)
                     agent_id = uuid.uuid4()
                     session = await adapter.create_session(agent_id, config)
+                    session.context = self._execution_context(adapter_type)
 
                     task_uuid = uuid.uuid4()
                     task_result = await adapter.execute_task(
@@ -625,6 +630,30 @@ class CompanyWorkflow:
                 source_agent_id=uuid.uuid4(),
                 company_id=company_uuid,
             )
+
+    def _execution_context(self, adapter_type: str) -> Any:
+        """Server-side identity for engineer tool calls.
+
+        Engineer sessions are not tied to an agent row, so the context names
+        no agent and access control treats the calls as unidentified (audited
+        as would-deny, refused under enforcement) unless the principal is a
+        run token that carries its own agent.
+        """
+        from nexus.tools.context import ExecutionContext
+
+        if self._principal is not None:
+            return ExecutionContext.for_principal(
+                self._principal, source="company_flow", adapter=adapter_type
+            )
+        if not self._is_valid_uuid(self.company_id):
+            return None
+        return ExecutionContext(
+            company_id=uuid.UUID(self.company_id),
+            principal_id="system:company_flow",
+            principal_role="agent",
+            source="company_flow",
+            adapter=adapter_type,
+        )
 
     @staticmethod
     def _is_valid_uuid(value: str) -> bool:

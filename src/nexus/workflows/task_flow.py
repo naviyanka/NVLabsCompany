@@ -191,6 +191,7 @@ class TaskFlow:
         approval_engine: ApprovalEngineProtocol | None = None,
         kill_switch_active: bool = False,
         adapter_registry: AdapterRegistryProtocol | None = None,
+        principal: Any = None,
     ) -> None:
         """Initialize the task flow manager.
 
@@ -202,8 +203,12 @@ class TaskFlow:
             kill_switch_active: Whether the kill switch is engaged.
             adapter_registry: Optional AdapterRegistry for real adapter execution.
                 If None, execution is simulated.
+            principal: The authenticated caller that started the flow. Tool
+                calls are authorised as this principal; ``None`` means the
+                flow is autonomous and each agent acts as itself.
         """
         self.company_id = company_id
+        self._principal = principal
         self._event_bus = event_bus
         self._budget_enforcer = budget_enforcer
         self._approval_engine = approval_engine
@@ -570,6 +575,7 @@ class TaskFlow:
                 adapter_type=adapter_type,
                 payload=execution.payload,
                 config=agent.get("config", {}),
+                context=self._execution_context(agent["agent_id"], adapter_type),
             ),
             timeout=LLM_TIMEOUT,
             maximum_attempts=ONCE_ONLY,
@@ -649,6 +655,37 @@ class TaskFlow:
             if not required_capabilities or agent_caps & set(required_capabilities):
                 return agent["agent_id"]
         return None
+
+    def _execution_context(self, agent_id: Any, adapter_type: str) -> dict[str, Any] | None:
+        """Server-side identity for the adapter's tool calls, or ``None``.
+
+        ``None`` (bad ids, or a run token for another agent) leaves the calls
+        without identity, which access control refuses under enforcement.
+        """
+        from nexus.tools.context import ExecutionContext
+
+        try:
+            company_uuid = uuid.UUID(str(self.company_id))
+            agent_uuid = uuid.UUID(str(agent_id))
+        except (ValueError, AttributeError):
+            return None
+        if self._principal is None:
+            ctx = ExecutionContext(
+                company_id=company_uuid,
+                principal_id=f"agent:{agent_uuid}",
+                principal_role="agent",
+                source="task_flow",
+                agent_id=agent_uuid,
+                adapter=adapter_type,
+            )
+        else:
+            try:
+                ctx = ExecutionContext.for_principal(
+                    self._principal, source="task_flow", agent_id=agent_uuid, adapter=adapter_type
+                )
+            except PermissionError:
+                return None
+        return ctx.to_dict()
 
     def _get_company_uuid(self) -> uuid.UUID:
         """Get the company ID as a UUID.

@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy import select, update
 
-from nexus.api.deps import CurrentCompanyId, DbSession
+from nexus.api.deps import CurrentCompanyId, CurrentPrincipal, DbSession
 from nexus.models.task import Goal, RunCompletionReason
 
 router = APIRouter(tags=["goals"])
@@ -179,6 +179,7 @@ async def execute_goal(
     goal_id: uuid.UUID,
     db: DbSession,
     company_id: CurrentCompanyId,
+    principal: CurrentPrincipal = None,
 ) -> dict[str, Any]:
     """Execute a goal using the GoalLoop orchestration module.
 
@@ -218,7 +219,7 @@ async def execute_goal(
     async def execute_fn() -> tuple[str, int]:
         """Call the agent to work toward the goal."""
         response_text, _model, tokens = await _call_llm(
-            agent, system_prompt, goal_description, []
+            agent, system_prompt, goal_description, [], principal=principal
         )
         # Cost in cents: ~1 cent per 500 tokens
         cost_cents = max(1, tokens // 500)

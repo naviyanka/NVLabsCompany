@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy import select, update
 
-from nexus.api.deps import CurrentCompanyId, DbSession
+from nexus.api.deps import CurrentCompanyId, CurrentPrincipal, DbSession
 from nexus.models.task import RunCompletionReason, Task
 
 router = APIRouter(tags=["tasks"])
@@ -344,7 +344,10 @@ async def cancel_task(task_id: uuid.UUID, db: DbSession, company_id: CurrentComp
 
 @router.post("/api/v1/tasks/{task_id}/decompose")
 async def decompose_task(
-    task_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId
+    task_id: uuid.UUID,
+    db: DbSession,
+    company_id: CurrentCompanyId,
+    principal: CurrentPrincipal = None,
 ) -> dict[str, Any]:
     """Decompose a task into subtasks using the TaskPlanner orchestration module.
 
@@ -373,7 +376,9 @@ async def decompose_task(
 
         if agent:
             async def llm_fn(prompt: str) -> str:
-                text, _, _ = await _call_llm(agent, _build_system_prompt(agent), prompt, [])
+                text, _, _ = await _call_llm(
+                    agent, _build_system_prompt(agent), prompt, [], principal=principal
+                )
                 return text
 
             llm_planner = LLMTaskPlanner(llm_callable=llm_fn, max_subtasks=10)

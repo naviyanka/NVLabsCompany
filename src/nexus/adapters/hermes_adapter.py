@@ -285,7 +285,7 @@ class HermesAdapter(BaseAdapter):
                 tool_args = call.get("arguments", {})
 
                 tool_result = await self._execute_tool(
-                    tool_name, tool_args, agent_id=session.agent_id
+                    tool_name, tool_args, agent_id=session.agent_id, context=session.context
                 )
                 tool_results.append({
                     "tool": tool_name,
@@ -590,14 +590,16 @@ class HermesAdapter(BaseAdapter):
         name: str,
         arguments: dict[str, Any],
         agent_id: uuid.UUID | None = None,
+        context: Any = None,
     ) -> dict[str, Any]:
         """Execute a registered tool by name.
 
         Args:
             name: The tool name to execute.
             arguments: The arguments to pass to the tool handler.
-            agent_id: The calling agent, used to resolve its autonomy tier. When
-                omitted only the guardrail chain applies.
+            agent_id: The session's agent, used only when there is no context.
+            context: The session's server-built
+                :class:`~nexus.tools.context.ExecutionContext`.
 
         Returns:
             Tool execution result dict.
@@ -605,26 +607,26 @@ class HermesAdapter(BaseAdapter):
         if name not in self._tool_registry:
             return {"error": f"Tool '{name}' not registered", "status": "not_found"}
 
-        # This loop is a real tool dispatch path, so it has to clear the same
-        # guardrails the ToolExecutor applies. A refusal is returned as a normal
-        # tool error so the model can see it and adapt.
-        from nexus.tools.factory import guard_tool_call
+        # This loop is a real tool dispatch path, so it runs the same server-side
+        # chain as every other one (access, guardrails, autonomy) and records the
+        # invocation. A refusal is returned as a normal tool error so the model
+        # can see it and adapt.
+        import asyncio
+        import inspect
 
-        refusal = await guard_tool_call(name, arguments, agent_id=agent_id)
-        if refusal is not None:
-            return refusal
+        from nexus.tools.factory import guarded_call
 
         handler = self._tool_registry[name]["handler"]
-        try:
-            import asyncio
-            import inspect
 
+        async def run() -> Any:
             if inspect.iscoroutinefunction(handler):
-                result = await handler(**arguments)
-            else:
-                result = await asyncio.to_thread(handler, **arguments)
+                return await handler(**arguments)
+            return await asyncio.to_thread(handler, **arguments)
 
-            return {"result": result, "status": "success"}
+        try:
+            return await guarded_call(
+                context, name, arguments, run, source="hermes", agent_id=agent_id
+            )
         except Exception as e:
             logger.error(f"Tool '{name}' execution failed: {e}")
             return {"error": str(e), "status": "failed"}

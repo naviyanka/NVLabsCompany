@@ -21,6 +21,8 @@ from nexus.api.routes.auth import router as auth_router
 from nexus.api.routes.budgets import router as budgets_router
 from nexus.api.routes.connections import router as connections_router
 from nexus.api.routes.chat import router as chat_router
+from nexus.api.routes.mcp_bindings import router as mcp_bindings_router
+from nexus.api.routes.sessions import router as sessions_router
 from nexus.api.routes.communication import router as communication_router
 from nexus.api.routes.companies import router as companies_router
 from nexus.api.routes.company_sim import router as company_sim_router
@@ -227,16 +229,19 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     from nexus.config_validator import validate_config
     await validate_config()
 
-    # Obsidian vault + embedding-dimension policy (ADR 0002 §20-§21).
+    # Obsidian vault + embedding-dimension policy (ADR 0002 §20-§21, WP-22j).
     # Deliberately NOT part of validate_config, which promises never to raise: a
     # typo'd vault root must refuse to start rather than report an empty vault
     # forever, and a wrong-width provider must refuse to start rather than index
-    # a corpus whose vectors get silently dropped at write time.
+    # a corpus whose vectors get silently dropped at write time. On PostgreSQL
+    # the width check is unconditional — the column is vector(1536).
     from nexus.obsidian import validate_embedding_policy, validate_vault_root
     vault = validate_vault_root()
     if vault is not None:
         _logger.info("Obsidian vault root validated: %s", vault)
-    validate_embedding_policy()
+    validate_embedding_policy(
+        on_postgres=not settings.database_url.startswith("sqlite")
+    )
 
     # Reclaim heartbeat runs whose process died while we were down (Phase 1.3.4, WP-15a)
     # Cross-tenant over RLS-covered tables (heartbeat_runs, agents) -> system_session
@@ -515,6 +520,8 @@ app.include_router(archetypes_router)
 app.include_router(providers_router)
 app.include_router(hiring_router)
 app.include_router(chat_router)
+app.include_router(sessions_router)
+app.include_router(mcp_bindings_router)
 app.include_router(plaza_router)
 app.include_router(workspaces_router)
 app.include_router(nodes_router)

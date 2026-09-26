@@ -1,7 +1,18 @@
 """Adapter management API endpoints.
 
-Provides endpoints for managing adapter types, agent execution sessions,
-and session lifecycle operations (pause, resume, terminate).
+Provides endpoints for managing adapter types and agent task execution.
+
+The ``/api/v1/agents/{agent_id}/sessions`` GET and the pause/resume/terminate
+routes under it are deprecated aliases kept for existing clients. They read
+and write the persistent agent sessions (``AgentSessionRecord``) with the same
+tenant scoping, permissions and lifecycle rules as the canonical session API:
+
+- list:      GET  /api/v1/companies/{company_id}/sessions?agent_id=...
+- pause:     PATCH /api/v1/sessions/{id}  {"status": "idle"}
+- resume:    PATCH /api/v1/sessions/{id}  {"status": "active"}
+- terminate: POST /api/v1/sessions/{id}/terminate
+
+"paused" is the canonical "idle" status and is reported as such.
 """
 
 import uuid
@@ -10,6 +21,9 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel
+from sqlalchemy import select
+
+from nexus.api.deps import CurrentCompanyId, DbSession, require_permission
 
 router = APIRouter(tags=["adapters"])
 
@@ -79,7 +93,6 @@ class SessionActionResponse(BaseModel):
 # In-memory state for demo purposes
 # ---------------------------------------------------------------------------
 
-_sessions: dict[str, dict[str, Any]] = {}
 _task_results: dict[str, dict[str, Any]] = {}
 
 
@@ -191,185 +204,146 @@ async def execute_task(agent_id: uuid.UUID, body: ExecuteTaskRequest) -> dict[st
         "error": None,
     }
     _task_results[task_id] = result
-
-    # Create or reuse a session for this agent
-    session_id = str(uuid.uuid4())
-    _sessions[session_id] = {
-        "session_id": session_id,
-        "agent_id": str(agent_id),
-        "status": "active",
-        "created_at": now.isoformat(),
-        "last_activity_at": now.isoformat(),
-        "task_id": task_id,
-    }
-
     return result
+
+
+# ---------------------------------------------------------------------------
+# Deprecated session aliases (see the module docstring)
+# ---------------------------------------------------------------------------
+
+
+async def _agent_session(
+    db: Any, agent_id: uuid.UUID, session_id: uuid.UUID, company_id: uuid.UUID
+):
+    """The tenant's session belonging to ``agent_id``, or 404."""
+    from nexus.models.agent_session import AgentSessionRecord
+
+    record = (
+        await db.execute(
+            select(AgentSessionRecord).where(
+                AgentSessionRecord.id == session_id,
+                AgentSessionRecord.agent_id == agent_id,
+                AgentSessionRecord.company_id == company_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if record is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Session {session_id} not found for agent {agent_id}",
+        )
+    return record
+
+
+async def _session_action(
+    db: Any, agent_id: uuid.UUID, session_id: uuid.UUID, company_id: uuid.UUID, action: str, to: str
+) -> dict[str, Any]:
+    """Apply one lifecycle transition through the canonical state machine, audited."""
+    from nexus.governance.audit_service import record_audit
+    from nexus.services.session_service import publish_session_event, transition
+
+    record = await _agent_session(db, agent_id, session_id, company_id)
+    transition(record, to)
+    await db.flush()
+    await record_audit(
+        company_id,
+        f"session.{action}",
+        actor_type="user",
+        resource_type="session",
+        resource_id=str(record.id),
+        details={"agent_id": str(agent_id), "status": record.status, "via": "deprecated_alias"},
+        db=db,
+    )
+    await db.commit()  # listeners refetch on the event: the change must be visible
+    await publish_session_event(
+        "session.updated",
+        company_id,
+        {"session_id": str(record.id), "agent_id": str(agent_id), "status": record.status},
+    )
+    return {
+        "session_id": str(record.id),
+        "agent_id": str(agent_id),
+        "action": action,
+        "status": record.status,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
 
 
 @router.get(
     "/api/v1/agents/{agent_id}/sessions",
     response_model=list[SessionResponse],
+    dependencies=[require_permission("read", "session")],
+    deprecated=True,
 )
-async def list_agent_sessions(agent_id: uuid.UUID) -> list[dict[str, Any]]:
-    """List all sessions for a specific agent.
+async def list_agent_sessions(
+    agent_id: uuid.UUID, company_id: CurrentCompanyId, db: DbSession
+) -> list[dict[str, Any]]:
+    """Deprecated: use GET /api/v1/companies/{company_id}/sessions?agent_id=...
 
-    Args:
-        agent_id: The agent whose sessions to list.
-
-    Returns:
-        List of session records for this agent.
+    Lists the agent's persistent sessions, newest activity first.
     """
-    agent_id_str = str(agent_id)
-    agent_sessions = [
+    from nexus.models.agent_session import AgentSessionRecord
+
+    rows = (
+        await db.execute(
+            select(AgentSessionRecord)
+            .where(
+                AgentSessionRecord.company_id == company_id,
+                AgentSessionRecord.agent_id == agent_id,
+            )
+            .order_by(AgentSessionRecord.last_activity_at.desc())
+            .limit(200)
+        )
+    ).scalars()
+    return [
         {
-            "session_id": s["session_id"],
-            "agent_id": s["agent_id"],
-            "status": s["status"],
-            "created_at": s["created_at"],
-            "last_activity_at": s.get("last_activity_at"),
+            "session_id": str(r.id),
+            "agent_id": str(r.agent_id),
+            "status": r.status,
+            "created_at": r.started_at.isoformat(),
+            "last_activity_at": r.last_activity_at.isoformat(),
         }
-        for s in _sessions.values()
-        if s["agent_id"] == agent_id_str
+        for r in rows
     ]
-    return agent_sessions
 
 
 @router.post(
     "/api/v1/agents/{agent_id}/sessions/{session_id}/pause",
     response_model=SessionActionResponse,
+    dependencies=[require_permission("write", "session")],
+    deprecated=True,
 )
-async def pause_session(agent_id: uuid.UUID, session_id: uuid.UUID) -> dict[str, Any]:
-    """Pause an active agent session.
-
-    Args:
-        agent_id: The agent that owns the session.
-        session_id: The session to pause.
-
-    Returns:
-        Confirmation of the pause action.
-
-    Raises:
-        HTTPException: If the session is not found or not active.
-    """
-    session_id_str = str(session_id)
-    session = _sessions.get(session_id_str)
-
-    if session is None or session["agent_id"] != str(agent_id):
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Session {session_id} not found for agent {agent_id}",
-        )
-
-    if session["status"] != "active":
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=f"Session cannot be paused from status '{session['status']}'",
-        )
-
-    now = datetime.now(timezone.utc)
-    session["status"] = "paused"
-    session["last_activity_at"] = now.isoformat()
-
-    return {
-        "session_id": session_id_str,
-        "agent_id": str(agent_id),
-        "action": "pause",
-        "status": "paused",
-        "timestamp": now.isoformat(),
-    }
+async def pause_session(
+    agent_id: uuid.UUID, session_id: uuid.UUID, company_id: CurrentCompanyId, db: DbSession
+) -> dict[str, Any]:
+    """Deprecated: use PATCH /api/v1/sessions/{id} with {"status": "idle"}."""
+    return await _session_action(db, agent_id, session_id, company_id, "pause", "idle")
 
 
 @router.post(
     "/api/v1/agents/{agent_id}/sessions/{session_id}/resume",
     response_model=SessionActionResponse,
+    dependencies=[require_permission("write", "session")],
+    deprecated=True,
 )
-async def resume_session(agent_id: uuid.UUID, session_id: uuid.UUID) -> dict[str, Any]:
-    """Resume a paused agent session.
-
-    Args:
-        agent_id: The agent that owns the session.
-        session_id: The session to resume.
-
-    Returns:
-        Confirmation of the resume action.
-
-    Raises:
-        HTTPException: If the session is not found or not paused.
-    """
-    session_id_str = str(session_id)
-    session = _sessions.get(session_id_str)
-
-    if session is None or session["agent_id"] != str(agent_id):
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Session {session_id} not found for agent {agent_id}",
-        )
-
-    if session["status"] != "paused":
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=f"Session cannot be resumed from status '{session['status']}'",
-        )
-
-    now = datetime.now(timezone.utc)
-    session["status"] = "active"
-    session["last_activity_at"] = now.isoformat()
-
-    return {
-        "session_id": session_id_str,
-        "agent_id": str(agent_id),
-        "action": "resume",
-        "status": "active",
-        "timestamp": now.isoformat(),
-    }
+async def resume_session(
+    agent_id: uuid.UUID, session_id: uuid.UUID, company_id: CurrentCompanyId, db: DbSession
+) -> dict[str, Any]:
+    """Deprecated: use PATCH /api/v1/sessions/{id} with {"status": "active"}."""
+    return await _session_action(db, agent_id, session_id, company_id, "resume", "active")
 
 
 @router.post(
     "/api/v1/agents/{agent_id}/sessions/{session_id}/terminate",
     response_model=SessionActionResponse,
+    dependencies=[require_permission("write", "session")],
+    deprecated=True,
 )
 async def terminate_session(
-    agent_id: uuid.UUID, session_id: uuid.UUID
+    agent_id: uuid.UUID, session_id: uuid.UUID, company_id: CurrentCompanyId, db: DbSession
 ) -> dict[str, Any]:
-    """Terminate an agent session.
-
-    Args:
-        agent_id: The agent that owns the session.
-        session_id: The session to terminate.
-
-    Returns:
-        Confirmation of the termination action.
-
-    Raises:
-        HTTPException: If the session is not found or already terminated.
-    """
-    session_id_str = str(session_id)
-    session = _sessions.get(session_id_str)
-
-    if session is None or session["agent_id"] != str(agent_id):
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Session {session_id} not found for agent {agent_id}",
-        )
-
-    if session["status"] == "terminated":
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Session is already terminated",
-        )
-
-    now = datetime.now(timezone.utc)
-    session["status"] = "terminated"
-    session["last_activity_at"] = now.isoformat()
-
-    return {
-        "session_id": session_id_str,
-        "agent_id": str(agent_id),
-        "action": "terminate",
-        "status": "terminated",
-        "timestamp": now.isoformat(),
-    }
-
+    """Deprecated: use POST /api/v1/sessions/{id}/terminate."""
+    return await _session_action(db, agent_id, session_id, company_id, "terminate", "terminated")
 
 
 # ---------------------------------------------------------------------------

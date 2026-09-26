@@ -10,6 +10,8 @@ from pydantic import BaseModel
 from sqlalchemy import select, update
 
 from nexus.api.deps import CurrentCompanyId, DbSession
+from nexus.config import settings
+from nexus.governance.fs_roots import resolve_in_roots
 from nexus.models.workspace import Workspace
 
 router = APIRouter(tags=["workspaces"])
@@ -33,6 +35,19 @@ class WorkspaceResponse(BaseModel):
     created_at: datetime
 
 
+def _resolve_workspace_path(raw: str, company_id: uuid.UUID) -> Path:
+    """Resolve ``raw`` and require it to sit inside an allowed workspace root.
+
+    ``resolve()`` collapses ``..`` and follows symlinks, so neither can escape a root.
+    """
+    if not raw.strip():
+        raise HTTPException(status_code=422, detail="Workspace path is required")
+    path = resolve_in_roots(raw, settings.workspace_roots, company_id)
+    if path is None:
+        raise HTTPException(status_code=422, detail="Workspace path is outside the allowed workspace roots")
+    return path
+
+
 @router.get("/api/v1/companies/{company_id}/workspaces", response_model=list[WorkspaceResponse])
 async def list_workspaces(company_id: uuid.UUID, db: DbSession) -> Any:
     """List all workspaces for a company."""
@@ -44,13 +59,13 @@ async def list_workspaces(company_id: uuid.UUID, db: DbSession) -> Any:
 @router.post("/api/v1/companies/{company_id}/workspaces", status_code=status.HTTP_201_CREATED, response_model=WorkspaceResponse)
 async def create_workspace(company_id: uuid.UUID, body: WorkspaceCreate, db: DbSession) -> Any:
     """Register a new workspace directory."""
-    ws_path = Path(body.path)
-    is_git = (ws_path / ".git").exists() if ws_path.exists() else False
+    ws_path = _resolve_workspace_path(body.path, company_id)
+    is_git = (ws_path / ".git").exists()
 
     workspace = Workspace(
         company_id=company_id,
         name=body.name,
-        path=body.path,
+        path=str(ws_path),
         description=body.description,
         is_git_repo=is_git,
         default_branch="main" if is_git else None,

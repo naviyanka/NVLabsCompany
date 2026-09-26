@@ -8,8 +8,9 @@ from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy import select, update
 
-from nexus.api.deps import CurrentCompanyId, DbSession
+from nexus.api.deps import CurrentCompanyId, CurrentPrincipal, DbSession, require_permission
 from nexus.models.agent import Agent
+from nexus.realtime.publish import TOPOLOGY_CHANNEL, publish_event
 
 router = APIRouter(tags=["agents"])
 
@@ -322,6 +323,20 @@ async def delete_agent(agent_id: uuid.UUID, db: DbSession, company_id: CurrentCo
     """Delete an agent permanently. Nullifies all foreign key references first."""
     from sqlalchemy import delete as sa_delete, update as sa_update
     from nexus.models.task import Task, Goal
+    from nexus.models.agent_worktree import AgentWorktree
+
+    # Worktree records are history and pin their agent (RESTRICT), so refuse
+    # before touching anything rather than surface a raw FK error.
+    held = await db.scalar(
+        select(AgentWorktree.id)
+        .where(AgentWorktree.agent_id == agent_id, AgentWorktree.company_id == company_id)
+        .limit(1)
+    )
+    if held is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Agent {agent_id} has agent worktrees and cannot be deleted",
+        )
 
     # Nullify references from other tables
     await db.execute(sa_update(Agent).where(Agent.manager_id == agent_id).values(manager_id=None))
@@ -371,6 +386,85 @@ async def clone_agent(agent_id: uuid.UUID, db: DbSession, company_id: CurrentCom
     return clone
 
 
+class ManagerUpdate(BaseModel):
+    """Request body for setting who an agent reports to; ``null`` clears it."""
+
+    manager_id: uuid.UUID | None = None
+
+
+@router.put(
+    "/api/v1/agents/{agent_id}/manager",
+    response_model=AgentResponse,
+    dependencies=[require_permission("write", "agent")],
+)
+async def set_agent_manager(
+    agent_id: uuid.UUID,
+    body: ManagerUpdate,
+    db: DbSession,
+    company_id: CurrentCompanyId,
+    principal: CurrentPrincipal,
+) -> Any:
+    """Set or clear the agent's manager (the reporting line the org chart draws).
+
+    Both agents must be in the caller's company, and the new line may not make
+    the agent report to itself, directly or through anyone below it.
+    """
+    agent = (
+        await db.execute(select(Agent).where(Agent.id == agent_id, Agent.company_id == company_id))
+    ).scalar_one_or_none()
+    if agent is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"Agent {agent_id} not found"
+        )
+    if body.manager_id is not None:
+        exists = (
+            await db.execute(
+                select(Agent.id).where(Agent.id == body.manager_id, Agent.company_id == company_id)
+            )
+        ).scalar_one_or_none()
+        if exists is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Manager not found")
+        # Walk up from the new manager: meeting this agent means a cycle.
+        cursor: uuid.UUID | None = body.manager_id
+        seen: set[uuid.UUID] = set()
+        while cursor is not None and cursor not in seen:
+            if cursor == agent_id:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="An agent cannot report to itself or to one of its reports",
+                )
+            seen.add(cursor)
+            cursor = (
+                await db.execute(
+                    select(Agent.manager_id).where(
+                        Agent.id == cursor, Agent.company_id == company_id
+                    )
+                )
+            ).scalar_one_or_none()
+    previous = agent.manager_id
+    if previous == body.manager_id:
+        return agent
+    agent.manager_id = body.manager_id
+    agent.updated_at = datetime.now(timezone.utc)
+    await db.flush()
+
+    from nexus.governance.audit_service import record_audit
+
+    change = {
+        "agent_id": str(agent_id),
+        "previous_manager_id": previous and str(previous),
+        "manager_id": body.manager_id and str(body.manager_id),
+    }
+    await record_audit(
+        company_id, "agent.manager_changed",
+        actor_type="user", actor_id=principal.user_id and str(principal.user_id),
+        resource_type="agent", resource_id=str(agent_id), details=change, db=db,
+    )
+    await db.commit()
+    await publish_event(TOPOLOGY_CHANNEL, "agent.manager_changed", company_id, change)
+    return agent
+
+
 class DelegateTaskRequest(BaseModel):
     """Request body for delegating a task to another agent."""
 
@@ -380,17 +474,33 @@ class DelegateTaskRequest(BaseModel):
     priority: int = 1
 
 
-@router.post("/api/v1/agents/{agent_id}/delegate", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/api/v1/agents/{agent_id}/delegate",
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[require_permission("write", "task")],
+)
 async def delegate_task(
-    agent_id: uuid.UUID, body: DelegateTaskRequest, db: DbSession, company_id: CurrentCompanyId
+    agent_id: uuid.UUID,
+    body: DelegateTaskRequest,
+    db: DbSession,
+    company_id: CurrentCompanyId,
+    principal: CurrentPrincipal,
 ) -> dict[str, Any]:
     """Delegate a task from one agent to another.
 
     Creates a task assigned to the target agent and sends a notification
     via the communication inbox. The source agent is recorded as the requestor.
+    Both agents must be in the caller's company, and a caller acting as an
+    agent may only delegate as itself.
     """
-    from nexus.models.task import Task
+    from nexus.governance.audit_service import record_audit
     from nexus.models.communication import Message
+    from nexus.models.task import Task
+
+    if principal.agent_id is not None and agent_id != principal.agent_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="An agent may only delegate its own work"
+        )
 
     # Verify both agents exist
     source = await db.execute(select(Agent).where(Agent.id == agent_id, Agent.company_id == company_id))
@@ -428,10 +538,18 @@ async def delegate_task(
     db.add(msg)
     await db.flush()
 
-    return {
+    result = {
         "task_id": str(task.id),
         "delegated_by": str(agent_id),
         "delegated_to": str(body.target_agent_id),
         "title": body.title,
         "status": "pending",
     }
+    await record_audit(
+        company_id, "delegation.created",
+        actor_type="agent" if principal.agent_id else principal.kind,
+        actor_id=str(principal.agent_id or principal.user_id or principal.api_key_id or ""),
+        resource_type="task", resource_id=str(task.id), details=result,
+        db=db, raise_on_error=True,
+    )
+    return result

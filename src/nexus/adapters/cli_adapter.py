@@ -170,6 +170,13 @@ class CLIAdapter(BaseAdapter):
             "timeout", session.metadata.get("timeout", DEFAULT_TIMEOUT_SECONDS)
         )
         extra_args = payload.get("args", [])
+        from nexus.tools.access import check_cli_args
+
+        refused = check_cli_args(extra_args)
+        if refused:
+            return TaskResult(
+                task_id=task_id, agent_id=session.agent_id, success=False, error=refused
+            )
         workspace = self._workspaces.get(session.session_id, ".")
         backend_id = session.metadata.get("backend", "claude")
 
@@ -550,11 +557,9 @@ class CLIAdapter(BaseAdapter):
             # Auto-commit any pending changes
             has_changes = await manager.has_pending_changes(repo_path, workspace_path)
             if has_changes:
-                # Stage all changes and commit
-                await manager._run_git(workspace_path, "add", "-A")
                 agent_name = session.config.get("agent_name", "agent")
                 commit_msg = f"[{agent_name}] Auto-commit from agent execution"
-                await manager._run_git(workspace_path, "commit", "-m", commit_msg)
+                await manager.commit_all(workspace_path, commit_msg)
                 self._add_log(
                     session.session_id,
                     f"Auto-committed changes in worktree ({branch})",

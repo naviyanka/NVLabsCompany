@@ -9,7 +9,7 @@
  */
 
 import { Button } from '@/components/common/Button';
-import type { CanvasEdge, CanvasNode, CanvasNodeType, PipelineItem } from '@/types/pipeline';
+import type { CanvasEdge, CanvasNode, CanvasNodeType, PipelineItem, PipelineStage } from '@/types/pipeline';
 import { Save, Trash2, X } from 'lucide-react';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import ReactFlow, {
@@ -45,6 +45,9 @@ function nextId(): string {
 }
 
 /* ── seed reactflow graph from a pipeline ── */
+/** Stages stored before the builder existed have no id; their position stands in. */
+export const stageNodeId = (stage: PipelineStage, index: number): string => stage.id || `stage-${index + 1}`;
+
 function seedGraph(pipeline?: PipelineItem | null): { nodes: RFNode[]; edges: Edge[] } {
   // 1. Existing canvas graph
   if (pipeline?.canvas_nodes?.length) {
@@ -71,25 +74,29 @@ function seedGraph(pipeline?: PipelineItem | null): { nodes: RFNode[]; edges: Ed
     return { nodes, edges };
   }
 
-  // 2. Legacy stages → sequential nodes
+  // 2. Stored stages → sequential nodes (the order the executor runs them in)
   if (pipeline?.stages?.length) {
-    const nodes: RFNode[] = pipeline.stages.map((s, i) => ({
-      id: s.id,
-      type: i === 0 ? 'trigger' : 'action',
-      position: { x: 80 + i * 280, y: 200 },
-      data: {
-        label: s.name,
-        category: i === 0 ? 'trigger' : 'utility',
-        icon: categoryIcon(i === 0 ? 'trigger' : 'utility'),
-        color: categoryColor(i === 0 ? 'trigger' : 'utility'),
-        agent: s.assignedAgent,
-        params: {},
-      },
-    }));
-    const edges: Edge[] = pipeline.stages.slice(0, -1).map((s, i) => ({
-      id: `e-${s.id}-${pipeline.stages[i + 1]!.id}`,
-      source: s.id,
-      target: pipeline.stages[i + 1]!.id,
+    const nodes: RFNode[] = pipeline.stages.map((s, i) => {
+      const category = s.category ?? (i === 0 ? 'trigger' : 'utility');
+      return {
+        id: stageNodeId(s, i),
+        type: s.category ? kindForCategory(s.category) : i === 0 ? 'trigger' : 'action',
+        position: { x: s.x ?? 80 + i * 280, y: s.y ?? 200 },
+        data: {
+          label: s.name,
+          category,
+          icon: categoryIcon(category),
+          color: categoryColor(category),
+          nodeId: s.nodeId,
+          agent: s.assignedAgent,
+          params: s.params ?? {},
+        },
+      };
+    });
+    const edges: Edge[] = nodes.slice(0, -1).map((n, i) => ({
+      id: `e-${n.id}-${nodes[i + 1]!.id}`,
+      source: n.id,
+      target: nodes[i + 1]!.id,
       type: 'smoothstep',
     }));
     return { nodes, edges };

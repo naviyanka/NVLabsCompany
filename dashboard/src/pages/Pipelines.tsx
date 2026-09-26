@@ -1,9 +1,9 @@
-import { apiClient } from '@/api/client';
+import { apiClient, ApiClientError } from '@/api/client';
 import { Badge } from '@/components/common/Badge';
 import { Button } from '@/components/common/Button';
 import { Card } from '@/components/common/Card';
 import { AddPipelineModal } from '@/components/pipelines/AddPipelineModal';
-import { PipelineBuilderCanvas } from '@/components/pipelines/PipelineBuilderCanvas';
+import { PipelineBuilderCanvas, stageNodeId } from '@/components/pipelines/PipelineBuilderCanvas';
 import { PipelineDetailDrawer } from '@/components/pipelines/PipelineDetailDrawer';
 import { getActiveCompanyId } from '@/config';
 import { NodeLibrary } from '@/pages/NodeLibrary';
@@ -42,6 +42,7 @@ export function Pipelines() {
   // Visual Builder state
   const [builderPipeline, setBuilderPipeline] = useState<PipelineItem | null>(null);
   const [showBuilder, setShowBuilder] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   useEffect(() => {
     async function loadData() {
@@ -169,66 +170,67 @@ export function Pipelines() {
     setShowBuilder(true);
   };
 
-  const handleBuilderSave = async (canvasNodes: CanvasNode[], canvasEdges: CanvasEdge[], name: string) => {
-    // Convert canvas nodes to PipelineStages for backward compat
+  /**
+   * The builder's graph is stored as the pipeline's ordered `stages` (the
+   * backend has no separate canvas columns). Fields the builder does not edit,
+   * such as a stage's prompt or agent_id, are carried over from the stored
+   * stage so a save never drops what the executor relies on. The list is only
+   * updated from what the server returns; a failed save keeps the builder open
+   * and says why.
+   */
+  const handleBuilderSave = async (canvasNodes: CanvasNode[], _edges: CanvasEdge[], name: string) => {
+    const previous = new Map((builderPipeline?.stages ?? []).map((s, i) => [stageNodeId(s, i), s]));
     const stages: PipelineStage[] = canvasNodes.map((n) => ({
+      ...previous.get(n.id),
       id: n.id,
       name: n.label,
       assignedAgent: n.agent || 'Unassigned',
       status: 'pending' as const,
+      category: n.category,
+      nodeId: n.nodeId,
+      params: n.params,
+      x: n.x,
+      y: n.y,
     }));
 
-    if (builderPipeline) {
-      // Update existing
-      const updated: PipelineItem = {
-        ...builderPipeline,
-        name,
-        stages,
-        canvas_nodes: canvasNodes,
-        canvas_edges: canvasEdges,
-      };
-      handlePipelineUpdated(updated);
-      try {
-        await apiClient.patch(
-          `/api/v1/companies/${getActiveCompanyId()}/pipelines/${builderPipeline.id}`,
-          { name, stages, canvas_nodes: canvasNodes, canvas_edges: canvasEdges }
-        );
-      } catch { /* fallback */ }
-    } else {
-      // Create new
-      const newPipe: PipelineItem = {
-        id: `pipe-${Date.now().toString(36)}`,
-        name,
-        description: `Visual pipeline with ${canvasNodes.length} nodes`,
-        status: 'idle',
-        success_rate: 100,
-        trigger: 'Manual Operator Dispatch',
-        stages,
-        canvas_nodes: canvasNodes,
-        canvas_edges: canvasEdges,
-        last_run: new Date().toISOString(),
-      };
-      try {
-        const created = await apiClient.post<PipelineItem>(
-          `/api/v1/companies/${getActiveCompanyId()}/pipelines`,
-          newPipe
-        );
+    setSaveError(null);
+    try {
+      if (builderPipeline) {
+        const saved = await apiClient.put<PipelineItem>(`/api/v1/pipelines/${builderPipeline.id}`, { name, stages });
+        handlePipelineUpdated({ ...builderPipeline, ...saved });
+      } else {
+        const created = await apiClient.post<PipelineItem>(`/api/v1/companies/${getActiveCompanyId()}/pipelines`, {
+          name,
+          description: `Visual pipeline with ${canvasNodes.length} nodes`,
+          stages,
+          trigger_type: 'manual',
+        });
         handlePipelineAdded(created);
-      } catch {
-        handlePipelineAdded(newPipe);
       }
+      setShowBuilder(false);
+    } catch (err) {
+      setSaveError(err instanceof ApiClientError ? err.detail || err.message : 'Could not save the pipeline.');
     }
-    setShowBuilder(false);
   };
 
   /* ── Full-screen visual builder ── */
   if (showBuilder) {
     return (
-      <PipelineBuilderCanvas
-        pipeline={builderPipeline}
-        onSave={handleBuilderSave}
-        onClose={() => setShowBuilder(false)}
-      />
+      <>
+        <PipelineBuilderCanvas
+          pipeline={builderPipeline}
+          onSave={handleBuilderSave}
+          onClose={() => {
+            setSaveError(null);
+            setShowBuilder(false);
+          }}
+        />
+        {saveError && (
+          <p role="alert" className="fixed top-14 left-1/2 -translate-x-1/2 z-[60] px-3 py-1.5 text-xs rounded bg-red-500/10 text-red-400 border border-red-500/30">
+            Pipeline not saved: {saveError}
+          </p>
+        )}
+      </>
     );
   }
 

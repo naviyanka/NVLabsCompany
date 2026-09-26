@@ -10,6 +10,7 @@ from sqlalchemy import select
 
 from nexus.api.deps import (
     CurrentCompanyId,
+    CurrentPrincipal,
     DbSession,
     PathCompanyId,
     require_permission,
@@ -257,7 +258,12 @@ async def get_proposal(proposal_id: uuid.UUID, db: DbSession, company_id: Curren
     response_model=EvaluationResponse,
     dependencies=[require_permission("read", "evolution")],
 )
-async def evaluate_proposal(proposal_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId) -> Any:
+async def evaluate_proposal(
+    proposal_id: uuid.UUID,
+    db: DbSession,
+    company_id: CurrentCompanyId,
+    principal: CurrentPrincipal = None,
+) -> Any:
     """Trigger evaluation for a proposal using the LLM Evolution Advisor.
 
     Calls the evolution engine to analyze the proposal and generate real
@@ -296,7 +302,9 @@ async def evaluate_proposal(proposal_id: uuid.UUID, db: DbSession, company_id: C
 
                 # Create an LLM callable using the agent's own adapter
                 async def llm_fn(prompt: str) -> str:
-                    text, _, _ = await _call_llm(agent, _build_system_prompt(agent), prompt, [])
+                    text, _, _ = await _call_llm(
+                        agent, _build_system_prompt(agent), prompt, [], principal=principal
+                    )
                     return text
 
                 advisor = LLMEvolutionAdvisor(llm_callable=llm_fn)
@@ -692,7 +700,10 @@ class ABTestRequest(BaseModel):
 
 @router.post("/api/v1/evolution/ab-test")
 async def run_ab_test(
-    body: ABTestRequest, db: DbSession, company_id: CurrentCompanyId
+    body: ABTestRequest,
+    db: DbSession,
+    company_id: CurrentCompanyId,
+    principal: CurrentPrincipal = None,
 ) -> dict[str, Any]:
     """Run an A/B test comparing two agent configurations.
 
@@ -722,7 +733,9 @@ async def run_ab_test(
             original_model = agent.model
             agent.model = body.control_config.get("model", agent.model)
             system_prompt = _build_system_prompt(agent)
-            text, model_used, tokens = await _call_llm(agent, system_prompt, body.test_prompt, [])
+            text, model_used, tokens = await _call_llm(
+                agent, system_prompt, body.test_prompt, [], principal=principal
+            )
             control_results.append({"success": True, "tokens": tokens, "output_length": len(text)})
             agent.model = original_model
         except Exception as e:
@@ -734,7 +747,9 @@ async def run_ab_test(
         try:
             agent.model = body.variant_config.get("model", agent.model)
             system_prompt = _build_system_prompt(agent)
-            text, model_used, tokens = await _call_llm(agent, system_prompt, body.test_prompt, [])
+            text, model_used, tokens = await _call_llm(
+                agent, system_prompt, body.test_prompt, [], principal=principal
+            )
             variant_results.append({"success": True, "tokens": tokens, "output_length": len(text)})
             agent.model = original_model
         except Exception as e:

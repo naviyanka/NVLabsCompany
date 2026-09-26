@@ -7,14 +7,14 @@ status, traces, and costs survive process restarts.
 
 import asyncio
 import uuid
-from datetime import timezone, datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy import select
 
-from nexus.api.deps import CurrentCompanyId, DbSession
+from nexus.api.deps import CurrentCompanyId, CurrentPrincipal, DbSession
 from nexus.models.workflow_run import WorkflowRun
 
 router = APIRouter(tags=["workflows"])
@@ -108,12 +108,15 @@ def _naive_now() -> datetime:
 
 
 def _coerce_company_uuid(value: str | None, fallback: uuid.UUID) -> uuid.UUID:
-    """Resolve the tenant scope, honoring legacy body overrides when valid."""
-    if value:
-        try:
-            return uuid.UUID(str(value))
-        except (ValueError, AttributeError):
-            pass
+    """Resolve the tenant scope. It is always the authenticated company.
+
+    The legacy ``company_id`` body field is still accepted, but only when it
+    names that same company; a body can never move a run to another tenant.
+    """
+    if value and str(value) != str(fallback):
+        raise HTTPException(
+            status_code=403, detail="company_id does not match the authenticated company"
+        )
     return fallback
 
 
@@ -263,6 +266,7 @@ async def _run_company_flow(
     objective: str,
     estimated_cost_cents: int,
     metadata: dict[str, Any] | None,
+    principal: Any = None,
 ) -> None:
     """Execute a CompanyWorkflow and persist its trace."""
     try:
@@ -277,6 +281,7 @@ async def _run_company_flow(
         workflow = CompanyWorkflow(
             company_id=str(company_uuid),
             adapter_registry=adapter_registry,
+            principal=principal,
         )
         trace = await workflow.execute(
             objective,
@@ -309,6 +314,7 @@ async def _run_task_flow(
     estimated_cost_cents: int,
     approval_type: str | None,
     max_attempts: int,
+    principal: Any = None,
 ) -> None:
     """Execute a TaskFlow and persist its outcome."""
     try:
@@ -323,6 +329,7 @@ async def _run_task_flow(
         flow = TaskFlow(
             company_id=str(company_uuid),
             adapter_registry=adapter_registry,
+            principal=principal,
         )
         await _register_company_agents(company_uuid, flow)
 
@@ -372,6 +379,7 @@ async def start_company_flow(
     body: StartCompanyFlowRequest,
     db: DbSession,
     company_id: CurrentCompanyId,
+    principal: CurrentPrincipal = None,
 ) -> dict[str, Any]:
     """Start a company workflow with a high-level objective.
 
@@ -414,6 +422,7 @@ async def start_company_flow(
             body.objective,
             body.estimated_cost_cents,
             body.metadata,
+            principal,
         )
     )
     _running_tasks[str(run.id)] = task
@@ -435,6 +444,7 @@ async def start_task_flow(
     body: StartTaskFlowRequest,
     db: DbSession,
     company_id: CurrentCompanyId,
+    principal: CurrentPrincipal = None,
 ) -> dict[str, Any]:
     """Start a single task flow.
 
@@ -485,6 +495,7 @@ async def start_task_flow(
             body.estimated_cost_cents,
             body.approval_type,
             body.max_attempts,
+            principal,
         )
     )
     _running_tasks[str(run.id)] = task

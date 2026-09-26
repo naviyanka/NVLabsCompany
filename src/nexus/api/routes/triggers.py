@@ -9,10 +9,22 @@ from pydantic import BaseModel
 from sqlalchemy import select, update
 
 from nexus.api.deps import CurrentCompanyId, DbSession
+from nexus.governance.ssrf_protection import guard_outbound_url
 from nexus.models.trigger import Trigger, TriggerExecution
 from nexus.runtime.scheduler import compute_next_fire
 
 router = APIRouter(tags=["triggers"])
+
+
+async def _validate_webhook_config(config: dict[str, Any] | None) -> None:
+    """Reject an SSRF-unsafe webhook_url up front; the scheduler re-checks at fire time."""
+    url = (config or {}).get("webhook_url")
+    if not url:
+        return
+    try:
+        await guard_outbound_url(str(url), "webhook_url")
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 class TriggerCreate(BaseModel):
@@ -80,6 +92,7 @@ async def create_trigger(
     computation seeds it, so the trigger is due at the right time even if the
     process restarts before its first fire.
     """
+    await _validate_webhook_config(body.config)
     next_fire_at = body.next_fire_at
     if next_fire_at is None:
         next_fire_at = compute_next_fire(
@@ -134,6 +147,7 @@ async def update_trigger(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="No fields to update",
         )
+    await _validate_webhook_config(updates.get("config"))
     stmt = update(Trigger).where(Trigger.id == trigger_id, Trigger.company_id == company_id).values(**updates)
     await db.execute(stmt)
 

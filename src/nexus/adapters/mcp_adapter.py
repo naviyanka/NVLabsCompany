@@ -5,13 +5,14 @@ backend, using tool listing for capability discovery and routing task
 execution through MCP tool calls.
 """
 
+import functools
 import uuid
 from typing import Any
 
 from nexus.adapters.base import BaseAdapter
 from nexus.governance.ssrf_protection import guard_url as _guard_url
 from nexus.runtime.adapter import AgentSession, TaskResult
-from nexus.tools.factory import guard_tool_call
+from nexus.tools.factory import guarded_call
 
 try:
     from nexus.tools.mcp_client import MCPClient, MCPResult, MCPTool
@@ -160,25 +161,31 @@ class MCPAgentAdapter(BaseAdapter):
                 f"Calling MCP tool: {tool_name}({arguments})",
             )
 
-            # This loop dispatches tools directly, so it has to clear the same
-            # guardrails a ToolExecutor applies. A refusal is recorded as an
-            # ordinary tool error so the model sees it and can adapt.
-            refusal = await guard_tool_call(
-                tool_name, arguments, agent_id=session.agent_id
-            )
-            if refusal is not None:
-                self._add_log(session.session_id, f"[{tool_name}] {refusal['error']}")
-                results.append({
-                    "tool_name": tool_name,
-                    "content": refusal["error"],
-                    "is_error": True,
-                    "metadata": {"status": refusal["status"]},
-                })
-                combined_output.append(f"[{tool_name}] ERROR: {refusal['error']}")
-                continue
-
+            # This loop dispatches tools directly, so it runs the full server-side
+            # chain (access, guardrails, autonomy) and records the invocation. A
+            # refusal is recorded as an ordinary tool error so the model sees it
+            # and can adapt.
             try:
-                result: MCPResult = await client.call_tool(tool_name, arguments)
+                outcome = await guarded_call(
+                    session.context,
+                    tool_name,
+                    arguments,
+                    functools.partial(client.call_tool, tool_name, arguments),
+                    source="mcp",
+                    agent_id=session.agent_id,
+                    endpoint_url=session.config.get("server_url"),
+                )
+                if outcome["status"] != "success":
+                    self._add_log(session.session_id, f"[{tool_name}] {outcome['error']}")
+                    results.append({
+                        "tool_name": tool_name,
+                        "content": outcome["error"],
+                        "is_error": True,
+                        "metadata": {"status": outcome["status"]},
+                    })
+                    combined_output.append(f"[{tool_name}] ERROR: {outcome['error']}")
+                    continue
+                result: MCPResult = outcome["result"]
 
                 results.append({
                     "tool_name": tool_name,

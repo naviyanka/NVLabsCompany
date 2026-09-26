@@ -81,11 +81,16 @@ def test_execution_to_step_dicts_maps_task_execution():
     assert dicts[0]["cost_cents"] == 7
 
 
-def test_coerce_company_uuid_valid_and_invalid():
-    valid = str(uuid.uuid4())
-    assert wf_routes._coerce_company_uuid(valid, COMPANY_ID) == uuid.UUID(valid)
-    assert wf_routes._coerce_company_uuid("not-a-uuid", COMPANY_ID) == COMPANY_ID
+def test_coerce_company_uuid_never_leaves_the_authenticated_company():
+    from fastapi import HTTPException
+
     assert wf_routes._coerce_company_uuid(None, COMPANY_ID) == COMPANY_ID
+    assert wf_routes._coerce_company_uuid(str(COMPANY_ID), COMPANY_ID) == COMPANY_ID
+    # A body naming another tenant (or garbage) is refused, not honoured.
+    for other in (str(uuid.uuid4()), "not-a-uuid"):
+        with pytest.raises(HTTPException) as exc:
+            wf_routes._coerce_company_uuid(other, COMPANY_ID)
+        assert exc.value.status_code == 403
 
 
 @pytest.mark.asyncio
@@ -128,21 +133,22 @@ async def test_start_task_flow_uses_principal_company_and_persists(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_start_company_flow_honors_valid_body_company_override(monkeypatch):
+async def test_start_company_flow_refuses_a_body_company_override(monkeypatch):
+    """The legacy body field may repeat the caller's company, never name another."""
+    from fastapi import HTTPException
+
     session = AsyncMock()
     monkeypatch.setattr(wf_routes, "_run_company_flow", AsyncMock())
 
-    override = str(uuid.uuid4())
-    body = wf_routes.StartCompanyFlowRequest(objective="obj", company_id=override)
-    await wf_routes.start_company_flow(body, session, COMPANY_ID)
+    body = wf_routes.StartCompanyFlowRequest(objective="obj", company_id=str(uuid.uuid4()))
+    with pytest.raises(HTTPException) as exc:
+        await wf_routes.start_company_flow(body, session, COMPANY_ID)
+    assert exc.value.status_code == 403
+    session.add.assert_not_called()
 
-    run = session.add.call_args[0][0]
-    assert run.company_id == uuid.UUID(override)
-
-    body_bad = wf_routes.StartCompanyFlowRequest(objective="obj", company_id="garbage")
-    await wf_routes.start_company_flow(body_bad, session, COMPANY_ID)
-    run_bad = session.add.call_args[0][0]
-    assert run_bad.company_id == COMPANY_ID
+    same = wf_routes.StartCompanyFlowRequest(objective="obj", company_id=str(COMPANY_ID))
+    await wf_routes.start_company_flow(same, session, COMPANY_ID)
+    assert session.add.call_args[0][0].company_id == COMPANY_ID
 
 
 def _make_run_factory(status_value):

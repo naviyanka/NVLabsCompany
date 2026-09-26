@@ -55,8 +55,15 @@ ROLE_MANAGER = Role(
         Permission(action="read", resource_type="*", resource_id="*"),
         Permission(action="write", resource_type="task", resource_id="*"),
         Permission(action="write", resource_type="agent", resource_id="*"),
+        Permission(action="write", resource_type="session", resource_id="*"),
+        Permission(action="write", resource_type="mcp_binding", resource_id="*"),
+        Permission(action="write", resource_type="pipeline", resource_id="*"),
+        Permission(action="execute", resource_type="pipeline", resource_id="*"),
         Permission(action="execute", resource_type="tool", resource_id="*"),
         Permission(action="approve", resource_type="approval", resource_id="*"),
+        # Managers create and end agent worktrees on existing repositories;
+        # connecting a repository (write:repository) stays admin-only.
+        Permission(action="write", resource_type="worktree", resource_id="*"),
     ],
 )
 

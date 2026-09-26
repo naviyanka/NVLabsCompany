@@ -22,19 +22,31 @@ class EmbeddingPolicyError(Exception):
     """The configured embedding provider cannot serve the vault corpus."""
 
 
-def validate_embedding_policy() -> None:
-    """Refuse a vault configured against a wrong-width embedding provider.
+def validate_embedding_policy(*, on_postgres: bool = False) -> None:
+    """Refuse a wrong-width embedding provider at startup (WP-22j).
 
-    Does nothing when the vault is disabled (no ``obsidian_vault_root``), so
-    existing deployments are unaffected, or when no provider is configured — a
-    vault indexed without vectors still supports keyword search, and that is a
-    visible, deliberate state rather than a silent degradation.
+    On PostgreSQL the check is unconditional: ``knowledge_chunks.embedding_vector``
+    is ``vector(1536)`` (migration d5b1f7a3c210), and a provider of any other
+    width has its vectors silently dropped by ``RAGPipeline.index_chunks`` —
+    retrieval degrades to keyword-only with no operator-visible signal.
+
+    Without PostgreSQL the column is the SQLite JSON variant and any width
+    inserts fine, so only the vault constraint applies: a vault configured
+    against a wrong-width provider refuses to start (ADR 0002 §21), and no
+    provider at all — or the null provider — is a visible, deliberate
+    keyword-only state rather than a silent degradation.
+
+    Args:
+        on_postgres: Whether the application database is PostgreSQL.
 
     Raises:
-        EmbeddingPolicyError: If a vault is configured and the provider's
-            dimension is neither ``EMBEDDING_DIM`` nor 0 (the null provider).
+        EmbeddingPolicyError: If the provider's dimension is neither
+            ``EMBEDDING_DIM`` nor 0 (the null provider) on PostgreSQL, or if a
+            vault is configured and the provider is not exactly
+            ``EMBEDDING_DIM``.
     """
-    if not is_vault_enabled():
+    vault_enabled = is_vault_enabled()
+    if not on_postgres and not vault_enabled:
         return
 
     from nexus.knowledge.embeddings import get_embedding_provider
@@ -49,10 +61,19 @@ def validate_embedding_policy() -> None:
         return
 
     if dimension != EMBEDDING_DIM:
+        what = (
+            f"knowledge_chunks.embedding_vector (vector({EMBEDDING_DIM}))"
+            if on_postgres
+            else "the Obsidian vault corpus"
+        )
         raise EmbeddingPolicyError(
-            f"EMBEDDING_PROVIDER yields {dimension}-dimensional vectors but the "
-            f"Obsidian vault corpus requires {EMBEDDING_DIM}. Configure a "
-            f"{EMBEDDING_DIM}-dimensional provider (EMBEDDING_PROVIDER=openai "
-            f"with OPENAI_EMBED_MODEL=text-embedding-3-small), or unset "
-            f"obsidian_vault_root to disable the integration."
+            f"EMBEDDING_PROVIDER yields {dimension}-dimensional vectors but {what} "
+            f"requires {EMBEDDING_DIM}. Configure a {EMBEDDING_DIM}-dimensional "
+            f"provider (EMBEDDING_PROVIDER=openai with "
+            f"OPENAI_EMBED_MODEL=text-embedding-3-small)"
+            + (
+                ", or unset obsidian_vault_root to disable the integration."
+                if vault_enabled
+                else "."
+            )
         )

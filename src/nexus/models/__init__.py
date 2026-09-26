@@ -4,9 +4,12 @@ All models are imported here so Alembic can discover them for migration autogene
 """
 
 from nexus.models.agent import Agent
+from nexus.models.agent_session import AgentSessionRecord
+from nexus.models.agent_worktree import AgentWorktree
 from nexus.models.auth import Invite
 from nexus.models.budget import BudgetPolicy, CostEvent
 from nexus.models.chat import ChatMessage
+from nexus.models.mcp_binding import McpBinding
 from nexus.models.communication import Event, Group, GroupMember, Message
 from nexus.models.company import Company, CompanyMembership, Department, Team
 from nexus.models.connection import LLMConnection
@@ -109,6 +112,7 @@ __all__ = [
     "ToolProfileBinding",
     "ToolPolicy",
     "ToolInvocation",
+    "McpBinding",
     # Memory
     "MemoryRecord",
     # Triggers
@@ -150,7 +154,10 @@ __all__ = [
     "Invite",
     "ApiKey",
     # Chat
+    "AgentSessionRecord",
     "ChatMessage",
+    # Worktrees
+    "AgentWorktree",
     # Workflows
     "WorkflowRun",
     # OKR

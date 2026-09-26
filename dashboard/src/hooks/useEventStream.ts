@@ -3,7 +3,7 @@ import { useEffect, useRef } from 'react';
 /**
  * Minimal custom hook using EventSource to stream real-time events.
  *
- * Connects to `/api/v1/events?channel=${channel}` with credentials: 'include'.
+ * Connects to `/api/v1/events/stream?channel=${channel}` with credentials: 'include'.
  * Features exponential backoff reconnection on error and cleanup on unmount.
  */
 export function useEventStream<T = any>(

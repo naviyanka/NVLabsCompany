@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from nexus.models.agent import Agent
 from nexus.runtime.adapter import AgentAdapter, AgentSession, AgentStatus
+from nexus.tools.context import ExecutionContext
 
 
 # Valid state transitions
@@ -151,6 +152,8 @@ class AgentLifecycleManager:
             agent_id=agent_id,
             config=agent.adapter_config or {},
         )
+        # Lifecycle work is autonomous: the agent acts as itself, in its own company.
+        session.context = ExecutionContext.for_agent(agent, source="lifecycle")
         self._sessions[agent_id] = session
 
         await self._update_status(agent_id, "ready")

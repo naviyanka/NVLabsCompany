@@ -1,6 +1,7 @@
 """Application configuration using pydantic-settings."""
 
 from pathlib import Path
+from typing import Literal
 
 from pydantic_settings import BaseSettings
 
@@ -61,6 +62,22 @@ class Settings(BaseSettings):
     # Data directory for JSON-persisted runtime state (control registry, etc.)
     data_dir: str = "./data"
 
+    # Filesystem roots a workspace may be registered under, comma-separated.
+    # "{company_id}" is substituted per tenant. Paths outside every root are
+    # rejected, so a tenant cannot point a workspace at arbitrary host files.
+    workspace_roots: str = "./data/workspaces/{company_id}"
+
+    # Filesystem roots a repository's local clone may live under, same format
+    # as workspace_roots. Git runs inside these directories, so a repository
+    # whose local_path is outside every root is refused rather than used.
+    repository_roots: str = "./data/repos/{company_id}"
+
+    # Directory agent worktrees live under, one per company. "{company_id}" is
+    # required, so one tenant's worktrees never share a root with another's.
+    # Kept apart from repository_roots so a worktree can never be registered
+    # as a repository. A worktree's stored relative_path is relative to this.
+    worktree_root: str = "./data/worktrees/{company_id}"
+
     # Secret vault backend: "fernet" (encrypted rows in the `secrets` table),
     # "keyring" (OS keychain, requires the `keyring` package), or "env"
     # (read-only, values come from NEXUS_SECRET_<REF> environment variables).
@@ -89,6 +106,13 @@ class Settings(BaseSettings):
     e2b_api_key: str = ""
     judge0_base_url: str = "https://judge0-ce.p.rapidapi.com"
     judge0_api_key: str = ""
+
+    # MCP/tool binding enforcement (ws05). "enforce" (the default since P3.2):
+    # a call that fails a binding check, or has no agent identity, is denied.
+    # "audit" lets it run and records it as would_deny; it is for rollout and
+    # diagnosis only. RBAC, tool policy, autonomy and guardrail denials are
+    # hard in both modes.
+    tool_binding_enforcement: Literal["audit", "enforce"] = "enforce"
 
     # Temporal (ADR 0001). These were read straight from os.environ, which meant
     # a value in .env was silently ignored: pydantic-settings loads .env into

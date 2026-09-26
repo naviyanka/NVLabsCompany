@@ -9,8 +9,12 @@ a function instead of remembering six constructor arguments.
 
 from __future__ import annotations
 
+import functools
 import logging
+import time
 import uuid
+from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime
 from typing import Any
 
 from nexus.guardrails import GuardrailChain, PolicyGuardrail, StructuralGuardrail
@@ -96,6 +100,7 @@ async def guard_tool_call(
     allowed_tools: list[str] | None = None,
     context: dict[str, Any] | None = None,
     agent_id: uuid.UUID | None = None,
+    company_id: uuid.UUID | None = None,
 ) -> dict[str, Any] | None:
     """Screen one tool call, for dispatch paths that cannot use a ToolExecutor.
 
@@ -111,6 +116,9 @@ async def guard_tool_call(
         context: Optional context passed through to the guardrails.
         agent_id: The calling agent. Without it the autonomy tier cannot be
             resolved and only the guardrail chain runs.
+        company_id: The company the call was authorized for. The autonomy gate
+            then runs under that tenant's RLS context, the same one
+            :func:`nexus.tools.access.check_tool_access` used.
 
     Returns:
         None when the call may proceed, or an error dict shaped like an ordinary
@@ -140,15 +148,14 @@ async def guard_tool_call(
     # Guardrails first, autonomy second: a call the policy refuses outright
     # should not be sent to a human for approval.
     try:
-        from nexus.database import async_session_factory
-
-        async with async_session_factory() as db:
+        async with _access_session(company_id) as db:
             gate = build_autonomy_gate(db)
             decision = await gate.check(
                 agent_id=agent_id,
                 tool_id=uuid.uuid5(uuid.NAMESPACE_URL, f"tool:{tool_name}"),
                 tool_name=tool_name,
                 arguments=arguments,
+                company_id=company_id,
             )
     except Exception as exc:  # noqa: BLE001
         logger.warning("Autonomy check errored for tool %s, allowing: %s", tool_name, exc)
@@ -162,6 +169,204 @@ async def guard_tool_call(
         "status": "autonomy_blocked",
         "correlation_id": str(decision.correlation_id),
     }
+
+
+async def guarded_call(
+    ctx: Any,
+    tool_name: str,
+    arguments: dict[str, Any],
+    run: Callable[[], Awaitable[Any]],
+    *,
+    source: str,
+    agent_id: uuid.UUID | None = None,
+    connection_id: uuid.UUID | None = None,
+    endpoint_url: str | None = None,
+    default_risk: str | None = None,
+) -> dict[str, Any]:
+    """Authorize, screen, run and record one tool call.
+
+    This is the one security boundary every governed tool call crosses, from
+    an adapter loop in this process or from an external MCP client through
+    :mod:`nexus.tools.mcp_server`. The whole chain runs server-side, in order:
+    access (:func:`nexus.tools.access.check_tool_access`: company, agent,
+    session, MCP binding, connection, catalog, RBAC, tool policy), then
+    :func:`guard_tool_call` (guardrails, autonomy gate under the same tenant).
+    Every attempt, refused or not, lands in ``tool_invocations`` with its
+    authorization outcome; an access decision other than ``allowed``, and any
+    refusal by the guardrails or the autonomy gate, also writes an
+    ``audit_log`` entry.
+
+    Args:
+        ctx: The server-built :class:`~nexus.tools.context.ExecutionContext`.
+            ``None`` only on a legacy path that has none, which is a soft
+            problem (``would_deny`` in audit mode, ``denied`` in enforce).
+        tool_name: Name of the tool about to run.
+        arguments: Arguments the tool would receive.
+        run: Coroutine factory that performs the call. It runs only when the
+            chain allows it; its exceptions propagate after being recorded.
+        source: Dispatch path, recorded in the audit detail (``mcp``,
+            ``hermes``, ``mcp_inbound``).
+        agent_id: The adapter session's agent, used only when ``ctx`` is
+            ``None``.
+        connection_id: The ``ToolConnection`` being called, when known.
+        endpoint_url: MCP server URL, for calls into a ToolConnection.
+        default_risk: Risk level of a tool with no catalog entry.
+
+    Returns:
+        ``{"status": "success", "result": ...}`` when the call ran, or a
+        refusal dict with ``error`` and ``status`` (``denied``,
+        ``guardrail_blocked``, ``autonomy_blocked``) when it did not.
+    """
+    from nexus.tools.access import DENIED, AccessDecision, check_tool_access
+
+    company_id = ctx.company_id if ctx is not None else None
+    try:
+        async with _access_session(company_id) as db:
+            decision = await check_tool_access(
+                db,
+                ctx,
+                tool_name=tool_name,
+                agent_id=agent_id,
+                connection_id=connection_id,
+                endpoint_url=endpoint_url,
+                default_risk=default_risk,
+            )
+    except Exception as exc:  # noqa: BLE001
+        # An error is a soft problem: audit mode keeps the pre-ws05
+        # behaviour, enforce mode refuses.
+        from nexus.config import settings
+
+        logger.warning("Access check errored for tool %s: %s", tool_name, exc)
+        enforcement = settings.tool_binding_enforcement
+        decision = AccessDecision(
+            outcome=DENIED if enforcement == "enforce" else "would_deny",
+            enforcement=enforcement,
+            company_id=company_id,
+            problems=[{"stage": "error", "reason": str(exc), "hard": False}],
+        )
+
+    started = time.monotonic()
+    refusal: dict[str, Any] | None = None
+    if not decision.allowed:
+        logger.warning("Access denied for tool %s: %s", tool_name, decision.reason)
+        refusal = {"error": f"Denied by access policy: {decision.reason}", "status": "denied"}
+    else:
+        # Only an agent that passed the access check reaches the autonomy
+        # gate, and it runs under the company the call was authorized for.
+        refusal = await guard_tool_call(
+            tool_name,
+            arguments,
+            agent_id=decision.agent_id,
+            company_id=decision.company_id,
+        )
+
+    record = functools.partial(_record_invocation, decision, ctx, tool_name, arguments, source)
+    if refusal is not None:
+        await record(refusal["status"], started, error=refusal["error"])
+        return refusal
+
+    try:
+        result = await run()
+    except Exception as exc:
+        await record("error", started, error=str(exc))
+        raise
+    # An MCP result reports a tool-side failure in-band rather than raising.
+    failed = bool(getattr(result, "is_error", False))
+    await record("error" if failed else "success", started)
+    return {"status": "success", "result": result}
+
+
+def _access_session(company_id: uuid.UUID | None) -> Any:
+    """A session carrying tenant RLS context when the company is known."""
+    from nexus import database
+
+    if company_id is not None:
+        return database.tenant_session(company_id)
+    return database.async_session_factory()
+
+
+async def _record_invocation(
+    decision: Any,
+    ctx: Any,
+    tool_name: str,
+    arguments: dict[str, Any],
+    source: str,
+    status: str,
+    started: float,
+    *,
+    error: str | None = None,
+) -> None:
+    """Persist one guarded call to ``tool_invocations`` (and ``audit_log``).
+
+    The row carries only identities the access check validated, plus who the
+    principal was and which request path and adapter made the call. Skipped
+    when the company is unknown (a legacy call for an agent with no row):
+    there is no tenant to attribute the row to. Best effort: a failed write is
+    logged and never fails the tool call.
+    """
+    if decision.company_id is None:
+        return
+
+    from nexus.governance.audit_service import record_audit
+    from nexus.models.tool_invocation import ToolInvocation
+    from nexus.tools.executor import _scrub_arguments
+
+    detail = {**decision.detail(), "source": source}
+    if ctx is not None:
+        # The agent and session the context claimed, kept even when the check
+        # rejected them (the row's own columns hold only validated ids), so a
+        # wrong-agent or wrong-session refusal says what was attempted.
+        detail.update(
+            principal_id=ctx.principal_id,
+            principal_role=ctx.principal_role,
+            request_source=ctx.source,
+            adapter=ctx.adapter,
+            model=ctx.model,
+            claimed_agent_id=str(ctx.agent_id) if ctx.agent_id else None,
+            claimed_session_id=str(ctx.session_id) if ctx.session_id else None,
+        )
+        actor_type, _, actor_id = ctx.principal_id.partition(":")
+    else:
+        actor_type, actor_id = "agent", str(decision.agent_id)
+    try:
+        async with _access_session(decision.company_id) as db:
+            invocation = ToolInvocation(
+                company_id=decision.company_id,
+                agent_id=decision.agent_id,
+                connection_id=decision.connection_id,
+                session_id=decision.session_id,
+                tool_name=tool_name,
+                arguments_scrubbed=_scrub_arguments(arguments),
+                status=status,
+                duration_ms=int((time.monotonic() - started) * 1000),
+                error=error,
+                completed_at=datetime.now(UTC).replace(tzinfo=None),
+                authorization=decision.outcome,
+                authorization_detail=detail,
+            )
+            db.add(invocation)
+            # Access refusals and would-denies, then refusals after access
+            # passed: a refused call must be as visible as an allowed one.
+            if decision.outcome != "allowed":
+                action = f"tool.access_{decision.outcome}"
+            elif status in ("guardrail_blocked", "autonomy_blocked"):
+                action = f"tool.{status}"
+            else:
+                action = None
+            if action is not None:
+                await record_audit(
+                    decision.company_id,
+                    action,
+                    actor_type=actor_type,
+                    actor_id=actor_id,
+                    resource_type="tool_invocation",
+                    resource_id=str(invocation.id),
+                    details={**detail, "tool_name": tool_name, "status": status},
+                    db=db,
+                )
+            await db.commit()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Could not record invocation of tool %s: %s", tool_name, exc)
 
 
 def build_autonomy_gate(db: Any, default_level: int = 1) -> AutonomyGate:

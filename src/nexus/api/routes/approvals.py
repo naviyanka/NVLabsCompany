@@ -8,12 +8,21 @@ from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy import select
 
-from nexus.api.deps import CurrentCompanyId, DbSession
+from nexus.api.deps import (
+    CurrentCompanyId,
+    CurrentPrincipal,
+    DbSession,
+    PathCompanyId,
+    require_permission,
+)
 from nexus.governance.approval_signing import SignatureError
 from nexus.models.governance import Approval
 from nexus.services.approval_service import ApprovalService
 
 router = APIRouter(tags=["approvals"])
+
+# Deciding an approval needs approve:approval (admin and manager by default).
+APPROVE = [require_permission("approve", "approval")]
 
 
 class ApprovalCreate(BaseModel):
@@ -26,9 +35,13 @@ class ApprovalCreate(BaseModel):
 
 
 class ApprovalDecision(BaseModel):
-    """Request body for approving or rejecting."""
+    """Request body for approving or rejecting.
 
-    decided_by: str
+    ``decided_by`` is accepted for compatibility with existing clients and
+    ignored: the decision is recorded against the authenticated principal.
+    """
+
+    decided_by: str | None = None
     decision_note: str | None = None
 
 
@@ -64,7 +77,7 @@ class ApprovalResponse(BaseModel):
     response_model=ApprovalResponse,
 )
 async def create_approval(
-    company_id: uuid.UUID, body: ApprovalCreate, db: DbSession
+    company_id: PathCompanyId, body: ApprovalCreate, db: DbSession
 ) -> Any:
     """Create a new approval request through the single approval service."""
     return await ApprovalService(db).request_approval(
@@ -81,7 +94,7 @@ async def create_approval(
     response_model=list[ApprovalResponse],
 )
 async def list_pending_approvals(
-    company_id: uuid.UUID,
+    company_id: PathCompanyId,
     db: DbSession,
     limit: int = 100,
     offset: int = 0,
@@ -104,9 +117,14 @@ async def list_pending_approvals(
 @router.post(
     "/api/v1/approvals/{approval_id}/approve",
     response_model=ApprovalResponse,
+    dependencies=APPROVE,
 )
 async def approve(
-    approval_id: uuid.UUID, body: ApprovalDecision, db: DbSession, company_id: CurrentCompanyId
+    approval_id: uuid.UUID,
+    body: ApprovalDecision,
+    db: DbSession,
+    company_id: CurrentCompanyId,
+    principal: CurrentPrincipal,
 ) -> Any:
     """Approve a pending approval request.
 
@@ -125,7 +143,7 @@ async def approve(
         )
     try:
         approval = await ApprovalService(db).approve(
-            approval_id, body.decided_by, body.decision_note
+            approval_id, principal.display_name, body.decision_note
         )
     except SignatureError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
@@ -179,9 +197,14 @@ async def sign_approval(
 @router.post(
     "/api/v1/approvals/{approval_id}/reject",
     response_model=ApprovalResponse,
+    dependencies=APPROVE,
 )
 async def reject(
-    approval_id: uuid.UUID, body: ApprovalDecision, db: DbSession, company_id: CurrentCompanyId
+    approval_id: uuid.UUID,
+    body: ApprovalDecision,
+    db: DbSession,
+    company_id: CurrentCompanyId,
+    principal: CurrentPrincipal,
 ) -> Any:
     """Reject a pending approval request."""
     existing = await db.execute(
@@ -193,7 +216,7 @@ async def reject(
             detail=f"Approval {approval_id} not found or not pending",
         )
     approval = await ApprovalService(db).reject(
-        approval_id, body.decided_by, body.decision_note
+        approval_id, principal.display_name, body.decision_note
     )
     if approval is None:
         raise HTTPException(

@@ -28,6 +28,7 @@ import { Skills } from '@/pages/Skills';
 import { Tasks } from '@/pages/Tasks';
 import { Tools } from '@/pages/Tools';
 import { Workflows } from '@/pages/Workflows';
+import { Workspace } from '@/pages/Workspace';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { lazy, Suspense } from 'react';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
@@ -73,6 +74,7 @@ export default function App() {
               <Route path="/office" element={<Suspense fallback={<OfficeFallback />}><LazyOffice /></Suspense>} />
               <Route path="/hr-room" element={<HRRoom />} />
               <Route path="/plaza" element={<PlazaFeed />} />
+              <Route path="/workspace" element={<Workspace />} />
               <Route path="/agents" element={<Agents />} />
               <Route path="/agents/:id" element={<AgentDetailPage />} />
               <Route path="/tasks" element={<Tasks />} />

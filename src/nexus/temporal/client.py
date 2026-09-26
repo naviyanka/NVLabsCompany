@@ -274,9 +274,16 @@ async def query_obsidian_index_progress(company_id: str, workflow_id: str) -> di
 
 
 async def start_pipeline_workflow(
-    pipeline_id: str, run_id: str, company_id: str, stages: list[dict[str, Any]],
+    pipeline_id: str,
+    run_id: str,
+    company_id: str,
+    stages: list[dict[str, Any]],
+    context: dict[str, Any] | None = None,
 ) -> str | None:
     """Start a PipelineExecutionWorkflow on Temporal.
+
+    ``context`` is the starting caller's ExecutionContext.to_dict(); see
+    :class:`~nexus.temporal.workflows.PipelineExecutionInput`.
 
     Returns the workflow run ID, or None if Temporal is unavailable.
     """
@@ -295,6 +302,7 @@ async def start_pipeline_workflow(
             run_id=run_id,
             company_id=company_id,
             stages=stages,
+            context=context,
         )
         handle = await client.start_workflow(
             PipelineExecutionWorkflow.run,

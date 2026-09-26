@@ -10,7 +10,7 @@ export function Layout() {
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const location = useLocation();
 
-  const isFullCanvasPage = location.pathname === '/memory-graph' || location.pathname === '/office';
+  const isFullCanvasPage = ['/memory-graph', '/office', '/workspace'].includes(location.pathname);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {

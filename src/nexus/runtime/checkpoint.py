@@ -43,6 +43,7 @@ class ExecutionCheckpoint(SQLModel, table=True):
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     task_id: uuid.UUID = Field(index=True)
     step_index: int = Field(default=0)
+    session_id: uuid.UUID | None = Field(default=None, foreign_key="agent_sessions.id", ondelete="SET NULL", index=True)
     state_json: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
     status: str = Field(default=CheckpointStatus.active)
     created_at: datetime = Field(default_factory=utcnow)

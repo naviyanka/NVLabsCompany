@@ -5,7 +5,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query, status
 from pydantic import BaseModel
 
-from nexus.api.deps import CurrentCompanyId
+from nexus.api.deps import CurrentCompanyId, CurrentPrincipal
 from nexus.nodes.registry import NodeRegistry, NodeCategory
 
 router = APIRouter(prefix="/api/v1/nodes", tags=["nodes"])
@@ -85,11 +85,16 @@ async def execute_node_endpoint(
     node_id: str,
     body: NodeExecuteRequest,
     company_id: CurrentCompanyId,
+    principal: CurrentPrincipal,
 ) -> NodeExecuteResponse:
     """Execute a workflow node with the supplied parameters.
 
     Only nodes with a registered executor are executable; others answer 503 so
     clients can distinguish "exists, not executable yet" from "not found".
+
+    The node is one of the tools inbound MCP exposes, so it crosses the same
+    boundary (:func:`nexus.tools.factory.guarded_call`) as the caller's
+    principal, against the company's builtin connection. A refusal is 403.
     """
     from nexus.nodes.executor import DEFAULT_TIMEOUT_SECONDS, get_default_registry
 
@@ -105,13 +110,26 @@ async def execute_node_endpoint(
         )
 
     from nexus.nodes.executor import execute_node
+    from nexus.tools.access import BUILTIN_ENDPOINT
+    from nexus.tools.context import ExecutionContext
+    from nexus.tools.factory import guarded_call
+    from nexus.tools.mcp_server import risk_level_for
 
-    result = await execute_node(
+    source = "node_api"
+    outcome = await guarded_call(
+        ExecutionContext.for_principal(principal, source=source),
         node_id,
         body.params,
-        registry=registry,
-        timeout_seconds=DEFAULT_TIMEOUT_SECONDS,
+        lambda: execute_node(
+            node_id, body.params, registry=registry, timeout_seconds=DEFAULT_TIMEOUT_SECONDS
+        ),
+        source=source,
+        endpoint_url=BUILTIN_ENDPOINT,
+        default_risk=risk_level_for(node),
     )
+    if outcome["status"] != "success":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=outcome["error"])
+    result = outcome["result"]
 
     try:
         from nexus.database import async_session_factory

@@ -8,21 +8,30 @@ The tools exposed are the executable entries of the workflow node library, so
 there is one definition of what a tool is and one code path that runs it
 (:func:`nexus.nodes.executor.execute_node`). Nothing new is registered here.
 
-Every call is authorized twice, and ``tools/list`` applies the same first check
-so a client is never shown a tool it may not call:
+Every call crosses the same boundary as an adapter's outbound tool call,
+:func:`nexus.tools.factory.guarded_call`: identity, MCP binding, RBAC,
+ToolPolicy/ToolProfile, autonomy, guardrails, then execution and the
+``tool_invocations``/audit record. The tools are governed as the company's
+``nexus_builtin`` ToolConnection (:data:`nexus.tools.access.BUILTIN_ENDPOINT`),
+so bindings and the catalog apply to them like to any other connection. The
+policy default is deny: without a policy of its own a company exposes only
+read-risk tools. ``tools/list`` hides only the tools that call would deny
+outright.
 
-* :class:`nexus.tools.policy_engine.ToolPolicyEngine` against the ``ToolPolicy``
-  rows of the calling key's company -- this is also the per-company scoping.
-* :func:`nexus.tools.factory.guard_tool_call`, the same guardrail screen the
-  adapter tool loops use.
+Identity comes from the credential, never from a request:
 
-The caller authenticates with a company-scoped API key in ``NEXUS_API_KEY``;
-the key's company decides which policies apply. There is no unauthenticated
-mode: without a resolvable key the server refuses to start.
+* ``NEXUS_RUN_TOKEN`` (preferred): a run JWT. Company and agent are the
+  token's, the role is ``agent``.
+* ``NEXUS_API_KEY``: a company API key. Company and role are the key's; there
+  is no agent, so under enforcement the calls are refused.
+
+``NEXUS_SESSION_ID`` optionally names the agent session; it is a claim that
+access control checks against the agent and company. There is no
+unauthenticated mode: without a valid credential the server refuses to start.
 
 Run it as::
 
-    NEXUS_API_KEY=nv_... python -m nexus.tools.mcp_server
+    NEXUS_RUN_TOKEN=... python -m nexus.tools.mcp_server
 """
 
 from __future__ import annotations
@@ -37,8 +46,9 @@ from typing import Any
 
 from nexus.nodes.executor import execute_node, get_default_registry
 from nexus.nodes.registry import NodeCategory, NodeDefinition, NodeRegistry
-from nexus.tools.factory import guard_tool_call
-from nexus.tools.policy_engine import PolicyRule, ToolPolicyEngine
+from nexus.tools.access import BUILTIN_ENDPOINT, DENIED, check_tool_access
+from nexus.tools.context import INBOUND_MCP, ExecutionContext
+from nexus.tools.factory import _access_session, guarded_call
 
 logger = logging.getLogger(__name__)
 
@@ -115,102 +125,40 @@ def input_schema_for(node: NodeDefinition) -> dict[str, Any]:
     }
 
 
-async def load_policy_engine(company_id: uuid.UUID) -> ToolPolicyEngine:
-    """Load one company's active tool policies into an engine.
-
-    The default effect is ``deny``: this is an external surface, so a tool is
-    exposed only where a policy says so. :func:`default_read_policy` supplies
-    the read-only baseline when a company has written no policies of its own.
-    """
-    from sqlmodel import select
-
-    from nexus.database import async_session_factory
-    from nexus.models.tool import ToolPolicy
-
-    engine = ToolPolicyEngine(default_effect="deny")
-
-    async with async_session_factory() as db:
-        stmt = select(ToolPolicy).where(
-            ToolPolicy.company_id == company_id,
-            ToolPolicy.is_active == True,  # noqa: E712
-        )
-        rows = list((await db.execute(stmt)).scalars().all())
-
-    rules = [
-        PolicyRule(
-            id=row.id,
-            company_id=row.company_id,
-            name=row.name,
-            priority=row.priority,
-            effect=row.effect,
-            conditions=row.conditions or {},
-            is_active=row.is_active,
-        )
-        for row in rows
-    ]
-    engine.load_policies(rules or [default_read_policy(company_id)])
-    return engine
-
-
-def default_read_policy(company_id: uuid.UUID) -> PolicyRule:
-    """The baseline for a company with no tool policies: read-risk tools only.
-
-    Write-risk tools stay denied until someone writes a policy allowing them,
-    so turning the server on cannot by itself hand an external client the
-    ability to send mail or write rows.
-    """
-    return PolicyRule(
-        company_id=company_id,
-        name="default: read-only tools",
-        priority=1000,
-        effect="allow",
-        conditions={"risk_level": ["read"]},
-    )
-
-
 class MCPServer:
     """Serves the exposed node tools over one stdio session."""
 
-    def __init__(
-        self,
-        company_id: uuid.UUID,
-        principal_id: uuid.UUID,
-        policy_engine: ToolPolicyEngine,
-    ) -> None:
-        """Bind the server to one company and its policies.
+    def __init__(self, ctx: ExecutionContext) -> None:
+        """Bind the server to one authenticated caller.
 
         Args:
-            company_id: Company the calling key belongs to; scopes every call.
-            principal_id: Stable id for the caller, so ``agent_id`` policy
-                conditions can name it.
-            policy_engine: Engine preloaded with that company's policies.
+            ctx: Built from the credential by :func:`authenticate`; scopes
+                every call to its company, principal, role and agent.
         """
-        self._company_id = company_id
-        self._principal_id = principal_id
-        self._policies = policy_engine
+        self._ctx = ctx
         self._nodes = exposed_nodes()
 
-    def _allowed(self, node: NodeDefinition) -> tuple[bool, str]:
-        """Whether policy permits this node, and the reason either way."""
-        decision = self._policies.evaluate(
-            agent_id=self._principal_id,
-            tool_name=node.id,
-            risk_level=risk_level_for(node),
-            context={"company_id": str(self._company_id)},
-        )
-        return decision.allowed, decision.reason
-
-    def list_tools(self) -> list[dict[str, Any]]:
-        """The tools this company's policies allow, in MCP ``tools/list`` shape."""
-        return [
-            {
-                "name": node.id,
-                "description": node.description,
-                "inputSchema": input_schema_for(node),
-            }
-            for node in self._nodes.values()
-            if self._allowed(node)[0]
-        ]
+    async def list_tools(self) -> list[dict[str, Any]]:
+        """The tools this caller may be offered, in MCP ``tools/list`` shape."""
+        tools = []
+        async with _access_session(self._ctx.company_id) as db:
+            for node in self._nodes.values():
+                decision = await check_tool_access(
+                    db,
+                    self._ctx,
+                    tool_name=node.id,
+                    endpoint_url=BUILTIN_ENDPOINT,
+                    default_risk=risk_level_for(node),
+                )
+                if decision.outcome != DENIED:
+                    tools.append(
+                        {
+                            "name": node.id,
+                            "description": node.description,
+                            "inputSchema": input_schema_for(node),
+                        }
+                    )
+        return tools
 
     async def call_tool(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         """Authorize and run one tool call, in MCP ``tools/call`` result shape.
@@ -223,16 +171,20 @@ class MCPServer:
         if node is None:
             return _tool_error(f"Unknown tool '{name}'")
 
-        allowed, reason = self._allowed(node)
-        if not allowed:
-            logger.warning("Policy denied tool %s: %s", name, reason)
-            return _tool_error(f"Denied by policy: {reason}")
+        outcome = await guarded_call(
+            self._ctx,
+            name,
+            arguments,
+            lambda: execute_node(name, arguments),
+            source=INBOUND_MCP,
+            endpoint_url=BUILTIN_ENDPOINT,
+            default_risk=risk_level_for(node),
+        )
+        if outcome["status"] != "success":
+            logger.warning("Refused tool %s: %s", name, outcome["error"])
+            return _tool_error(outcome["error"])
 
-        blocked = await guard_tool_call(name, arguments)
-        if blocked is not None:
-            return _tool_error(blocked["error"])
-
-        result = await execute_node(name, arguments)
+        result = outcome["result"]
         if not result.success:
             return _tool_error(result.error or "Execution failed")
 
@@ -263,7 +215,7 @@ class MCPServer:
             )
 
         if method == "tools/list":
-            return _result(request_id, {"tools": self.list_tools()})
+            return _result(request_id, {"tools": await self.list_tools()})
 
         if method == "tools/call":
             params = request.get("params") or {}
@@ -304,22 +256,57 @@ def _tool_error(message: str) -> dict[str, Any]:
     return {"content": [{"type": "text", "text": message}], "isError": True}
 
 
-async def authenticate(credential: str) -> tuple[uuid.UUID, uuid.UUID]:
-    """Resolve an API key to the company it scopes and a stable principal id.
+async def authenticate(
+    *,
+    run_token: str = "",
+    api_key: str = "",
+    session_id: str = "",
+) -> ExecutionContext:
+    """Resolve the process credential to the server-side execution context.
+
+    The run token wins when both are set. Its role is fixed at ``agent``, as
+    in the HTTP middleware: a credential never names its own role.
 
     Raises:
-        RuntimeError: If the key is unknown, revoked or expired.
+        RuntimeError: If no credential is given, or it does not verify.
     """
-    from nexus.auth.api_keys import resolve_api_key, touch_api_key
-    from nexus.database import async_session_factory
+    from nexus.auth.principal import Principal
 
-    async with async_session_factory() as db:
-        key = await resolve_api_key(db, credential)
-        if key is None:
-            raise RuntimeError("NEXUS_API_KEY is not a valid, active API key")
-        await touch_api_key(db, key.id)
-        await db.commit()
-        return key.company_id, uuid.uuid5(uuid.NAMESPACE_URL, f"apikey:{key.id}")
+    if run_token:
+        from nexus.auth.run_tokens import RunTokenError, verify_run_token
+
+        try:
+            run_id, agent_id, company_id = verify_run_token(run_token)
+        except RunTokenError as exc:
+            raise RuntimeError(f"NEXUS_RUN_TOKEN is not valid: {exc}") from exc
+        principal = Principal(
+            kind="run", company_id=company_id, role="agent", run_id=run_id, agent_id=agent_id
+        )
+    elif api_key:
+        from nexus.auth.api_keys import resolve_api_key, touch_api_key
+        from nexus.database import async_session_factory
+        from nexus.models.auth import normalize_role
+
+        async with async_session_factory() as db:
+            key = await resolve_api_key(db, api_key)
+            if key is None:
+                raise RuntimeError("NEXUS_API_KEY is not a valid, active API key")
+            await touch_api_key(db, key.id)
+            await db.commit()
+        principal = Principal(
+            kind="service",
+            company_id=key.company_id,
+            role=normalize_role(key.role),
+            api_key_id=key.id,
+        )
+    else:
+        raise RuntimeError("NEXUS_RUN_TOKEN or NEXUS_API_KEY is required")
+
+    try:
+        session = uuid.UUID(session_id) if session_id else None
+    except ValueError as exc:
+        raise RuntimeError("NEXUS_SESSION_ID is not a UUID") from exc
+    return ExecutionContext.for_principal(principal, source=INBOUND_MCP, session_id=session)
 
 
 class StdinReader:
@@ -368,21 +355,20 @@ async def serve(server: MCPServer, reader: Any, writer: Any) -> None:
 
 
 async def main() -> int:
-    """Entry point: authenticate, load policies, then serve stdio until EOF."""
+    """Entry point: authenticate, then serve stdio until EOF."""
     logging.basicConfig(level=logging.WARNING, stream=sys.stderr)
 
-    credential = os.environ.get("NEXUS_API_KEY", "")
-    if not credential:
-        print("NEXUS_API_KEY is required", file=sys.stderr)
-        return 1
-
     try:
-        company_id, principal_id = await authenticate(credential)
+        ctx = await authenticate(
+            run_token=os.environ.get("NEXUS_RUN_TOKEN", ""),
+            api_key=os.environ.get("NEXUS_API_KEY", ""),
+            session_id=os.environ.get("NEXUS_SESSION_ID", ""),
+        )
     except RuntimeError as exc:
         print(str(exc), file=sys.stderr)
         return 1
 
-    server = MCPServer(company_id, principal_id, await load_policy_engine(company_id))
+    server = MCPServer(ctx)
     await serve(server, StdinReader(), sys.stdout)
     return 0
 
