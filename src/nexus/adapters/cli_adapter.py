@@ -265,9 +265,19 @@ class CLIAdapter(BaseAdapter):
             # No instruction file this CLI reads natively: carry it inline.
             prompt = f"{system_prompt}\n\n---\n\n{prompt}"
 
-        cmd = self._build_args(
-            backend, prompt, extra_args, model=model, executable=executable
-        )
+        # A task attempt's permission mode comes from the server-built context
+        # and maps to cataloged flags only. A backend without flags for the
+        # mode is refused rather than run with its default permissions.
+        work_mode = getattr(getattr(session, "context", None), "work_mode", None)
+        try:
+            cmd = self._build_args(
+                backend, prompt, extra_args, model=model, executable=executable,
+                work_mode=work_mode,
+            )
+        except ValueError as exc:
+            return TaskResult(
+                task_id=task_id, agent_id=session.agent_id, success=False, error=str(exc)
+            )
         if executable.lower().endswith((".cmd", ".bat")) and any(
             _CMD_SHIM_UNSAFE & set(arg) for arg in cmd[1:]
         ):
@@ -634,6 +644,7 @@ class CLIAdapter(BaseAdapter):
         extra_args: list[str] | None = None,
         model: str = "",
         executable: str | None = None,
+        work_mode: str | None = None,
     ) -> list[str]:
         """Build the CLI command arguments for the given backend.
 
@@ -648,11 +659,14 @@ class CLIAdapter(BaseAdapter):
             extra_args: Additional CLI arguments to append.
             model: Model name, passed only through the backend's model flag.
             executable: Resolved executable path; defaults to the bare command.
+            work_mode: A task attempt's mode, mapped to cataloged flags.
 
         Returns:
             List of command-line arguments ready for subprocess exec.
         """
-        return backend.build_args(prompt, extra_args, model=model, executable=executable)
+        return backend.build_args(
+            prompt, extra_args, model=model, executable=executable, work_mode=work_mode
+        )
 
     def _write_instruction_file(
         self,

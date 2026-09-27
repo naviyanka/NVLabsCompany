@@ -57,6 +57,10 @@ class CLIBackendInfo:
     prompt_transport: str = "positional"
     prompt_flag: str = ""
     safe_non_interactive_args: tuple[str, ...] = ()
+    # Cataloged permission flags per task-attempt work mode ("write" or
+    # "read_only"), as ((mode, args), ...) so the dataclass stays hashable.
+    # A backend without an entry cannot run that mode.
+    work_args: tuple[tuple[str, tuple[str, ...]], ...] = ()
     version_args: tuple[str, ...] = ("--version",)
     # stdout | stderr | either
     version_stream: str = "either"
@@ -86,14 +90,18 @@ class CLIBackendInfo:
         extra_args: list[str] | None = None,
         model: str = "",
         executable: str | None = None,
+        work_mode: str | None = None,
     ) -> list[str]:
         """Build the argv for one non-interactive run.
 
-        Order: executable, cataloged safe args, model flag, extra args, prompt.
+        Order: executable, cataloged safe args, cataloged work-mode args,
+        model flag, extra args, prompt.
         With ``prompt_transport == "stdin"`` the prompt is not in argv; the
         caller must write it to the process's stdin.
         """
         cmd = [executable or self.command, *self.safe_non_interactive_args]
+        if work_mode is not None:
+            cmd.extend(self.work_mode_args(work_mode))
         if model and self.supports_model and self.model_flag:
             cmd.extend([self.model_flag, model])
         if extra_args:
@@ -108,6 +116,18 @@ class CLIBackendInfo:
             cmd.append(safe_prompt)
         return cmd
 
+    def work_mode_args(self, work_mode: str) -> tuple[str, ...]:
+        """This backend's cataloged flags for a work mode.
+
+        Raises:
+            ValueError: If the backend has no flags for that mode, so a task
+                attempt never runs with the CLI's default permissions.
+        """
+        args = dict(self.work_args).get(work_mode)
+        if args is None:
+            raise ValueError(f"{self.id} does not support work mode {work_mode!r}")
+        return args
+
 
 _DEFAULT_BACKENDS: list[CLIBackendInfo] = [
     CLIBackendInfo(
@@ -119,6 +139,20 @@ _DEFAULT_BACKENDS: list[CLIBackendInfo] = [
         stability="stable",
         # ``-p/--print`` is a boolean; the prompt is positional.
         safe_non_interactive_args=("-p",),
+        # Write: edits allowed in the worktree cwd, plus only pytest via Bash.
+        # The "=" form keeps the variadic --allowedTools off the prompt.
+        work_args=(
+            (
+                "write",
+                (
+                    "--permission-mode",
+                    "acceptEdits",
+                    "--allowedTools=Bash(python -m pytest:*),Bash(python3 -m pytest:*),"
+                    "Bash(pytest:*)",
+                ),
+            ),
+            ("read_only", ("--permission-mode", "plan")),
+        ),
         supports_model=True,
         model_flag="--model",
         supports_resume=True,
@@ -178,6 +212,7 @@ _DEFAULT_BACKENDS: list[CLIBackendInfo] = [
         # ``-p`` takes the prompt as its value.
         prompt_transport="flag",
         prompt_flag="-p",
+        work_args=(("write", ("--mode", "accept-edits")), ("read_only", ("--mode", "plan"))),
         supports_model=True,
         model_flag="--model",
         supports_resume=True,
