@@ -14,6 +14,7 @@ import subprocess
 import tempfile
 import time
 import uuid
+import weakref
 from pathlib import Path
 from typing import Any
 
@@ -352,6 +353,7 @@ class CLIAdapter(BaseAdapter):
                 env=env,
                 start_new_session=os.name != "nt",
             )
+            _contain(process)
             self._processes[session.session_id] = process
 
             # For interactive sessions, spawn _stream_output as a background
@@ -494,6 +496,8 @@ class CLIAdapter(BaseAdapter):
             )
         finally:
             self._processes.pop(session.session_id, None)
+            if process is not None:
+                _release_job(process)
             # Clean up temporary instruction file
             if instruction_file_path:
                 self._cleanup_instruction_file(instruction_file_path)
@@ -878,15 +882,123 @@ async def _communicate_bounded(
     return stdout, stderr
 
 
+# Windows job objects of running CLIs, by process. A job created with
+# KILL_ON_JOB_CLOSE ends every process in it when its last handle closes, so
+# the tree dies with this server even if the server itself is killed.
+#
+# OS limits: the CLI is assigned to its job right after it starts, so anything
+# it spawns in that first instant can escape the job (asyncio cannot start a
+# process suspended); taskkill /T then remains the fallback. On POSIX the CLI
+# leads its own process group and is stopped by signalling that group; a
+# descendant that starts a new session, or a server killed with SIGKILL, can
+# still leave processes behind there.
+_jobs: "weakref.WeakKeyDictionary[asyncio.subprocess.Process, int]" = weakref.WeakKeyDictionary()
+
+if os.name == "nt":
+    import ctypes
+    from ctypes import wintypes
+
+    class _IoCounters(ctypes.Structure):
+        _fields_ = [(name, ctypes.c_ulonglong) for name in (
+            "ReadOperationCount", "WriteOperationCount", "OtherOperationCount",
+            "ReadTransferCount", "WriteTransferCount", "OtherTransferCount",
+        )]
+
+    class _BasicLimits(ctypes.Structure):
+        _fields_ = [
+            ("PerProcessUserTimeLimit", ctypes.c_int64),
+            ("PerJobUserTimeLimit", ctypes.c_int64),
+            ("LimitFlags", wintypes.DWORD),
+            ("MinimumWorkingSetSize", ctypes.c_size_t),
+            ("MaximumWorkingSetSize", ctypes.c_size_t),
+            ("ActiveProcessLimit", wintypes.DWORD),
+            ("Affinity", ctypes.c_size_t),
+            ("PriorityClass", wintypes.DWORD),
+            ("SchedulingClass", wintypes.DWORD),
+        ]
+
+    class _ExtendedLimits(ctypes.Structure):
+        _fields_ = [
+            ("BasicLimitInformation", _BasicLimits),
+            ("IoInfo", _IoCounters),
+            ("ProcessMemoryLimit", ctypes.c_size_t),
+            ("JobMemoryLimit", ctypes.c_size_t),
+            ("PeakProcessMemoryUsed", ctypes.c_size_t),
+            ("PeakJobMemoryUsed", ctypes.c_size_t),
+        ]
+
+    _kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    _kernel32.CreateJobObjectW.restype = wintypes.HANDLE
+    _kernel32.CreateJobObjectW.argtypes = (ctypes.c_void_p, wintypes.LPCWSTR)
+    _kernel32.SetInformationJobObject.argtypes = (
+        wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD,
+    )
+    _kernel32.OpenProcess.restype = wintypes.HANDLE
+    _kernel32.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
+    _kernel32.AssignProcessToJobObject.argtypes = (wintypes.HANDLE, wintypes.HANDLE)
+    _kernel32.TerminateJobObject.argtypes = (wintypes.HANDLE, wintypes.UINT)
+    _kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
+
+    _JOB_KILL_ON_CLOSE = 0x2000
+    _JOB_EXTENDED_LIMITS = 9
+    _PROCESS_SET_QUOTA_AND_TERMINATE = 0x0100 | 0x0001
+
+    def _new_job(pid: int) -> int | None:
+        job = _kernel32.CreateJobObjectW(None, None)
+        if not job:
+            return None
+        info = _ExtendedLimits()
+        info.BasicLimitInformation.LimitFlags = _JOB_KILL_ON_CLOSE
+        handle = None
+        try:
+            if not _kernel32.SetInformationJobObject(
+                job, _JOB_EXTENDED_LIMITS, ctypes.byref(info), ctypes.sizeof(info)
+            ):
+                raise OSError(ctypes.get_last_error())
+            handle = _kernel32.OpenProcess(_PROCESS_SET_QUOTA_AND_TERMINATE, False, pid)
+            if not handle or not _kernel32.AssignProcessToJobObject(job, handle):
+                raise OSError(ctypes.get_last_error())
+            return job
+        except OSError:
+            _kernel32.CloseHandle(job)
+            return None
+        finally:
+            if handle:
+                _kernel32.CloseHandle(handle)
+
+
+def _contain(process: Any) -> None:
+    """Windows: put a freshly started CLI in its own kill-on-close job object.
+
+    Only real processes; a failure leaves the taskkill fallback in place.
+    """
+    if os.name != "nt" or not isinstance(process, asyncio.subprocess.Process):
+        return
+    job = _new_job(process.pid)
+    if job is not None:
+        _jobs[process] = job
+
+
+def _release_job(process: Any) -> None:
+    """Close the process's job handle; anything still running in the job ends."""
+    job = _jobs.pop(process, None)
+    if job is not None:
+        _kernel32.CloseHandle(job)
+
+
 async def _terminate_tree(process: asyncio.subprocess.Process) -> None:
     """Stop a CLI and everything it spawned: SIGTERM, then SIGKILL.
 
-    Windows uses ``taskkill /T /F``; POSIX signals the process group the child
-    leads (it was started with ``start_new_session``).
+    Windows ends the CLI's job object, falling back to ``taskkill /T /F`` when
+    it has none; POSIX signals the process group the child leads (it was
+    started with ``start_new_session``).
     """
     pid = process.pid
+    job = _jobs.get(process)
     try:
-        if isinstance(pid, int) and os.name == "nt":
+        if job is not None:
+            _kernel32.TerminateJobObject(job, 1)
+        elif isinstance(pid, int) and os.name == "nt":
             await asyncio.to_thread(
                 subprocess.run,
                 ["taskkill", "/T", "/F", "/PID", str(pid)],
@@ -908,3 +1020,5 @@ async def _terminate_tree(process: asyncio.subprocess.Process) -> None:
             await process.wait()
     except (ProcessLookupError, PermissionError, OSError, subprocess.SubprocessError):
         pass
+    finally:
+        _release_job(process)

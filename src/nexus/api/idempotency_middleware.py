@@ -13,7 +13,7 @@ from sqlalchemy import select, delete
 from sqlalchemy.exc import IntegrityError
 
 from nexus.auth.middleware import get_principal_from_scope
-from nexus.database import async_session_factory
+from nexus.database import tenant_session
 from nexus.models.idempotency import IdempotencyRecord
 
 logger = logging.getLogger(__name__)
@@ -78,7 +78,8 @@ class IdempotencyMiddleware:
         expires_at = now + timedelta(hours=24)
 
         # 1. Query if record exists
-        async with async_session_factory() as session:
+        # Records are tenant rows under RLS: every read and write carries the tenant.
+        async with tenant_session(company_id) as session:
             stmt = select(IdempotencyRecord).where(
                 IdempotencyRecord.company_id == company_id,
                 IdempotencyRecord.idem_key == idem_key,
@@ -189,7 +190,7 @@ class IdempotencyMiddleware:
             await self.app(scope, replay_receive, capture_send)
             handler_crashed = False
         finally:
-            async with async_session_factory() as session:
+            async with tenant_session(company_id) as session:
                 stmt = select(IdempotencyRecord).where(
                     IdempotencyRecord.company_id == company_id,
                     IdempotencyRecord.idem_key == idem_key,

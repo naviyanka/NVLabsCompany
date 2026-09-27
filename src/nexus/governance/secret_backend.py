@@ -78,6 +78,38 @@ def _run_sync(coro):
         return pool.submit(asyncio.run, coro).result(timeout=30)
 
 
+def _run_db(factory, work):
+    """Run ``work(session_factory)`` from sync code on a private, unpooled engine.
+
+    The shared engine's pooled connections belong to the application's event
+    loop. ``_run_sync`` runs on a fresh loop (in a worker thread when a loop is
+    already running), and handing it one of those connections fails with
+    asyncpg's "attached to a different loop". A NullPool engine on the same URL
+    opens its connection on the loop that uses it and closes it afterwards. An
+    in-memory SQLite database lives only on its own connection, so that case
+    keeps the given factory.
+    """
+    url = getattr(factory.kw.get("bind"), "url", None)
+    if url is None or (
+        url.get_backend_name() == "sqlite" and url.database in (None, "", ":memory:")
+    ):
+        return _run_sync(work(factory))
+
+    async def run():
+        from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+        from sqlalchemy.pool import NullPool
+
+        private = create_async_engine(url, poolclass=NullPool)
+        try:
+            return await work(
+                async_sessionmaker(private, class_=AsyncSession, expire_on_commit=False)
+            )
+        finally:
+            await private.dispose()
+
+    return _run_sync(run())
+
+
 @dataclass
 class RotationPolicy:
     """Policy defining when a secret should be rotated.
@@ -222,14 +254,14 @@ class FernetSecretBackend:
     def _load_from_db(self) -> None:
         """Load encrypted secrets for this company from the `secrets` table."""
         try:
-            self._store = _run_sync(self._async_load_from_db())
+            self._store = _run_db(self._session_factory, self._async_load_from_db)
         except Exception:
             logger.warning(
                 "Failed to load secrets from database; starting with empty store."
             )
             self._store = {}
 
-    async def _async_load_from_db(self) -> dict[str, bytes]:
+    async def _async_load_from_db(self, session_factory) -> dict[str, bytes]:
         """Read all non-revoked secret rows for this company.
 
         Returns:
@@ -239,8 +271,7 @@ class FernetSecretBackend:
 
         from nexus.models.secret import Secret
 
-        assert self._session_factory is not None
-        async with self._session_factory() as session:
+        async with session_factory() as session:
             rows = (
                 await session.execute(
                     select(Secret).where(
@@ -281,7 +312,7 @@ class FernetSecretBackend:
             )
             self._store = {}
 
-    async def _async_sync_store(self) -> None:
+    async def _async_sync_store(self, session_factory) -> None:
         """Make the `secrets` table match `self._store` exactly.
 
         Upserts every ref currently held and deletes rows this company owns
@@ -292,8 +323,7 @@ class FernetSecretBackend:
 
         from nexus.models.secret import Secret
 
-        assert self._session_factory is not None
-        async with self._session_factory() as session:
+        async with session_factory() as session:
             rows = list(
                 (
                     await session.execute(
@@ -339,7 +369,7 @@ class FernetSecretBackend:
     def _persist(self) -> None:
         """Write the store to whichever backing store is configured (if any)."""
         if self._session_factory is not None:
-            _run_sync(self._async_sync_store())
+            _run_db(self._session_factory, self._async_sync_store)
         else:
             self._save_to_file()
 

@@ -66,7 +66,7 @@ class ExecutionContext:
             agent_id = principal.agent_id
             principal_id = f"run:{principal.run_id}"
         elif principal.kind == "service":
-            principal_id = f"service:{principal.api_key_id}"
+            principal_id = principal.display_name
         else:
             principal_id = f"user:{principal.user_id}"
         return cls(

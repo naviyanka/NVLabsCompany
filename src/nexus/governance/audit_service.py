@@ -76,9 +76,10 @@ async def record_audit(
             # cannot poison the transaction of the request being audited.
             await _chain_in_savepoint(db, entry)
         else:
-            # Create a new session (for background tasks / orchestrator)
-            from nexus.database import async_session_factory
-            async with async_session_factory() as new_db:
+            # Create a new session (for background tasks / orchestrator), in
+            # the event's tenant: audit_log is under row-level security.
+            from nexus.database import tenant_session
+            async with tenant_session(company_id) as new_db:
                 await _write_with_chain_retry(new_db, entry)
 
         logger.info("Audit: %s [%s] %s", action, actor_type, resource_type or "")

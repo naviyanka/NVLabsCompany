@@ -74,7 +74,12 @@ def _hardening() -> tuple[str, ...]:
         # An empty directory works the same on every platform. If it is ever
         # deleted, git finds no hooks at the missing path either.
         _hooks_dir = tempfile.mkdtemp(prefix="nexus-git-no-hooks-")
-    return ("-c", f"core.hooksPath={_hooks_dir}", "-c", "core.fsmonitor=false")
+    # core.longPaths: on Windows, files deeper than MAX_PATH (a pytest cache
+    # name under a long worktree root) otherwise fail ``add`` and ``clean``.
+    return (
+        "-c", f"core.hooksPath={_hooks_dir}", "-c", "core.fsmonitor=false",
+        "-c", "core.longPaths=true",
+    )
 
 
 def _env(extra: dict[str, str] | None = None) -> dict[str, str]:
