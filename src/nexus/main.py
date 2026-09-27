@@ -311,6 +311,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     await stop_orchestrator()
     await stop_scheduler()
     await stop_watchdog()
+    # Workers are stopped; remove any instruction file still held.
+    from nexus.adapters.cli_adapter import release_all_instruction_files
+
+    release_all_instruction_files()
 
     # Flush accumulated budget spend to DB
     try:

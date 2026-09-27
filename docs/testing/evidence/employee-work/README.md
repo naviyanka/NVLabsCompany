@@ -144,6 +144,10 @@ Each bug was fixed, and each fix has a regression test in `tests/test_employee_w
 ## Limitations
 
 - S3's first failure was scripted through the objective. It was not an organic model mistake.
-- The instruction-file leftover is fixed on the task-attempt path only. A plain chat session on a worktree that
-  crashes can still leave `.claude/CLAUDE.md` for the session-end snapshot.
+- The instruction-file leftover is now handled for every session, not only task attempts.
+  - The first line of the file NEXUS writes records the writing process id.
+  - One finalizer in `CLIAdapter._do_execute` removes the file on every exit.
+  - A file whose writer died is recovered in three places: at the next write, at session termination and before the
+    session-end snapshot (`tests/test_instruction_file_lifecycle.py`).
+  - The real-CLI runs above predate this change.
 - These runs are manual. Real CLI tests do not run in CI.

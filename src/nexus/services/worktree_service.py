@@ -909,6 +909,10 @@ async def release_session_worktree(db: AsyncSession, record: AgentSessionRecord)
     if before == "created":
         values["status"] = "archived"
     else:
+        from nexus.adapters.cli_adapter import recover_instruction_files
+
+        # An instruction file a killed CLI run left behind is not work.
+        recover_instruction_files(worktree_path(row.company_id, row.relative_path))
         try:
             head, committed = await _snapshot(db, row, commit_changes=True)
         except WorktreeError as exc:
