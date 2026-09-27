@@ -1,0 +1,4 @@
+19:00:05.435 POST :8000 agy idempotency-key=da3575b4-6d14-43a5-9b02-cb8e70ff4e41
+19:00:05.467 HTTP 200
+19:00:05.473 id=None {"type": "turn", "turn_id": "ead0121e-7e61-42f3-95ef-cb88a6140062", "session_id": "6dbfc916-90a0-4dcc-a8f4-60a579bac207", "agent_id": "33e71503-3791-4e0d-8bd3-0ba61df45867", "execution_id": null, "status": "queued", "seq": 3, "prompt_message_id": "16eb7f0c-0f8d-4422-9b2f-20fd061486d2", "attempt_count": 0, "error_code": null, "cancel_requested": false, "retry_after": null}
+19:00:05.474 disconnected last-event-id=None

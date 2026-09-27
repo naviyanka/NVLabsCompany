@@ -1,0 +1,6 @@
+(('390a9e51', 'running'), ('2c1a85e4', 'queued'), ('ead0121e', 'running'))
+(('390a9e51', 'completed'), ('2c1a85e4', 'running'), ('ead0121e', 'running'))
+(('390a9e51', 'completed'), ('2c1a85e4', 'completed'), ('ead0121e', 'running'))
+(('390a9e51', 'completed'), ('2c1a85e4', 'completed'), ('ead0121e', 'completed'))
+
+[exited with code 0]

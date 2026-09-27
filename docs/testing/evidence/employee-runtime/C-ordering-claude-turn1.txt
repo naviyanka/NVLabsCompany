@@ -1,0 +1,4 @@
+19:00:00.710 POST :8000 claude idempotency-key=d6209b23-bc2d-42c2-bb04-353edf734bab
+19:00:03.040 HTTP 200
+19:00:03.080 id=None {"type": "turn", "turn_id": "390a9e51-a274-4915-95ab-019a0e5c1a04", "session_id": "e86e3629-63b4-4b6a-a401-352b736ad251", "agent_id": "81747b39-d56f-4b05-839d-c2d68d806920", "execution_id": "93d08585-89d8-4b15-b725-eaaab0a967c0", "status": "running", "seq": 9, "prompt_message_id": "aeac76eb-a433-43ea-b671-c47c45869c69", "attempt_count": 1, "error_code": null, "cancel_requested": false, "retry_after": null}
+19:00:03.081 disconnected last-event-id=None
