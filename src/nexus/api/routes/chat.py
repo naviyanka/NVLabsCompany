@@ -11,6 +11,7 @@ import asyncio
 import json
 import logging
 import uuid
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
@@ -79,6 +80,49 @@ class ChatResponse(BaseModel):
 _conversations: dict[str, list[dict[str, Any]]] = {}
 _cache_loaded_at: dict[str, float] = {}
 _CACHE_TTL_SECONDS = 5.0
+
+
+# ---------------------------------------------------------------------------
+# Turn concurrency
+# ---------------------------------------------------------------------------
+# Different employees (and different sessions of one employee) run their turns
+# concurrently. Turns in the same session queue in arrival order, so a reply is
+# never produced against a transcript another in-flight turn is still writing.
+# ponytail: in-process queue; with several API workers two turns of one session
+# can still overlap across workers. A row lock or advisory lock on the session
+# is the upgrade path if that matters.
+_session_turns: dict[uuid.UUID, list[Any]] = {}  # session_id -> [Lock, users]
+
+
+def _chat_saturated(exc: Exception) -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+        detail={"code": "CHAT_CONCURRENCY_LIMIT", "message": str(exc)},
+        headers={"Retry-After": str(getattr(exc, "retry_after", 5))},
+    )
+
+
+@asynccontextmanager
+async def _chat_turn_slot(company_id: uuid.UUID, session_id: uuid.UUID):
+    """Hold the session's turn queue and a tenant/global execution slot.
+
+    The slot is claimed only once the turn reaches the head of its session's
+    queue, so queued turns do not use up the tenant's concurrency. Saturation
+    raises TenantSaturated/GlobalSaturated rather than waiting.
+    """
+    from nexus.runtime.orchestrator import _tenant_bulkhead
+
+    entry = _session_turns.get(session_id)
+    if entry is None:
+        entry = _session_turns[session_id] = [asyncio.Lock(), 0]
+    entry[1] += 1
+    try:
+        async with entry[0], _tenant_bulkhead.acquire(company_id):
+            yield
+    finally:
+        entry[1] -= 1
+        if entry[1] == 0:
+            _session_turns.pop(session_id, None)
 
 
 def _get_history(agent_id: str) -> list[dict[str, Any]]:
@@ -1206,15 +1250,19 @@ async def _call_llm(
         )
 
     finally:
-        # Every exit above — success, provider error, in-character fallback —
-        # passes through here, so a hold is never left dangling for its TTL.
-        await _settle_budget(
-            reservation_id,
-            cost_cents=spend["cost_cents"],
-            input_tokens=spend["input"],
-            output_tokens=spend["output"],
-            model=spend["model"],
-        )
+        # Every exit above — success, provider error, in-character fallback,
+        # a cancelled request — passes through here, so a hold is never left
+        # dangling for its TTL. Shielded: a cancelled scope re-cancels awaits.
+        import anyio
+
+        with anyio.CancelScope(shield=True):
+            await _settle_budget(
+                reservation_id,
+                cost_cents=spend["cost_cents"],
+                input_tokens=spend["input"],
+                output_tokens=spend["output"],
+                model=spend["model"],
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -1307,125 +1355,34 @@ async def _stream_reply(
     disconnects mid-stream does not lose it: a simulated stream stores the
     whole reply before the first chunk, and a true stream that is cut off
     stores what was generated so far with ``payload={"partial": true}``.
+
+    Turns in one session run one at a time (see ``_chat_turn_slot``); a
+    saturated tenant gets an error event with code CHAT_CONCURRENCY_LIMIT.
     """
-    import anyio
+    from nexus.governance.bulkhead import GlobalSaturated, TenantSaturated
 
     agent_id = agent.id
     try:
-        from nexus.adapters.registry import AdapterRegistry
-        from nexus.tools.context import ExecutionContext
-
-        connection = await _resolve_connection(agent)
-        registry_key, config = _resolve_adapter_type(agent, connection)
-        api_key = config.get("api_key", "")
-
-        # Try true token-level streaming for Anthropic/OpenAI adapters
-        use_true_streaming = (
-            registry_key in ("anthropic", "openai")
-            and api_key  # API key must be configured
-        )
-
-        if use_true_streaming:
-            # True streaming: yield tokens as they arrive from the API
-            adapter_registry = AdapterRegistry()
-            adapter = adapter_registry.create_adapter(registry_key)
-
-            session_config = {**config, "system_prompt": system_prompt}
-            session = await adapter.create_session(agent.id, session_config)
-            session.context = ExecutionContext.for_call(
-                agent,
-                principal,
-                source="chat",
-                session_id=session_id,
-                adapter=registry_key,
-                model=config.get("model"),
-            )
-
-            task_id = uuid.uuid4()
-            payload = {"prompt": prompt, "max_tokens": 4096}
-            accumulated = ""
-            finished = False
-
-            try:
-                if hasattr(adapter, "stream_execute"):
-                    async for chunk in adapter.stream_execute(session, task_id, payload):
-                        accumulated += chunk
-                        event = json.dumps({"type": "chunk", "text": chunk})
-                        yield f"data: {event}\n\n"
-                else:
-                    # Fallback for adapters without stream_execute
-                    result = await adapter.execute_task(session, task_id, payload)
-                    accumulated = str(result.output) if result.output else ""
-                    # Emit word-by-word
-                    for i, word in enumerate(accumulated.split(" ")):
-                        chunk = word if i == 0 else " " + word
-                        event = json.dumps({"type": "chunk", "text": chunk})
-                        yield f"data: {event}\n\n"
-                        await asyncio.sleep(0.01)
-                finished = True
-            finally:
-                # A disconnect cancels the generator mid-stream; shield the
-                # cleanup so the adapter is released and the tokens already
-                # generated (and paid for) still reach the transcript.
-                with anyio.CancelScope(shield=True):
-                    await adapter.terminate(session)
-                    if not finished and accumulated:
-                        await _persist_from_generator(
-                            agent_id, company_id, "agent", accumulated,
-                            session_id=session_id, model_used=config.get("model", "unknown"),
-                            tokens_used=len(accumulated.split()) * 2,
-                            payload={"partial": True},
-                        )
-
-            # Store response and emit done
-            model_used = config.get("model", "unknown")
-            tokens_used = len(accumulated.split()) * 2  # Rough estimate
-            agent_msg = _add_message(str(agent_id), "agent", accumulated)
-            await _persist_from_generator(
-                agent_id, company_id, "agent", accumulated,
-                session_id=session_id, model_used=model_used, tokens_used=tokens_used,
-            )
-            done_event = json.dumps({
-                "type": "done",
-                "message": agent_msg,
-                "model_used": model_used,
-                "tokens_used": tokens_used,
-            })
-            yield f"data: {done_event}\n\n"
-            yield "data: [DONE]\n\n"
-        else:
-            # Fallback: call LLM, then emit word-by-word (simulated streaming)
-            execution: dict[str, Any] = {}
-            response_text, model_used, tokens_used = await _call_llm(
-                agent, system_prompt, prompt, history, session_id=session_id, principal=principal,
-                execution=execution,
-            )
-            # Stored before the first chunk, so a disconnect cannot lose it.
-            agent_msg = _add_message(str(agent_id), "agent", response_text)
-            await _persist_from_generator(
-                agent_id, company_id, "agent", response_text,
-                session_id=session_id, model_used=model_used, tokens_used=tokens_used,
-                payload={"execution": execution} if execution else None,
-            )
-
-            words = response_text.split(" ")
-            for i, word in enumerate(words):
-                chunk = word if i == 0 else " " + word
-                event = json.dumps({"type": "chunk", "text": chunk})
-                yield f"data: {event}\n\n"
-                await asyncio.sleep(0.02)
-            done_event = json.dumps({
-                "type": "done",
-                "message": agent_msg,
-                "model_used": model_used,
-                "tokens_used": tokens_used,
-                "adapter_used": execution.get("adapter"),
-                "backend_used": execution.get("backend"),
-                "execution_id": execution.get("execution_id"),
-            })
-            yield f"data: {done_event}\n\n"
-            yield "data: [DONE]\n\n"
-
+        async with _chat_turn_slot(company_id, session_id):
+            async for event in _stream_turn(
+                agent, company_id, system_prompt, prompt, history, session_id, principal
+            ):
+                yield event
+    except (TenantSaturated, GlobalSaturated) as e:
+        error_event = json.dumps({
+            "type": "error",
+            "code": "CHAT_CONCURRENCY_LIMIT",
+            "text": f"Too many concurrent chats: {e}. Retry shortly.",
+        })
+        yield f"data: {error_event}\n\n"
+        yield "data: [DONE]\n\n"
+    except HTTPException as e:
+        # Refusals raised by _call_llm (409 configuration, 403 context).
+        detail = e.detail if isinstance(e.detail, dict) else {"message": str(e.detail)}
+        error_event = json.dumps({"type": "error", "status": e.status_code, **detail,
+                                  "text": detail.get("message", str(e.detail))})
+        yield f"data: {error_event}\n\n"
+        yield "data: [DONE]\n\n"
     except Exception as e:
         logger.error("Streaming chat error for agent %s: %s", agent_id, e)
         error_event = json.dumps({
@@ -1433,6 +1390,134 @@ async def _stream_reply(
             "text": f"Chat error: {type(e).__name__}: {e}",
         })
         yield f"data: {error_event}\n\n"
+        yield "data: [DONE]\n\n"
+
+
+async def _stream_turn(
+    agent: Agent,
+    company_id: uuid.UUID,
+    system_prompt: str,
+    prompt: str,
+    history: list[dict[str, Any]],
+    session_id: uuid.UUID,
+    principal: Principal | None,
+):
+    """The body of ``_stream_reply``, run while the turn holds its slot."""
+    import anyio
+
+    agent_id = agent.id
+    from nexus.adapters.registry import AdapterRegistry
+    from nexus.tools.context import ExecutionContext
+
+    connection = await _resolve_connection(agent)
+    registry_key, config = _resolve_adapter_type(agent, connection)
+    api_key = config.get("api_key", "")
+
+    # Try true token-level streaming for Anthropic/OpenAI adapters
+    use_true_streaming = (
+        registry_key in ("anthropic", "openai")
+        and api_key  # API key must be configured
+    )
+
+    if use_true_streaming:
+        # True streaming: yield tokens as they arrive from the API
+        adapter_registry = AdapterRegistry()
+        adapter = adapter_registry.create_adapter(registry_key)
+
+        session_config = {**config, "system_prompt": system_prompt}
+        session = await adapter.create_session(agent.id, session_config)
+        session.context = ExecutionContext.for_call(
+            agent,
+            principal,
+            source="chat",
+            session_id=session_id,
+            adapter=registry_key,
+            model=config.get("model"),
+        )
+
+        task_id = uuid.uuid4()
+        payload = {"prompt": prompt, "max_tokens": 4096}
+        accumulated = ""
+        finished = False
+
+        try:
+            if hasattr(adapter, "stream_execute"):
+                async for chunk in adapter.stream_execute(session, task_id, payload):
+                    accumulated += chunk
+                    event = json.dumps({"type": "chunk", "text": chunk})
+                    yield f"data: {event}\n\n"
+            else:
+                # Fallback for adapters without stream_execute
+                result = await adapter.execute_task(session, task_id, payload)
+                accumulated = str(result.output) if result.output else ""
+                # Emit word-by-word
+                for i, word in enumerate(accumulated.split(" ")):
+                    chunk = word if i == 0 else " " + word
+                    event = json.dumps({"type": "chunk", "text": chunk})
+                    yield f"data: {event}\n\n"
+                    await asyncio.sleep(0.01)
+            finished = True
+        finally:
+            # A disconnect cancels the generator mid-stream; shield the
+            # cleanup so the adapter is released and the tokens already
+            # generated (and paid for) still reach the transcript.
+            with anyio.CancelScope(shield=True):
+                await adapter.terminate(session)
+                if not finished and accumulated:
+                    await _persist_from_generator(
+                        agent_id, company_id, "agent", accumulated,
+                        session_id=session_id, model_used=config.get("model", "unknown"),
+                        tokens_used=len(accumulated.split()) * 2,
+                        payload={"partial": True},
+                    )
+
+        # Store response and emit done
+        model_used = config.get("model", "unknown")
+        tokens_used = len(accumulated.split()) * 2  # Rough estimate
+        agent_msg = _add_message(str(agent_id), "agent", accumulated)
+        await _persist_from_generator(
+            agent_id, company_id, "agent", accumulated,
+            session_id=session_id, model_used=model_used, tokens_used=tokens_used,
+        )
+        done_event = json.dumps({
+            "type": "done",
+            "message": agent_msg,
+            "model_used": model_used,
+            "tokens_used": tokens_used,
+        })
+        yield f"data: {done_event}\n\n"
+        yield "data: [DONE]\n\n"
+    else:
+        # Fallback: call LLM, then emit word-by-word (simulated streaming)
+        execution: dict[str, Any] = {}
+        response_text, model_used, tokens_used = await _call_llm(
+            agent, system_prompt, prompt, history, session_id=session_id, principal=principal,
+            execution=execution,
+        )
+        # Stored before the first chunk, so a disconnect cannot lose it.
+        agent_msg = _add_message(str(agent_id), "agent", response_text)
+        await _persist_from_generator(
+            agent_id, company_id, "agent", response_text,
+            session_id=session_id, model_used=model_used, tokens_used=tokens_used,
+            payload={"execution": execution} if execution else None,
+        )
+
+        words = response_text.split(" ")
+        for i, word in enumerate(words):
+            chunk = word if i == 0 else " " + word
+            event = json.dumps({"type": "chunk", "text": chunk})
+            yield f"data: {event}\n\n"
+            await asyncio.sleep(0.02)
+        done_event = json.dumps({
+            "type": "done",
+            "message": agent_msg,
+            "model_used": model_used,
+            "tokens_used": tokens_used,
+            "adapter_used": execution.get("adapter"),
+            "backend_used": execution.get("backend"),
+            "execution_id": execution.get("execution_id"),
+        })
+        yield f"data: {done_event}\n\n"
         yield "data: [DONE]\n\n"
 
 
@@ -1503,24 +1588,32 @@ async def chat_with_agent(
     # Get history for context (TTL-fresh across workers)
     history = await _get_history_fresh(db, str(agent_id), company_id)
 
-    # Store user message
+    # Store user message, committed before the (possibly minutes-long) CLI
+    # call: no transaction or session-row lock is held while it runs, and the
+    # message survives a failed or cancelled turn.
     _add_message(str(agent_id), "user", body.prompt)
     await _persist_message_to_db(db, agent_id, company_id, "user", body.prompt, session_id=session.id)
+    await db.commit()
 
-    # Call LLM
+    from nexus.governance.bulkhead import GlobalSaturated, TenantSaturated
+
     execution: dict[str, Any] = {}
-    response_text, model_used, tokens_used = await _call_llm(
-        agent, system_prompt, body.prompt, history, session_id=session.id, principal=principal,
-        execution=execution,
-    )
-
-    # Store agent response
-    agent_msg = _add_message(str(agent_id), "agent", response_text)
-    await _persist_message_to_db(
-        db, agent_id, company_id, "agent", response_text,
-        session_id=session.id, model_used=model_used, tokens_used=tokens_used,
-        payload={"execution": execution} if execution else None,
-    )
+    try:
+        async with _chat_turn_slot(company_id, session.id):
+            response_text, model_used, tokens_used = await _call_llm(
+                agent, system_prompt, body.prompt, history, session_id=session.id,
+                principal=principal, execution=execution,
+            )
+            # Store agent response inside the slot so turns keep their order.
+            agent_msg = _add_message(str(agent_id), "agent", response_text)
+            await _persist_message_to_db(
+                db, agent_id, company_id, "agent", response_text,
+                session_id=session.id, model_used=model_used, tokens_used=tokens_used,
+                payload={"execution": execution} if execution else None,
+            )
+            await db.commit()
+    except (TenantSaturated, GlobalSaturated) as exc:
+        raise _chat_saturated(exc) from exc
 
     await _record_chat_audit(db, company_id, agent_id, body.prompt, response_text, model_used, tokens_used, session.id)
 

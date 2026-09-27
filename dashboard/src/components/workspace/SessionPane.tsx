@@ -1,15 +1,16 @@
-import { useState } from 'react';
+import { useEffect } from 'react';
 import { useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
 
 import {
   getTimeline,
-  sendMessage,
   sessionKeys,
   terminateSession,
   type Session,
   type TimelineItem,
 } from '@/api/sessions';
 import { describeError } from './describeError';
+import { getActiveCompanyId } from '@/config';
+import { conversationKey, useChatManager } from '@/contexts/ChatManagerContext';
 
 export const WORKSPACE_TABS = ['chat', 'files', 'canvas', 'terminal', 'review'] as const;
 export type WorkspaceTab = (typeof WORKSPACE_TABS)[number];
@@ -118,7 +119,7 @@ export function SessionPane({ sessionId, session, tab, onTab, onClear }: Session
       )}
       <WorkspaceTabs tab={tab} onTab={onTab} />
       {tab === 'chat' ? (
-        <ChatTab sessionId={s.id} open={open} />
+        <ChatTab key={s.id} session={s} open={open} />
       ) : (
         <div role="tabpanel" className="flex-1 p-6 text-sm text-[#6B6B6E]">
           {TAB_LABELS[tab]} for this session arrives in a later phase.
@@ -128,22 +129,39 @@ export function SessionPane({ sessionId, session, tab, onTab, onClear }: Session
   );
 }
 
-function ChatTab({ sessionId, open }: { sessionId: string; open: boolean }) {
-  const [draft, setDraft] = useState('');
+function ChatTab({ session, open }: { session: Session; open: boolean }) {
+  const sessionId = session.id;
   const timeline = useQuery({
     queryKey: sessionKeys.timeline(sessionId),
     queryFn: () => getTimeline(sessionId),
   });
-  const queryClient = useQueryClient();
-  const send = useMutation({
-    mutationFn: (prompt: string) => sendMessage(sessionId, prompt),
-    onSuccess: () => setDraft(''),
-    // The reply is read back from the timeline, not from this response.
-    onSettled: () =>
-      queryClient.invalidateQueries({
-        predicate: ({ queryKey }) => queryKey[0] === 'sessions' && queryKey[2] === sessionId,
-      }),
-  });
+  // Draft, pending turn, cancel and error live in the chat manager under this
+  // session's key, so they survive switching sessions and never leak between them.
+  const chat = useChatManager();
+  const { ensure } = chat;
+  const key = conversationKey(getActiveCompanyId(), session.agent_id, sessionId);
+  useEffect(() => {
+    ensure(
+      {
+        id: session.agent_id,
+        name: 'Agent',
+        title: '',
+        role: '',
+        adapter_type: session.adapter_type ?? '',
+        cli_backend: null,
+        model: session.model ?? '',
+        status: 'idle',
+        capabilities: [],
+        budget_monthly_cents: 0,
+        spent_monthly_cents: 0,
+      },
+      sessionId,
+    );
+  }, [ensure, session.agent_id, session.adapter_type, session.model, sessionId]);
+  const conv = chat.state.conversations[key];
+  const draft = conv?.draft ?? '';
+  const pending = conv?.pendingRequests ?? [];
+  const setDraft = (value: string) => chat.dispatch({ type: 'SET_DRAFT', key, draft: value });
 
   const messages = (timeline.data ?? []).filter((item) => item.type === 'message');
   return (
@@ -157,32 +175,47 @@ function ChatTab({ sessionId, open }: { sessionId: string; open: boolean }) {
         {messages.map((m) => (
           <Message key={m.id} item={m} />
         ))}
+        {pending.map((r) => (
+          <li key={r.requestId} aria-label="Pending request" className="flex items-center gap-2 text-xs text-[#6B6B6E]">
+            <span className="flex-1 whitespace-pre-wrap">{r.partial || (r.phase === 'sending' ? 'Sending…' : 'Waiting for the agent…')}</span>
+            <button type="button" onClick={() => chat.cancel(r.requestId)} className="text-[11px] text-red-400 hover:text-red-300">
+              Cancel
+            </button>
+          </li>
+        ))}
       </ol>
       <form
         className="flex gap-2 p-3 border-t border-white/[0.08]"
         onSubmit={(e) => {
           e.preventDefault();
-          if (draft.trim()) send.mutate(draft.trim());
+          chat.send(key, draft);
         }}
       >
         <textarea
           aria-label="Message"
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
-          disabled={!open || send.isPending}
+          disabled={!open}
           placeholder={open ? 'Message the agent…' : 'This session has ended.'}
           rows={2}
           className="flex-1 resize-none px-2.5 py-1.5 bg-[#141416] border border-white/[0.08] rounded-[6px] text-xs text-[#F2F1EE] focus:outline-none focus:border-[#FFB020] disabled:opacity-50"
         />
         <button
           type="submit"
-          disabled={!open || send.isPending || !draft.trim()}
+          disabled={!open || pending.length > 0 || !draft.trim()}
           className="px-3 text-xs rounded-[6px] bg-[#FFB020] text-black disabled:opacity-40"
         >
           Send
         </button>
       </form>
-      {send.error && <p className="px-3 pb-2 text-[11px] text-red-400">{describeError(send.error)}</p>}
+      {conv?.error && (
+        <p role="alert" className="px-3 pb-2 text-[11px] text-red-400">
+          {conv.error.message}{' '}
+          <button type="button" onClick={() => chat.retry(key)} className="text-[#FFB020]">
+            Retry
+          </button>
+        </p>
+      )}
     </div>
   );
 }

@@ -7,6 +7,7 @@ import { http, HttpResponse } from 'msw';
 import { server } from '@/test/setup';
 import { getActiveCompanyId } from '@/config';
 import { Workspace } from '../Workspace';
+import { ChatManagerProvider } from '@/contexts/ChatManagerContext';
 
 // Capture the realtime handler so tests can deliver server events by hand.
 const streams = vi.hoisted(() => ({ handlers: {} as { sessions: (event: unknown) => void } }));
@@ -102,14 +103,21 @@ beforeEach(() => {
         },
       ])
     ),
-    http.post('*/api/v1/sessions/:id/messages', async ({ request }) => {
+    http.post('*/api/v1/sessions/:id/messages/stream', async ({ request }) => {
       const { prompt } = (await request.json()) as { prompt: string };
       backend.posted.push(prompt);
       backend.timeline.push(
         { type: 'message', id: `u${backend.timeline.length}`, at: '2026-09-26T10:01:00', sender: 'user', text: prompt },
         { type: 'message', id: `r${backend.timeline.length}`, at: '2026-09-26T10:01:01', sender: 'agent', text: `echo: ${prompt}` }
       );
-      return HttpResponse.json({ session_id: 's1', seq: 2 });
+      const reply = { type: 'done', message: { id: 'r', sender: 'agent', text: `echo: ${prompt}`, timestamp: '2026-09-26T10:01:01' } };
+      return new HttpResponse(`data: ${JSON.stringify(reply)}
+
+data: [DONE]
+
+`, {
+        headers: { 'Content-Type': 'text/event-stream' },
+      });
     }),
     http.post('*/api/v1/agents/:agentId/sessions', ({ params }) => {
       backend.session = makeSession({ id: 's2', agent_id: String(params.agentId), title: null });
@@ -128,6 +136,7 @@ function renderWorkspace(url: string) {
   return render(
     <MemoryRouter initialEntries={[url]}>
       <QueryClientProvider client={queryClient}>
+        <ChatManagerProvider>
         <Routes>
           <Route
             path="/workspace"
@@ -139,6 +148,7 @@ function renderWorkspace(url: string) {
             }
           />
         </Routes>
+        </ChatManagerProvider>
       </QueryClientProvider>
     </MemoryRouter>
   );

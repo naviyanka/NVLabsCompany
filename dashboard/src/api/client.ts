@@ -54,6 +54,15 @@ function defaultHeaders(method: string): Record<string, string> {
   return headers;
 }
 
+/** Headers and URL for a hand-rolled mutating `fetch` (a streamed POST): JSON, CSRF echo, dev tenant. */
+export function postHeaders(): Record<string, string> {
+  return defaultHeaders('POST');
+}
+
+export function apiUrl(path: string): string {
+  return `${BASE_URL}${path}`;
+}
+
 /** For SSE and hand-rolled `fetch` calls that bypass `apiClient`. */
 export function legacyCompanyHeaders(): Record<string, string> {
   return AUTH_ENABLED ? {} : { 'X-Company-Id': getActiveCompanyId() };

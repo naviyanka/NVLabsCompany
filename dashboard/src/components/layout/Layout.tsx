@@ -4,6 +4,8 @@ import { Sidebar } from './Sidebar';
 import { Header } from './Header';
 import { PulseLine } from './PulseLine';
 import { CommandPalette } from '../common/CommandPalette';
+import { ChatManagerProvider } from '@/contexts/ChatManagerContext';
+import { ChatDock } from '@/components/chat/ChatDock';
 
 export function Layout() {
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
@@ -24,6 +26,7 @@ export function Layout() {
   }, []);
 
   return (
+    <ChatManagerProvider>
     <div className="min-h-screen bg-[#0A0A0B] text-[#F2F1EE] flex flex-row overflow-hidden font-sans">
       {/* Sidebar Navigation */}
       <Sidebar
@@ -67,6 +70,10 @@ export function Layout() {
         isOpen={commandPaletteOpen}
         onClose={() => setCommandPaletteOpen(false)}
       />
+
+      {/* Employee chats: non-modal, survive navigation */}
+      <ChatDock />
     </div>
+    </ChatManagerProvider>
   );
 }

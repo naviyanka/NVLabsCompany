@@ -523,22 +523,35 @@ async def send_message(
     principal: CurrentPrincipal = None,
 ) -> dict[str, Any]:
     """Run one turn. The reply's place in the session is ``seq``; read the rest via the timeline."""
+    from nexus.governance.bulkhead import GlobalSaturated, TenantSaturated
+
     record, agent, system_prompt, history = await _begin_turn(
         db, session_id, company_id, body.prompt
     )
-    text, model_used, tokens_used = await chat._call_llm(
-        agent, system_prompt, body.prompt, history, session_id=record.id, principal=principal
-    )
-    reply = await chat._persist_message_to_db(
-        db,
-        agent.id,
-        company_id,
-        "agent",
-        text,
-        session_id=record.id,
-        model_used=model_used,
-        tokens_used=tokens_used,
-    )
+    # The user message is committed before the model/CLI runs, so no
+    # transaction or session-row lock is held across the call.
+    await db.commit()
+    execution: dict[str, Any] = {}
+    try:
+        async with chat._chat_turn_slot(company_id, record.id):
+            text, model_used, tokens_used = await chat._call_llm(
+                agent, system_prompt, body.prompt, history, session_id=record.id,
+                principal=principal, execution=execution,
+            )
+            reply = await chat._persist_message_to_db(
+                db,
+                agent.id,
+                company_id,
+                "agent",
+                text,
+                session_id=record.id,
+                model_used=model_used,
+                tokens_used=tokens_used,
+                payload={"execution": execution} if execution else None,
+            )
+            await db.commit()
+    except (TenantSaturated, GlobalSaturated) as exc:
+        raise chat._chat_saturated(exc) from exc
     await chat._record_chat_audit(
         db, company_id, agent.id, body.prompt, text, model_used, tokens_used, record.id
     )
@@ -554,6 +567,9 @@ async def send_message(
         "seq": reply.seq if reply else None,
         "model_used": model_used,
         "tokens_used": tokens_used,
+        "adapter_used": execution.get("adapter"),
+        "backend_used": execution.get("backend"),
+        "execution_id": execution.get("execution_id"),
     }
 
 

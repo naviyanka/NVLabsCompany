@@ -282,6 +282,9 @@ class CLIAdapter(BaseAdapter):
                 ),
             )
         stdin_prompt = backend.prompt_transport == "stdin"
+        # Off the event loop: a cache miss spawns `<cli> --version`, which
+        # would otherwise stall every other chat while it runs.
+        version = await asyncio.to_thread(get_cli_registry().probe_version, backend_id)
         started = time.monotonic()
 
         def _meta(exit_code: int | None) -> dict[str, Any]:
@@ -291,7 +294,7 @@ class CLIAdapter(BaseAdapter):
                 "backend": backend_id,
                 "model": model,
                 "executable": _redact_home(executable),
-                "version": get_cli_registry().probe_version(backend_id),
+                "version": version,
                 "duration_ms": int((time.monotonic() - started) * 1000),
                 "exit_code": exit_code,
                 "session_id": session.session_id,
@@ -322,6 +325,7 @@ class CLIAdapter(BaseAdapter):
         env = _filter_env(env, [*(backend.allow_env or []), *operator_allow])
 
         is_interactive = session.metadata.get("is_interactive", False)
+        process: asyncio.subprocess.Process | None = None
         try:
             # Argument array, never a shell. The child leads its own process
             # group on POSIX so a timeout can kill everything it spawned.
@@ -454,6 +458,13 @@ class CLIAdapter(BaseAdapter):
                 ],
             )
 
+        except asyncio.CancelledError:
+            # The request was cancelled (client disconnect or Cancel): stop
+            # this turn's own process tree and nothing else. Shielded so the
+            # kill finishes even if the cancellation is delivered again.
+            if process is not None and process.returncode is None:
+                await asyncio.shield(asyncio.ensure_future(_terminate_tree(process)))
+            raise
         except FileNotFoundError:
             return TaskResult(
                 task_id=task_id,

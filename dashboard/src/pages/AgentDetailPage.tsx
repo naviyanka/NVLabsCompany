@@ -9,6 +9,8 @@ import { Card } from '@/components/common/Card';
 import { Skeleton } from '@/components/common/Skeleton';
 import { StatCard } from '@/components/common/StatCard';
 import { Tabs } from '@/components/common/Tabs';
+import { ConversationView } from '@/components/chat/ChatDock';
+import { useChatManager } from '@/contexts/ChatManagerContext';
 import { getActiveCompanyId } from '@/config';
 import type { Agent } from '@/types/agent';
 import {
@@ -22,20 +24,12 @@ import {
   Pause,
   Pencil,
   Play,
-  Send,
   ShieldCheck,
   Trash2
 } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
-
-interface ChatMessage {
-  id: string;
-  sender: 'user' | 'agent';
-  text: string;
-  timestamp: string;
-}
 
 interface AgentMemory {
   id: string;
@@ -63,11 +57,15 @@ export function AgentDetailPage() {
   const [showFireModal, setShowFireModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
 
-  // Chat state
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
-  const [inputPrompt, setInputPrompt] = useState('');
-  const [sendingChat, setSendingChat] = useState(false);
-  const chatBottomRef = useRef<HTMLDivElement>(null);
+  // Chat lives in the shared manager, so a reply always lands in its own
+  // agent's conversation even after navigating to another agent.
+  const chat = useChatManager();
+  const { ensure } = chat;
+  const [chatKey, setChatKey] = useState<string | null>(null);
+  useEffect(() => {
+    setChatKey(agent && agent.id === id ? ensure(agent, null) : null);
+  }, [agent, id, ensure]);
+  const conversation = chatKey ? chat.state.conversations[chatKey] : undefined;
 
   // Memories
   const [memories, setMemories] = useState<AgentMemory[]>([]);
@@ -79,17 +77,13 @@ export function AgentDetailPage() {
       setLoading(true);
       try {
         const companyId = getActiveCompanyId();
-        const [agentData, chatData, memoryData] = await Promise.allSettled([
+        const [agentData, memoryData] = await Promise.allSettled([
           apiClient.get<Agent>(`/api/v1/companies/${companyId}/agents/${id}`),
-          apiClient.get<ChatMessage[]>(`/api/v1/agents/${id}/chat`),
           apiClient.get<AgentMemory[]>(`/api/v1/agents/${id}/memory`),
         ]);
         if (!isMounted) return;
         if (agentData.status === 'fulfilled' && agentData.value) {
           setAgent(agentData.value);
-        }
-        if (chatData.status === 'fulfilled' && Array.isArray(chatData.value) && chatData.value.length > 0) {
-          setChatMessages(chatData.value);
         }
         if (memoryData.status === 'fulfilled') {
           const memItems = memoryData.value;
@@ -106,45 +100,6 @@ export function AgentDetailPage() {
       isMounted = false;
     };
   }, [id]);
-
-  useEffect(() => {
-    if (activeTab === 'chat') {
-      chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }
-  }, [chatMessages, activeTab]);
-
-  const handleSendMessage = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!inputPrompt.trim() || !id || sendingChat) return;
-
-    const userText = inputPrompt;
-    setInputPrompt('');
-    setSendingChat(true);
-
-    const tempUserMsg: ChatMessage = {
-      id: `usr-${Date.now()}`,
-      sender: 'user',
-      text: userText,
-      timestamp: new Date().toISOString(),
-    };
-    setChatMessages((prev) => [...prev, tempUserMsg]);
-
-    try {
-      const res = await apiClient.post<{ message: ChatMessage; history: ChatMessage[] }>(
-        `/api/v1/agents/${id}/chat`,
-        { prompt: userText }
-      );
-      if (res?.history) {
-        setChatMessages(res.history);
-      } else if (res?.message) {
-        setChatMessages((prev) => [...prev, res.message]);
-      }
-    } catch (err) {
-      console.error('Failed to send command to agent', err);
-    } finally {
-      setSendingChat(false);
-    }
-  };
 
   const handleTrainAgent = async () => {
     if (!id || !agent) return;
@@ -324,65 +279,7 @@ export function AgentDetailPage() {
       {activeTab === 'chat' && (
         <Card padding="none">
           <div className="h-[420px] flex flex-col bg-[#101012] rounded-[10px] overflow-hidden">
-            {/* Chat Messages Log */}
-            <div className="flex-1 p-4 overflow-y-auto space-y-3">
-              {chatMessages.length === 0 ? (
-                <div className="h-full flex items-center justify-center text-xs font-mono text-[#6B6B6E]">
-                  Send a command or prompt to initiate conversation with {agent.name}.
-                </div>
-              ) : (
-                chatMessages.map((msg) => (
-                  <div
-                    key={msg.id}
-                    className={`flex flex-col max-w-xl ${msg.sender === 'user' ? 'ml-auto items-end' : 'mr-auto items-start'
-                      }`}
-                  >
-                    <div className="flex items-center gap-1.5 mb-1 text-[10px] font-mono text-[#6B6B6E]">
-                      <span>{msg.sender === 'user' ? 'Operator' : agent.name}</span>
-                      <span>·</span>
-                      <span>
-                        {new Date(msg.timestamp).toLocaleTimeString([], {
-                          hour: '2-digit',
-                          minute: '2-digit',
-                        })}
-                      </span>
-                    </div>
-                    <div
-                      className={`p-3 rounded-[8px] text-xs leading-relaxed font-mono ${msg.sender === 'user'
-                        ? 'bg-[#FFB020] text-[#0A0A0B] font-medium'
-                        : 'bg-[#1C1C1F] text-[#F2F1EE] border border-white/[0.08]'
-                        }`}
-                    >
-                      {msg.text}
-                    </div>
-                  </div>
-                ))
-              )}
-              <div ref={chatBottomRef} />
-            </div>
-
-            {/* Chat Input Bar */}
-            <form
-              onSubmit={handleSendMessage}
-              className="p-3 bg-[#141416] border-t border-white/[0.08] flex items-center gap-2"
-            >
-              <input
-                type="text"
-                value={inputPrompt}
-                onChange={(e) => setInputPrompt(e.target.value)}
-                placeholder={`Instruct ${agent.name}... (e.g. "Optimize circuit breaker threshold")`}
-                className="flex-1 px-3 py-2 bg-[#101012] border border-white/[0.08] rounded-[6px] text-xs text-[#F2F1EE] placeholder-[#6B6B6E] focus:outline-none focus:border-[#FFB020] font-sans"
-              />
-              <Button
-                variant="primary"
-                size="sm"
-                type="submit"
-                loading={sendingChat}
-                icon={<Send size={14} />}
-              >
-                Send
-              </Button>
-            </form>
+            {conversation && <ConversationView key={conversation.key} conv={conversation} />}
           </div>
         </Card>
       )}
