@@ -36,11 +36,15 @@ QUERY_EMBEDDING = _vec(1.0)
 
 
 class FakePGSession:
-    """Async session double that reports a postgresql dialect and records SQL."""
+    """Async session double that reports a postgresql dialect and records SQL.
+
+    Answers like Postgres would: the vector query selects ``(chunk, distance)``
+    pairs, and the hybrid search's BM25 corpus query selects bare chunks.
+    """
 
     def __init__(self, rows):
         self._rows = rows
-        self.compiled = ""
+        self.statements: list[str] = []
         self.add = MagicMock()
         self.commit = AsyncMock()
 
@@ -50,9 +54,12 @@ class FakePGSession:
         return bind
 
     async def exec(self, statement):
-        self.compiled = str(statement.compile(dialect=postgresql.dialect()))
+        self.statements.append(str(statement.compile(dialect=postgresql.dialect())))
         result = MagicMock()
-        result.all.return_value = self._rows
+        if len(statement.column_descriptions) == 2:
+            result.all.return_value = self._rows
+        else:
+            result.all.return_value = [chunk for chunk, _distance in self._rows]
         return result
 
 
@@ -81,9 +88,11 @@ async def test_search_pushes_distance_into_sql():
         COMPANY_ID, "python programming", top_k=2
     )
 
-    assert "<=>" in db.compiled
-    assert "ORDER BY" in db.compiled
-    assert "LIMIT" in db.compiled
+    # The first query is the vector search, ordered and limited in SQL.
+    vector_sql = db.statements[0]
+    assert "<=>" in vector_sql
+    assert "ORDER BY" in vector_sql
+    assert "LIMIT" in vector_sql
     assert results, "expected at least one hit"
 
     # Scores derived from the SQL distance match Python cosine on the fixtures.

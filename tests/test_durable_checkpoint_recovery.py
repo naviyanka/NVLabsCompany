@@ -510,7 +510,9 @@ class TestReconciliationAndReenqueuing:
 class TestOrchestratorResumptionAndAuditTrail:
     """Verifies _execute_subtasks rehydrates state and writes task_resumed_from_checkpoint audit logs."""
 
-    async def test_execute_subtasks_resumes_from_checkpoint_and_emits_audit(self, session_factory, company_id, agent):
+    async def test_execute_subtasks_resumes_from_checkpoint_and_emits_audit(
+        self, session_factory, company_id, agent, monkeypatch
+    ):
         """Assert _execute_subtasks resumes from step index + 1 and logs audit event with state hash."""
         task_id = uuid.uuid4()
         task = Task(
@@ -545,11 +547,12 @@ class TestOrchestratorResumptionAndAuditTrail:
             })
             return "Q3 and Q4 forecast generated successfully.", "test-model", 150
 
+        # The subtask runs in its own tenant session (WP-19a); point it at this DB.
+        monkeypatch.setattr("nexus.database.async_session_factory", session_factory)
         with patch("nexus.api.routes.chat._call_llm", side_effect=mock_call_llm):
             async with session_factory() as session:
                 task_to_run = (await session.execute(select(Task).where(Task.id == task_id))).scalar_one()
-                await _execute_subtasks(session, [task_to_run], company_id)
-                await session.commit()
+            await _execute_subtasks([task_to_run], company_id)
 
         # 1. Assert prompt contained resumption instructions and did not repeat step 0/1
         assert len(captured_calls) == 1
