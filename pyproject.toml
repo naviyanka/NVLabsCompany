@@ -82,6 +82,7 @@ markers = [
     "slow: takes several seconds; deselect with -m \"not slow\"",
     "postgres: needs PostgreSQL (TEST_DATABASE_URL or testcontainers)",
     "real_cli: spawns an installed employee CLI; skipped unless NEXUS_REAL_CLI=1",
+    "employee_work: task attempts, isolated worktrees, evidence and verification (nexus.runtime.task_attempts)",
 ]
 
 [tool.ruff]

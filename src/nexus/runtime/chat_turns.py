@@ -33,6 +33,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import contextvars
+import dataclasses
 import logging
 import os
 import socket
@@ -186,6 +187,7 @@ async def create_turn(
     principal: Any = None,
     idempotency_key: str | None = None,
     stream: bool = False,
+    work_mode: str | None = None,
 ) -> Enqueued:
     """Store the user's prompt and its queued turn in one transaction, then commit.
 
@@ -219,6 +221,9 @@ async def create_turn(
         context = ExecutionContext.for_call(pinned, principal, source="chat", session_id=record.id)
     except PermissionError as exc:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+    if work_mode is not None:
+        # Server-chosen (task attempts only); the adapter maps it to flags.
+        context = dataclasses.replace(context, work_mode=work_mode)
 
     message = await chat._persist_message_to_db(
         db, pinned.id, company_id, "user", prompt, session_id=record.id

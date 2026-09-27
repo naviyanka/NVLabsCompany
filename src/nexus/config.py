@@ -153,6 +153,16 @@ class Settings(BaseSettings):
     chat_turn_queue_ttl_seconds: int = 3600  # a turn queued this long expires
     chat_turn_poll_seconds: float = 1.0  # worker and waiter re-read the database this often
 
+    # Durable employee task attempts (nexus.runtime.task_attempts)
+    task_attempt_lease_seconds: int = 30  # claimed/verifying lease, renewed every third
+    task_attempt_poll_seconds: float = 1.0  # attempt worker pass interval
+    task_attempt_max_recoveries: int = 3  # lease losses before an attempt fails
+    task_attempt_queue_ttl_seconds: int = 3600  # a queued attempt this old expires
+    task_attempt_log_bytes: int = 64_000  # stdout/stderr kept per verification command
+    # Bounded verification logs, one root per company like worktree_root. Stored
+    # references are relative to this root, never absolute.
+    task_attempt_evidence_root: str = "./data/task_evidence/{company_id}"
+
     model_config = {
         "env_prefix": "",
         # Anchored to the repository root rather than the process CWD. A bare

@@ -36,6 +36,9 @@ class ExecutionContext:
     session_id: uuid.UUID | None = None
     adapter: str | None = None
     model: str | None = None
+    # Set for task-attempt turns: "write" or "read_only". The CLI adapter maps
+    # it to the backend's own cataloged permission flags; never model-chosen.
+    work_mode: str | None = None
 
     @classmethod
     def for_principal(

@@ -23,6 +23,34 @@ class TaskCreate(BaseModel):
     project_id: uuid.UUID | None = None
     assigned_agent_id: uuid.UUID | None = None
     parent_task_id: uuid.UUID | None = None
+    # Makes the task a work task: done only by a verified attempt
+    # (nexus.runtime.task_attempts.WorkSpec).
+    work_spec: dict[str, Any] | None = None
+
+
+def _work_spec(raw: dict[str, Any] | None) -> dict[str, Any] | None:
+    if raw is None:
+        return None
+    from nexus.runtime.task_attempts import parse_work_spec
+
+    return parse_work_spec(raw).model_dump(mode="json")
+
+
+async def _refuse_if_attempt_active(
+    db: Any, company_id: uuid.UUID, task_id: uuid.UUID, agent_id: uuid.UUID
+) -> None:
+    """Reassigning away from an employee that is working on the task is refused."""
+    from nexus.runtime.task_attempts import _active
+
+    active = await _active(db, company_id, task_id)
+    if active is not None and active.agent_id != agent_id:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "ATTEMPT_ACTIVE",
+                "message": "Cancel the active attempt before reassigning the task",
+            },
+        )
 
 
 class TaskAssign(BaseModel):
@@ -55,6 +83,7 @@ class TaskResponse(BaseModel):
     result: str | None = None
     error: str | None = None
     completion_reason: str | None = None
+    work_spec: dict[str, Any] | None = None
     started_at: datetime | None = None
     completed_at: datetime | None = None
     created_at: datetime
@@ -75,6 +104,7 @@ async def create_task(
     agents in the company and auto-assign the highest-scoring candidate.
     """
     assigned_id = body.assigned_agent_id
+    work_spec = _work_spec(body.work_spec)
 
     if assigned_id is None:
         try:
@@ -126,6 +156,7 @@ async def create_task(
         project_id=body.project_id,
         assigned_agent_id=assigned_id,
         parent_task_id=body.parent_task_id,
+        work_spec=work_spec,
     )
     db.add(task)
     await db.flush()
@@ -184,6 +215,7 @@ async def assign_task(
     task_id: uuid.UUID, body: TaskAssign, db: DbSession, company_id: CurrentCompanyId
 ) -> Any:
     """Assign a task to an agent."""
+    await _refuse_if_attempt_active(db, company_id, task_id, body.agent_id)
     stmt = (
         update(Task)
         .where(Task.id == task_id, Task.company_id == company_id)
@@ -208,7 +240,25 @@ async def assign_task(
 async def update_task_status(
     task_id: uuid.UUID, body: TaskStatusUpdate, db: DbSession, company_id: CurrentCompanyId
 ) -> Any:
-    """Update the status of a task."""
+    """Update the status of a task.
+
+    A work task cannot be marked completed here: only an attempt whose
+    verification passed completes it (nexus.runtime.task_attempts).
+    """
+    if body.status == "completed":
+        spec = (
+            await db.execute(
+                select(Task.work_spec).where(Task.id == task_id, Task.company_id == company_id)
+            )
+        ).scalar_one_or_none()
+        if spec:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "code": "WORK_TASK_REQUIRES_VERIFIED_ATTEMPT",
+                    "message": "A work task completes only through a verified attempt",
+                },
+            )
     values: dict[str, Any] = {
         "status": body.status,
         "updated_at": datetime.now(timezone.utc),
@@ -312,7 +362,7 @@ async def get_task_stats(company_id: uuid.UUID, db: DbSession) -> dict[str, Any]
 @router.post("/api/v1/tasks/{task_id}/subtasks", status_code=status.HTTP_201_CREATED, response_model=TaskResponse)
 async def create_subtask(task_id: uuid.UUID, body: TaskCreate, db: DbSession, company_id: CurrentCompanyId) -> Any:
     """Create a subtask under a parent task."""
-    subtask = Task(company_id=company_id, parent_task_id=task_id, title=body.title, description=body.description, priority=body.priority or 0, assigned_agent_id=body.assigned_agent_id)
+    subtask = Task(company_id=company_id, parent_task_id=task_id, title=body.title, description=body.description, priority=body.priority or 0, assigned_agent_id=body.assigned_agent_id, work_spec=_work_spec(body.work_spec))
     db.add(subtask)
     await db.flush()
     return subtask
@@ -321,6 +371,7 @@ async def create_subtask(task_id: uuid.UUID, body: TaskCreate, db: DbSession, co
 @router.post("/api/v1/tasks/{task_id}/reassign", response_model=TaskResponse)
 async def reassign_task(task_id: uuid.UUID, body: TaskAssign, db: DbSession, company_id: CurrentCompanyId) -> Any:
     """Reassign task to a different agent."""
+    await _refuse_if_attempt_active(db, company_id, task_id, body.agent_id)
     stmt = update(Task).where(Task.id == task_id, Task.company_id == company_id).values(assigned_agent_id=body.agent_id, updated_at=datetime.now(timezone.utc))
     await db.execute(stmt)
     result = await db.execute(select(Task).where(Task.id == task_id, Task.company_id == company_id))
@@ -331,8 +382,15 @@ async def reassign_task(task_id: uuid.UUID, body: TaskAssign, db: DbSession, com
 
 
 @router.post("/api/v1/tasks/{task_id}/cancel", response_model=TaskResponse)
-async def cancel_task(task_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId) -> Any:
-    """Cancel a task."""
+async def cancel_task(
+    task_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId, principal: CurrentPrincipal
+) -> Any:
+    """Cancel a task, and the employee's active attempt on it."""
+    from nexus.runtime import task_attempts
+
+    active = await task_attempts._active(db, company_id, task_id)
+    if active is not None:
+        await task_attempts.cancel_attempt(db, company_id, task_id, active.id, principal)
     stmt = update(Task).where(Task.id == task_id, Task.company_id == company_id).values(status="cancelled", completed_at=datetime.now(timezone.utc), updated_at=datetime.now(timezone.utc))
     await db.execute(stmt)
     result = await db.execute(select(Task).where(Task.id == task_id, Task.company_id == company_id))
