@@ -1,5 +1,6 @@
 """Concurrent employee chat: turns of different employees overlap, turns of one
-session queue, and cancelling one turn stops only its own CLI process.
+session queue in the database, and cancelling one turn stops only its own CLI
+process.
 
 Each fake CLI process blocks until its test releases it, so overlap is shown
 by state (both processes spawned, one reply returned while the other is still
@@ -29,8 +30,10 @@ from nexus.auth.principal import Principal
 from nexus.governance.bulkhead import TenantBulkhead
 from nexus.models.agent import Agent
 from nexus.models.chat import ChatMessage
+from nexus.models.chat_turn import ChatTurn
 from nexus.models.company import Company
 from nexus.models.governance import AuditLog
+from nexus.runtime import chat_turns
 
 pytestmark = pytest.mark.core_employee
 
@@ -109,7 +112,6 @@ async def world(tmp_path, monkeypatch):
     monkeypatch.setattr(chat_routes, "_remember_response", AsyncMock(return_value=0))
     monkeypatch.setattr(chat_routes, "_conversations", {})
     monkeypatch.setattr(chat_routes, "_cache_loaded_at", {})
-    monkeypatch.setattr(chat_routes, "_session_turns", {})
     monkeypatch.setattr(orchestrator, "_tenant_bulkhead", TenantBulkhead())
     clis = FakeCLIs()
     monkeypatch.setattr("nexus.adapters.cli_adapter.asyncio.create_subprocess_exec", clis.spawn)
@@ -139,6 +141,7 @@ async def world(tmp_path, monkeypatch):
     yield {"client": client, "factory": factory, "acme": acme.id,
            "claude": claude.id, "agy": agy.id, "clis": clis}
     await client.aclose()
+    await chat_turns.drain()
     await engine.dispose()
 
 
@@ -222,12 +225,24 @@ async def test_turns_in_one_session_run_in_order(world):
     await clis.until_spawned(1)
     second = asyncio.create_task(c.post(f"/api/v1/sessions/{sid}/messages", json={"prompt": "two"}))
 
+    async def turns():
+        async with world["factory"]() as db:
+            return (await db.execute(
+                select(ChatTurn).where(ChatTurn.session_id == uuid.UUID(sid))
+                .order_by(ChatTurn.turn_seq)
+            )).scalars().all()
+
     async def queued():
-        while chat_routes._session_turns[uuid.UUID(sid)][1] < 2:
+        while len(await turns()) < 2:
             await asyncio.sleep(0)
 
     await asyncio.wait_for(queued(), WAIT)
+    running, waiting = await turns()
+    assert (running.status, waiting.status) == ("running", "queued")
     assert len(clis.spawned) == 1  # the second turn waits for the first
+    # The order lives in the database: no worker, here or elsewhere, may claim
+    # the second turn while the first is unfinished.
+    assert await chat_turns.claim(waiting.id, world["acme"], "another-worker") is None
 
     clis.release(0)
     one = (await asyncio.wait_for(first, WAIT)).json()
@@ -237,7 +252,8 @@ async def test_turns_in_one_session_run_in_order(world):
     assert one["seq"] < two["seq"]
     assert one["backend_used"] == two["backend_used"] == "claude"
     assert one["execution_id"] != two["execution_id"]
-    assert chat_routes._session_turns == {}
+    assert [(t.status, t.attempt_count) for t in await turns()] == [
+        ("completed", 1), ("completed", 1)]
 
 
 async def test_cancelling_one_turn_stops_only_its_process(world, monkeypatch):
@@ -288,17 +304,30 @@ async def test_one_failing_cli_leaves_the_other_turn_intact(world):
         ("user", "now"), ("agent", ok.json()["message"]["text"])]
 
 
-async def test_saturated_tenant_gets_429_not_a_hang(world, monkeypatch):
+async def test_saturated_tenant_gets_202_and_runs_later(world, monkeypatch):
     monkeypatch.setattr(orchestrator, "_tenant_bulkhead", TenantBulkhead(per_tenant=1))
     c, clis = world["client"], world["clis"]
     busy = asyncio.create_task(c.post(f"/api/v1/agents/{world['claude']}/chat", json={"prompt": "a"}))
     await clis.until_spawned(1)
     resp = await c.post(f"/api/v1/agents/{world['agy']}/chat", json={"prompt": "b"})
-    assert resp.status_code == 429
-    assert resp.json()["detail"]["code"] == "CHAT_CONCURRENCY_LIMIT"
-    assert resp.headers["retry-after"]
+    # The prompt is stored and queued, not refused: the answer is 202, not 429.
+    assert resp.status_code == 202, resp.text
+    pending = resp.json()
+    assert pending["status"] == "queued" and pending["retry_after"] >= 1
+    assert resp.headers["retry-after"] == str(pending["retry_after"])
+    assert [m[:2] for m in await _messages(world, world["agy"])] == [("user", "b")]
+    assert len(clis.spawned) == 1
+
     clis.release(0)
     assert (await asyncio.wait_for(busy, WAIT)).status_code == 200
+    # Capacity is free again: the queued turn runs without being resent.
+    await clis.until_spawned(2)
+    clis.release(1)
+    await chat_turns.drain()
+    turn = (await c.get(
+        f"/api/v1/agent-sessions/{pending['session_id']}/turns/{pending['turn_id']}")).json()
+    assert turn["status"] == "completed" and turn["backend_used"] == "agy"
+    assert '"employee":"agy"' in turn["message"]["text"]
 
 
 async def test_version_probe_runs_off_the_event_loop(world, monkeypatch):

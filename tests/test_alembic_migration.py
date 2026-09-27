@@ -40,6 +40,7 @@ EXPECTED_TABLES = {
     "auth_invites",
     "budget_policies",
     "chat_messages",
+    "chat_turns",
     "circuit_breaker_records",
     "companies",
     "company_memberships",

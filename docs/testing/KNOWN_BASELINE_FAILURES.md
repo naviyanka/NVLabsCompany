@@ -51,8 +51,9 @@ are exactly rows 2 to 14 above. There are no new failures.
   exception for the process-wide cap. The test still expected
   `TenantSaturated` when a third tenant, which is still under its own cap, hits
   the global cap. The code is right: that case is global saturation.
-- **Why it matters here:** direct employee chat takes a bulkhead slot per turn
-  (`_chat_turn_slot`), and a saturated bulkhead becomes `429 CHAT_CONCURRENCY_LIMIT`.
+- **Why it matters here:** the chat turn worker takes a bulkhead slot before it
+  claims a turn. A saturated bulkhead leaves the turn queued, and the request
+  gets `202` with `turn_id` and `Retry-After`; the turn runs once a slot frees.
 - **Fix:** the test now expects `GlobalSaturated`. `tests/test_bulkhead.py` passes 4/4.
 
 ### 2–11. Orchestrator `_execute_subtasks` signature (10 tests)

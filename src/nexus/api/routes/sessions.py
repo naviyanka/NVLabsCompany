@@ -25,9 +25,9 @@ import base64
 import json
 import uuid
 from datetime import UTC, datetime
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, Header, HTTPException, Query, status
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
@@ -45,13 +45,14 @@ from nexus.api.routes import chat
 from nexus.models.agent_session import ENDED_STATUSES, AgentSessionRecord
 from nexus.models.budget import CostEvent
 from nexus.models.chat import ChatMessage
+from nexus.models.chat_turn import TERMINAL_STATUSES
 from nexus.models.tool_invocation import ToolInvocation
 from nexus.models.workspace import Workspace
+from nexus.runtime import chat_turns
 from nexus.runtime.checkpoint import ExecutionCheckpoint
 from nexus.services.session_service import (
     agent_pin,
     apply_pin,
-    begin_session_turn,
     check_pin,
     new_session_for,
     publish_session_event,
@@ -89,6 +90,8 @@ class SessionUpdate(BaseModel):
 
 class SessionMessageRequest(BaseModel):
     prompt: str = Field(..., min_length=1, max_length=10000)
+    # Idempotency key (the Idempotency-Key header wins); see chat.ChatRequest.
+    request_id: str | None = Field(default=None, min_length=1, max_length=255)
 
 
 class SessionOut(BaseModel):
@@ -472,46 +475,24 @@ async def get_usage(
 # ---------------------------------------------------------------------------
 
 
-async def _session_history(
-    db: Any, company_id: uuid.UUID, session_id: uuid.UUID, limit: int = 10
-) -> list[dict[str, Any]]:
-    """The last ``limit`` messages of the session in order, in _call_llm's shape."""
-    rows = (
-        await db.execute(
-            select(ChatMessage)
-            .where(
-                ChatMessage.company_id == company_id,
-                ChatMessage.session_id == session_id,
-                ChatMessage.kind == "message",
-            )
-            .order_by(ChatMessage.seq.desc())
-            .limit(limit)
-        )
-    ).scalars()
-    return [{"sender": r.sender, "text": r.text} for r in reversed(list(rows))]
-
-
-async def _begin_turn(db: Any, session_id: uuid.UUID, company_id: uuid.UUID, prompt: str):
-    """Shared setup for a turn: wake the session, check its pin, store the user message.
-
-    Returns the agent as pinned by the session; state and pin errors (409)
-    are raised before anything is stored or spent.
-    """
+async def _queue_turn(
+    db: Any,
+    session_id: uuid.UUID,
+    company_id: uuid.UUID,
+    body: SessionMessageRequest,
+    principal: Any,
+    idempotency_key: str | None,
+    *,
+    stream: bool,
+) -> chat_turns.ChatTurn:
+    """Store the prompt and its queued turn; state and pin errors (409) come first."""
     record = await _get_session(db, session_id, company_id)
-    agent = await begin_session_turn(
-        db, record, await chat._load_agent(db, record.agent_id, company_id)
+    agent = await chat._load_agent(db, record.agent_id, company_id)
+    queued = await chat_turns.create_turn(
+        db, record, agent, body.prompt, principal=principal,
+        idempotency_key=idempotency_key or body.request_id, stream=stream,
     )
-    system_prompt = await chat._build_chat_prompt(db, agent, company_id, prompt)
-    history = await _session_history(db, company_id, record.id)
-    stored = await chat._persist_message_to_db(
-        db, agent.id, company_id, "user", prompt, session_id=record.id
-    )
-    if stored is None:
-        # Nothing has been spent yet; refuse rather than run an unrecorded turn.
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Could not record message"
-        )
-    return record, agent, system_prompt, history
+    return queued.turn
 
 
 @router.post("/api/v1/sessions/{session_id}/messages", dependencies=WRITE)
@@ -521,57 +502,17 @@ async def send_message(
     company_id: CurrentCompanyId,
     db: DbSession,
     principal: CurrentPrincipal = None,
-) -> dict[str, Any]:
-    """Run one turn. The reply's place in the session is ``seq``; read the rest via the timeline."""
-    from nexus.governance.bulkhead import GlobalSaturated, TenantSaturated
+    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key", max_length=255)] = None,
+) -> Any:
+    """Run one turn. The reply's place in the session is ``seq``; read the rest via the timeline.
 
-    record, agent, system_prompt, history = await _begin_turn(
-        db, session_id, company_id, body.prompt
+    202 with the ``turn_id`` when the turn is still pending after the wait (see
+    ``chat.run_turn``); it completes on its own.
+    """
+    turn = await _queue_turn(
+        db, session_id, company_id, body, principal, idempotency_key, stream=False
     )
-    # The user message is committed before the model/CLI runs, so no
-    # transaction or session-row lock is held across the call.
-    await db.commit()
-    execution: dict[str, Any] = {}
-    try:
-        async with chat._chat_turn_slot(company_id, record.id):
-            text, model_used, tokens_used = await chat._call_llm(
-                agent, system_prompt, body.prompt, history, session_id=record.id,
-                principal=principal, execution=execution,
-            )
-            reply = await chat._persist_message_to_db(
-                db,
-                agent.id,
-                company_id,
-                "agent",
-                text,
-                session_id=record.id,
-                model_used=model_used,
-                tokens_used=tokens_used,
-                payload={"execution": execution} if execution else None,
-            )
-            await db.commit()
-    except (TenantSaturated, GlobalSaturated) as exc:
-        raise chat._chat_saturated(exc) from exc
-    await chat._record_chat_audit(
-        db, company_id, agent.id, body.prompt, text, model_used, tokens_used, record.id,
-        execution_id=execution.get("execution_id"),
-    )
-    await _publish(db, "session.message", record, seq=reply.seq if reply else None)
-    return {
-        "session_id": str(record.id),
-        "message": {
-            "id": str(reply.id) if reply else None,
-            "sender": "agent",
-            "text": text,
-            "timestamp": (reply.created_at if reply else _utcnow()).isoformat(),
-        },
-        "seq": reply.seq if reply else None,
-        "model_used": model_used,
-        "tokens_used": tokens_used,
-        "adapter_used": execution.get("adapter"),
-        "backend_used": execution.get("backend"),
-        "execution_id": execution.get("execution_id"),
-    }
+    return await chat.run_turn(company_id, turn)
 
 
 @router.post("/api/v1/sessions/{session_id}/messages/stream", dependencies=WRITE)
@@ -581,17 +522,102 @@ async def stream_message(
     company_id: CurrentCompanyId,
     db: DbSession,
     principal: CurrentPrincipal = None,
+    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key", max_length=255)] = None,
+    last_event_id: Annotated[str | None, Header(alias="Last-Event-ID")] = None,
 ) -> StreamingResponse:
     """Same as ``send_message`` but streamed as SSE, in the legacy chat stream format."""
-    record, agent, system_prompt, history = await _begin_turn(
-        db, session_id, company_id, body.prompt
+    turn = await _queue_turn(
+        db, session_id, company_id, body, principal, idempotency_key, stream=True
     )
-    # The generator writes the reply on its own connection and bumps this
-    # session row; commit first so it does not wait on this transaction.
-    await db.commit()
-    await _publish(db, "session.message", record)
+    chat_turns.get_worker().wake(company_id)
     return chat._sse_response(
-        chat._stream_reply(
-            agent, company_id, system_prompt, body.prompt, history, record.id, principal
-        )
+        chat.turn_events(turn.id, company_id, chat.resume_offset(last_event_id))
     )
+
+
+# ---------------------------------------------------------------------------
+# Turns
+# ---------------------------------------------------------------------------
+
+
+async def _get_turn(
+    db: Any, session_id: uuid.UUID, turn_id: uuid.UUID, company_id: uuid.UUID
+) -> chat_turns.ChatTurn:
+    await _get_session(db, session_id, company_id)
+    turn = await chat_turns.get_turn(company_id, turn_id)
+    if turn is None or turn.session_id != session_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"Turn {turn_id} not found"
+        )
+    return turn
+
+
+@router.get("/api/v1/agent-sessions/{session_id}/turns", dependencies=READ)
+async def list_turns(
+    session_id: uuid.UUID,
+    company_id: CurrentCompanyId,
+    db: DbSession,
+    pending: bool = Query(default=False, description="Only turns that are not finished"),
+    limit: int = Query(default=50, ge=1, le=200),
+) -> list[dict[str, Any]]:
+    """The session's latest turns in transcript order; a refreshed page rebuilds its state here."""
+    await _get_session(db, session_id, company_id)
+    stmt = select(chat_turns.ChatTurn).where(
+        chat_turns.ChatTurn.company_id == company_id,
+        chat_turns.ChatTurn.session_id == session_id,
+    )
+    if pending:
+        stmt = stmt.where(chat_turns.ChatTurn.status.not_in(TERMINAL_STATUSES))
+    rows = (
+        await db.execute(stmt.order_by(chat_turns.ChatTurn.turn_seq.desc()).limit(limit))
+    ).scalars()
+    return [chat_turns.turn_state(t) for t in reversed(list(rows))]
+
+
+@router.get("/api/v1/agent-sessions/{session_id}/turns/{turn_id}", dependencies=READ)
+async def get_turn(
+    session_id: uuid.UUID, turn_id: uuid.UUID, company_id: CurrentCompanyId, db: DbSession
+) -> dict[str, Any]:
+    """A turn's state, and its reply once it has one."""
+    turn = await _get_turn(db, session_id, turn_id, company_id)
+    reply = await chat._load_message(company_id, turn.response_message_id)
+    return {**chat_turns.turn_state(turn), **chat.turn_reply(turn, reply)}
+
+
+@router.get("/api/v1/agent-sessions/{session_id}/turns/{turn_id}/events", dependencies=READ)
+async def turn_events(
+    session_id: uuid.UUID,
+    turn_id: uuid.UUID,
+    company_id: CurrentCompanyId,
+    db: DbSession,
+    last_event_id: Annotated[str | None, Header(alias="Last-Event-ID")] = None,
+) -> StreamingResponse:
+    """Re-attach to a turn's SSE stream, for example after a refresh. Never runs the turn."""
+    turn = await _get_turn(db, session_id, turn_id, company_id)
+    return chat._sse_response(
+        chat.turn_events(turn.id, company_id, chat.resume_offset(last_event_id))
+    )
+
+
+@router.post("/api/v1/agent-sessions/{session_id}/turns/{turn_id}/cancel", dependencies=WRITE)
+async def cancel_turn(
+    session_id: uuid.UUID,
+    turn_id: uuid.UUID,
+    company_id: CurrentCompanyId,
+    db: DbSession,
+    principal: CurrentPrincipal = None,
+) -> dict[str, Any]:
+    """Cancel a turn. Durable: whichever worker runs it stops it.
+
+    Closing the page is not a cancel.
+    """
+    from nexus.tools.context import ExecutionContext
+
+    await _get_session(db, session_id, company_id)
+    by = (
+        ExecutionContext.for_principal(principal, source="chat").principal_id
+        if principal is not None
+        else "anonymous"
+    )
+    turn = await chat_turns.request_cancel(db, company_id, session_id, turn_id, by)
+    return chat_turns.turn_state(turn)

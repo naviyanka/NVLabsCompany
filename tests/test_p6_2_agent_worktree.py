@@ -454,11 +454,14 @@ def test_migration_downgrade_removes_only_this_table_and_reapplies(tmp_path):
     cfg = _alembic(db_file)
     command.upgrade(cfg, "head")
     at_head, _ = _inspect(db_file)
+    # Later migrations add their own tables; compare against this revision only.
+    command.downgrade(cfg, "d5e1a0c3b706")
+    at_revision, _ = _inspect(db_file)
 
     command.downgrade(cfg, "d5e1a0c3b705")
     after_down, detail = _inspect(db_file)
     assert detail is None
-    assert after_down == at_head - {"agent_worktrees"}
+    assert after_down == at_revision - {"agent_worktrees"}
 
     command.upgrade(cfg, "head")
     reapplied, detail = _inspect(db_file)

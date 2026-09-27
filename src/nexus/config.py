@@ -146,6 +146,13 @@ class Settings(BaseSettings):
     budget_reconcile_enabled: bool = True
     rag_ranker: str = "rrf"
 
+    # Durable employee chat turns (nexus.runtime.chat_turns)
+    chat_turn_lease_seconds: int = 30  # renewed every third of this while a turn runs
+    chat_turn_wait_seconds: float = 120.0  # POST waits this long, then answers 202
+    chat_turn_max_attempts: int = 3  # executions before a turn with lost leases fails
+    chat_turn_queue_ttl_seconds: int = 3600  # a turn queued this long expires
+    chat_turn_poll_seconds: float = 1.0  # worker and waiter re-read the database this often
+
     model_config = {
         "env_prefix": "",
         # Anchored to the repository root rather than the process CWD. A bare

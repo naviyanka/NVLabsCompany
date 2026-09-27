@@ -275,6 +275,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     from nexus.runtime.orchestrator import start_orchestrator, stop_orchestrator
     await start_orchestrator()
 
+    # Durable employee chat turns: claims queued turns and sweeps expired leases
+    # (nexus.runtime.chat_turns). Every worker process runs one.
+    from nexus.runtime.chat_turns import start_worker, stop_worker
+    await start_worker()
+
     # The watchdog patrol rides the scheduler tick (see runtime/scheduler.py); it
     # detects stuck agents and silently stalled runs, and files a human decision
     # for stalls it cannot explain (Phase 1.4). Only shutdown needs wiring here.
@@ -292,6 +297,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     yield
 
     # Shutdown: stop orchestrator, stop scheduler, persist state, close connections
+    # Drain chat turns first; unfinished ones go back to the queue for another worker.
+    await stop_worker()
     await stop_orchestrator()
     await stop_scheduler()
     await stop_watchdog()

@@ -126,6 +126,30 @@ if _PROMETHEUS_AVAILABLE:
         "nexus_orchestrator_tick_last_timestamp_seconds",
         "Timestamp in unix epoch seconds of the last orchestrator tick",
     )
+
+    # Durable employee chat turns (nexus.runtime.chat_turns)
+    nexus_chat_turn_events_total = Counter(
+        "nexus_chat_turn_events_total",
+        "Chat turn lifecycle events (queued, claimed, completed, failed, cancelled, "
+        "expired, recovered, lease_expired, duplicate_suppressed)",
+        ["event"],
+    )
+    nexus_chat_turn_claim_latency_seconds = Histogram(
+        "nexus_chat_turn_claim_latency_seconds",
+        "Time a chat turn waited in the queue before a worker claimed it",
+        buckets=DEFAULT_LATENCY_BUCKETS,
+    )
+    nexus_chat_turn_duration_seconds = Histogram(
+        "nexus_chat_turn_duration_seconds",
+        "Time from claim to a terminal status, by status",
+        ["status"],
+        buckets=TASK_DURATION_BUCKETS,
+    )
+    nexus_chat_turns = Gauge(
+        "nexus_chat_turns",
+        "Chat turns currently queued or active (claimed/running), from the database",
+        ["status"],
+    )
 else:
     # No-op placeholders if prometheus_client is absent
     nexus_llm_tokens_total = None  # type: ignore
@@ -140,6 +164,10 @@ else:
     nexus_active_reservations_cents = None  # type: ignore
     nexus_running_tasks_count = None  # type: ignore
     nexus_orchestrator_tick_last_timestamp_seconds = None  # type: ignore
+    nexus_chat_turn_events_total = None  # type: ignore
+    nexus_chat_turn_claim_latency_seconds = None  # type: ignore
+    nexus_chat_turn_duration_seconds = None  # type: ignore
+    nexus_chat_turns = None  # type: ignore
 
 
 # ---------------------------------------------------------------------------
@@ -302,6 +330,26 @@ def record_orchestrator_tick() -> None:
     if not _PROMETHEUS_AVAILABLE:
         return
     nexus_orchestrator_tick_last_timestamp_seconds.set(time.time())
+
+
+def record_chat_turn_event(
+    event: str, *, claim_latency: float | None = None, duration: float | None = None
+) -> None:
+    """Count a chat turn lifecycle event, with its claim latency or run duration."""
+    if not _PROMETHEUS_AVAILABLE:
+        return
+    nexus_chat_turn_events_total.labels(event=event).inc()
+    if claim_latency is not None:
+        nexus_chat_turn_claim_latency_seconds.observe(claim_latency)
+    if duration is not None:
+        nexus_chat_turn_duration_seconds.labels(status=event).observe(duration)
+
+
+def set_chat_turns(status: str, count: int) -> None:
+    """Set the queued/active chat turn gauge."""
+    if not _PROMETHEUS_AVAILABLE:
+        return
+    nexus_chat_turns.labels(status=status).set(float(count))
 
 
 def generate_metrics_response() -> tuple[bytes, str]:

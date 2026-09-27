@@ -49,7 +49,7 @@ files.
 | `test_chat_adapter_resolution.py` | `adapter_type="cli"` + `backend` and every legacy ID resolve to `CLIAdapter` with the right backend. Unknown IDs fail closed and never fall back to Anthropic. Hermes CLI and Hermes API stay distinct, as do Claude Code and the Anthropic API. |
 | `test_cli_adapter.py` | Golden argv table for each executable backend, session lifecycle, timeouts, non-zero exit, bounded output, execution metadata. |
 | `test_cli_adapter_interactive.py` | Interactive mode, approval gating, forbidden extra args. |
-| `test_concurrent_employee_chat.py` | Two employees chatting at once, per-session ordering, bulkhead saturation as `429 CHAT_CONCURRENCY_LIMIT`, isolated cancellation, user message persisted before the CLI runs, `execution_id` in responses and audit rows. |
+| `test_concurrent_employee_chat.py` | Two employees chatting at once, per-session ordering held in the database (another worker cannot claim a later turn), bulkhead saturation as `202` with a queued turn that runs when capacity frees, isolated cancellation, user message persisted before the CLI runs, `execution_id` in responses and audit rows. |
 
 Runtime on the development machine (Windows 11, Python 3.12): see
 "Measured runtimes" below.

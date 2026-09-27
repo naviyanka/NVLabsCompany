@@ -9,6 +9,7 @@ from nexus.models.agent_worktree import AgentWorktree
 from nexus.models.auth import Invite
 from nexus.models.budget import BudgetPolicy, CostEvent
 from nexus.models.chat import ChatMessage
+from nexus.models.chat_turn import ChatTurn
 from nexus.models.mcp_binding import McpBinding
 from nexus.models.communication import Event, Group, GroupMember, Message
 from nexus.models.company import Company, CompanyMembership, Department, Team
@@ -156,6 +157,7 @@ __all__ = [
     # Chat
     "AgentSessionRecord",
     "ChatMessage",
+    "ChatTurn",
     # Worktrees
     "AgentWorktree",
     # Workflows
