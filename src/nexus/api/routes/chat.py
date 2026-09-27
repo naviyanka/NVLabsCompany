@@ -910,6 +910,20 @@ async def _call_llm(
     except PermissionError as exc:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
 
+    # A session that holds a worktree runs its work in that worktree and
+    # nowhere else. An unusable one (not activated, gone, off its branch) is a
+    # refusal, not a fallback to another directory. Outside the broad try below
+    # so the refusal reaches the caller.
+    workspace = None
+    if execution_context.session_id is not None:
+        from nexus.database import async_session_factory
+        from nexus.services.worktree_service import session_workspace
+
+        async with async_session_factory() as worktree_db:
+            workspace = await session_workspace(
+                worktree_db, agent.company_id, agent.id, execution_context.session_id
+            )
+
     # Check if API key is available. A Connection that supplies its own key
     # satisfies this — the blocker must not fire on the gateway path (WP-22b).
     api_key = config.get("api_key", "")
@@ -1033,6 +1047,7 @@ async def _call_llm(
         session_config = {**config, "system_prompt": system_prompt}
         session = await adapter.create_session(agent.id, session_config)
         session.context = execution_context
+        session.worktree_path = str(workspace) if workspace is not None else None
 
         # Build conversation messages for context
         messages = []

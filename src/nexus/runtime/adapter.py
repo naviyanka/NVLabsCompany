@@ -39,6 +39,10 @@ class AgentSession:
     # calls act under. Set by the server right after create_session, never
     # from config: config can carry caller-supplied values, the context cannot.
     context: Any = None
+    # The session's agent worktree directory, resolved and checked by
+    # nexus.services.worktree_service. Set by the server like ``context``;
+    # adapters that run commands must run them here when it is set.
+    worktree_path: str | None = None
 
 
 @dataclass

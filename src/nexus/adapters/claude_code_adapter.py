@@ -35,6 +35,16 @@ COST_PATTERN = re.compile(
 )
 
 
+# Claude Code flags that would make it work outside the session's worktree.
+_OTHER_DIRECTORY_FLAGS = ("--worktree", "-w", "--add-dir")
+
+
+def _is_directory_flag(arg: str) -> bool:
+    """Whether ``arg`` names another directory, including the attached ``-wNAME`` form."""
+    flag = arg.split("=", 1)[0].lower()
+    return flag in _OTHER_DIRECTORY_FLAGS or (flag.startswith("-w") and not flag.startswith("--"))
+
+
 class ClaudeCodeAdapter(BaseAdapter):
     """Agent adapter that spawns Claude Code CLI as a subprocess.
 
@@ -187,7 +197,27 @@ class ClaudeCodeAdapter(BaseAdapter):
             return TaskResult(
                 task_id=task_id, agent_id=session.agent_id, success=False, error=refused
             )
-        workspace = self._workspaces.get(session.session_id, ".")
+        # The session's agent worktree when it has one, else the directory the
+        # session was created with. Never the server's own working directory.
+        workspace = session.worktree_path or self._workspaces.get(session.session_id)
+        if not workspace:
+            return TaskResult(
+                task_id=task_id,
+                agent_id=session.agent_id,
+                success=False,
+                error="Session has no workspace",
+            )
+        if session.worktree_path and (
+            payload.get("worktree")
+            or any(_is_directory_flag(a) for a in extra_args or [])
+        ):
+            # The server chose this worktree; the CLI must not pick another.
+            return TaskResult(
+                task_id=task_id,
+                agent_id=session.agent_id,
+                success=False,
+                error="This session runs in its agent worktree; no other directory is allowed",
+            )
         cli_command = session.metadata.get("cli_command", "claude")
 
         # Build command for non-interactive Claude Code CLI execution

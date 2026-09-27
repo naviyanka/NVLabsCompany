@@ -1,8 +1,12 @@
 """P6.3: WorktreeService, the authoritative writer of agent_worktrees rows.
 
 Runs on a file SQLite database with foreign keys switched on and against real
-git repositories created under a temporary repository root. Nothing here
-creates a worktree on disk; the service only records and transitions rows.
+git repositories created under a temporary repository root. Creation resolves
+refs in those repositories for real. The git steps behind transitions
+(creating the worktree, reading its head, merging) are replaced by
+``_FakeGit`` here, so these tests cover the row rules alone: which moves are
+legal, approval binding, company scoping and races. ``test_p6_5_git_worktrees``
+runs the same transitions against real worktrees.
 """
 
 import asyncio
@@ -10,6 +14,7 @@ import inspect
 import os
 import subprocess
 import uuid
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -29,16 +34,25 @@ from nexus.models.company import Company
 from nexus.models.governance import Approval
 from nexus.models.repository import Repository
 from nexus.models.task import Task
-from nexus.runtime.git_runner import GitRunner
+from nexus.runtime.git_runner import GitRunner, MergeOutcome
 from nexus.services import worktree_service
+from nexus.services.approval_service import ApprovalService
 from nexus.services.worktree_service import (
+    WORKTREE_APPROVAL_TYPE,
     WorktreeError,
     WorktreeService,
+    check_worktree_approval,
     worktree_path,
     worktree_root,
 )
 
 SHA = "b" * 40
+# Heads a worktree moves through; stand-ins for what the git layer records.
+HEAD = "1" * 40
+NEW_HEAD = "2" * 40
+# The merge commit _FakeGit reports.
+MERGED = "3" * 40
+APPROVER = "approver@example.test"
 STATUSES = ("created", "active", "review", "approved", "merged", "archived")
 # Written out independently of worktree_service.TRANSITIONS on purpose.
 ALLOWED = {
@@ -118,6 +132,50 @@ def roots(tmp_path, monkeypatch):
     return tmp_path
 
 
+class _FakeGit:
+    """The repository's git as the transition steps see it, minus the disk."""
+
+    async def resolve_commit(self, ref: str) -> str:
+        return ref if len(ref) in (40, 64) else SHA
+
+    async def check_branch_name(self, name: str) -> None:
+        return None
+
+    async def current_branch(self) -> str:
+        return "refs/heads/main"
+
+    async def is_ancestor(self, ancestor: str, descendant: str) -> bool:
+        return True
+
+    async def list_worktrees(self) -> list:
+        return []
+
+    async def merge_into(self, *args, **kwargs) -> MergeOutcome:
+        return MergeOutcome(status="merged", commit=MERGED, conflicts=[])
+
+
+@pytest.fixture(autouse=True)
+def fake_git(monkeypatch):
+    """Transition steps read the head the row records and merge as MERGED."""
+
+    async def repository_git(db, row):
+        return _FakeGit()
+
+    async def registration(git, row):
+        return object()
+
+    async def read_head(git, row):
+        return row.head_commit or HEAD
+
+    async def snapshot(db, row, *, commit_changes):
+        return row.head_commit or HEAD, False
+
+    monkeypatch.setattr(worktree_service, "_repository_git", repository_git)
+    monkeypatch.setattr(worktree_service, "_registration", registration)
+    monkeypatch.setattr(worktree_service, "_read_head", read_head)
+    monkeypatch.setattr(worktree_service, "_snapshot", snapshot)
+
+
 @pytest.fixture
 async def world(sessions, roots):
     """Two companies, each with a git-backed repository, agent, session, task and approvals."""
@@ -166,11 +224,53 @@ async def _create(sessions, ids, principal=None, **kw) -> AgentWorktree:
         return wt
 
 
-async def _set_status(sessions, wt_id, status: str) -> None:
+async def _update(sessions, wt_id, **values) -> None:
     async with sessions() as s:
         row = await s.get(AgentWorktree, wt_id)
-        row.status = status
+        for key, value in values.items():
+            setattr(row, key, value)
         await s.commit()
+
+
+async def _set_status(sessions, wt_id, status: str) -> None:
+    await _update(sessions, wt_id, status=status)
+
+
+async def _set_head(sessions, wt_id, head: str | None) -> None:
+    await _update(sessions, wt_id, head_commit=head)
+
+
+def _utcnow() -> datetime:
+    return datetime.now(UTC).replace(tzinfo=None)
+
+
+async def _approval(
+    sessions,
+    company_id: uuid.UUID,
+    worktree_id,
+    *,
+    head: str = HEAD,
+    status: str = "approved",
+    type: str = WORKTREE_APPROVAL_TYPE,
+    payload: dict | None = None,
+    decided_by: str | None = APPROVER,
+    expires_at: datetime | None = None,
+) -> uuid.UUID:
+    """An approval row naming ``worktree_id`` at ``head`` unless ``payload`` says otherwise."""
+    if payload is None:
+        payload = {"worktree_id": str(worktree_id), "head_commit": head}
+    async with sessions() as s:
+        row = Approval(
+            company_id=company_id,
+            type=type,
+            status=status,
+            payload=payload,
+            decided_by=decided_by,
+            expires_at=expires_at,
+        )
+        s.add(row)
+        await s.commit()
+        return row.id
 
 
 async def _refused(coro, reason: str) -> WorktreeError:
@@ -445,10 +545,12 @@ async def test_path_of_revalidates_stored_path(sessions, world, roots):
 async def test_transition_matrix(sessions, world, src, dst):
     ids = world["a"]
     wt = await _create(sessions, ids)
-    await _set_status(sessions, wt.id, src)
+    bound = await _approval(sessions, ids["company"], wt.id)
+    # An approved row carries the approval that approved it; merging re-checks it.
+    await _update(sessions, wt.id, status=src, head_commit=HEAD, approval_id=bound)
     async with sessions() as s:
         svc = WorktreeService(s, _manager(ids["company"]))
-        call = svc.transition(wt.id, dst, approval_id=ids["approved"], merged_commit=SHA)
+        call = svc.transition(wt.id, dst, approval_id=bound)
         if src == dst or (src, dst) in ALLOWED:
             row = await call
             await s.commit()
@@ -471,7 +573,7 @@ async def test_named_illegal_transitions(sessions, world, src, dst):
     await _set_status(sessions, wt.id, src)
     async with sessions() as s:
         svc = WorktreeService(s, _manager(ids["company"]))
-        await _refused(svc.transition(wt.id, dst, merged_commit=SHA), "illegal_transition")
+        await _refused(svc.transition(wt.id, dst), "illegal_transition")
 
 
 @pytest.mark.parametrize("src", ["review", "approved"])
@@ -487,14 +589,16 @@ async def test_back_to_active_for_more_work(sessions, world, src):
 async def test_full_happy_path(sessions, world):
     ids = world["a"]
     wt = await _create(sessions, ids)
+    await _set_head(sessions, wt.id, HEAD)
+    bound = await _approval(sessions, ids["company"], wt.id)
     async with sessions() as s:
         svc = WorktreeService(s, _manager(ids["company"]))
         for to in ("active", "review"):
             await svc.transition(wt.id, to)
-        row = await svc.transition(wt.id, "approved", approval_id=ids["approved"])
-        assert row.approval_id == ids["approved"]
-        row = await svc.transition(wt.id, "merged", merged_commit=SHA)
-        assert row.merged_commit == SHA
+        row = await svc.transition(wt.id, "approved", approval_id=bound)
+        assert row.approval_id == bound
+        row = await svc.transition(wt.id, "merged")
+        assert row.merged_commit == MERGED  # what the merge produced
         row = await svc.archive(wt.id)
         assert row.status == "archived"
 
@@ -514,14 +618,426 @@ async def test_approving_needs_an_approved_approval(sessions, world):
         )
 
 
-@pytest.mark.parametrize("commit", [None, "abc", "HEAD", "B" * 40])
-async def test_merging_needs_a_full_commit_id(sessions, world, commit):
+# ── Approval binding ─────────────────────────────────────────────────────
+
+
+async def _in_review(sessions, ids, head: str | None = HEAD) -> AgentWorktree:
+    wt = await _create(sessions, ids)
+    await _set_status(sessions, wt.id, "review")
+    await _set_head(sessions, wt.id, head)
+    return wt
+
+
+async def _approve(sessions, ids, wt, approval_id):
+    async with sessions() as s:
+        row = await WorktreeService(s, _manager(ids["company"])).transition(
+            wt.id, "approved", approval_id=approval_id
+        )
+        await s.commit()
+        return row
+
+
+async def _status(sessions, wt) -> str:
+    async with sessions() as s:
+        return (await s.get(AgentWorktree, wt.id)).status
+
+
+async def test_approval_naming_this_worktree_approves_it(sessions, world):
+    ids = world["a"]
+    wt = await _in_review(sessions, ids)
+    bound = await _approval(sessions, ids["company"], wt.id)
+    row = await _approve(sessions, ids, wt, bound)
+    assert (row.status, row.approval_id) == ("approved", bound)
+    assert await _status(sessions, wt) == "approved"
+
+
+async def test_approval_for_another_worktree_is_refused(sessions, world):
+    ids = world["a"]
+    wt = await _in_review(sessions, ids)
+    other = await _in_review(sessions, ids)
+    for_other = await _approval(sessions, ids["company"], other.id)
+    err = await _refused(_approve(sessions, ids, wt, for_other), "approval_required")
+    assert err.status_code == 409
+    assert await _status(sessions, wt) == "review"
+    # The approval still approves the worktree it names.
+    assert (await _approve(sessions, ids, other, for_other)).status == "approved"
+
+
+@pytest.mark.parametrize("kind", ["worktree_merge", "deployment", "WORKTREE_APPROVAL", ""])
+async def test_approval_of_the_wrong_type_is_refused(sessions, world, kind):
+    ids = world["a"]
+    wt = await _in_review(sessions, ids)
+    wrong = await _approval(sessions, ids["company"], wt.id, type=kind)
+    err = await _refused(_approve(sessions, ids, wt, wrong), "approval_required")
+    assert err.status_code == 409
+    assert await _status(sessions, wt) == "review"
+
+
+@pytest.mark.parametrize("state", ["pending", "rejected", "denied", "expired", "APPROVED"])
+async def test_undecided_or_rejected_approval_is_refused(sessions, world, state):
+    ids = world["a"]
+    wt = await _in_review(sessions, ids)
+    undecided = await _approval(sessions, ids["company"], wt.id, status=state)
+    err = await _refused(_approve(sessions, ids, wt, undecided), "approval_required")
+    assert err.status_code == 409
+    assert await _status(sessions, wt) == "review"
+
+
+async def test_cross_company_approval_reads_as_missing(sessions, world):
+    # Company b approves a worktree id that belongs to company a.
+    ids = world["a"]
+    wt = await _in_review(sessions, ids)
+    foreign = await _approval(sessions, world["b"]["company"], wt.id)
+    err = await _refused(_approve(sessions, ids, wt, foreign), "not_found")
+    assert err.status_code == 404
+    assert await _status(sessions, wt) == "review"
+
+
+def _spoofs(wt_id: uuid.UUID) -> list:
+    wid = str(wt_id)
+    return [
+        None,
+        {},
+        {"worktree": wid},
+        {"worktree_id": wid.upper()},
+        {"worktree_id": "{" + wid + "}"},
+        {"worktree_id": f"urn:uuid:{wid}"},
+        {"worktree_id": wid.replace("-", "")},
+        {"worktree_id": f" {wid}"},
+        {"worktree_id": f"{wid}\n"},
+        {"worktree_id": [wid]},
+        {"worktree_id": {"id": wid}},
+        {"worktree_id": f"{wid},{uuid.uuid4()}"},
+        {"target": {"worktree_id": wid}},
+        {"description": f"please approve {wid}"},
+    ]
+
+
+@pytest.mark.parametrize("case", range(14))
+async def test_spoofed_worktree_reference_is_refused(sessions, world, case):
+    ids = world["a"]
+    wt = await _in_review(sessions, ids)
+    payload = _spoofs(wt.id)[case]
+    async with sessions() as s:
+        row = Approval(
+            company_id=ids["company"],
+            type=WORKTREE_APPROVAL_TYPE,
+            status="approved",
+            payload=payload,
+            decided_by=APPROVER,
+        )
+        s.add(row)
+        await s.commit()
+    await _refused(_approve(sessions, ids, wt, row.id), "approval_required")
+    assert await _status(sessions, wt) == "review"
+
+
+async def test_approval_linked_at_creation_cannot_approve(sessions, world):
+    # A worktree created with an approval attached falls back to it when no
+    # approval is passed. That approval cannot name the worktree, whose id did
+    # not exist yet, so the fallback never approves.
+    ids = world["a"]
+    wt = await _create(sessions, ids, approval_id=ids["approved"])
+    await _set_status(sessions, wt.id, "review")
+    await _refused(_approve(sessions, ids, wt, None), "approval_required")
+    assert await _status(sessions, wt) == "review"
+
+
+def test_binding_check_refuses_an_approval_from_another_company(world):
+    # Defense in depth for a caller that loads the approval without a company filter.
+    wt = AgentWorktree(
+        id=uuid.uuid4(),
+        company_id=world["a"]["company"],
+        repository_id=world["a"]["repo"],
+        agent_id=world["a"]["agent"],
+        branch="b",
+        relative_path="p",
+        base_ref="HEAD",
+        base_commit=SHA,
+        created_by="t",
+    )
+    foreign = Approval(
+        company_id=world["b"]["company"],
+        type=WORKTREE_APPROVAL_TYPE,
+        status="approved",
+        payload={"worktree_id": str(wt.id)},
+    )
+    with pytest.raises(WorktreeError) as exc:
+        check_worktree_approval(foreign, wt)
+    assert exc.value.reason == "not_found"
+
+
+# ── Approval bound to the reviewed head ─────────────────────────────────
+
+
+async def test_approval_for_the_current_head_approves(sessions, world):
+    ids = world["a"]
+    wt = await _in_review(sessions, ids)
+    bound = await _approval(sessions, ids["company"], wt.id, head=HEAD)
+    row = await _approve(sessions, ids, wt, bound)
+    assert (row.status, row.head_commit) == ("approved", HEAD)
+
+
+async def test_sha256_head_is_accepted(sessions, world):
+    ids = world["a"]
+    head = "c" * 64
+    wt = await _in_review(sessions, ids, head=head)
+    bound = await _approval(sessions, ids["company"], wt.id, head=head)
+    assert (await _approve(sessions, ids, wt, bound)).status == "approved"
+
+
+async def test_approval_for_an_old_head_is_refused(sessions, world):
+    ids = world["a"]
+    wt = await _in_review(sessions, ids, head=NEW_HEAD)
+    stale = await _approval(sessions, ids["company"], wt.id, head=HEAD)
+    err = await _refused(_approve(sessions, ids, wt, stale), "approval_required")
+    assert err.status_code == 409
+    assert await _status(sessions, wt) == "review"
+
+
+async def test_rework_invalidates_the_earlier_approval(sessions, world):
+    ids = world["a"]
+    wt = await _in_review(sessions, ids, head=HEAD)
+    first = await _approval(sessions, ids["company"], wt.id, head=HEAD)
+    assert (await _approve(sessions, ids, wt, first)).status == "approved"
+
+    # Back to work: new commits move the head, then review again.
+    async with sessions() as s:
+        await WorktreeService(s, _manager(ids["company"])).transition(wt.id, "active")
+        await s.commit()
+    await _set_head(sessions, wt.id, NEW_HEAD)
+    async with sessions() as s:
+        await WorktreeService(s, _manager(ids["company"])).transition(wt.id, "review")
+        await s.commit()
+
+    err = await _refused(_approve(sessions, ids, wt, first), "approval_required")
+    assert err.status_code == 409
+    assert await _status(sessions, wt) == "review"
+
+    # A fresh approval of the new head does approve it.
+    second = await _approval(sessions, ids["company"], wt.id, head=NEW_HEAD)
+    row = await _approve(sessions, ids, wt, second)
+    assert (row.status, row.approval_id, row.head_commit) == ("approved", second, NEW_HEAD)
+
+
+async def test_approval_for_another_worktree_at_the_same_head_is_refused(sessions, world):
+    ids = world["a"]
+    wt = await _in_review(sessions, ids, head=HEAD)
+    other = await _in_review(sessions, ids, head=HEAD)
+    for_other = await _approval(sessions, ids["company"], other.id, head=HEAD)
+    err = await _refused(_approve(sessions, ids, wt, for_other), "approval_required")
+    assert err.status_code == 409
+    assert await _status(sessions, wt) == "review"
+
+
+def _head_spoofs() -> list:
+    return [
+        {},
+        {"head_commit": None},
+        {"head_commit": ""},
+        {"head_commit": HEAD[:7]},
+        {"head_commit": HEAD[:39]},
+        {"head_commit": HEAD + "1"},
+        {"head_commit": HEAD + "0" * 24},
+        {"head_commit": "A" * 40},
+        {"head_commit": f" {HEAD}"},
+        {"head_commit": f"{HEAD}\n"},
+        {"head_commit": "HEAD"},
+        {"head_commit": "refs/heads/main"},
+        {"head_commit": [HEAD]},
+        {"head_commit": {"sha": HEAD}},
+        {"head_commit": int(HEAD)},
+        {"head": HEAD},
+        {"reviewed": {"head_commit": HEAD}},
+        {"head_commit": NEW_HEAD},
+    ]
+
+
+@pytest.mark.parametrize("case", range(len(_head_spoofs())))
+async def test_spoofed_or_malformed_head_is_refused(sessions, world, case):
+    ids = world["a"]
+    wt = await _in_review(sessions, ids, head=HEAD)
+    payload = {"worktree_id": str(wt.id), **_head_spoofs()[case]}
+    spoof = await _approval(sessions, ids["company"], wt.id, payload=payload)
+    err = await _refused(_approve(sessions, ids, wt, spoof), "approval_required")
+    assert err.status_code == 409
+    assert await _status(sessions, wt) == "review"
+
+
+@pytest.mark.parametrize("claimed", [None, "", "abc", HEAD])
+async def test_worktree_without_a_recorded_head_cannot_be_approved(sessions, world, claimed):
+    ids = world["a"]
+    wt = await _in_review(sessions, ids, head=None)
+    payload = {"worktree_id": str(wt.id), "head_commit": claimed}
+    approval = await _approval(sessions, ids["company"], wt.id, payload=payload)
+    await _refused(_approve(sessions, ids, wt, approval), "approval_required")
+    assert await _status(sessions, wt) == "review"
+
+
+@pytest.mark.parametrize("stored", ["abc", HEAD[:7], "A" * 40, "HEAD"])
+async def test_malformed_recorded_head_cannot_be_approved_even_if_matched(sessions, world, stored):
+    ids = world["a"]
+    wt = await _in_review(sessions, ids, head=stored)
+    matching = await _approval(sessions, ids["company"], wt.id, head=stored)
+    await _refused(_approve(sessions, ids, wt, matching), "approval_required")
+    assert await _status(sessions, wt) == "review"
+
+
+async def test_head_moving_during_approval_loses_with_409(sessions, world):
+    ids = world["a"]
+    wt = await _in_review(sessions, ids, head=HEAD)
+    bound = await _approval(sessions, ids["company"], wt.id, head=HEAD)
+    async with sessions() as slow:
+        svc = WorktreeService(slow, _manager(ids["company"]))
+        # Keep the reference so the identity map serves this stale row.
+        stale = await svc.get(wt.id)
+        assert stale.head_commit == HEAD
+        await _set_head(sessions, wt.id, NEW_HEAD)
+        # The check passes against the stale head; the conditional write does not.
+        await _refused(svc.transition(wt.id, "approved", approval_id=bound), "conflict")
+    assert await _status(sessions, wt) == "review"
+
+
+# ── Approval expiry ──────────────────────────────────────────────────────
+
+
+async def test_approval_without_expiry_is_accepted(sessions, world):
+    ids = world["a"]
+    wt = await _in_review(sessions, ids)
+    bound = await _approval(sessions, ids["company"], wt.id, expires_at=None)
+    assert (await _approve(sessions, ids, wt, bound)).status == "approved"
+
+
+async def test_approval_expiring_in_the_future_is_accepted(sessions, world):
+    ids = world["a"]
+    wt = await _in_review(sessions, ids)
+    later = _utcnow() + timedelta(hours=1)
+    bound = await _approval(sessions, ids["company"], wt.id, expires_at=later)
+    assert (await _approve(sessions, ids, wt, bound)).status == "approved"
+
+
+@pytest.mark.parametrize("ago", [timedelta(seconds=1), timedelta(days=30)])
+async def test_expired_approved_approval_cannot_approve(sessions, world, ago):
+    ids = world["a"]
+    wt = await _in_review(sessions, ids)
+    expired = await _approval(
+        sessions, ids["company"], wt.id, status="approved", expires_at=_utcnow() - ago
+    )
+    err = await _refused(_approve(sessions, ids, wt, expired), "approval_required")
+    assert err.status_code == 409
+    assert await _status(sessions, wt) == "review"
+
+
+def _detached(world, **approval_fields) -> tuple[Approval, AgentWorktree]:
+    """An unsaved worktree at HEAD and an approval of it, for boundary checks."""
+    wt = AgentWorktree(
+        id=uuid.uuid4(),
+        company_id=world["a"]["company"],
+        repository_id=world["a"]["repo"],
+        agent_id=world["a"]["agent"],
+        branch="b",
+        relative_path="p",
+        base_ref="HEAD",
+        base_commit=SHA,
+        head_commit=HEAD,
+        created_by="m@example.test",
+    )
+    fields = {
+        "company_id": world["a"]["company"],
+        "type": WORKTREE_APPROVAL_TYPE,
+        "status": "approved",
+        "payload": {"worktree_id": str(wt.id), "head_commit": HEAD},
+        "decided_by": APPROVER,
+        **approval_fields,
+    }
+    return Approval(**fields), wt
+
+
+def test_expiry_boundary_is_exclusive(world):
+    moment = datetime(2026, 1, 1, 12, 0, 0)
+    approval, wt = _detached(world, expires_at=moment)
+    with pytest.raises(WorktreeError) as exc:
+        check_worktree_approval(approval, wt, now=moment)
+    assert exc.value.reason == "approval_required"
+    check_worktree_approval(approval, wt, now=moment - timedelta(microseconds=1))
+
+
+def test_timezone_aware_expiry_is_compared_in_utc(world):
+    # 13:00 at UTC+2 is 11:00 UTC: past at 12:00 UTC, not yet at 10:59 UTC.
+    approval, wt = _detached(
+        world, expires_at=datetime(2026, 1, 1, 13, 0, tzinfo=timezone(timedelta(hours=2)))
+    )
+    with pytest.raises(WorktreeError):
+        check_worktree_approval(approval, wt, now=datetime(2026, 1, 1, 12, 0))
+    check_worktree_approval(approval, wt, now=datetime(2026, 1, 1, 10, 59))
+
+
+# ── Self-approval ────────────────────────────────────────────────────────
+
+
+async def _decided_through_service(sessions, ids, wt, decider: Principal) -> uuid.UUID:
+    """Request and approve a worktree approval the way the approval routes do."""
+    async with sessions() as s:
+        service = ApprovalService(s)
+        approval = await service.request_approval(
+            ids["company"],
+            WORKTREE_APPROVAL_TYPE,
+            ids["agent"],
+            payload={"worktree_id": str(wt.id), "head_commit": wt.head_commit},
+        )
+        await service.approve(approval.id, decider.display_name)
+        await s.commit()
+        return approval.id
+
+
+async def test_worktree_creator_cannot_approve_their_own_worktree(sessions, world):
+    ids = world["a"]
+    creator = _manager(ids["company"])
+    wt = await _in_review(sessions, ids)
+    async with sessions() as s:
+        wt = await s.get(AgentWorktree, wt.id)
+    assert wt.created_by == creator.display_name
+    own = await _decided_through_service(sessions, ids, wt, creator)
+    err = await _refused(_approve(sessions, ids, wt, own), "approval_required")
+    assert err.status_code == 409
+    assert await _status(sessions, wt) == "review"
+
+
+async def test_another_approver_can_approve_the_worktree(sessions, world):
+    ids = world["a"]
+    wt = await _in_review(sessions, ids)
+    async with sessions() as s:
+        wt = await s.get(AgentWorktree, wt.id)
+    other = Principal(
+        kind="user", company_id=ids["company"], role="manager", email="other@example.test"
+    )
+    theirs = await _decided_through_service(sessions, ids, wt, other)
+    assert (await _approve(sessions, ids, wt, theirs)).status == "approved"
+
+
+@pytest.mark.parametrize("decider", [None, ""])
+async def test_approval_without_a_recorded_decider_is_refused(sessions, world, decider):
+    ids = world["a"]
+    wt = await _in_review(sessions, ids)
+    anonymous = await _approval(sessions, ids["company"], wt.id, decided_by=decider)
+    await _refused(_approve(sessions, ids, wt, anonymous), "approval_required")
+    assert await _status(sessions, wt) == "review"
+
+
+def test_transition_takes_no_commit_id_from_the_caller():
+    # Heads and the merge commit are read from git; there is no way to pass one.
+    params = inspect.signature(WorktreeService.transition).parameters
+    assert not {"merged_commit", "head_commit", "base_commit"} & set(params)
+
+
+async def test_merging_without_the_approval_that_approved_it_is_refused(sessions, world):
     ids = world["a"]
     wt = await _create(sessions, ids)
-    await _set_status(sessions, wt.id, "approved")
+    await _update(sessions, wt.id, status="approved", head_commit=HEAD)
     async with sessions() as s:
         svc = WorktreeService(s, _manager(ids["company"]))
-        await _refused(svc.transition(wt.id, "merged", merged_commit=commit), "invalid_link")
+        await _refused(svc.transition(wt.id, "merged"), "approval_required")
+    assert await _status(sessions, wt) == "approved"
 
 
 async def test_transition_of_other_companys_worktree_reads_as_missing(sessions, world):

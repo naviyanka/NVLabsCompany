@@ -241,9 +241,11 @@ async def _session_action(
     """Apply one lifecycle transition through the canonical state machine, audited."""
     from nexus.governance.audit_service import record_audit
     from nexus.services.session_service import publish_session_event, transition
+    from nexus.services.worktree_service import release_session_worktree
 
     record = await _agent_session(db, agent_id, session_id, company_id)
     transition(record, to)
+    await release_session_worktree(db, record)
     await db.flush()
     await record_audit(
         company_id,

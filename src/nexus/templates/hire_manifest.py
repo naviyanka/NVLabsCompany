@@ -59,6 +59,8 @@ class HireManifest(BaseModel):
     model: Optional[str] = Field(None, max_length=80)
     command_flags: list[str] = Field(default_factory=list)
     capabilities: list[str] = Field(default_factory=list)
+    # Accepted for spec v1 compatibility only; agent worktrees are created
+    # through the worktrees API, not by a manifest flag.
     isolate: bool = False
     token_cap: Optional[int] = Field(None, gt=0, le=10_000_000_000)
     author: Optional[str] = Field(None, max_length=80)

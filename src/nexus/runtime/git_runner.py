@@ -12,6 +12,9 @@ runs git:
 * without inherited ``GIT_*`` environment variables, which could otherwise
   redirect the call to another repository (``GIT_DIR``) or inject config
   (``GIT_CONFIG_PARAMETERS``), and with terminal prompts disabled;
+* with ``GIT_CEILING_DIRECTORIES`` set to the parent of the repository path,
+  so a directory that is not itself a repository fails instead of silently
+  resolving to a repository further up the tree;
 * under a timeout, after which the process is killed.
 
 Refs that come from outside are checked, resolved to commit SHAs, and only
@@ -20,10 +23,18 @@ pass ``--no-ext-diff`` and ``--no-textconv``. The repository is an explicit,
 absolute, server-controlled path; ``GitRunner.in_roots`` confines a stored
 path to the configured roots before any git runs there.
 
-Not covered here: filter and merge drivers selected by ``.gitattributes`` and
-defined in the repository's config still run on checkout, add and merge.
-Keeping agents from writing a repository's ``.git`` directory is the job of
-process sandboxing.
+Filter and merge drivers are commands a ``.gitattributes`` file selects and
+git config defines; git runs them while it reads or writes file contents
+(checkout, ``worktree add``, ``add``, ``status``, ``commit``, ``merge``,
+``merge-tree``, ``revert``). Before any of those, the runner reads the driver
+definitions git would see and refuses to run if one comes from the
+repository's own config (``.git/config``, ``config.worktree``, or a file they
+include) unless the system or global config defines the same command. Drivers
+the server's own git installation or user configures, such as Git LFS, still
+run. This is a check made just before the command, not a lock: a process that
+can write the repository's ``.git`` directory in between can still slip one
+in. Keeping agents from writing a repository's ``.git`` directory is the job
+of process sandboxing.
 """
 
 from __future__ import annotations
@@ -45,6 +56,15 @@ DIFF_SAFETY = ("--no-ext-diff", "--no-textconv")
 
 _OID = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
 _hooks_dir: str | None = None
+
+# Subcommands that read or write file contents through a working tree or the
+# index, and so can start a filter or merge driver.
+_CONTENT_COMMANDS = frozenset({"add", "commit", "merge", "merge-tree", "revert", "status"})
+_CONTENT_WORKTREE_COMMANDS = frozenset({"add", "remove"})
+# Config git reads from outside the repository: the installation's, the
+# server user's, and the runner's own ``-c`` overrides.
+_TRUSTED_SCOPES = frozenset({"system", "global", "command"})
+_DRIVER_KEY = re.compile(r"filter\..+\.(clean|smudge|process)|merge\..+\.driver")
 
 
 def _hardening() -> tuple[str, ...]:
@@ -68,7 +88,7 @@ def _env(extra: dict[str, str] | None = None) -> dict[str, str]:
 
 GitErrorKind = Literal[
     "invalid_ref", "invalid_path", "outside_roots", "timeout",
-    "unavailable", "failed", "conflict", "stale_ref",
+    "unavailable", "failed", "conflict", "stale_ref", "unsafe_config",
 ]
 
 
@@ -118,6 +138,30 @@ class MergeOutcome:
     conflicts: list[str]
 
 
+@dataclass(frozen=True)
+class WorktreeEntry:
+    """One entry of ``git worktree list``, as the repository itself records it.
+
+    ``branch`` is the full ref (``refs/heads/...``), or None when the worktree
+    is detached. ``prunable`` means git found the directory missing.
+    """
+
+    path: Path
+    head: str | None
+    branch: str | None
+    prunable: bool
+
+
+def _author_env(author: tuple[str, str] | None) -> dict[str, str] | None:
+    if not author:
+        return None
+    name, email = author
+    return {
+        "GIT_AUTHOR_NAME": name, "GIT_AUTHOR_EMAIL": email,
+        "GIT_COMMITTER_NAME": name, "GIT_COMMITTER_EMAIL": email,
+    }
+
+
 def check_ref_text(ref: str) -> str:
     """Refuse ref text that could be read as an option or smuggle whitespace."""
     if (
@@ -155,6 +199,13 @@ class GitRunner:
             raise GitError("invalid_path", f"Repository path is not a directory: {path}")
         self.path = path
         self.timeout = timeout
+        # Git looks for a repository in the working directory and then walks
+        # up through its parents. A directory with no .git of its own would
+        # otherwise run against whatever repository encloses it -- under the
+        # default roots, the NEXUS checkout itself. The ceiling is the parent,
+        # so git may check this directory and never climb out of it. A linked
+        # worktree still works: its .git file sits in this directory.
+        self._ceiling = path.parent.as_posix()
 
     @classmethod
     def in_roots(
@@ -173,11 +224,52 @@ class GitRunner:
     async def _run(
         self, *args: str, stdin: str | None = None, env: dict[str, str] | None = None
     ) -> GitResult:
+        if args[0] in _CONTENT_COMMANDS or (
+            args[0] == "worktree" and args[1] in _CONTENT_WORKTREE_COMMANDS
+        ):
+            await self._refuse_repository_drivers()
+        return await self._exec(*args, stdin=stdin, env=env)
+
+    async def _refuse_repository_drivers(self) -> None:
+        """Refuse when the repository's own config defines a filter or merge driver.
+
+        A driver the system or global config defines with the same command is
+        allowed: the repository adds nothing the server does not already run.
+        """
+        result = await self._exec(
+            "config", "--show-scope", "-z", "--get-regexp", r"^(filter|merge)\."
+        )
+        if result.returncode not in (0, 1):  # 1: no matching keys
+            raise GitError("failed", "git config failed", stderr=result.stderr)
+        # -z prints "scope NUL key NEWLINE value NUL" for every entry.
+        items = result.stdout.split("\0")
+        entries = [
+            (scope, *items[i + 1].partition("\n")[::2])
+            for i, scope in enumerate(items[:-1])
+            if i % 2 == 0
+        ]
+        trusted = {(key, value) for scope, key, value in entries if scope in _TRUSTED_SCOPES}
+        for scope, key, value in entries:
+            if (
+                value
+                and scope not in _TRUSTED_SCOPES
+                and _DRIVER_KEY.fullmatch(key)
+                and (key, value) not in trusted
+            ):
+                raise GitError(
+                    "unsafe_config",
+                    f"Repository config defines {key}; refusing to run a repository-defined driver",
+                )
+
+    async def _exec(
+        self, *args: str, stdin: str | None = None, env: dict[str, str] | None = None
+    ) -> GitResult:
         try:
             proc = await asyncio.create_subprocess_exec(
                 "git", *_hardening(), *args,
                 cwd=self.path,
-                env=_env(env),
+                # Set last so no caller's extra env can replace it.
+                env=_env({**(env or {}), "GIT_CEILING_DIRECTORIES": self._ceiling}),
                 stdin=asyncio.subprocess.PIPE if stdin is not None else asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
@@ -277,11 +369,78 @@ class GitRunner:
     async def status_porcelain(self) -> str:
         return await self._ok("status", "--porcelain")
 
+    async def current_branch(self) -> str | None:
+        """The full ref HEAD points at, or None when HEAD is detached."""
+        return await self.symbolic_ref("HEAD")
+
+    async def symbolic_ref(self, name: str) -> str | None:
+        """The branch ref the symbolic ref ``name`` points at, or None if it points at no branch."""
+        result = await self._run("symbolic-ref", "--quiet", check_ref_text(name))
+        ref = result.stdout.strip()
+        return ref if result.returncode == 0 and ref.startswith("refs/heads/") else None
+
+    async def set_symbolic_ref(self, name: str, branch: str) -> None:
+        """Point the symbolic ref ``name`` at branch ``branch``."""
+        await self.check_branch_name(branch)
+        await self._ok(
+            "symbolic-ref",
+            "-m",
+            "nexus: record branch",
+            check_ref_text(name),
+            f"refs/heads/{branch}",
+        )
+
+    async def detach_head(self, expected: str) -> None:
+        """Detach HEAD at ``expected``, the commit it is on now.
+
+        Only HEAD changes: no file and not the index, so the checkout stays
+        exactly what it was, now on a detached HEAD at the commit it matches.
+        Raises ``GitError("stale_ref")`` if HEAD is no longer at ``expected``.
+        """
+        oid = _check_oid(expected)
+        result = await self._run(
+            "update-ref", "--no-deref", "-m", "nexus: detach", "HEAD", oid, oid
+        )
+        if result.returncode != 0:
+            raise GitError("stale_ref", f"HEAD moved from {oid[:12]}", stderr=result.stderr)
+
+    async def common_dir(self) -> Path:
+        """The repository directory shared by all of this repository's worktrees."""
+        out = await self._ok("rev-parse", "--path-format=absolute", "--git-common-dir")
+        return Path(out.strip())
+
     # -- worktrees ---------------------------------------------------------
 
     async def add_worktree(self, path: Path, branch: str) -> None:
         await self.check_branch_name(branch)
         await self._ok("worktree", "add", "--end-of-options", _check_abs_path(path), branch)
+
+    async def list_worktrees(self) -> list[WorktreeEntry]:
+        """The worktrees this repository has registered, main checkout first.
+
+        Read from the repository's own administrative files, not from the
+        ``.git`` file inside each worktree, which whoever works there can edit.
+        """
+        out = await self._ok("worktree", "list", "--porcelain", "-z")
+        entries: list[WorktreeEntry] = []
+        fields: dict[str, str] = {}
+        # -z ends every attribute with NUL and every entry with one more.
+        for item in out.split("\0"):
+            if item:
+                key, _, value = item.partition(" ")
+                fields[key] = value
+            elif fields:
+                head = fields.get("HEAD")
+                entries.append(
+                    WorktreeEntry(
+                        path=Path(fields.get("worktree", "")),
+                        head=head if head and _OID.fullmatch(head) else None,
+                        branch=fields.get("branch"),
+                        prunable="prunable" in fields,
+                    )
+                )
+                fields = {}
+        return entries
 
     async def remove_worktree(self, path: Path, *, force: bool = False) -> None:
         flags = ("--force",) if force else ()
@@ -290,8 +449,12 @@ class GitRunner:
     async def stage_all(self) -> None:
         await self._ok("add", "--all")
 
-    async def commit(self, message: str) -> str:
-        await self._ok("commit", "--no-verify", f"--message={message}")
+    async def commit(self, message: str, *, author: tuple[str, str] | None = None) -> str:
+        """Commit the index. Signing is off, so no configured signing program runs."""
+        await self._ok(
+            "commit", "--no-verify", "--no-gpg-sign", f"--message={message}",
+            env=_author_env(author),
+        )
         return (await self._ok("rev-parse", "HEAD")).strip()
 
     async def merge(self, ref: str) -> None:
@@ -329,17 +492,10 @@ class GitRunner:
         self, tree: str, parents: list[str], message: str, *, author: tuple[str, str] | None = None
     ) -> str:
         """Write a commit object for ``tree``. No ref moves; the message goes in on stdin."""
-        args = ["commit-tree", _check_oid(tree)]
+        args = ["commit-tree", "--no-gpg-sign", _check_oid(tree)]
         for parent in parents:
             args += ["-p", _check_oid(parent)]
-        env = None
-        if author:
-            name, email = author
-            env = {
-                "GIT_AUTHOR_NAME": name, "GIT_AUTHOR_EMAIL": email,
-                "GIT_COMMITTER_NAME": name, "GIT_COMMITTER_EMAIL": email,
-            }
-        return _check_oid((await self._ok(*args, stdin=message, env=env)).strip())
+        return _check_oid((await self._ok(*args, stdin=message, env=_author_env(author))).strip())
 
     async def merge_into(
         self,

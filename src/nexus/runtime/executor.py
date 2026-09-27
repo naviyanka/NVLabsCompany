@@ -209,6 +209,14 @@ class TaskExecutor:
         """
         agent_id = session.agent_id
 
+        # A caller-named repository and a worktree made outside the worktree
+        # service must not decide where work runs; agent worktrees come from
+        # nexus.services.worktree_service and reach adapters on the session.
+        if payload and payload.get("isolate"):
+            raise ValueError(
+                "payload 'isolate' is no longer supported; use an agent worktree on the session"
+            )
+
         # 1. Check budget
         await self._check_budget(agent_id, task.company_id)
 
@@ -221,25 +229,7 @@ class TaskExecutor:
         # 3. Update task to running
         await self._update_task_status(task.id, "running")
 
-        # 4. Git Worktree Isolation (if isolation is enabled)
-        worktree_info = None
-        if payload and payload.get("isolate", False):
-            try:
-                from nexus.runtime.worktree import WorktreeManager
-                wt_mgr = WorktreeManager()
-                worktree_info = await wt_mgr.create_worktree(
-                    repo_path=payload.get("repo_path", "."),
-                    agent_id=agent_id,
-                    agent_name=payload.get("agent_name", "agent"),
-                )
-                if payload:
-                    payload["worktree_path"] = worktree_info.worktree_path
-                    payload["branch"] = worktree_info.branch
-            except Exception as wt_err:
-                # Log worktree creation warning and proceed in default workspace
-                pass
-
-        # 5. Execute with smart retry and escalation
+        # 4. Execute with smart retry and escalation
         from nexus.orchestration.smart_retry import SmartRetryWithEscalation, EscalationAction
 
         smart_retry = SmartRetryWithEscalation(
@@ -269,9 +259,9 @@ class TaskExecutor:
         if retry_result.success:
             # Extract the TaskResult from the output
             result = retry_result.final_output
-            # 6. Record cost
+            # 5. Record cost
             await self._record_cost(result, task.company_id, task)
-            # 7. Update task status
+            # 6. Update task status
             await self._update_task_status(
                 task.id, "completed", result_text=str(result.output)
             )

@@ -393,8 +393,9 @@ def default_read_policy(company_id: uuid.UUID) -> PolicyRule:
 # Command-line flags that would let a task payload give an out-of-process CLI
 # agent tools or permissions of its own choosing. A CLI agent reaches NEXUS's
 # governed tools only through the inbound MCP server (run token ->
-# guarded_call), so a payload may not attach other tool servers or switch the
-# CLI's own permission checks off.
+# guarded_call), so a payload may not attach other tool servers, switch the
+# CLI's own permission checks off, or widen the directories it may touch
+# beyond the workspace the server chose.
 _FORBIDDEN_CLI_FLAGS = (
     "--mcp-config",
     "--strict-mcp-config",
@@ -409,6 +410,11 @@ _FORBIDDEN_CLI_FLAGS = (
     "--full-auto",
     "--config",
     "-c",
+    "--settings",
+    "--add-dir",
+    "--include-directories",
+    "--cd",
+    "--sandbox",
 )
 
 

@@ -17,7 +17,20 @@ from typing import Any
 
 from nexus.adapters.base import BaseAdapter
 from nexus.adapters.cli_registry import CLIBackendInfo, CLIRegistry
+from nexus.governance.fs_roots import is_link, pinned_directory
 from nexus.runtime.adapter import AgentSession, AgentStatus, TaskResult
+
+# Create a file that must not exist yet. O_NOFOLLOW is POSIX only; O_EXCL alone
+# already refuses an existing link on every platform.
+_CREATE_NEW = (
+    os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
+)
+
+
+def _resolves_to_itself(path: Path) -> bool:
+    """True when no symlink or junction lies anywhere on ``path``."""
+    return os.path.normcase(str(path.resolve())) == os.path.normcase(str(path))
 
 
 # Default timeout for CLI execution (10 minutes)
@@ -101,45 +114,35 @@ class CLIAdapter(BaseAdapter):
         in the session for use during execution. Sets the is_interactive
         and awaiting_input flags based on config.
 
-        Supports optional git worktree isolation: if `use_worktree=True` is set
-        in the session config and the workspace is a git repo, a dedicated
-        worktree is created for the agent to work in.
+        Agent worktrees are not made here. The server sets
+        ``session.worktree_path`` after this returns when the agent session
+        holds one (see ``nexus.services.worktree_service``), and execution
+        then runs in it. The old ``use_worktree``/``auto_merge`` options,
+        which created, merged and removed worktrees in whatever repository
+        the config named, are refused rather than silently ignored.
 
         Args:
             session: The newly created session.
         """
+        for legacy in ("use_worktree", "auto_merge"):
+            if session.config.get(legacy):
+                raise ValueError(
+                    f"{legacy} is no longer supported; agent worktrees are managed by the server"
+                )
         workspace = session.config.get("workspace", None)
-        use_worktree = session.config.get("use_worktree", False)
 
-        if workspace and use_worktree:
-            # Try to create a git worktree for isolated execution
-            worktree_info = await self._try_create_worktree(
-                workspace, session.agent_id, session.config.get("agent_name", "agent")
-            )
-            if worktree_info:
-                workspace_path = worktree_info.worktree_path
-                session.metadata["_temp_workspace"] = False
-                session.metadata["_worktree"] = True
-                session.metadata["_worktree_branch"] = worktree_info.branch
-                session.metadata["_worktree_repo"] = workspace
-            else:
-                # Worktree creation failed — fall back to using workspace directly
-                workspace_path = workspace
-                os.makedirs(workspace_path, exist_ok=True)
-                session.metadata["_temp_workspace"] = False
-                session.metadata["_worktree"] = False
-        elif workspace:
+        if workspace:
+            # ponytail: a configured directory is still honoured for callers
+            # that set one; agent worktrees override it at execution.
             workspace_path = workspace
             os.makedirs(workspace_path, exist_ok=True)
             session.metadata["_temp_workspace"] = False
-            session.metadata["_worktree"] = False
         else:
             backend_id = session.config.get("backend", "cli")
             workspace_path = tempfile.mkdtemp(
                 prefix=f"nexus_cli_{backend_id}_{session.session_id[:8]}_"
             )
             session.metadata["_temp_workspace"] = True
-            session.metadata["_worktree"] = False
 
         self._workspaces[session.session_id] = workspace_path
         session.metadata["workspace"] = workspace_path
@@ -177,7 +180,16 @@ class CLIAdapter(BaseAdapter):
             return TaskResult(
                 task_id=task_id, agent_id=session.agent_id, success=False, error=refused
             )
-        workspace = self._workspaces.get(session.session_id, ".")
+        # The session's agent worktree when it has one, else the directory the
+        # session was created with. Never the server's own working directory.
+        workspace = session.worktree_path or self._workspaces.get(session.session_id)
+        if not workspace:
+            return TaskResult(
+                task_id=task_id,
+                agent_id=session.agent_id,
+                success=False,
+                error="Session has no workspace",
+            )
         backend_id = session.metadata.get("backend", "claude")
 
         backend = self._registry.get_backend(backend_id)
@@ -474,8 +486,10 @@ class CLIAdapter(BaseAdapter):
     async def _do_terminate(self, session: AgentSession) -> None:
         """Terminate the CLI subprocess and clean up workspace.
 
-        If the session used a git worktree, auto-commits any changes and
-        optionally merges back to the main branch before removing it.
+        Only a temporary workspace this adapter made is deleted. An agent
+        worktree is left alone: ending the agent session hands it to review
+        (``release_session_worktree``); nothing here commits, merges or
+        removes it.
 
         Args:
             session: The session being terminated.
@@ -494,102 +508,11 @@ class CLIAdapter(BaseAdapter):
 
         self._conversation_history.pop(session.session_id, None)
 
-        # Handle worktree cleanup with auto-commit/merge
         workspace_path = self._workspaces.pop(session.session_id, None)
-        if workspace_path and session.metadata.get("_worktree", False):
-            await self._cleanup_worktree(session, workspace_path)
-        elif workspace_path and session.metadata.get("_temp_workspace", False):
+        if workspace_path and session.metadata.get("_temp_workspace", False):
             try:
                 shutil.rmtree(workspace_path, ignore_errors=True)
             except OSError:
-                pass
-
-    async def _try_create_worktree(
-        self, repo_path: str, agent_id: uuid.UUID, agent_name: str
-    ) -> "WorktreeInfo | None":
-        """Attempt to create a git worktree for the agent.
-
-        Returns WorktreeInfo on success, None if the workspace isn't a git repo
-        or worktree creation fails.
-        """
-        from nexus.runtime.worktree import WorktreeManager
-
-        # Verify it's a git repo
-        git_dir = Path(repo_path) / ".git"
-        if not git_dir.exists():
-            return None
-
-        try:
-            manager = WorktreeManager()
-            info = await manager.create_worktree(repo_path, agent_id, agent_name)
-            self._add_log(
-                str(agent_id)[:8],
-                f"Created worktree at {info.worktree_path} (branch: {info.branch})",
-            )
-            return info
-        except Exception as e:
-            self._add_log(
-                str(agent_id)[:8],
-                f"Worktree creation failed, using workspace directly: {e}",
-            )
-            return None
-
-    async def _cleanup_worktree(self, session: AgentSession, workspace_path: str) -> None:
-        """Auto-commit changes in a worktree, merge to main, and remove it.
-
-        Flow:
-        1. Check for pending changes in the worktree
-        2. If changes exist, auto-commit them
-        3. Attempt to merge the worktree branch into main
-        4. Remove the worktree and delete the branch
-        """
-        from nexus.runtime.worktree import WorktreeManager
-
-        branch = session.metadata.get("_worktree_branch", "")
-        repo_path = session.metadata.get("_worktree_repo", "")
-        if not branch or not repo_path:
-            return
-
-        manager = WorktreeManager()
-        auto_merge = session.config.get("auto_merge", False)
-
-        try:
-            # Auto-commit any pending changes
-            has_changes = await manager.has_pending_changes(repo_path, workspace_path)
-            if has_changes:
-                agent_name = session.config.get("agent_name", "agent")
-                commit_msg = f"[{agent_name}] Auto-commit from agent execution"
-                await manager.commit_all(workspace_path, commit_msg)
-                self._add_log(
-                    session.session_id,
-                    f"Auto-committed changes in worktree ({branch})",
-                )
-
-                # Attempt merge back to main if configured
-                if auto_merge:
-                    result = await manager.merge_worktree(repo_path, workspace_path, branch)
-                    if result.success:
-                        self._add_log(
-                            session.session_id,
-                            f"Merged {branch} into main (commit: {result.merge_commit})",
-                        )
-                    else:
-                        self._add_log(
-                            session.session_id,
-                            f"Merge conflicts in {branch}: {result.conflicts}. Manual resolution needed.",
-                        )
-
-            # Remove the worktree and branch
-            await manager.remove_worktree(workspace_path, branch, repo_path)
-        except Exception as e:
-            self._add_log(
-                session.session_id,
-                f"Worktree cleanup error: {e}",
-            )
-            # Best-effort: try to remove the worktree even if other steps failed
-            try:
-                await manager.remove_worktree(workspace_path, branch, repo_path)
-            except Exception:
                 pass
 
     def _get_capabilities(self) -> list[str]:
@@ -647,17 +570,30 @@ class CLIAdapter(BaseAdapter):
         prompt to that path in the workspace so the CLI picks it up natively.
 
         Returns the absolute path of the written file (for cleanup), or None if skipped.
+
+        The workspace can be an agent's worktree, which the agent may have
+        filled with symlinks or junctions. No directory on the way to the file
+        may be a link, the file is only ever created, never opened if it is
+        already there (a dangling link included), and on Windows the directory
+        is held open between that check and the write. A link means the file is
+        skipped, not written through it.
         """
         if not backend.instruction_path:
             return None
 
-        instruction_path = Path(workspace) / backend.instruction_path
+        root = Path(workspace).resolve()
+        instruction_path = root / backend.instruction_path
         try:
-            # Create parent directories if needed
-            instruction_path.parent.mkdir(parents=True, exist_ok=True)
+            # Create parent directories one at a time, refusing any that is a link
+            parent = root
+            for part in Path(backend.instruction_path).parent.parts:
+                parent = parent / part
+                if is_link(parent):
+                    raise OSError(f"{parent} is a link")
+                parent.mkdir(exist_ok=True)
 
             # Don't overwrite existing instruction files the user has set up
-            if instruction_path.exists():
+            if os.path.lexists(instruction_path):
                 self._add_log(
                     session.session_id,
                     f"Instruction file already exists at {instruction_path}, skipping write",
@@ -670,7 +606,14 @@ class CLIAdapter(BaseAdapter):
                 f"# {agent_name} — System Instructions\n\n"
                 f"{system_prompt}\n"
             )
-            instruction_path.write_text(content, encoding="utf-8")
+            with pinned_directory(parent):
+                if not _resolves_to_itself(parent):
+                    raise OSError(f"{parent} is reached through a link")
+                # O_EXCL fails on any existing name, a link included, so a
+                # link planted since the check is never followed.
+                fd = os.open(instruction_path, _CREATE_NEW, 0o644)
+                with os.fdopen(fd, "w", encoding="utf-8") as f:
+                    f.write(content)
             self._add_log(
                 session.session_id,
                 f"Wrote instruction file: {instruction_path}",
@@ -684,15 +627,22 @@ class CLIAdapter(BaseAdapter):
             return None
 
     def _cleanup_instruction_file(self, path: str) -> None:
-        """Remove a temporary instruction file created for a CLI execution."""
+        """Remove a temporary instruction file created for a CLI execution.
+
+        The CLI ran in the workspace in between. If the file or any directory
+        above it is now a link, nothing is removed, so cleanup cannot delete
+        a file the link points to.
+        """
         try:
             file_path = Path(path)
-            if file_path.exists():
+            parent = file_path.parent
+            with pinned_directory(parent):
+                if not _resolves_to_itself(parent) or is_link(file_path) or not file_path.is_file():
+                    return
                 file_path.unlink()
-                # Remove parent dir if it's empty and was created by us
-                parent = file_path.parent
-                if parent.exists() and not any(parent.iterdir()):
-                    parent.rmdir()
+            # Remove parent dir if it's empty and was created by us
+            if not any(parent.iterdir()):
+                parent.rmdir()
         except OSError:
             pass  # Best effort cleanup
 

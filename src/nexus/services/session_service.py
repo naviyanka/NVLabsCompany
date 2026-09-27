@@ -220,8 +220,10 @@ async def get_or_create_default_session(db: AsyncSession, agent: Agent) -> Agent
     await db.flush()
     if existing is not None:
         from nexus.governance.audit_service import record_audit
+        from nexus.services.worktree_service import release_session_worktree
 
         transition(existing, "completed")
+        await release_session_worktree(db, existing)
         await record_audit(
             agent.company_id,
             "session.rolled_over",

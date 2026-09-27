@@ -58,6 +58,7 @@ from nexus.services.session_service import (
     session_pin,
     transition,
 )
+from nexus.services.worktree_service import release_session_worktree
 
 router = APIRouter(tags=["sessions"])
 
@@ -267,6 +268,7 @@ async def update_session(
     changes = body.model_dump(exclude_unset=True)
     if "status" in changes:
         transition(record, changes["status"])
+        await release_session_worktree(db, record)
     if "title" in changes:
         record.title = changes["title"]
     await db.flush()
@@ -283,6 +285,7 @@ async def terminate_session(
 ) -> SessionOut:
     record = await _get_session(db, session_id, company_id)
     transition(record, "terminated")
+    await release_session_worktree(db, record)
     await db.flush()
     await _audit(db, company_id, "session.terminated", record)
     await _publish(db, "session.terminated", record)

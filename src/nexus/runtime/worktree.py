@@ -6,6 +6,11 @@ preventing file conflicts during parallel operations.
 
 Supports creation, merging, syncing, change detection, removal, and revert
 operations. Every git call goes through ``nexus.runtime.git_runner``.
+
+Deprecated: no server path uses this module. Agent worktrees are owned by
+``nexus.services.worktree_service.WorktreeService`` (tenant-scoped, audited,
+approval-gated). It is kept only for its existing tests and the public
+``nexus.runtime`` export; do not add new callers.
 """
 
 import re

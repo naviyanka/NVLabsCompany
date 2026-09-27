@@ -23,6 +23,7 @@ from nexus.api.routes.connections import router as connections_router
 from nexus.api.routes.chat import router as chat_router
 from nexus.api.routes.mcp_bindings import router as mcp_bindings_router
 from nexus.api.routes.sessions import router as sessions_router
+from nexus.api.routes.worktrees import router as worktrees_router
 from nexus.api.routes.communication import router as communication_router
 from nexus.api.routes.companies import router as companies_router
 from nexus.api.routes.company_sim import router as company_sim_router
@@ -522,6 +523,7 @@ app.include_router(hiring_router)
 app.include_router(chat_router)
 app.include_router(sessions_router)
 app.include_router(mcp_bindings_router)
+app.include_router(worktrees_router)
 app.include_router(plaza_router)
 app.include_router(workspaces_router)
 app.include_router(nodes_router)

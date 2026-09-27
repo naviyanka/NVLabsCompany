@@ -206,11 +206,10 @@ async def hire_from_manifest(
         team_id=body.team_id,
         manager_id=body.manager_id,
         adapter_type=adapter_type,
-        adapter_config={
-            "command_flags": manifest.command_flags,
-            "isolate": manifest.isolate,
-        }
-        if manifest.command_flags or manifest.isolate
+        # ``isolate`` stays readable in manifests but is not stored: worktrees
+        # come only from WorktreeService, never from agent config.
+        adapter_config={"command_flags": manifest.command_flags}
+        if manifest.command_flags
         else None,
         model=manifest.model,
         capabilities=manifest.capabilities or None,

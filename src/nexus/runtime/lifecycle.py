@@ -12,6 +12,9 @@ from nexus.runtime.adapter import AgentAdapter, AgentSession, AgentStatus
 from nexus.tools.context import ExecutionContext
 
 
+# Adapter config keys that pick a directory or git behaviour on the server.
+_SERVER_CHOSEN_KEYS = frozenset({"workspace", "use_worktree", "auto_merge", "repo_path"})
+
 # Valid state transitions
 _VALID_TRANSITIONS: dict[str, set[str]] = {
     "idle": {"configuring", "ready", "terminated"},
@@ -148,10 +151,13 @@ class AgentLifecycleManager:
         if agent.status not in ("idle", "ready", "paused"):
             self._validate_transition(agent_id, agent.status, "ready")
 
-        session = await self._adapter.create_session(
-            agent_id=agent_id,
-            config=agent.adapter_config or {},
-        )
+        # adapter_config is writable through the agents API, so it may not
+        # choose where the agent runs: the workspace is the server's (a
+        # WorktreeService worktree or a fresh temporary directory).
+        config = {
+            k: v for k, v in (agent.adapter_config or {}).items() if k not in _SERVER_CHOSEN_KEYS
+        }
+        session = await self._adapter.create_session(agent_id=agent_id, config=config)
         # Lifecycle work is autonomous: the agent acts as itself, in its own company.
         session.context = ExecutionContext.for_agent(agent, source="lifecycle")
         self._sessions[agent_id] = session

@@ -289,6 +289,118 @@ async def test_inherited_git_environment_is_ignored(repo: Path, tmp_path: Path, 
     assert await GitRunner(repo).resolve_commit("HEAD") != other_head
 
 
+# -- repository discovery ----------------------------------------------------
+#
+# Git searches the working directory and then its parents for a repository.
+# The runner caps that search at the repository path, so a directory that is
+# not a repository never runs against one that encloses it.
+
+
+def init_repo(path: Path, message: str) -> str:
+    path.mkdir(parents=True)
+    git(path, "init", "-q", "-b", "main")
+    git(path, "config", "user.name", "Test")
+    git(path, "config", "user.email", "test@example.com")
+    git(path, "config", "core.autocrlf", "false")
+    return commit_file(path, "f.txt", f"{message}\n", message)
+
+
+@pytest.fixture
+def enclosing(tmp_path: Path) -> tuple[Path, str]:
+    """A repository standing in for the NEXUS checkout that encloses the roots."""
+    outer = tmp_path / "outer"
+    return outer, init_repo(outer, "outer")
+
+
+async def test_valid_repository_still_resolves_refs(repo: Path) -> None:
+    runner = GitRunner(repo)
+    assert await runner.resolve_commit("HEAD") == head(repo)
+    assert await runner.resolve_commit("main~1") == head(repo, "main~1")
+
+
+async def test_nested_repository_resolves_its_own_refs(enclosing) -> None:
+    outer, outer_head = enclosing
+    inner = outer / "data" / "repos" / "inner"
+    inner_head = init_repo(inner, "inner")
+
+    runner = GitRunner(inner)
+    assert await runner.resolve_commit("HEAD") == inner_head != outer_head
+    assert "inner" in await runner.log(5, "%s")
+
+
+async def test_linked_worktree_still_works(repo: Path, tmp_path: Path) -> None:
+    runner = GitRunner(repo)
+    await runner.create_branch("agent/ceiling")
+    wt = tmp_path / "worktrees" / "ceiling"
+    await runner.add_worktree(wt, "agent/ceiling")
+    assert await GitRunner(wt).resolve_commit("HEAD") == head(repo)
+
+
+async def test_directory_without_git_does_not_resolve_the_parent_repository(enclosing) -> None:
+    outer, outer_head = enclosing
+    plain = outer / "data" / "repos" / "plain"
+    plain.mkdir(parents=True)
+
+    # Control: plain git in the directory walks up and finds the outer repository.
+    assert git(plain, "rev-parse", "HEAD") == outer_head
+    with pytest.raises(GitError):
+        await GitRunner(plain).resolve_commit("HEAD")
+
+
+async def test_in_roots_directory_without_git_does_not_resolve_the_parent(enclosing) -> None:
+    outer, _ = enclosing
+    company = uuid.uuid4()
+    (outer / "repos" / str(company) / "plain").mkdir(parents=True)
+    roots = f"{outer.as_posix()}/repos/{{company_id}}"
+
+    runner = GitRunner.in_roots(str(outer / "repos" / str(company) / "plain"), roots, company)
+    with pytest.raises(GitError):
+        await runner.resolve_commit("HEAD")
+
+
+async def test_diff_commit_and_log_do_not_escape_into_the_parent(enclosing) -> None:
+    outer, outer_head = enclosing
+    plain = outer / "plain"
+    plain.mkdir()
+    (plain / "new.txt").write_text("agent output\n")
+    runner = GitRunner(plain)
+
+    with pytest.raises(GitError):
+        await runner.stage_all()
+    with pytest.raises(GitError):
+        await runner.commit("escaped")
+    with pytest.raises(GitError):
+        await runner.log(5, "%H")
+    with pytest.raises(GitError):
+        await runner.status_porcelain()
+    with pytest.raises(GitError):
+        await runner.diff(outer_head, outer_head)
+    with pytest.raises(GitError):
+        await runner.create_branch("escaped")
+
+    assert head(outer) == outer_head
+    assert git(outer, "diff", "--cached", "--name-only") == ""
+    assert git(outer, "branch", "--list", "escaped") == ""
+
+
+async def test_ceiling_cannot_be_overridden_by_extra_env(enclosing) -> None:
+    outer, _ = enclosing
+    plain = outer / "plain"
+    plain.mkdir()
+    result = await GitRunner(plain)._run("rev-parse", "HEAD", env={"GIT_CEILING_DIRECTORIES": ""})
+    assert result.returncode != 0
+
+
+async def test_without_the_ceiling_the_parent_is_used(enclosing) -> None:
+    """Mutation: drop the ceiling and the runner resolves the enclosing repository."""
+    outer, outer_head = enclosing
+    plain = outer / "plain"
+    plain.mkdir()
+    runner = GitRunner(plain)
+    runner._ceiling = ""
+    assert await runner.resolve_commit("HEAD") == outer_head
+
+
 # -- structured results ----------------------------------------------------
 
 
