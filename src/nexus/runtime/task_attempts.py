@@ -2079,11 +2079,7 @@ class TaskAttemptWorker:
         if effect.status == "done":
             result = effect.result or {}
         else:
-            renewal = asyncio.ensure_future(self._keep_lease(attempt))
-            try:
-                result = await verify(attempt, spec, turn, worktree)
-            finally:
-                renewal.cancel()
+            result = await self._leased(attempt, verify(attempt, spec, turn, worktree))
             await _effect_done(effect, result)
         record, report = result["record"], result.get("report")
         if report is not None:
@@ -2113,11 +2109,16 @@ class TaskAttemptWorker:
         }
         await _finish(attempt, me, record["outcome"], record["completion_reason"], **values)
 
-    async def _keep_lease(self, attempt: TaskAttempt) -> None:
+    async def _leased(self, attempt: TaskAttempt, work: Any) -> Any:
+        """Await ``work``, renewing the attempt's lease each time a third of it passes."""
         interval = max(0.5, _settings().task_attempt_lease_seconds / 3)
-        while True:
-            await asyncio.sleep(interval)
-            await _safe_renew(attempt, self.worker_id)
+        task = asyncio.ensure_future(work)
+        try:
+            while not (await asyncio.wait({task}, timeout=interval))[0]:
+                await _safe_renew(attempt, self.worker_id)
+            return task.result()
+        finally:
+            task.cancel()
 
 
 _workers: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, TaskAttemptWorker] = (
