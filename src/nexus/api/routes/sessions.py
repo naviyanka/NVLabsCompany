@@ -553,7 +553,8 @@ async def send_message(
     except (TenantSaturated, GlobalSaturated) as exc:
         raise chat._chat_saturated(exc) from exc
     await chat._record_chat_audit(
-        db, company_id, agent.id, body.prompt, text, model_used, tokens_used, record.id
+        db, company_id, agent.id, body.prompt, text, model_used, tokens_used, record.id,
+        execution_id=execution.get("execution_id"),
     )
     await _publish(db, "session.message", record, seq=reply.seq if reply else None)
     return {

@@ -30,6 +30,7 @@ from nexus.governance.bulkhead import TenantBulkhead
 from nexus.models.agent import Agent
 from nexus.models.chat import ChatMessage
 from nexus.models.company import Company
+from nexus.models.governance import AuditLog
 
 pytestmark = pytest.mark.core_employee
 
@@ -176,6 +177,15 @@ async def test_two_employees_chat_at_the_same_time(world):
         ("user", "now"), ("agent", agy_body["message"]["text"])]
     assert [m[:2] for m in await _messages(world, world["claude"])] == [
         ("user", "wait"), ("agent", claude_body["message"]["text"])]
+    # The audit trail ties each turn to its agent, session and execution.
+    async with world["factory"]() as db:
+        audits = (await db.execute(
+            select(AuditLog).where(AuditLog.action.like("chat.%"))
+        )).scalars().all()
+    by_exec = {(a.details["execution_id"], a.action) for a in audits}
+    for body in (agy_body, claude_body):
+        assert {(body["execution_id"], "chat.message_sent"),
+                (body["execution_id"], "chat.response_generated")} <= by_exec
 
 
 async def test_stream_and_plain_chat_overlap(world):

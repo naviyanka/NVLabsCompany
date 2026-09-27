@@ -1308,6 +1308,7 @@ async def _record_chat_audit(
     model_used: str,
     tokens_used: int,
     session_id: uuid.UUID,
+    execution_id: str | None = None,
 ) -> None:
     """Audit both sides of a turn and record its spend on the in-process tracker."""
     from nexus.governance.audit_service import record_audit
@@ -1315,14 +1316,16 @@ async def _record_chat_audit(
     await record_audit(
         company_id, "chat.message_sent",
         actor_type="user", resource_type="agent", resource_id=str(agent_id),
-        details={"prompt_preview": prompt[:100], "model": model_used, "tokens": tokens_used, "session_id": str(session_id)},
+        details={"prompt_preview": prompt[:100], "model": model_used, "tokens": tokens_used, "session_id": str(session_id),
+                 "execution_id": execution_id},
         db=db,
     )
     await record_audit(
         company_id, "chat.response_generated",
         actor_type="agent", actor_id=str(agent_id),
         resource_type="chat",
-        details={"model": model_used, "tokens": tokens_used, "response_preview": response_text[:100], "session_id": str(session_id)},
+        details={"model": model_used, "tokens": tokens_used, "response_preview": response_text[:100], "session_id": str(session_id),
+                 "execution_id": execution_id},
         db=db,
     )
 
@@ -1615,7 +1618,8 @@ async def chat_with_agent(
     except (TenantSaturated, GlobalSaturated) as exc:
         raise _chat_saturated(exc) from exc
 
-    await _record_chat_audit(db, company_id, agent_id, body.prompt, response_text, model_used, tokens_used, session.id)
+    await _record_chat_audit(db, company_id, agent_id, body.prompt, response_text, model_used, tokens_used, session.id,
+                             execution_id=execution.get("execution_id"))
 
     return ChatResponse(
         message=ChatMessage(**agent_msg),
