@@ -2,10 +2,11 @@
 
 Snapshot: 2026-09-27, `main` after `1f4a494`.
 
-Before this phase the full backend suite had exactly **14** failing tests. They
-reproduce on a clean checkout and predate the employee chat work. One of them
-(the bulkhead test) sits on the chat concurrency path and was fixed in this
-phase. The other 13 are still failing and are listed below with the next action.
+Before the employee chat phase the full backend suite had exactly **14**
+failing tests. They reproduced on a clean checkout and predate the employee chat
+work. The bulkhead test (row 1) was fixed in the employee chat phase. The other
+13 were fixed in the employee runtime durability phase. **The baseline is now
+zero failures.** Each row keeps its root cause and fix below for the record.
 
 Full-suite command (from `.github/workflows/test.yml`):
 
@@ -14,33 +15,35 @@ DATABASE_URL=sqlite+aiosqlite:///./test.db AUTH_ENABLED=false \
   python -m pytest tests/ --ignore=tests/test_postgres_integration.py -q
 ```
 
-Every phase should compare the exact `FAILED` node IDs against this list. A new
-ID is a regression. A missing ID means someone fixed it, so update this file.
+Any `FAILED` line in that run is a regression. If a failure is ever accepted
+into the baseline again, list its node ID, root cause and owner here.
 
 ## Summary
 
 | # | Test | Subsystem | First failing commit | Employee/CLI related | Status |
 |---|------|-----------|----------------------|----------------------|--------|
 | 1 | `tests/test_bulkhead.py::test_tenant_bulkhead_enforces_global_cap` | governance / bulkhead (used by chat concurrency) | `ef0fe16` (2026-09-09, WP-19d) | Yes | **Fixed in this phase** |
-| 2 | `tests/test_completion_reasons.py::test_goal_reason_on_successful_subtask` | runtime / orchestrator | `ef0fe16` | No | Fix later |
-| 3 | `tests/test_completion_reasons.py::test_no_tool_calls_reason_on_empty_output` | runtime / orchestrator | `ef0fe16` | No | Fix later |
-| 4 | `tests/test_completion_reasons.py::test_timeout_reason_when_llm_exceeds_budget` | runtime / orchestrator | `ef0fe16` | No | Fix later |
-| 5 | `tests/test_completion_reasons.py::test_budget_exhausted_reason_blocks_before_the_call` | runtime / orchestrator | `ef0fe16` | No | Fix later |
-| 6 | `tests/test_completion_reasons.py::test_needs_help_reason_when_agent_escalates` | runtime / orchestrator | `ef0fe16` | No | Fix later |
-| 7 | `tests/test_completion_reasons.py::test_error_reason_on_unhandled_failure` | runtime / orchestrator | `ef0fe16` | No | Fix later |
-| 8 | `tests/test_completion_reasons.py::test_max_iterations_reason_when_tick_budget_runs_out` | runtime / orchestrator | `ef0fe16` | No | Fix later |
-| 9 | `tests/test_durable_checkpoint_recovery.py::TestOrchestratorResumptionAndAuditTrail::test_execute_subtasks_resumes_from_checkpoint_and_emits_audit` | runtime / orchestrator | `ef0fe16` | No | Fix later |
-| 10 | `tests/test_orchestrator_recovery.py::TestSubtaskClaim::test_crash_mid_execution_leaves_the_task_claimed` | runtime / orchestrator | `ef0fe16` | No | Fix later |
-| 11 | `tests/test_orchestrator_recovery.py::TestSubtaskClaim::test_successful_execution_still_ends_terminal` | runtime / orchestrator | `ef0fe16` | No | Fix later |
-| 12 | `tests/test_pgvector_search.py::test_search_pushes_distance_into_sql` | knowledge / RAG | `6814424` (2026-09-09, WP-7..14) | No | Fix later |
-| 13 | `tests/test_scheduler_persistence.py::TestCronTriggerSurvivesRestart::test_due_trigger_fires_on_a_fresh_scheduler_tick` | runtime / scheduler | `ef0fe16` | No | Fix later |
-| 14 | `tests/test_scheduler_persistence.py::TestCronTriggerSurvivesRestart::test_one_shot_trigger_deactivates_after_firing` | runtime / scheduler | `ef0fe16` | No | Fix later |
+| 2 | `tests/test_completion_reasons.py::test_goal_reason_on_successful_subtask` | runtime / orchestrator | `ef0fe16` | No | **Fixed** (durability phase) |
+| 3 | `tests/test_completion_reasons.py::test_no_tool_calls_reason_on_empty_output` | runtime / orchestrator | `ef0fe16` | No | **Fixed** (durability phase) |
+| 4 | `tests/test_completion_reasons.py::test_timeout_reason_when_llm_exceeds_budget` | runtime / orchestrator | `ef0fe16` | No | **Fixed** (durability phase) |
+| 5 | `tests/test_completion_reasons.py::test_budget_exhausted_reason_blocks_before_the_call` | runtime / orchestrator | `ef0fe16` | No | **Fixed** (durability phase) |
+| 6 | `tests/test_completion_reasons.py::test_needs_help_reason_when_agent_escalates` | runtime / orchestrator | `ef0fe16` | No | **Fixed** (durability phase) |
+| 7 | `tests/test_completion_reasons.py::test_error_reason_on_unhandled_failure` | runtime / orchestrator | `ef0fe16` | No | **Fixed** (durability phase) |
+| 8 | `tests/test_completion_reasons.py::test_max_iterations_reason_when_tick_budget_runs_out` | runtime / orchestrator | `ef0fe16` | No | **Fixed** (durability phase) |
+| 9 | `tests/test_durable_checkpoint_recovery.py::TestOrchestratorResumptionAndAuditTrail::test_execute_subtasks_resumes_from_checkpoint_and_emits_audit` | runtime / orchestrator | `ef0fe16` | No | **Fixed** (durability phase) |
+| 10 | `tests/test_orchestrator_recovery.py::TestSubtaskClaim::test_crash_mid_execution_leaves_the_task_claimed` | runtime / orchestrator | `ef0fe16` | No | **Fixed** (durability phase) |
+| 11 | `tests/test_orchestrator_recovery.py::TestSubtaskClaim::test_successful_execution_still_ends_terminal` | runtime / orchestrator | `ef0fe16` | No | **Fixed** (durability phase) |
+| 12 | `tests/test_pgvector_search.py::test_search_pushes_distance_into_sql` | knowledge / RAG | `6814424` (2026-09-09, WP-7..14) | No | **Fixed** (durability phase) |
+| 13 | `tests/test_scheduler_persistence.py::TestCronTriggerSurvivesRestart::test_due_trigger_fires_on_a_fresh_scheduler_tick` | runtime / scheduler | `ef0fe16` | No | **Fixed** (durability phase) |
+| 14 | `tests/test_scheduler_persistence.py::TestCronTriggerSurvivesRestart::test_one_shot_trigger_deactivates_after_firing` | runtime / scheduler | `ef0fe16` | No | **Fixed** (durability phase) |
 
-None of these was marked `skip` or `xfail`, and none was deleted.
+None of these was marked `skip` or `xfail`, none was deleted, and no assertion
+was weakened. All 13 were stale tests: the production code was right, and each
+test still assumed an interface that WP-7..WP-19 had changed.
 
-Final full run at the end of this phase (after `58320f1` and the test-profile
-changes): **13 failed, 5,047 passed, 8 skipped** in 13 min 25 s. The 13 failing IDs
-are exactly rows 2 to 14 above. There are no new failures.
+Final full run at the end of the employee chat phase (after `58320f1`):
+**13 failed, 5,047 passed, 8 skipped**, exactly rows 2 to 14. After the
+durability phase, the five files that held them pass together (61 tests).
 
 ## Details
 
@@ -63,10 +66,20 @@ are exactly rows 2 to 14 above. There are no new failures.
   to `(tasks, company_id)`. Each subtask now opens its own tenant-scoped
   session instead of sharing the caller's `db`. These tests still call
   `_execute_subtasks(db, tasks, company_id)`.
-- **Next action:** drop the `db` argument in the calls and monkeypatch
-  `nexus.database.async_session_factory` (or the orchestrator's session
-  factory) to the test's `session_factory`, so the per-task sessions see the
-  test database. This is a test-only change. Owner: runtime.
+- **Fix (test-only):** the calls drop the `db` argument.
+  - `test_orchestrator_recovery.py` and `test_durable_checkpoint_recovery.py`
+    monkeypatch `nexus.database.async_session_factory` to the test factory, so
+    each per-task tenant session sees the test database.
+  - `test_completion_reasons.py` patches `nexus.database.tenant_session` with a
+    fake that serves the task and agent rows by ID. It also asserts that every
+    subtask opens exactly one session for its own company, and that the task
+    past `MAX_ITERATIONS_PER_GOAL` opens none.
+  - The crash test used `KeyboardInterrupt` to stand for a killed process.
+    Raised inside a subtask that `asyncio.gather` runs, a `KeyboardInterrupt`
+    escapes the event loop and aborts the whole pytest run. The test now raises
+    a private `BaseException` subclass that nothing in the orchestrator catches.
+    It asserts the same outcome: the task stays `in_progress` with `started_at`
+    set, so recovery can reclaim it.
 
 ### 12. pgvector distance pushdown
 
@@ -75,9 +88,12 @@ are exactly rows 2 to 14 above. There are no new failures.
   query (`all_chunks = list(result.all())`) and expects chunk rows.
   `FakePGSession` in the test returns `(chunk, distance)` tuples for every
   query, so the BM25 path receives tuples.
-- **Next action:** make the fake session answer the vector query and the
-  chunk-listing query differently, or patch the BM25 channel off for this
-  SQL-shape test. Owner: knowledge.
+- **Fix (test-only):** `FakePGSession` now answers like Postgres. The
+  two-column vector query gets `(chunk, distance)` pairs, and the BM25 corpus
+  query gets bare chunks. The SQL-shape assertions (`<=>`, `ORDER BY`, `LIMIT`)
+  now check the first statement, which is the vector query, instead of the last
+  statement compiled. The test needs no real Postgres, so it keeps running in
+  the normal suite.
 
 ### 13–14. Cron trigger survives restart
 
@@ -86,8 +102,11 @@ are exactly rows 2 to 14 above. There are no new failures.
   through `system_session(...)`, which uses the global system session factory.
   It ignores the `session_factory` the test passes in, so it queries a database
   that has no tables.
-- **Next action:** monkeypatch `nexus.database.async_session_factory` and
-  `_system_session_factory` to the test's factory. Owner: runtime.
+- **Fix (test-only):** an autouse fixture on `TestCronTriggerSurvivesRestart`
+  monkeypatches `nexus.database.async_session_factory` and
+  `_system_session_factory` to the test factory. `_tick` keeps its production
+  path: it discovers triggers in `system_session` and fires them in
+  `tenant_session`. `tests/test_scheduler_persistence.py` passes 25/25.
 
 ## Order-dependent failure found and fixed in this phase
 
