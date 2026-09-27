@@ -5,12 +5,16 @@
  * ID) before they start and report back by that captured key, so a reply can
  * never land in whichever chat happens to be on screen. Which conversation is
  * selected, and whether the dock is visible, only controls what is shown.
+ *
+ * Each request is a durable server turn. Closing or refreshing the page only
+ * disconnects: on load the manager asks for the conversation's unfinished
+ * turns and re-attaches to them. Cancel is a server call, not a disconnect.
  */
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useRef, type ReactNode } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '@/api/client';
-import { chatStreamPath, streamChat, type ChatReply } from '@/api/chatStream';
+import { attachTurn, cancelTurn, ChatStreamError, chatStreamPath, streamChat, type ChatReply, type StreamHandlers, type TurnInfo } from '@/api/chatStream';
 import { getActiveCompanyId } from '@/config';
 import type { Agent } from '@/types/agent';
 
@@ -32,9 +36,11 @@ export interface PendingRequest {
   requestId: string;
   prompt: string;
   startedAt: string;
-  /** sending: not yet accepted by the server; waiting: the employee is working. */
-  phase: 'sending' | 'waiting';
+  /** sending: not yet accepted; queued: stored, waiting for its slot; waiting: the employee is working. */
+  phase: 'sending' | 'queued' | 'waiting';
   partial: string;
+  /** The server turn, once the server has stored the prompt. */
+  turn?: TurnInfo;
 }
 
 export interface Conversation {
@@ -69,6 +75,8 @@ export type ChatAction =
   | { type: 'SET_DRAFT'; key: string; draft: string }
   | { type: 'REQUEST_STARTED'; key: string; requestId: string; prompt: string; at: string }
   | { type: 'REQUEST_PROGRESS'; key: string; requestId: string; chunk?: string }
+  | { type: 'REQUEST_ATTACHED'; key: string; requestId: string; turn: TurnInfo }
+  | { type: 'REQUEST_RESUMED'; key: string; turn: TurnInfo; prompt: string; at: string }
   | { type: 'REQUEST_COMPLETED'; key: string; requestId: string; reply: ChatReply; at: string }
   | { type: 'REQUEST_FAILED'; key: string; requestId: string; message: string; cancelled: boolean; at: string }
   | { type: 'MARK_READ'; key: string }
@@ -172,10 +180,42 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
           r.requestId === action.requestId ? { ...r, phase: 'waiting', partial: r.partial + (action.chunk ?? '') } : r,
         ),
       }));
+    case 'REQUEST_ATTACHED': {
+      const { turn } = action;
+      const phase = turn.status === 'queued' ? 'queued' : 'waiting';
+      const localId = `local-${action.requestId}`;
+      return update(state, action.key, (c) => ({
+        pendingRequests: c.pendingRequests.map((r) => (r.requestId === action.requestId ? { ...r, turn, phase } : r)),
+        // The prompt now has its server ID, so a history reload merges instead of duplicating it.
+        messages: turn.prompt_message_id
+          ? c.messages.map((m) => (m.id === localId ? { ...m, id: turn.prompt_message_id! } : m))
+          : c.messages,
+      }));
+    }
+    case 'REQUEST_RESUMED':
+      return update(state, action.key, (c) =>
+        c.pendingRequests.some((r) => r.turn?.turn_id === action.turn.turn_id)
+          ? {}
+          : {
+              pendingRequests: [
+                ...c.pendingRequests,
+                {
+                  requestId: action.turn.turn_id,
+                  prompt: action.prompt,
+                  startedAt: action.at,
+                  phase: action.turn.status === 'queued' ? 'queued' : 'waiting',
+                  partial: '',
+                  turn: action.turn,
+                },
+              ],
+            },
+      );
     case 'REQUEST_COMPLETED': {
       const { reply } = action;
       return settle(state, action.key, action.requestId, (c) => ({
-        messages: [...c.messages, { ...reply.message, via: executionLabel(reply) }],
+        messages: c.messages.some((m) => m.id === reply.message.id)
+          ? c.messages
+          : [...c.messages, { ...reply.message, via: executionLabel(reply) }],
         lastOutcome: 'completed',
         lastActivityAt: action.at,
         adapterUsed: reply.adapter_used ?? c.adapterUsed,
@@ -251,15 +291,18 @@ export interface ChatManager {
   open: (agent: ChatAgent, sessionId?: string | null) => string;
   /** Register a conversation without showing it in the dock. */
   ensure: (agent: ChatAgent, sessionId: string | null) => string;
-  /** Returns false when this conversation already has a request in flight. */
-  /** Fetch an agent chat's server transcript once. */
+  /** Fetch the server transcript and unfinished turns once, and re-attach to those turns. */
   loadHistory: (key: string) => void;
+  /** Returns false when this conversation already has a request in flight. */
   send: (key: string, prompt: string) => boolean;
   cancel: (requestId: string) => void;
   retry: (key: string) => void;
 }
 
 const ChatManagerContext = createContext<ChatManager | null>(null);
+
+/** A transcript row as the server sends it, with the labels of the run that wrote it. */
+type ServerMessage = ChatMessage & { adapter_used?: string | null; backend_used?: string | null; model_used?: string | null };
 
 let requestSeq = 0;
 function newRequestId(): string {
@@ -271,6 +314,16 @@ export function ChatManagerProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(chatReducer, undefined, restore);
   const queryClient = useQueryClient();
   const controllers = useRef(new Map<string, AbortController>());
+  const turns = useRef(new Map<string, TurnInfo>());
+  const cancelling = useRef(new Set<string>());
+  const stop = useCallback((requestId: string) => {
+    const turn = turns.current.get(requestId);
+    if (!turn) return;
+    // Only a confirmed cancel ends the request here; if the call fails the turn is still running.
+    cancelTurn(turn.session_id, turn.turn_id)
+      .then(() => controllers.current.get(requestId)?.abort())
+      .catch(() => cancelling.current.delete(requestId));
+  }, []);
   // Checked synchronously, so a double click cannot start two turns in one chat.
   const busy = useRef(new Set<string>());
   const stateRef = useRef(state);
@@ -291,19 +344,86 @@ export function ChatManagerProvider({ children }: { children: ReactNode }) {
     }
   }, [state.tabs, state.activeKey, state.conversations]);
 
-  // Agent chats load their transcript the first time they are shown. Session
-  // chats read theirs from the session timeline instead.
+  // Follow one request to its end and settle it under its captured key.
+  const follow = useCallback(
+    (key: string, requestId: string, sessionId: string | null, run: (h: StreamHandlers) => Promise<ChatReply>) => {
+      const controller = new AbortController();
+      busy.current.add(key);
+      controllers.current.set(requestId, controller);
+      run({
+        signal: controller.signal,
+        onOpen: () => dispatch({ type: 'REQUEST_PROGRESS', key, requestId }),
+        onTurn: (turn) => {
+          turns.current.set(requestId, turn);
+          dispatch({ type: 'REQUEST_ATTACHED', key, requestId, turn });
+          if (cancelling.current.has(requestId)) stop(requestId);
+        },
+        onChunk: (chunk) => dispatch({ type: 'REQUEST_PROGRESS', key, requestId, chunk }),
+      })
+        .then((reply) => dispatch({ type: 'REQUEST_COMPLETED', key, requestId, reply, at: new Date().toISOString() }))
+        .catch((err: unknown) =>
+          dispatch({
+            type: 'REQUEST_FAILED',
+            key,
+            requestId,
+            message: err instanceof Error ? err.message : 'Failed to send message.',
+            cancelled: controller.signal.aborted || (err instanceof ChatStreamError && err.code === 'TURN_CANCELLED'),
+            at: new Date().toISOString(),
+          }),
+        )
+        .finally(() => {
+          busy.current.delete(key);
+          controllers.current.delete(requestId);
+          turns.current.delete(requestId);
+          cancelling.current.delete(requestId);
+          if (sessionId) {
+            queryClient.invalidateQueries({
+              predicate: ({ queryKey }) => queryKey[0] === 'sessions' && queryKey[2] === sessionId,
+            });
+          }
+        });
+    },
+    [queryClient, stop],
+  );
+
+  // Each conversation loads its transcript and unfinished turns the first time
+  // it is shown, then re-attaches to those turns: this is how a refreshed page
+  // gets its pending requests back. Session chats read their transcript from
+  // the session timeline, so only their turns are fetched here.
   const loading = useRef(new Set<string>());
-  const loadHistory = useCallback((key: string) => {
-    const conv = stateRef.current.conversations[key];
-    if (!conv || conv.historyLoaded || conv.sessionId || loading.current.has(key)) return;
-    loading.current.add(key);
-    apiClient
-      .get<ChatMessage[]>(`/api/v1/agents/${conv.agentId}/chat`)
-      .then((history) => dispatch({ type: 'HISTORY_LOADED', key, messages: Array.isArray(history) ? history : [] }))
-      .catch(() => dispatch({ type: 'HISTORY_LOADED', key, messages: [] }))
-      .finally(() => loading.current.delete(key));
-  }, []);
+  const loadHistory = useCallback(
+    (key: string) => {
+      const conv = stateRef.current.conversations[key];
+      if (!conv || conv.historyLoaded || loading.current.has(key)) return;
+      loading.current.add(key);
+      const { agentId, sessionId } = conv;
+      const history: Promise<ServerMessage[]> = sessionId
+        ? Promise.resolve([])
+        : apiClient.get<ServerMessage[]>(`/api/v1/agents/${agentId}/chat`).catch(() => []);
+      const pending = apiClient
+        .get<TurnInfo[]>(sessionId ? `/api/v1/agent-sessions/${sessionId}/turns` : `/api/v1/agents/${agentId}/chat/turns`, { pending: true })
+        .catch((): TurnInfo[] => []);
+      Promise.all([history, pending])
+        .then(([messages, turnList]) => {
+          const list = Array.isArray(messages) ? messages : [];
+          dispatch({
+            type: 'HISTORY_LOADED',
+            key,
+            messages: list.map((m) => ({ id: m.id, sender: m.sender, text: m.text, timestamp: m.timestamp, via: executionLabel(m) })),
+          });
+          const followed = new Set([...turns.current.values()].map((t) => t.turn_id));
+          for (const turn of Array.isArray(turnList) ? turnList : []) {
+            if (!turn.turn_id || !turn.session_id || followed.has(turn.turn_id)) continue;
+            const prompt = list.find((m) => m.id === turn.prompt_message_id)?.text ?? '';
+            dispatch({ type: 'REQUEST_RESUMED', key, turn, prompt, at: new Date().toISOString() });
+            turns.current.set(turn.turn_id, turn);
+            follow(key, turn.turn_id, sessionId, (h) => attachTurn(turn, h));
+          }
+        })
+        .finally(() => loading.current.delete(key));
+    },
+    [follow],
+  );
 
   const ensure = useCallback((agent: ChatAgent, sessionId: string | null) => {
     const companyId = getActiveCompanyId();
@@ -325,42 +445,22 @@ export function ChatManagerProvider({ children }: { children: ReactNode }) {
       // Routing is fixed here; nothing below reads the current selection.
       const { agentId, sessionId } = conv;
       const requestId = newRequestId();
-      const controller = new AbortController();
-      busy.current.add(key);
-      controllers.current.set(requestId, controller);
       dispatch({ type: 'REQUEST_STARTED', key, requestId, prompt: text, at: new Date().toISOString() });
-
-      streamChat(chatStreamPath(agentId, sessionId), text, {
-        signal: controller.signal,
-        onOpen: () => dispatch({ type: 'REQUEST_PROGRESS', key, requestId }),
-        onChunk: (chunk) => dispatch({ type: 'REQUEST_PROGRESS', key, requestId, chunk }),
-      })
-        .then((reply) => dispatch({ type: 'REQUEST_COMPLETED', key, requestId, reply, at: new Date().toISOString() }))
-        .catch((err: unknown) =>
-          dispatch({
-            type: 'REQUEST_FAILED',
-            key,
-            requestId,
-            message: err instanceof Error ? err.message : 'Failed to send message.',
-            cancelled: controller.signal.aborted,
-            at: new Date().toISOString(),
-          }),
-        )
-        .finally(() => {
-          busy.current.delete(key);
-          controllers.current.delete(requestId);
-          if (sessionId) {
-            queryClient.invalidateQueries({
-              predicate: ({ queryKey }) => queryKey[0] === 'sessions' && queryKey[2] === sessionId,
-            });
-          }
-        });
+      follow(key, requestId, sessionId, (h) => streamChat(chatStreamPath(agentId, sessionId), text, requestId, h));
       return true;
     },
-    [queryClient],
+    [follow],
   );
 
-  const cancel = useCallback((requestId: string) => controllers.current.get(requestId)?.abort(), []);
+  // Cancel the server turn, then stop listening. A request whose turn is not
+  // known yet is cancelled as soon as the server names it.
+  const cancel = useCallback(
+    (requestId: string) => {
+      cancelling.current.add(requestId);
+      stop(requestId);
+    },
+    [stop],
+  );
 
   const retry = useCallback(
     (key: string) => {

@@ -35,51 +35,78 @@ function agent(id: string, name: string, backend: string): ChatAgent {
 const CLAUDE = agent('claude-id', 'Claude Emp', 'claude');
 const AGY = agent('agy-id', 'Agy Emp', 'agy');
 
-/** One in-flight stream request the test can answer, fail or observe being aborted. */
+/** One open event stream (a POST or a re-attach) the test can answer, fail or observe being aborted. */
 interface Call {
   agentId: string;
+  kind: 'post' | 'attach';
+  url: string;
   prompt: string;
+  headers: Record<string, string>;
+  turnId: string;
   signal: AbortSignal;
-  push: (event: object) => void;
+  push: (event: object, id?: number) => void;
+  drop: () => void;
   reply: (text: string, backend: string) => void;
 }
 
 let calls: Call[];
+let cancels: string[];
 let history: Record<string, Array<Record<string, string>>>;
+let pendingTurns: Record<string, object[]>;
 const encoder = new TextEncoder();
 
-function fakeFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
-  const url = String(input);
-  const agentId = /agents\/([^/]+)\/chat/.exec(url)?.[1] ?? '';
-  if (!init?.method || init.method === 'GET') {
-    return Promise.resolve(Response.json(history[agentId] ?? []));
-  }
-  const signal = init.signal as AbortSignal;
-  const { prompt } = JSON.parse(String(init.body)) as { prompt: string };
-  if (prompt === 'overloaded') {
-    return Promise.resolve(Response.json({ detail: { code: 'CHAT_CONCURRENCY_LIMIT', message: 'Too many chats running' } }, { status: 429 }));
-  }
+function stream(call: Omit<Call, 'signal' | 'push' | 'drop' | 'reply'>, signal: AbortSignal): Response {
   let controller!: ReadableStreamDefaultController<Uint8Array>;
   const body = new ReadableStream<Uint8Array>({ start: (c) => void (controller = c) });
   signal.addEventListener('abort', () => controller.error(new DOMException('Aborted', 'AbortError')));
-  const push = (event: object) => controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
+  const push = (event: object, id?: number) =>
+    controller.enqueue(encoder.encode(`${id === undefined ? '' : `id: ${id}\n`}data: ${JSON.stringify(event)}\n\n`));
   calls.push({
-    agentId,
-    prompt,
+    ...call,
     signal,
     push,
+    drop: () => controller.close(),
     reply: (text, backend) => {
       push({
         type: 'done',
-        message: { id: `srv-${calls.length}-${text}`, sender: 'agent', text, timestamp: '2026-09-27T10:00:00Z' },
+        message: { id: `srv-${call.turnId}`, sender: 'agent', text, timestamp: '2026-09-27T10:00:00Z' },
         adapter_used: 'cli',
         backend_used: backend,
-        execution_id: `exec-${agentId}`,
+        execution_id: `exec-${call.agentId}`,
+        turn_id: call.turnId,
       });
       controller.close();
     },
   });
-  return Promise.resolve(new Response(body, { status: 200, headers: { 'Content-Type': 'text/event-stream' } }));
+  if (call.kind === 'post') {
+    push({ type: 'turn', turn_id: call.turnId, session_id: `sess-${call.agentId}`, status: 'running', prompt_message_id: `pm-${call.turnId}` });
+  }
+  return new Response(body, { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
+}
+
+function fakeFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  const url = String(input);
+  const headers = { ...(init?.headers as Record<string, string>) };
+  const signal = init?.signal as AbortSignal;
+  const cancel = /turns\/([^/]+)\/cancel/.exec(url);
+  if (cancel) {
+    cancels.push(url);
+    return Promise.resolve(Response.json({ turn_id: cancel[1], status: 'cancelled' }));
+  }
+  const events = /agent-sessions\/sess-([^/]+)\/turns\/([^/]+)\/events/.exec(url);
+  if (events) {
+    return Promise.resolve(stream({ agentId: events[1]!, kind: 'attach', url, prompt: '', headers, turnId: events[2]! }, signal));
+  }
+  const agentId = /agents\/([^/]+)\/chat/.exec(url)?.[1] ?? '';
+  if (!init?.method || init.method === 'GET') {
+    if (url.includes('/chat/turns')) return Promise.resolve(Response.json(pendingTurns[agentId] ?? []));
+    return Promise.resolve(Response.json(history[agentId] ?? []));
+  }
+  const { prompt } = JSON.parse(String(init.body)) as { prompt: string };
+  if (prompt === 'over budget') {
+    return Promise.resolve(Response.json({ detail: { code: 'BUDGET_EXCEEDED', message: 'Monthly budget exhausted' } }, { status: 402 }));
+  }
+  return Promise.resolve(stream({ agentId, kind: 'post', url, prompt, headers, turnId: `turn-${calls.length + 1}` }, signal));
 }
 
 /** Stand-in for the agent list: always clickable, opens a chat per agent. */
@@ -121,7 +148,9 @@ async function until(n: number) {
 
 beforeEach(() => {
   calls = [];
+  cancels = [];
   history = {};
+  pendingTurns = {};
   try {
     localStorage.clear();
   } catch {
@@ -197,6 +226,8 @@ describe('concurrent employee chats', () => {
     fireEvent.click(tab('Claude Emp'));
     fireEvent.click(within(transcript('Claude Emp')).getByText('Cancel'));
     expect(await within(transcript('Claude Emp')).findByText('Request cancelled.')).toBeTruthy();
+    // Cancel is a server call for that turn only; the disconnect follows it.
+    expect(cancels).toEqual([expect.stringContaining(`/agent-sessions/sess-claude-id/turns/${claude.turnId}/cancel`)]);
     expect(claude.signal.aborted).toBe(true);
     expect(agy.signal.aborted).toBe(false);
 
@@ -252,8 +283,8 @@ describe('concurrent employee chats', () => {
 
   it('shows a per-chat error for a rejected request and retries it', async () => {
     renderApp();
-    await openAndSend('Chat with Claude', 'Claude Emp', 'overloaded');
-    expect(await screen.findByRole('alert')).toHaveTextContent('Too many chats running');
+    await openAndSend('Chat with Claude', 'Claude Emp', 'over budget');
+    expect(await screen.findByRole('alert')).toHaveTextContent('Monthly budget exhausted');
     history = {};
     fireEvent.click(screen.getByText('Retry'));
     await waitFor(() => expect(vi.mocked(fetch).mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(2));
@@ -275,6 +306,64 @@ describe('concurrent employee chats', () => {
     fireEvent.click(await screen.findByLabelText('Open chats'));
     expect(await within(transcript('Claude Emp')).findByText('remembered')).toBeTruthy();
   });
+
+  it('sends an idempotency key and re-attaches to a dropped stream without resending', async () => {
+    renderApp();
+    await openAndSend('Chat with Claude', 'Claude Emp', 'long job');
+    await until(1);
+    const [post] = calls as [Call];
+    const key = post.headers['Idempotency-Key'];
+    expect(key).toBeTruthy();
+    await act(async () => {
+      post.push({ type: 'chunk', text: 'half' }, 4);
+      post.drop();
+    });
+    await until(2);
+    const attach = calls[1]!;
+    expect(attach.kind).toBe('attach');
+    expect(attach.url).toContain(`/agent-sessions/sess-claude-id/turns/${post.turnId}/events`);
+    expect(attach.headers['Last-Event-ID']).toBe('4');
+
+    await act(async () => attach.reply('half and the rest', 'claude'));
+    expect(await within(transcript('Claude Emp')).findByText('half and the rest')).toBeTruthy();
+    expect(calls.filter((c) => c.kind === 'post')).toHaveLength(1);
+    expect(cancels).toEqual([]);
+  });
+
+  it('a refreshed page rebuilds a pending turn from the server and re-attaches (no re-run, no cancel)', async () => {
+    const view = renderApp();
+    await openAndSend('Chat with Claude', 'Claude Emp', 'survive a refresh');
+    await until(1);
+    const [post] = calls as [Call];
+    view.unmount();
+    // Closing the page is not a cancel.
+    expect(cancels).toEqual([]);
+
+    history['claude-id'] = [{ id: `pm-${post.turnId}`, sender: 'user', text: 'survive a refresh', timestamp: '2026-09-27T10:00:00Z' }];
+    pendingTurns['claude-id'] = [
+      { turn_id: post.turnId, session_id: 'sess-claude-id', status: 'running', prompt_message_id: `pm-${post.turnId}` },
+    ];
+    renderApp();
+    fireEvent.click(await screen.findByLabelText('Open chats'));
+    expect(await within(transcript('Claude Emp')).findByLabelText('Pending request')).toBeTruthy();
+    await until(2);
+    const attach = calls[1]!;
+    expect(attach.kind).toBe('attach');
+
+    await act(async () => attach.reply('still here', 'claude'));
+    expect(await within(transcript('Claude Emp')).findByText('still here')).toBeTruthy();
+    expect(within(transcript('Claude Emp')).getAllByText('survive a refresh')).toHaveLength(1);
+    expect(calls.filter((c) => c.kind === 'post')).toHaveLength(1);
+  });
+
+  it('a turn cancelled elsewhere ends as cancelled, not as an error', async () => {
+    renderApp();
+    await openAndSend('Chat with Claude', 'Claude Emp', 'stop me');
+    await until(1);
+    await act(async () => calls[0]!.push({ type: 'error', code: 'TURN_CANCELLED', text: 'The turn was cancelled', status: 409 }));
+    expect(await within(transcript('Claude Emp')).findByText('Request cancelled.')).toBeTruthy();
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
 });
 
 describe('chatReducer', () => {
@@ -285,6 +374,27 @@ describe('chatReducer', () => {
     (s, a) => chatReducer(s, { type: 'OPEN_CONVERSATION', companyId: company, agent: a, sessionId: null, focus: true }),
     initialChatState,
   );
+
+  it('an attached turn renames the local prompt so history merges by server ID', () => {
+    let s = chatReducer(opened, { type: 'REQUEST_STARTED', key: claudeKey, requestId: 'r1', prompt: 'hi', at: 't0' });
+    s = chatReducer(s, {
+      type: 'REQUEST_ATTACHED',
+      key: claudeKey,
+      requestId: 'r1',
+      turn: { turn_id: 't1', session_id: 's1', status: 'queued', prompt_message_id: 'm-user' },
+    });
+    expect(s.conversations[claudeKey]!.pendingRequests[0]!.phase).toBe('queued');
+    s = chatReducer(s, { type: 'HISTORY_LOADED', key: claudeKey, messages: [{ id: 'm-user', sender: 'user', text: 'hi', timestamp: 't0' }] });
+    expect(s.conversations[claudeKey]!.messages.map((m) => m.id)).toEqual(['m-user']);
+    const resumed = chatReducer(s, {
+      type: 'REQUEST_RESUMED',
+      key: claudeKey,
+      turn: { turn_id: 't1', session_id: 's1', status: 'running' },
+      prompt: 'hi',
+      at: 't1',
+    });
+    expect(resumed.conversations[claudeKey]!.pendingRequests).toHaveLength(1);
+  });
 
   it('routes a completion by its captured key, not by the selected chat', () => {
     expect(opened.activeKey).toBe(agyKey);

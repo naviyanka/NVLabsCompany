@@ -159,6 +159,12 @@ function ChatTab({ session, open }: { session: Session; open: boolean }) {
     );
   }, [ensure, session.agent_id, session.adapter_type, session.model, sessionId]);
   const conv = chat.state.conversations[key];
+  // Re-attach to this session's unfinished turns, for example after a refresh.
+  const { loadHistory } = chat;
+  const registered = conv !== undefined;
+  useEffect(() => {
+    if (registered) loadHistory(key);
+  }, [loadHistory, key, registered]);
   const draft = conv?.draft ?? '';
   const pending = conv?.pendingRequests ?? [];
   const setDraft = (value: string) => chat.dispatch({ type: 'SET_DRAFT', key, draft: value });
@@ -177,7 +183,7 @@ function ChatTab({ session, open }: { session: Session; open: boolean }) {
         ))}
         {pending.map((r) => (
           <li key={r.requestId} aria-label="Pending request" className="flex items-center gap-2 text-xs text-[#6B6B6E]">
-            <span className="flex-1 whitespace-pre-wrap">{r.partial || (r.phase === 'sending' ? 'Sending…' : 'Waiting for the agent…')}</span>
+            <span className="flex-1 whitespace-pre-wrap">{r.partial || { sending: 'Sending…', queued: 'Queued…', waiting: 'Waiting for the agent…' }[r.phase]}</span>
             <button type="button" onClick={() => chat.cancel(r.requestId)} className="text-[11px] text-red-400 hover:text-red-300">
               Cancel
             </button>

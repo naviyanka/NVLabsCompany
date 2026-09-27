@@ -30,7 +30,7 @@ function uid(): string {
 
 function statusOf(c: Conversation): string {
   const pending = c.pendingRequests[0];
-  if (pending) return pending.phase === 'sending' ? 'sending' : 'waiting for CLI';
+  if (pending) return { sending: 'sending', queued: 'queued', waiting: 'waiting for CLI' }[pending.phase];
   return c.lastOutcome ?? 'idle';
 }
 
@@ -176,7 +176,7 @@ export function ConversationView({ conv, className = '' }: { conv: Conversation;
           <li key={r.requestId} className="flex gap-2 items-start" aria-label="Pending request">
             <Loader2 size={12} className="text-[#FFB020] mt-1 shrink-0 animate-spin" />
             <div className="flex-1 px-3 py-2 rounded-[8px] text-xs bg-[#141416] border border-white/[0.08] text-[#A8A8AB] whitespace-pre-wrap">
-              {r.partial || `${r.phase === 'sending' ? 'Sending' : 'Waiting for'} ${conv.agent.name}… ${Math.max(0, Math.round((now - Date.parse(r.startedAt)) / 1000))}s`}
+              {r.partial || `${{ sending: 'Sending', queued: 'Queued for', waiting: 'Waiting for' }[r.phase]} ${conv.agent.name}… ${Math.max(0, Math.round((now - Date.parse(r.startedAt)) / 1000))}s`}
             </div>
             <button type="button" onClick={() => manager.cancel(r.requestId)} className="text-[11px] font-mono text-red-400 hover:text-red-300 px-1.5 py-1">
               Cancel
