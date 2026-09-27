@@ -577,3 +577,86 @@ async def test_orchestrator_tick_sees_work_as_app_role(
 
     await app_engine.dispose()
     await sys_engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_chat_turn_claim_race_ordering_and_rls(
+    app_user_postgres_url, system_user_postgres_url, monkeypatch
+):
+    """Durable chat turns on PostgreSQL as the application role.
+
+    Racing claims from many workers have one winner, a session's later turn
+    cannot be claimed while an earlier one is unfinished, another tenant sees
+    none of the rows (RLS, no WHERE clause), and the cross-tenant recovery
+    sweep finds an expired lease through the system role.
+    """
+    import asyncio
+    from datetime import timedelta
+
+    from nexus.config import settings
+    from nexus.models.agent import Agent
+    from nexus.models.agent_session import AgentSessionRecord
+    from nexus.models.chat_turn import ChatTurn
+    from nexus.runtime import chat_turns
+
+    monkeypatch.setattr(settings, "database_url", app_user_postgres_url)
+    monkeypatch.setattr(settings, "system_database_url", system_user_postgres_url)
+    app_engine = create_async_engine(app_user_postgres_url)
+    app_factory = async_sessionmaker(app_engine, class_=AsyncSession, expire_on_commit=False)
+    sys_engine = create_async_engine(system_user_postgres_url)
+    sys_factory = async_sessionmaker(sys_engine, class_=AsyncSession, expire_on_commit=False)
+    monkeypatch.setattr("nexus.database.async_session_factory", app_factory)
+    monkeypatch.setattr("nexus.database._system_session_factory", sys_factory)
+
+    mine, theirs = uuid.uuid4(), uuid.uuid4()
+    session_id = uuid.uuid4()
+    first, second = uuid.uuid4(), uuid.uuid4()
+    for cid in (mine, theirs):
+        async with app_factory() as session:
+            await session.execute(
+                sa.text("SELECT set_config('nexus.company_id', :cid, false)"), {"cid": str(cid)}
+            )
+            session.add(Company(id=cid, name=f"Turns {cid}"))
+            await session.commit()
+    async with app_factory() as session:
+        await session.execute(
+            sa.text("SELECT set_config('nexus.company_id', :cid, false)"), {"cid": str(mine)}
+        )
+        agent = Agent(company_id=mine, name="Turn Employee", role="engineer")
+        session.add(agent)
+        await session.flush()
+        session.add(AgentSessionRecord(id=session_id, company_id=mine, agent_id=agent.id))
+        await session.flush()
+        for turn_id, seq in ((first, 1), (second, 2)):
+            session.add(
+                ChatTurn(
+                    id=turn_id, company_id=mine, agent_id=agent.id, session_id=session_id,
+                    idempotency_key=f"key-{seq}", turn_seq=seq,
+                )
+            )
+        await session.commit()
+
+    try:
+        won = await asyncio.gather(
+            *(chat_turns.claim(first, mine, f"worker-{i}") for i in range(8))
+        )
+        assert sum(w is not None for w in won) == 1
+        assert await chat_turns.claim(second, mine, "worker-x") is None
+
+        # Another tenant: no rows without a WHERE clause, and no claim.
+        async with app_factory() as session:
+            await session.execute(
+                sa.text("SELECT set_config('nexus.company_id', :cid, false)"),
+                {"cid": str(theirs)},
+            )
+            assert (await session.execute(sa.select(ChatTurn))).scalars().all() == []
+        assert await chat_turns.get_turn(theirs, first) is None
+        assert await chat_turns.claim(second, theirs, "worker-y") is None
+
+        outcome = await chat_turns.sweep(now=chat_turns._now() + timedelta(minutes=5))
+        assert outcome["recovered"] == 1
+        assert (await chat_turns.get_turn(mine, first)).status == "queued"
+        assert f"company:{mine}" in outcome
+    finally:
+        await app_engine.dispose()
+        await sys_engine.dispose()
