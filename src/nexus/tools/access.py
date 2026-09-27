@@ -415,6 +415,19 @@ _FORBIDDEN_CLI_FLAGS = (
     "--include-directories",
     "--cd",
     "--sandbox",
+    "-s",
+    # Per-CLI autonomy / approval bypasses (kiro, copilot, cursor, gemini,
+    # aider, codex, hermes).
+    "--trust-all-tools",
+    "--trust-tools",
+    "--allow-all-tools",
+    "--allow-tool",
+    "--force",
+    "--approval-mode",
+    "--yes",
+    "--yes-always",
+    "--approve-for-me",
+    "--dangerously-bypass-hook-trust",
 )
 
 

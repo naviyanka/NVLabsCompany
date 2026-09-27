@@ -3,23 +3,23 @@
  */
 
 import {
+  cliAdapterConfig,
   createAgent,
   listArchetypes,
-  listProviderModels,
   listProviders,
   listSoulTemplates,
   type AgentArchetype,
   type AgentProvider,
-  type ProviderModel,
   type SoulTemplate,
 } from '@/api/agents';
 import { ArchetypeGrid } from '@/components/agents/ArchetypeGrid';
+import { CliBackendPicker, providerGroup } from '@/components/agents/CliBackendPicker';
 import { ManifestImport } from '@/components/agents/ManifestImport';
 import { TeamHireFlow } from '@/components/agents/TeamHireFlow';
 import { getRolePreset } from '@/components/agents/rolePresets';
 import { Button } from '@/components/common/Button';
 import { Modal } from '@/components/common/Modal';
-import { ArrowLeft, Circle, FileJson, LayoutTemplate, UserPlus, Users } from 'lucide-react';
+import { ArrowLeft, FileJson, LayoutTemplate, UserPlus, Users } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
 type HireMode = 'select' | 'manual' | 'template' | 'team' | 'manifest';
@@ -51,112 +51,26 @@ const FALLBACK_ARCHETYPES: AgentArchetype[] = [
   { name: 'Hermes Agent', role: 'hermes-agent', capabilities: ['function-calling', 'tool-execution', 'autonomous-reasoning', 'unaligned-problem-solving', 'structured-json-output'], constraints: ['must execute all function calls via sandbox', 'must log all context discoveries to Plaza Knowledge Feed'], system_prompt: 'You are Hermes, an autonomous agent powered by Nous Research Hermes 3. You excel at tool calling, function execution, and complex problem solving.', tools_allowed: ['code-editor', 'terminal', 'sandbox-runner', 'plaza-broadcast', 'gitnexus-analysis'], interaction_style: 'direct', description: 'Nous Research Hermes 3 autonomous tool execution and function-calling specialist. Can fill any role with direct, precise execution.' },
 ];
 
-// Fallback providers when the backend API is unavailable
+/**
+ * Emergency fallback used only when GET /api/v1/agent-providers fails. The
+ * picker labels it "metadata unavailable"; install status is unknown, and the
+ * server still validates the backend on hire.
+ */
+const offlineProvider = (id: string, label: string): AgentProvider => ({
+  id, label, adapter_type: 'cli', installed: false, resolved_command: null, version: null,
+  execution_supported: true, configured: null, stability: 'stable', supports_model: true,
+  supports_resume: false, supports_interactive: false, supports_worktree: false,
+  recommended_model: null, models: [], install_command: null, docs_url: null, notes: null,
+});
 const FALLBACK_PROVIDERS: AgentProvider[] = [
-  { id: 'hermes', label: 'Hermes 3 \u00b7 Nous Research', default_command: 'ollama run hermes3', auto_mode_flag: '', supports_model: true, model_flag: '--model', hive_aware: true, can_receive_inbox: true, recommended_model: 'hermes3:8b', resume_flag: null, install_command: 'ollama pull hermes3', docs_url: 'https://nousresearch.com/hermes', installed: true, version: '3.0' },
-  { id: 'hermes-cli', label: 'Hermes Agent CLI \u00b7 CEO Mode', default_command: 'hermes', auto_mode_flag: '--yolo', supports_model: true, model_flag: '--model', hive_aware: true, can_receive_inbox: true, recommended_model: 'stealth/ox-alpha', resume_flag: '--resume', install_command: 'See https://nousresearch.com/hermes', docs_url: 'https://nousresearch.com/hermes', installed: true, version: '0.20.5' },
-  { id: 'claude', label: 'Claude Code', default_command: 'claude', auto_mode_flag: '--permission-mode bypassPermissions', supports_model: true, model_flag: '--model', hive_aware: true, can_receive_inbox: true, recommended_model: 'claude-opus-4-8[1m]', resume_flag: '--resume', install_command: 'npm install -g @anthropic-ai/claude-code', docs_url: 'https://docs.claude.com/en/docs/claude-code', installed: false, version: null },
-  { id: 'codex', label: 'Codex \u00b7 GPT', default_command: 'codex', auto_mode_flag: '--dangerously-bypass-approvals-and-sandbox', supports_model: true, model_flag: '--model', hive_aware: false, can_receive_inbox: true, recommended_model: 'gpt-5-codex', resume_flag: null, install_command: 'npm install -g @openai/codex', docs_url: 'https://github.com/openai/codex', installed: false, version: null },
-  { id: 'grok', label: 'Grok \u00b7 xAI', default_command: 'grok', auto_mode_flag: '--permission-mode bypassPermissions', supports_model: true, model_flag: '--model', hive_aware: false, can_receive_inbox: true, recommended_model: null, resume_flag: '--resume', install_command: null, docs_url: null, installed: false, version: null },
-  { id: 'kimi', label: 'Kimi Code', default_command: 'kimi', auto_mode_flag: '--auto', supports_model: true, model_flag: '--model', hive_aware: false, can_receive_inbox: false, recommended_model: null, resume_flag: null, install_command: null, docs_url: null, installed: false, version: null },
-  { id: 'antigravity', label: 'Antigravity \u00b7 Gemini', default_command: 'agy', auto_mode_flag: '--dangerously-skip-permissions', supports_model: true, model_flag: '--model', hive_aware: false, can_receive_inbox: true, recommended_model: 'Gemini 3.1 Pro (High)', resume_flag: '--conversation', install_command: null, docs_url: null, installed: false, version: null },
-  { id: 'qwen', label: 'Qwen (local available)', default_command: 'qwen', auto_mode_flag: '--yolo', supports_model: true, model_flag: '--model', hive_aware: false, can_receive_inbox: true, recommended_model: 'qwen3-coder-plus', resume_flag: null, install_command: null, docs_url: null, installed: false, version: null },
-  { id: 'opencode', label: 'OpenCode', default_command: 'opencode', auto_mode_flag: '', supports_model: true, model_flag: '--model', hive_aware: false, can_receive_inbox: true, recommended_model: null, resume_flag: null, install_command: 'npm install -g opencode-ai@latest', docs_url: 'https://opencode.ai/docs', installed: false, version: null },
-  { id: 'crush', label: 'Crush \u00b7 Charm', default_command: 'crush', auto_mode_flag: '--yolo', supports_model: true, model_flag: '--model', hive_aware: false, can_receive_inbox: true, recommended_model: 'openai/gpt-4o', resume_flag: '--session', install_command: 'npm install -g @charmland/crush', docs_url: 'https://github.com/charmbracelet/crush', installed: false, version: null },
-  { id: 'pi', label: 'Pi', default_command: 'pi', auto_mode_flag: '--approve', supports_model: true, model_flag: '--model', hive_aware: false, can_receive_inbox: true, recommended_model: 'anthropic/claude-sonnet-4-5', resume_flag: '--session', install_command: 'npm install -g --ignore-scripts @earendil-works/pi-coding-agent', docs_url: 'https://pi.dev/docs/latest', installed: false, version: null },
-  { id: 'copilot', label: 'Copilot', default_command: 'copilot', auto_mode_flag: '-s --allow-all-tools --no-ask-user', supports_model: true, model_flag: '--model', hive_aware: false, can_receive_inbox: false, recommended_model: 'claude-sonnet-4.5', resume_flag: '--resume', install_command: 'npm install -g @github/copilot', docs_url: 'https://docs.github.com/copilot/concepts/agents/about-copilot-cli', installed: false, version: null },
-  { id: 'kiro-cli', label: 'Kiro CLI', default_command: 'kiro', auto_mode_flag: '', supports_model: true, model_flag: '--model', hive_aware: false, can_receive_inbox: true, recommended_model: null, resume_flag: null, install_command: null, docs_url: 'https://kiro.dev', installed: false, version: null },
-  { id: 'aider', label: 'Aider', default_command: 'aider', auto_mode_flag: '--yes', supports_model: true, model_flag: '--model', hive_aware: false, can_receive_inbox: false, recommended_model: 'claude-sonnet-4', resume_flag: null, install_command: 'pip install aider-chat', docs_url: 'https://aider.chat', installed: false, version: null },
+  offlineProvider('claude', 'Claude Code'),
+  offlineProvider('codex', 'OpenAI Codex CLI'),
+  offlineProvider('gemini', 'Gemini CLI'),
+  offlineProvider('agy', 'Antigravity / Agy'),
 ];
 
-// Fallback model lists per provider for when API is unavailable
-const FALLBACK_MODELS: Record<string, ProviderModel[]> = {
-  hermes: [
-    { id: 'hermes3:8b', name: 'Hermes 3 8B (local)', tier: 'fast' },
-    { id: 'hermes3:70b', name: 'Hermes 3 70B (local)', tier: 'flagship' },
-    { id: 'nousresearch/hermes-3-llama-3.1-405b', name: 'Hermes 3 405B (OpenRouter)', tier: 'flagship' },
-    { id: 'nousresearch/hermes-3-llama-3.1-8b', name: 'Hermes 3 8B (OpenRouter)', tier: 'balanced' },
-  ],
-  'hermes-cli': [
-    { id: 'stealth/ox-alpha', name: 'Stealth OX Alpha (default)', tier: 'flagship' },
-    { id: 'nousresearch/hermes-4-405b', name: 'Hermes 4 405B', tier: 'flagship' },
-    { id: 'nousresearch/hermes-4-70b', name: 'Hermes 4 70B', tier: 'balanced' },
-    { id: 'poolside/laguna-s-2.1:free', name: 'Laguna S 2.1 (free)', tier: 'free' },
-    { id: 'anthropic/claude-sonnet-4', name: 'Claude Sonnet 4 (via Nous)', tier: 'flagship' },
-    { id: 'deepseek/deepseek-chat', name: 'DeepSeek Chat', tier: 'balanced' },
-  ],
-  claude: [
-    { id: 'claude-sonnet-4-20250514', name: 'Claude Sonnet 4', tier: 'flagship' },
-    { id: 'claude-opus-4-20250514', name: 'Claude Opus 4', tier: 'flagship' },
-    { id: 'claude-haiku-4-20250514', name: 'Claude Haiku 4', tier: 'fast' },
-    { id: 'claude-sonnet-4-5-20250514', name: 'Claude Sonnet 4.5', tier: 'flagship' },
-    { id: 'claude-3-7-sonnet-20250219', name: 'Claude 3.7 Sonnet', tier: 'balanced' },
-    { id: 'claude-3-5-haiku-20241022', name: 'Claude 3.5 Haiku', tier: 'fast' },
-  ],
-  codex: [
-    { id: 'gpt-4o', name: 'GPT-4o', tier: 'flagship' },
-    { id: 'gpt-4o-mini', name: 'GPT-4o Mini', tier: 'fast' },
-    { id: 'o3', name: 'o3', tier: 'reasoning' },
-    { id: 'o3-mini', name: 'o3 Mini', tier: 'reasoning' },
-    { id: 'o4-mini', name: 'o4 Mini', tier: 'reasoning' },
-    { id: 'gpt-4.1', name: 'GPT-4.1', tier: 'flagship' },
-    { id: 'gpt-4.1-mini', name: 'GPT-4.1 Mini', tier: 'fast' },
-  ],
-  grok: [
-    { id: 'grok-3', name: 'Grok 3', tier: 'flagship' },
-    { id: 'grok-3-mini', name: 'Grok 3 Mini', tier: 'fast' },
-    { id: 'grok-3-fast', name: 'Grok 3 Fast', tier: 'fast' },
-  ],
-  kimi: [
-    { id: 'kimi-latest', name: 'Kimi Latest', tier: 'flagship' },
-    { id: 'moonshot-v1-128k', name: 'Moonshot v1 128K', tier: 'flagship' },
-  ],
-  antigravity: [
-    { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro', tier: 'flagship' },
-    { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', tier: 'fast' },
-    { id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash', tier: 'fast' },
-  ],
-  qwen: [
-    { id: 'qwen3-coder-plus', name: 'Qwen3 Coder Plus', tier: 'flagship' },
-    { id: 'qwen3-coder', name: 'Qwen3 Coder', tier: 'balanced' },
-    { id: 'qwen3-235b', name: 'Qwen3 235B', tier: 'flagship' },
-  ],
-  opencode: [
-    { id: 'anthropic/claude-sonnet-4', name: 'Claude Sonnet 4', tier: 'flagship' },
-    { id: 'openai/gpt-4o', name: 'GPT-4o', tier: 'flagship' },
-  ],
-  crush: [
-    { id: 'openai/gpt-4o', name: 'GPT-4o', tier: 'flagship' },
-    { id: 'anthropic/claude-sonnet-4', name: 'Claude Sonnet 4', tier: 'flagship' },
-  ],
-  pi: [
-    { id: 'anthropic/claude-sonnet-4-5', name: 'Claude Sonnet 4.5', tier: 'flagship' },
-    { id: 'anthropic/claude-sonnet-4', name: 'Claude Sonnet 4', tier: 'flagship' },
-  ],
-  copilot: [
-    { id: 'claude-sonnet-4', name: 'Claude Sonnet 4', tier: 'flagship' },
-    { id: 'gpt-4o', name: 'GPT-4o', tier: 'flagship' },
-    { id: 'o3-mini', name: 'o3 Mini', tier: 'reasoning' },
-    { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro', tier: 'flagship' },
-  ],
-  'kiro-cli': [
-    { id: 'auto', name: 'Auto (optimal per task)', tier: 'auto' },
-    { id: 'claude-opus-5', name: 'Claude Opus 5', tier: 'flagship' },
-    { id: 'claude-sonnet-5', name: 'Claude Sonnet 5', tier: 'flagship' },
-    { id: 'claude-opus-4.8', name: 'Claude Opus 4.8', tier: 'flagship' },
-    { id: 'claude-sonnet-4.6', name: 'Claude Sonnet 4.6', tier: 'balanced' },
-    { id: 'gpt-5.6-sol', name: 'GPT 5.6 Sol', tier: 'flagship' },
-    { id: 'deepseek-3.2', name: 'DeepSeek 3.2', tier: 'fast' },
-    { id: 'qwen3-coder-next', name: 'Qwen3 Coder Next', tier: 'fast' },
-  ],
-  aider: [
-    { id: 'claude-sonnet-4', name: 'Claude Sonnet 4 (via Anthropic)', tier: 'flagship' },
-    { id: 'gpt-4o', name: 'GPT-4o (via OpenAI)', tier: 'flagship' },
-    { id: 'deepseek/deepseek-chat', name: 'DeepSeek Chat', tier: 'balanced' },
-    { id: 'ollama/llama3.1', name: 'Llama 3.1 (local)', tier: 'local' },
-    { id: 'gemini/gemini-2.5-pro', name: 'Gemini 2.5 Pro', tier: 'flagship' },
-  ],
-};
+/** "cli" hires a CLI employee; "hermes" keeps the Hermes API/Ollama adapter. */
+type ExecutionBackend = 'cli' | 'hermes';
 
 interface HireAgentModalProps {
   isOpen: boolean;
@@ -167,7 +81,8 @@ interface HireAgentModalProps {
 export function HireAgentModal({ isOpen, onClose, onSuccess }: HireAgentModalProps) {
   const [mode, setMode] = useState<HireMode>('select');
   const [archetypes, setArchetypes] = useState<AgentArchetype[]>(FALLBACK_ARCHETYPES);
-  const [providers, setProviders] = useState<AgentProvider[]>(FALLBACK_PROVIDERS);
+  const [providers, setProviders] = useState<AgentProvider[]>([]);
+  const [metadataUnavailable, setMetadataUnavailable] = useState(false);
   const [soulTemplates, setSoulTemplates] = useState<SoulTemplate[]>([]);
   const [loadingMeta, setLoadingMeta] = useState(false);
 
@@ -176,9 +91,9 @@ export function HireAgentModal({ isOpen, onClose, onSuccess }: HireAgentModalPro
   const [title, setTitle] = useState('');
   const [role, setRole] = useState('');
   const [model, setModel] = useState('');
+  const [execution, setExecution] = useState<ExecutionBackend>('cli');
   const [provider, setProvider] = useState('claude');
-  const [providerModels, setProviderModels] = useState<ProviderModel[]>([]);
-  const [showProviderMenu, setShowProviderMenu] = useState(false);
+  const [allowUnavailable, setAllowUnavailable] = useState(false);
   const [capabilities, setCapabilities] = useState('');
   const [responsibilities, setResponsibilities] = useState('');
   const [objectives, setObjectives] = useState('');
@@ -196,22 +111,35 @@ export function HireAgentModal({ isOpen, onClose, onSuccess }: HireAgentModalPro
   useEffect(() => {
     if (!isOpen) return;
     setLoadingMeta(true);
-    Promise.all([listArchetypes(), listProviders(), listSoulTemplates()])
-      .then(([archs, provs, souls]) => {
+    const loadProviders = listProviders()
+      .then((provs) => {
+        if (!Array.isArray(provs) || provs.length === 0) throw new Error('empty provider catalog');
+        setProviders(provs);
+        setMetadataUnavailable(false);
+        // Keep the current choice if it is ready, else preselect the first ready backend.
+        setProvider((prev) =>
+          provs.some((p) => p.id === prev && providerGroup(p) === 'ready')
+            ? prev
+            : (provs.find((p) => providerGroup(p) === 'ready')?.id ?? prev),
+        );
+      })
+      .catch(() => {
+        setProviders(FALLBACK_PROVIDERS);
+        setMetadataUnavailable(true);
+      });
+    const loadOther = Promise.all([listArchetypes(), listSoulTemplates()])
+      .then(([archs, souls]) => {
         if (Array.isArray(archs) && archs.length > 0) {
           setArchetypes(archs);
-        }
-        if (Array.isArray(provs) && provs.length > 0) {
-          setProviders(provs);
         }
         if (Array.isArray(souls) && souls.length > 0) {
           setSoulTemplates(souls);
         }
       })
       .catch(() => {
-        // API unavailable — keep fallback data (already in state)
-      })
-      .finally(() => setLoadingMeta(false));
+        // API unavailable — keep fallback archetypes (already in state)
+      });
+    Promise.all([loadProviders, loadOther]).finally(() => setLoadingMeta(false));
   }, [isOpen]);
 
   // Reset state when modal closes
@@ -227,26 +155,11 @@ export function HireAgentModal({ isOpen, onClose, onSuccess }: HireAgentModalPro
       setObjectives('');
       setSoulDescription('');
       setBudgetCents(0);
+      setExecution('cli');
+      setAllowUnavailable(false);
       setError(null);
     }
   }, [isOpen]);
-
-  // Load models when provider changes
-  useEffect(() => {
-    if (!provider) return;
-    // Immediately show fallback models (curated list per provider)
-    setProviderModels(FALLBACK_MODELS[provider] || []);
-    // Then try API for potentially fresher data
-    listProviderModels(provider)
-      .then((models) => {
-        if (Array.isArray(models) && models.length > 0) {
-          setProviderModels(models);
-        }
-      })
-      .catch(() => {
-        // Keep fallback models already set above
-      });
-  }, [provider]);
 
   const handleManualCreate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -264,12 +177,21 @@ export function HireAgentModal({ isOpen, onClose, onSuccess }: HireAgentModalPro
       if (tone && tone !== 'professional') soulParts.push(`Tone: ${tone}`);
       const fullSoulDescription = soulParts.join('\n\n') || undefined;
 
+      const selected = providers.find((p) => p.id === provider);
+      const executionFields =
+        execution === 'cli'
+          ? {
+              adapter_type: 'cli',
+              adapter_config: cliAdapterConfig(provider),
+              allow_unavailable_backend: allowUnavailable && !(selected?.installed ?? false),
+            }
+          : { adapter_type: 'hermes' };
       await createAgent({
         name,
         title: title || 'Operations Specialist',
         role: role || 'engineer',
-        adapter_type: provider || 'langchain',
-        model: model || '',
+        ...executionFields,
+        model: model.trim(),
         capabilities: capabilities ? capabilities.split(',').map((c) => c.trim()).filter(Boolean) : undefined,
         responsibilities: responsibilities || undefined,
         objectives: objectives || undefined,
@@ -310,15 +232,18 @@ export function HireAgentModal({ isOpen, onClose, onSuccess }: HireAgentModalPro
 
     // Auto-select Hermes provider for Hermes archetypes
     if (archetype.role === 'ceo' && archetype.name.toLowerCase().includes('hermes')) {
-      setProvider('hermes-cli');
+      setExecution('cli');
+      setProvider('hermes');
       setModel('');
     } else if (archetype.name.toLowerCase().includes('hermes')) {
-      setProvider('hermes');
+      setExecution('hermes');
       setModel('hermes3:8b');
     }
 
     setMode('manual');
   };
+
+  const selectedProvider = providers.find((p) => p.id === provider);
 
   const modalTitle =
     mode === 'select'
@@ -438,101 +363,53 @@ export function HireAgentModal({ isOpen, onClose, onSuccess }: HireAgentModalPro
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
-            <div className="relative">
-              <label className="block text-xs font-mono text-[#A8A8AB] uppercase mb-1">
-                Provider / Backend
-              </label>
-              <button
-                type="button"
-                onClick={() => setShowProviderMenu(!showProviderMenu)}
-                className="w-full px-3 py-2 bg-[#141416] border border-white/[0.12] rounded-[6px] text-xs text-[#F2F1EE] focus:outline-none focus:border-[#FFB020] text-left flex items-center gap-2 cursor-pointer"
-              >
-                <span className={`w-2 h-2 rounded-full shrink-0 ${providers.find((p) => p.id === provider)?.installed ? 'bg-emerald-400' : 'bg-gray-500/50'}`} />
-                <span className="flex-1 truncate">{providers.find((p) => p.id === provider)?.label || provider}</span>
-                <svg className="w-3 h-3 text-[#6B6B6E]" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
-              </button>
-              {providers.find((p) => p.id === provider)?.installed && (
-                <span className="text-[9px] font-mono text-emerald-400 flex items-center gap-1 mt-0.5">
-                  <Circle size={6} className="fill-emerald-400 text-emerald-400" />
-                  Installed & available on PATH
-                </span>
-              )}
-              {showProviderMenu && (
-                <>
-                  <div className="fixed inset-0 z-40" onClick={() => setShowProviderMenu(false)} />
-                  <div className="absolute z-50 mt-1 w-full bg-[#1C1C1F] border border-white/[0.14] rounded-[8px] shadow-2xl overflow-hidden">
-                    <div className="max-h-52 overflow-y-auto py-1">
-                      {providers.map((p) => (
-                        <button
-                          key={p.id}
-                          type="button"
-                          onClick={() => { setProvider(p.id); setModel(''); setShowProviderMenu(false); }}
-                          className={`w-full px-3 py-2 text-left text-xs flex items-center gap-2.5 transition-colors cursor-pointer ${provider === p.id
-                            ? 'bg-[#FFB020]/10 text-[#FFB020]'
-                            : 'text-[#F2F1EE] hover:bg-white/[0.06]'
-                            }`}
-                        >
-                          <span className={`w-2 h-2 rounded-full shrink-0 ${p.installed ? 'bg-emerald-400 shadow-[0_0_4px_rgba(52,211,153,0.5)]' : 'bg-gray-600 border border-gray-500'}`} />
-                          <span className="flex-1">{p.label}</span>
-                          {p.installed && <span className="text-[9px] text-emerald-400/70 font-mono">ready</span>}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                </>
-              )}
-            </div>
+          <div>
+            <label htmlFor="hire-execution" className="block text-xs font-mono text-[#A8A8AB] uppercase mb-1">
+              Execution Backend
+            </label>
+            <select
+              id="hire-execution"
+              value={execution}
+              onChange={(e) => setExecution(e.target.value as ExecutionBackend)}
+              className="w-full px-3 py-2 bg-[#141416] border border-white/[0.12] rounded-[6px] text-xs text-[#F2F1EE] focus:outline-none focus:border-[#FFB020]"
+            >
+              <option value="cli">CLI</option>
+              <option value="hermes">Hermes API / Ollama</option>
+            </select>
+          </div>
 
-            <div>
-              <label className="block text-xs font-mono text-[#A8A8AB] uppercase mb-1">
-                Model Engine
-              </label>
-              {providerModels.length > 0 ? (
-                <>
-                  <select
-                    value={model}
-                    onChange={(e) => {
-                      if (e.target.value === '__custom__') {
-                        setModel('');
-                        setProviderModels([]);
-                      } else {
-                        setModel(e.target.value);
-                      }
-                    }}
-                    className="w-full px-3 py-2 bg-[#141416] border border-white/[0.12] rounded-[6px] text-xs text-[#F2F1EE] focus:outline-none focus:border-[#FFB020]"
-                  >
-                    <option value="">Provider default (recommended)</option>
-                    {providerModels.map((m) => (
-                      <option key={m.id} value={m.id}>
-                        {m.name} ({m.tier})
-                      </option>
-                    ))}
-                    <option value="__custom__">✎ Enter custom model ID...</option>
-                  </select>
-                  <span className="text-[9px] font-mono text-[#6B6B6E] mt-0.5 block">
-                    {!model ? `No override — ${providers.find((p) => p.id === provider)?.label || provider} will use its configured default` : `Override: ${model}`}
-                  </span>
-                </>
-              ) : (
-                <>
-                  <input
-                    type="text"
-                    value={model}
-                    onChange={(e) => setModel(e.target.value)}
-                    placeholder="Leave empty for provider default"
-                    className="w-full px-3 py-2 bg-[#141416] border border-white/[0.12] rounded-[6px] text-xs text-[#F2F1EE] focus:outline-none focus:border-[#FFB020]"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setProviderModels(FALLBACK_MODELS[provider] || [])}
-                    className="text-[9px] font-mono text-[#6B6B6E] hover:text-[#FFB020] mt-0.5 cursor-pointer"
-                  >
-                    ← Back to model list
-                  </button>
-                </>
-              )}
-            </div>
+          {execution === 'cli' && (
+            <CliBackendPicker
+              providers={providers}
+              metadataUnavailable={metadataUnavailable}
+              value={provider}
+              onChange={(id) => { setProvider(id); setModel(''); }}
+              allowUnavailable={allowUnavailable}
+              onAllowUnavailableChange={setAllowUnavailable}
+            />
+          )}
+
+          <div>
+            <label htmlFor="hire-model" className="block text-xs font-mono text-[#A8A8AB] uppercase mb-1">
+              Model
+            </label>
+            <input
+              id="hire-model"
+              type="text"
+              list="hire-model-options"
+              value={model}
+              onChange={(e) => setModel(e.target.value)}
+              placeholder={selectedProvider?.recommended_model ? `Default (${selectedProvider.recommended_model})` : 'Leave empty for backend default'}
+              className="w-full px-3 py-2 bg-[#141416] border border-white/[0.12] rounded-[6px] text-xs text-[#F2F1EE] focus:outline-none focus:border-[#FFB020]"
+            />
+            <datalist id="hire-model-options">
+              {(execution === 'cli' ? selectedProvider?.models ?? [] : []).map((m) => (
+                <option key={m} value={m} />
+              ))}
+            </datalist>
+            <span className="text-[9px] font-mono text-[#6B6B6E] mt-0.5 block">
+              Pick a listed model or type any model ID. Empty uses the backend default.
+            </span>
           </div>
 
           <div className="grid grid-cols-2 gap-3">

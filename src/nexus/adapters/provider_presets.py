@@ -3,6 +3,10 @@
 Each provider declares how to build its spawn command (model/auto-mode flags) and
 whether it accepts the hive's Claude-specific identity injection. Ported from
 the upstream TypeScript AGENT_PROVIDER_PRESETS.
+
+Legacy descriptive metadata only. ``nexus.adapters.cli_registry`` is the
+authoritative catalog for what executes and how; ``auto_mode_flag`` documents
+each CLI's autonomy flag and is never applied to a spawned process.
 """
 
 from __future__ import annotations
@@ -196,12 +200,10 @@ PROVIDER_PRESETS: dict[AgentProviderID, AgentProviderPreset] = {
 
 
 def get_preset(provider_id: AgentProviderID) -> AgentProviderPreset:
-    """Look up a provider preset by ID, falling back to Claude for unknown IDs.
+    """Look up a provider preset by ID.
 
-    Args:
-        provider_id: The provider identifier to look up.
-
-    Returns:
-        The matching AgentProviderPreset, or the Claude preset as fallback.
+    Raises:
+        KeyError: for an unknown ID. There is deliberately no fallback, so an
+            unknown provider can never be mistaken for Claude.
     """
-    return PROVIDER_PRESETS.get(provider_id, PROVIDER_PRESETS[AgentProviderID.claude])
+    return PROVIDER_PRESETS[provider_id]

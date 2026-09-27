@@ -65,7 +65,11 @@ async def _chat(factory, company_id, agent_id, prompt):
 async def test_response_shape_is_unchanged(setup) -> None:
     factory, company_id, agent = setup
     resp = await _chat(factory, company_id, agent.id, "hello")
-    assert set(resp.model_dump()) == {"message", "history", "model_used", "tokens_used"}
+    # The original keys stay; execution provenance is additive and optional.
+    assert set(resp.model_dump()) == {
+        "message", "history", "model_used", "tokens_used",
+        "adapter_used", "backend_used", "execution_id",
+    }
     assert (
         resp.message.text == "echo: hello"
         and resp.model_used == "test-model"

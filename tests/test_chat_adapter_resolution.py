@@ -56,10 +56,14 @@ def test_legacy_mappings_preserved():
         assert key == expected_key, f"{adapter_type} -> {key}, expected {expected_key}"
 
 
-def test_unknown_defaults_to_anthropic():
-    key, config = _resolve_adapter_type(_FakeAgent("does-not-exist"))
-    assert key == "anthropic"
-    assert "api_key" in config
+def test_unknown_adapter_type_fails_closed():
+    """An unknown provider is refused, never answered through Anthropic."""
+    from fastapi import HTTPException
+
+    with pytest.raises(HTTPException) as exc:
+        _resolve_adapter_type(_FakeAgent("does-not-exist"))
+    assert exc.value.status_code == 422
+    assert exc.value.detail["code"] == "ADAPTER_CONFIG_INVALID"
 
 
 def test_none_defaults_to_anthropic():

@@ -79,6 +79,11 @@ class Settings(BaseSettings):
     # as a repository. A worktree's stored relative_path is relative to this.
     worktree_root: str = "./data/worktrees/{company_id}"
 
+    # Comma-separated secret-looking env var names every CLI employee may
+    # inherit, on top of each backend's own allowlist, e.g. the key a custom
+    # provider in ~/.codex/config.toml reads. Operator-only; never per request.
+    cli_env_allowlist: str = ""
+
     # Secret vault backend: "fernet" (encrypted rows in the `secrets` table),
     # "keyring" (OS keychain, requires the `keyring` package), or "env"
     # (read-only, values come from NEXUS_SECRET_<REF> environment variables).

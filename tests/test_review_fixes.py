@@ -359,12 +359,11 @@ class TestStreamOutputWiredIntoInteractive:
     def test_non_interactive_mode_does_not_stream(
         self, mock_exec, adapter, agent_id, task_id
     ):
-        """Non-interactive mode uses communicate() without _stream_output."""
-        mock_process = AsyncMock()
-        mock_process.communicate = AsyncMock(
-            return_value=(b"output\n", b"")
-        )
-        mock_process.returncode = 0
+        """Non-interactive mode reads output in bulk without _stream_output."""
+        mock_process = MagicMock(pid=None, returncode=0, stdin=None)
+        mock_process.stdout.read = AsyncMock(side_effect=[b"output\n", b""])
+        mock_process.stderr.read = AsyncMock(side_effect=[b"", b""])
+        mock_process.wait = AsyncMock(return_value=0)
         mock_exec.return_value = mock_process
 
         config = {
@@ -379,8 +378,8 @@ class TestStreamOutputWiredIntoInteractive:
 
         assert result.success is True
         assert "output" in result.output
-        # communicate was called (not wait)
-        mock_process.communicate.assert_awaited_once()
+        # Bulk read, not line streaming
+        mock_process.stdout.readline.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

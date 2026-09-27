@@ -89,9 +89,15 @@ async function handleResponse<T>(response: Response, path: string): Promise<T> {
   if (!response.ok) {
     let detail = response.statusText;
     try {
-      const body = await response.json() as { detail?: string; message?: string };
-      if (body.detail) {
+      const body = await response.json() as {
+        detail?: string | { code?: string; message?: string };
+        message?: string;
+      };
+      if (typeof body.detail === 'string') {
         detail = body.detail;
+      } else if (body.detail?.message) {
+        // Structured errors, e.g. {code: "CLI_BACKEND_UNAVAILABLE", message}.
+        detail = body.detail.code ? `${body.detail.code}: ${body.detail.message}` : body.detail.message;
       } else if (body.message) {
         detail = body.message;
       }

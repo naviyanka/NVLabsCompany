@@ -21,21 +21,52 @@ export interface AgentArchetype {
   description: string;
 }
 
+/** One CLI backend from the server catalog (`nexus.adapters.cli_registry`). */
 export interface AgentProvider {
   id: string;
   label: string;
-  default_command: string;
-  auto_mode_flag: string;
+  adapter_type: 'cli';
+  installed: boolean;
+  resolved_command: string | null;
+  version: string | null;
+  execution_supported: boolean;
+  /** true/false when the server can tell; null means unknown. */
+  configured: boolean | null;
+  stability: 'stable' | 'beta' | 'experimental';
   supports_model: boolean;
-  model_flag: string | null;
-  hive_aware: boolean;
-  can_receive_inbox: boolean;
+  supports_resume: boolean;
+  supports_interactive: boolean;
+  supports_worktree: boolean;
+  instruction_path?: string | null;
   recommended_model: string | null;
-  resume_flag: string | null;
+  models: string[];
   install_command: string | null;
   docs_url: string | null;
+  notes: string | null;
+}
+
+export interface ProviderProbe {
+  id: string;
   installed: boolean;
+  resolved_command: string | null;
   version: string | null;
+  execution_supported: boolean;
+  configured: boolean | null;
+  ok: boolean;
+  error: string | null;
+}
+
+/** Canonical adapter_config for a CLI employee. Never carries paths or secrets. */
+export interface CliAdapterConfig {
+  backend: string;
+  interactive: false;
+  use_worktree: false;
+  autonomy_mode: 'safe';
+  extra_args: string[];
+}
+
+export function cliAdapterConfig(backend: string): CliAdapterConfig {
+  return { backend, interactive: false, use_worktree: false, autonomy_mode: 'safe', extra_args: [] };
 }
 
 export interface AgentTemplate {
@@ -51,6 +82,7 @@ export interface TeamAgentSpec {
   title?: string;
   model?: string;
   adapter_type?: string;
+  adapter_config?: CliAdapterConfig;
   capabilities?: string[];
   responsibilities?: string;
   objectives?: string;
@@ -122,20 +154,14 @@ export async function listArchetypes(): Promise<AgentArchetype[]> {
   return apiClient.get<AgentArchetype[]>('/api/v1/agent-archetypes');
 }
 
-export interface ProviderModel {
-  id: string;
-  name: string;
-  tier: string;
-}
-
-/** List available models for a specific provider. */
-export async function listProviderModels(providerId: string): Promise<ProviderModel[]> {
-  return apiClient.get<ProviderModel[]>(`/api/v1/agent-providers/${providerId}/models`);
-}
-
-/** List all agent providers with install status. */
+/** List all cataloged CLI backends with detection status. */
 export async function listProviders(): Promise<AgentProvider[]> {
   return apiClient.get<AgentProvider[]>('/api/v1/agent-providers');
+}
+
+/** Re-detect one backend (PATH + `--version`). Runs no LLM task. */
+export async function probeProvider(backendId: string): Promise<ProviderProbe> {
+  return apiClient.post<ProviderProbe>(`/api/v1/agent-providers/${encodeURIComponent(backendId)}/probe`);
 }
 
 /** List available agent role templates (markdown-based). */

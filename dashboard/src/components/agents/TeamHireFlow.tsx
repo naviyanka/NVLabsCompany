@@ -6,6 +6,7 @@
 import { useState, useEffect } from 'react';
 import { Button } from '@/components/common/Button';
 import {
+  cliAdapterConfig,
   hireTeam,
   listTeamTemplates,
   type AgentArchetype,
@@ -194,7 +195,8 @@ export function TeamHireFlow({ archetypes, providers, onSuccess, onCancel }: Tea
         name: m.name,
         archetype: m.archetype || undefined,
         model: m.model || undefined,
-        adapter_type: m.provider || 'langchain',
+        adapter_type: 'cli',
+        adapter_config: cliAdapterConfig(m.provider || 'claude'),
       }));
 
       const response = await hireTeam({
@@ -334,7 +336,7 @@ export function TeamHireFlow({ archetypes, providers, onSuccess, onCancel }: Tea
         <div className="flex items-center gap-2">
           <span className="text-[10px] font-mono text-[#6B6B6E]">Set all providers to:</span>
           <div className="flex gap-1">
-            {(providers.length > 0 ? providers.filter((p) => p.installed) : [{ id: 'claude', label: 'Claude' }]).map((p) => (
+            {providers.filter((p) => p.installed && p.execution_supported).map((p) => (
               <button
                 key={p.id}
                 type="button"
@@ -432,18 +434,13 @@ export function TeamHireFlow({ archetypes, providers, onSuccess, onCancel }: Tea
                     >
                       {providers.length > 0 ? (
                         providers.map((p) => (
-                          <option key={p.id} value={p.id}>
+                          <option key={p.id} value={p.id} disabled={!p.execution_supported}>
                             {p.installed ? '● ' : '○ '}{p.label}
+                            {p.execution_supported ? '' : ' (catalog only)'}
                           </option>
                         ))
                       ) : (
-                        <>
-                          <option value="claude">Claude Code</option>
-                          <option value="codex">Codex</option>
-                          <option value="kiro-cli">Kiro CLI</option>
-                          <option value="antigravity">Antigravity</option>
-                          <option value="copilot">Copilot</option>
-                        </>
+                        <option value="claude">Claude Code</option>
                       )}
                     </select>
                   </div>

@@ -102,14 +102,19 @@ PROVIDERS: dict[str, dict[str, Any]] = {
         "supports_tools": True,
         "models": [],
     },
-    # Generic CLI backends (subprocess-based)
+    # Generic CLI backends (subprocess-based). Canonical agents store
+    # adapter_type="cli" + adapter_config["backend"]; the entries below keep
+    # legacy provider-specific adapter_type values resolving to the same CLI.
+    # Any other CLI catalog ID/alias also resolves (see resolve_provider).
     "cli": {"registry_key": "cli", "backend": "claude", "env_key": None},
     "codex": {"registry_key": "cli", "backend": "codex", "env_key": None},
     "aider": {"registry_key": "cli", "backend": "aider", "env_key": None},
     "kiro-cli": {"registry_key": "cli", "backend": "kiro-cli", "env_key": None},
     "agy": {"registry_key": "cli", "backend": "agy", "env_key": None},
     "opencode": {"registry_key": "cli", "backend": "opencode", "env_key": None},
-    "cursor": {"registry_key": "cli", "backend": "cursor", "env_key": None},
+    # The ``cursor`` editor launcher never ran headless; its catalog entry is
+    # the cursor-agent binary.
+    "cursor": {"registry_key": "cli", "backend": "cursor-agent", "env_key": None},
     "hermes-cli": {
         # Uses the same Nous Portal backend as the hermes CLI app.
         # Reads auth token from hermes auth.json (same credentials).
@@ -140,13 +145,23 @@ PROVIDER_ALIASES: dict[str, str] = {
     "claude-cli": "claude_code",
     "claude_cli": "claude_code",
     "antigravity": "agy",
+    "kiro": "kiro-cli",
 }
+
+
+class ProviderResolutionError(ValueError):
+    """An agent's adapter configuration names no known provider or CLI backend.
+
+    Raised instead of falling back to another provider: an employee must
+    never silently run on a provider nobody chose.
+    """
 
 
 def resolve_provider(
     adapter_type: str,
     model: str | None = None,
     connection: "Any | None" = None,
+    adapter_config: dict[str, Any] | None = None,
 ) -> tuple[str, dict[str, Any]]:
     """Resolve an adapter_type to a registry key and config dict.
 
@@ -158,9 +173,14 @@ def resolve_provider(
         connection: Optional resolved Connection. When present, its wire_format
             forces the registry key and its base_url/api_key override the
             provider defaults — the injection point for the whole integration.
+        adapter_config: The agent's stored adapter_config. For
+            ``adapter_type == "cli"`` its ``backend`` selects the CLI.
 
     Returns:
         Tuple of (registry_key, config_dict).
+
+    Raises:
+        ProviderResolutionError: unknown adapter_type or CLI backend.
     """
     if connection is not None:
         # wire_format is "openai" | "anthropic"; those are registry keys as-is.
@@ -177,17 +197,35 @@ def resolve_provider(
     provider_name = PROVIDER_ALIASES.get(adapter_type, adapter_type)
     provider = PROVIDERS.get(provider_name)
 
+    from nexus.adapters.cli_registry import CLIRegistry
+
+    catalog = CLIRegistry(auto_detect=False)
     if provider is None:
-        # Default to anthropic
-        provider = PROVIDERS["anthropic"]
+        # Any other CLI catalog ID or alias used as a legacy adapter_type.
+        if catalog.resolve_backend_id(adapter_type) is None:
+            raise ProviderResolutionError(
+                f"Unknown adapter_type {adapter_type!r}; refusing to fall back to another provider"
+            )
+        provider = {"registry_key": "cli", "backend": adapter_type}
 
     registry_key = provider["registry_key"]
     config: dict[str, Any] = {}
 
     # Build config based on provider type
     if registry_key == "cli":
-        config["backend"] = provider.get("backend", adapter_type)
+        stored = adapter_config or {}
+        raw_backend = provider["backend"]
+        if provider_name == "cli" and stored.get("backend"):
+            raw_backend = stored["backend"]
+        # A legacy "cli" agent without a stored backend always ran Claude Code.
+        backend = catalog.resolve_backend_id(raw_backend)
+        if backend is None:
+            raise ProviderResolutionError(f"Unknown CLI backend {str(raw_backend)[:80]!r}")
+        config["backend"] = backend
         config["model"] = model or ""
+        if provider_name == "cli":
+            config["interactive"] = bool(stored.get("interactive", False))
+            config["extra_args"] = list(stored.get("extra_args") or [])
     elif registry_key == "hermes":
         config["model"] = model or provider.get("default_model", "")
         config["ollama_host"] = os.environ.get(

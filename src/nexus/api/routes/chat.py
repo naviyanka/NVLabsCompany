@@ -63,6 +63,11 @@ class ChatResponse(BaseModel):
     history: list[ChatMessage]
     model_used: str | None = None
     tokens_used: int = 0
+    # Which adapter / CLI backend actually produced the reply (None when the
+    # adapter reports nothing, e.g. an API adapter has no CLI backend).
+    adapter_used: str | None = None
+    backend_used: str | None = None
+    execution_id: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -669,11 +674,21 @@ def _resolve_adapter_type(
     Connection is async, so callers use :func:`_resolve_connection` first; this
     stays sync so the existing resolution tests keep working.
     """
-    from nexus.adapters.uastl import resolve_provider
+    from nexus.adapters.uastl import ProviderResolutionError, resolve_provider
 
-    return resolve_provider(
-        agent.adapter_type or "anthropic", agent.model, connection=connection
-    )
+    try:
+        return resolve_provider(
+            agent.adapter_type or "anthropic",
+            agent.model,
+            connection=connection,
+            adapter_config=getattr(agent, "adapter_config", None),
+        )
+    except ProviderResolutionError as exc:
+        # Fail closed: never answer through a provider nobody configured.
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "ADAPTER_CONFIG_INVALID", "message": str(exc)},
+        ) from exc
 
 
 async def _reserve_budget(
@@ -849,6 +864,7 @@ async def _call_llm(
     principal: Principal | None = None,
     source: str | None = None,
     context: ExecutionContext | None = None,
+    execution: dict[str, Any] | None = None,
 ) -> tuple[str, str, int]:
     """Call the LLM adapter to get a real response.
 
@@ -872,6 +888,8 @@ async def _call_llm(
             activity. Used instead of ``principal``: its principal, role and
             source are kept and it is bound to ``agent``. It must be for the
             agent's company and name no other agent.
+        execution: Optional dict the caller passes to learn which adapter,
+            CLI backend and execution ID produced the reply.
 
     Returns:
         Tuple of (response_text, model_used, tokens_used).
@@ -881,8 +899,18 @@ async def _call_llm(
     from nexus.adapters.registry import AdapterRegistry
     from nexus.tools.context import ExecutionContext
 
+    if getattr(agent, "status", None) == "configuration_required":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "AGENT_CONFIGURATION_REQUIRED",
+                "message": f"{agent.name} must be configured before it can receive work",
+            },
+        )
     connection = await _resolve_connection(agent)
     registry_key, config = _resolve_adapter_type(agent, connection)
+    if execution is not None:
+        execution.update(adapter=registry_key, backend=config.get("backend"))
     try:
         if context is None:
             execution_context = ExecutionContext.for_call(
@@ -1087,6 +1115,12 @@ async def _call_llm(
 
             # Clean up session
             await adapter.terminate(session)
+
+            if execution is not None:
+                execution["execution_id"] = str(task_id)
+                for artifact in result.artifacts or []:
+                    if isinstance(artifact, dict) and artifact.get("type") == "cli_execution":
+                        execution["cli"] = artifact
 
             if result.success and result.output:
                 response_text = str(result.output)
@@ -1361,14 +1395,17 @@ async def _stream_reply(
             yield "data: [DONE]\n\n"
         else:
             # Fallback: call LLM, then emit word-by-word (simulated streaming)
+            execution: dict[str, Any] = {}
             response_text, model_used, tokens_used = await _call_llm(
-                agent, system_prompt, prompt, history, session_id=session_id, principal=principal
+                agent, system_prompt, prompt, history, session_id=session_id, principal=principal,
+                execution=execution,
             )
             # Stored before the first chunk, so a disconnect cannot lose it.
             agent_msg = _add_message(str(agent_id), "agent", response_text)
             await _persist_from_generator(
                 agent_id, company_id, "agent", response_text,
                 session_id=session_id, model_used=model_used, tokens_used=tokens_used,
+                payload={"execution": execution} if execution else None,
             )
 
             words = response_text.split(" ")
@@ -1382,6 +1419,9 @@ async def _stream_reply(
                 "message": agent_msg,
                 "model_used": model_used,
                 "tokens_used": tokens_used,
+                "adapter_used": execution.get("adapter"),
+                "backend_used": execution.get("backend"),
+                "execution_id": execution.get("execution_id"),
             })
             yield f"data: {done_event}\n\n"
             yield "data: [DONE]\n\n"
@@ -1468,8 +1508,10 @@ async def chat_with_agent(
     await _persist_message_to_db(db, agent_id, company_id, "user", body.prompt, session_id=session.id)
 
     # Call LLM
+    execution: dict[str, Any] = {}
     response_text, model_used, tokens_used = await _call_llm(
-        agent, system_prompt, body.prompt, history, session_id=session.id, principal=principal
+        agent, system_prompt, body.prompt, history, session_id=session.id, principal=principal,
+        execution=execution,
     )
 
     # Store agent response
@@ -1477,6 +1519,7 @@ async def chat_with_agent(
     await _persist_message_to_db(
         db, agent_id, company_id, "agent", response_text,
         session_id=session.id, model_used=model_used, tokens_used=tokens_used,
+        payload={"execution": execution} if execution else None,
     )
 
     await _record_chat_audit(db, company_id, agent_id, body.prompt, response_text, model_used, tokens_used, session.id)
@@ -1486,6 +1529,9 @@ async def chat_with_agent(
         history=[ChatMessage(**m) for m in _get_history(str(agent_id))],
         model_used=model_used,
         tokens_used=tokens_used,
+        adapter_used=execution.get("adapter"),
+        backend_used=execution.get("backend"),
+        execution_id=execution.get("execution_id"),
     )
 
 

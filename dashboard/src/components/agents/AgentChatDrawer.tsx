@@ -14,6 +14,19 @@ interface ChatMessage {
   sender: 'user' | 'agent';
   text: string;
   timestamp: string;
+  /** Which adapter/backend/model actually produced this reply. */
+  via?: string;
+}
+
+interface ExecutionInfo {
+  adapter_used?: string | null;
+  backend_used?: string | null;
+  model_used?: string | null;
+}
+
+function executionLabel(e: ExecutionInfo): string | undefined {
+  const parts = [e.adapter_used, e.backend_used, e.model_used].filter(Boolean);
+  return parts.length ? parts.join(' · ') : undefined;
 }
 
 interface AgentChatDrawerProps {
@@ -291,15 +304,16 @@ export function AgentChatDrawer({ agent, isOpen, onClose }: AgentChatDrawerProps
 
       if (!response.ok || !response.body) {
         // Fallback to non-streaming
-        const res = await apiClient.post<{ message: ChatMessage; history: ChatMessage[]; tokens_used?: number }>(
+        const res = await apiClient.post<{ message: ChatMessage; history: ChatMessage[]; tokens_used?: number } & ExecutionInfo>(
           `/api/v1/agents/${agent.id}/chat`,
           { prompt: userText }
         );
         setMessages((prev) => prev.filter((m) => m.id !== streamMsgId));
+        const via = executionLabel(res ?? {});
         if (res?.history) {
-          setMessages(res.history);
+          setMessages(res.history.map((m) => (m.id === res.message?.id ? { ...m, via } : m)));
         } else if (res?.message) {
-          setMessages((prev) => [...prev, res.message]);
+          setMessages((prev) => [...prev, { ...res.message, via }]);
         }
         // Accumulate tokens from non-streaming response
         if (res?.tokens_used) {
@@ -339,7 +353,7 @@ export function AgentChatDrawer({ agent, isOpen, onClose }: AgentChatDrawerProps
                 );
               } else if (event.type === 'done') {
                 setMessages((prev) =>
-                  prev.map((m) => m.id === streamMsgId ? event.message : m)
+                  prev.map((m) => m.id === streamMsgId ? { ...event.message, via: executionLabel(event) } : m)
                 );
                 if (event.tokens_used) {
                   setSessionTokens((prev) => prev + event.tokens_used);
@@ -426,6 +440,11 @@ export function AgentChatDrawer({ agent, isOpen, onClose }: AgentChatDrawerProps
                   }`}
                 >
                   {msg.text}
+                  {msg.via && (
+                    <div className="mt-1 text-[9px] font-mono text-[#6B6B6E]" title="Execution that produced this reply">
+                      via {msg.via}
+                    </div>
+                  )}
                 </div>
                 {msg.sender === 'user' && (
                   <div className="w-6 h-6 rounded-full bg-white/[0.06] border border-white/[0.1] flex items-center justify-center shrink-0 mt-0.5">

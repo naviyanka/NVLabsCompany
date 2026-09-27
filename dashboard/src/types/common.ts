@@ -11,7 +11,8 @@ export type AgentStatus =
   | 'terminated'
   | 'working'
   | 'review'
-  | 'offline';
+  | 'offline'
+  | 'configuration_required';
 
 export type TaskStatus = 'pending' | 'in_progress' | 'completed' | 'failed' | 'blocked' | 'cancelled';
 export type TaskPriority = 1 | 2 | 3 | 4 | 5; // 1 = Critical, 5 = Lowest

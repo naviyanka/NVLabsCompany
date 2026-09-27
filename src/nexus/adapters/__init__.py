@@ -17,7 +17,7 @@ Additionally provides:
 - AgentProviderID: Enum of supported agent CLI providers
 - AgentProviderPreset: Frozen dataclass describing provider spawn metadata
 - PROVIDER_PRESETS: Complete mapping of all provider presets
-- get_preset: Lookup function with Claude fallback
+- get_preset: Lookup function (raises KeyError for unknown IDs)
 """
 
 from nexus.adapters.anthropic_adapter import AnthropicAdapter
