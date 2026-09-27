@@ -478,13 +478,17 @@ class GitRunner:
         specs += [f":(exclude,glob)**/{check_ref_text(name)}/**" for name in anywhere]
         await self._ok("add", "--all", "--", ".", *specs)
 
-    async def remove_untracked(self, anywhere: tuple[str, ...]) -> None:
-        """Delete untracked files under the ``anywhere`` directories at any depth.
+    async def remove_untracked(
+        self, anywhere: tuple[str, ...], top: tuple[str, ...] = ()
+    ) -> None:
+        """Delete untracked files under the ``anywhere`` directories at any depth
+        and under the ``top`` directories at the root.
 
         ``clean`` never touches tracked or ignored files and removes a link
         itself, never what it points to.
         """
         specs = [f":(glob)**/{check_ref_text(name)}/**" for name in anywhere]
+        specs += [f":(glob){check_ref_text(name)}/**" for name in top]
         await self._ok("clean", "--force", "-d", "--", *specs)
 
     async def find_commit_with(self, text: str) -> str | None:

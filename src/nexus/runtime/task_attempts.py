@@ -1300,6 +1300,7 @@ async def _prepare(attempt: TaskAttempt, worker_id: str) -> tuple[Any, Any, Any]
         WorktreeService,
         _repository_git,
         held_worktree,
+        worktree_path,
     )
 
     company_id = attempt.company_id
@@ -1353,11 +1354,15 @@ async def _prepare(attempt: TaskAttempt, worker_id: str) -> tuple[Any, Any, Any]
                 diff = await git.diff(reviewed.base_commit, reviewed.head_commit)
             worktree_id = row.id
             branch = row.branch
+            root = worktree_path(company_id, row.relative_path)
         if not await _update_held(attempt, worker_id, worktree_id=worktree_id):
             return None
 
         turn_id = attempt.chat_turn_id
         if turn_id is None:
+            # A retry reuses the session's worktree: the previous attempt's
+            # progress file would otherwise be read as this attempt's report.
+            _drop_progress_file(root)
             failed: list[str] = []
             if attempt.attempt_number > 1:
                 async with tenant_session(company_id) as db:
@@ -2083,9 +2088,10 @@ class TaskAttemptWorker:
         record, report = result["record"], result.get("report")
         if report is not None:
             await store_report(attempt, attempt.report_seq + 1, report, "final")
-        # Caches left by running the tests would otherwise be committed with
-        # whatever the session leaves behind when it ends.
-        await GitRunner(root).remove_untracked(GENERATED_DIRS)
+        # Caches left by running the tests, and server files a killed run
+        # could not clean up (its CLI instruction file), would otherwise be
+        # committed with whatever the session leaves behind when it ends.
+        await GitRunner(root).remove_untracked(GENERATED_DIRS, top=EXCLUDED_DIRS)
         commit = None
         if record["passed"] and spec.mode == "write":
             _drop_progress_file(root)
