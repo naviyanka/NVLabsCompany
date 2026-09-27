@@ -105,10 +105,14 @@ are exactly rows 2 to 14 above. There are no new failures.
   runs a contended burst on a separate loop first, then checks that every row
   of a burst on the test loop is kept.
 
-## Related environment issue (not a test failure)
+## Related environment issue (fixed)
 
-`alembic upgrade head` on a fresh database fails at the seed step because the
-`focus_items` model and its migration drifted apart after `0be6843`. Tests
-create tables from the models, so the suite does not notice. Developer
-databases that were already migrated are unaffected. Fix with a new migration
-that brings `focus_items` in line with the model.
+`alembic upgrade head` on a fresh database used to fail at the seed step:
+`table agents has no column named focus_items`. Two model columns never got a
+migration: `agents.focus_items` (added in `0be6843`) and
+`user_profiles.oidc_sub`. Tests build tables with `create_all`, so the suite
+did not notice. Migration `e7a1c2d3f401` adds both (only when missing, so hand
+patched databases are fine). `tests/test_alembic_migration.py::TestChainExecution::test_migrated_schema_matches_the_models`
+now builds a database from migrations alone and fails on any model table or
+column the migrations do not create. Older FK and index differences are listed
+in that test one by one.
