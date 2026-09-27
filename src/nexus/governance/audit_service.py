@@ -19,6 +19,7 @@ Events captured:
 import asyncio
 import logging
 import uuid
+import weakref
 from datetime import datetime, timezone
 from typing import Any
 
@@ -139,7 +140,7 @@ async def _chain_in_savepoint(session: Any, entry: Any) -> None:
     # an unchained row rather than poisoning the caller's transaction. The gap
     # is that such a row is invisible to chain verification -- allocating the
     # number from a DB sequence would close it, and needs a migration.
-    async with _chain_lock:
+    async with _chain_lock():
         await _chain_safely(session, entry)
         try:
             async with session.begin_nested():
@@ -181,7 +182,22 @@ async def _chain_safely(session: Any, entry: Any) -> None:
 # violation. This lock serialises them within a process; the retry loop below
 # still covers the cross-process case, where a second API worker or the Temporal
 # worker writes concurrently.
-_chain_lock = asyncio.Lock()
+#
+# One lock per event loop: an asyncio.Lock binds to the first loop that waits on
+# it, and a later loop (asyncio.run in a worker thread, a test) would then get
+# RuntimeError on every contended write -- which record_audit swallows, silently
+# dropping the row.
+_chain_locks: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Lock] = (
+    weakref.WeakKeyDictionary()
+)
+
+
+def _chain_lock() -> asyncio.Lock:
+    loop = asyncio.get_running_loop()
+    lock = _chain_locks.get(loop)
+    if lock is None:
+        lock = _chain_locks[loop] = asyncio.Lock()
+    return lock
 
 
 async def _write_with_chain_retry(session: Any, entry: Any, attempts: int = 5) -> None:
@@ -192,7 +208,7 @@ async def _write_with_chain_retry(session: Any, entry: Any, attempts: int = 5) -
     """
     from sqlalchemy.exc import IntegrityError
 
-    async with _chain_lock:
+    async with _chain_lock():
         for attempt in range(attempts):
             await _chain_safely(session, entry)
             session.add(entry)

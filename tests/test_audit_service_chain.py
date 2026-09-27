@@ -208,6 +208,46 @@ class TestConcurrentWriters:
         sequences = [row.sequence_number for row in rows if row.sequence_number is not None]
         assert len(sequences) == len(set(sequences)), "sequence numbers must be unique"
 
+    async def test_contended_writes_survive_an_earlier_event_loop(
+        self, session_factory, monkeypatch
+    ) -> None:
+        """A burst on one event loop must not break bursts on the next.
+
+        The chain lock used to be a module-level asyncio.Lock. Once contended it
+        binds to that loop, and every contended write on a later loop raised
+        inside record_audit and was silently dropped.
+        """
+        import nexus.database as database
+
+        async def burst(prefix: str) -> None:
+            await asyncio.gather(
+                *(
+                    record_audit(company_id=uuid.uuid4(), actor_type="agent", action=f"{prefix}.{i}")
+                    for i in range(4)
+                )
+            )
+
+        async def burst_on_its_own_database() -> None:
+            engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+            async with engine.begin() as conn:
+                await conn.run_sync(SQLModel.metadata.create_all)
+            monkeypatch.setattr(
+                database,
+                "async_session_factory",
+                async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False),
+            )
+            await burst("other-loop")
+            await engine.dispose()
+
+        await asyncio.to_thread(asyncio.run, burst_on_its_own_database())
+
+        monkeypatch.setattr(database, "async_session_factory", session_factory)
+        await burst("this-loop")
+
+        async with session_factory() as session:
+            rows = list((await session.execute(select(AuditLog))).scalars())
+        assert len(rows) == 4
+
 
 class TestFailureHandling:
     """A chain problem must not cost us the audit row itself."""
