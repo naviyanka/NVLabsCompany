@@ -1,0 +1,9 @@
+{"mode": "write", "repository_id": "d40bb825-419e-4efe-9206-c5b3fa43bef9",
+ "objective": "Create src/stats.py with mean, median, mode and variance functions over a list of numbers (each raises ValueError on an empty list), and tests/test_stats.py with pytest tests for each function including the empty-list case. Write the report after every step. Run the tests.",
+ "deliverables": ["src/stats.py", "tests/test_stats.py"],
+ "verification": [{"command": "pytest", "paths": ["tests/test_stats.py"]}],
+ "acceptance_criteria": [
+   {"kind": "file_exists", "path": "src/stats.py"},
+   {"kind": "pattern_count", "path": "tests/test_stats.py", "pattern": "def test_", "min_count": 5},
+   {"kind": "command_passes", "command": "pytest"}],
+ "timeout_seconds": 600}

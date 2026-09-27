@@ -1,0 +1,8 @@
+{"mode": "read_only", "repository_id": "d40bb825-419e-4efe-9206-c5b3fa43bef9",
+ "review_of_task_id": "7141d465-d37c-4bf4-b667-054b3fb23d39",
+ "objective": "Review the calculator change in the diff: check src/calculator.py and tests/test_calculator.py for correctness and missing test cases. Do not modify any file. In your final report summary, start with the word REVIEW and list your findings.",
+ "verification": [{"command": "pytest", "paths": ["tests/test_calculator.py"]}],
+ "acceptance_criteria": [
+   {"kind": "command_passes", "command": "pytest"},
+   {"kind": "report_contains", "text": "REVIEW"}],
+ "timeout_seconds": 600}

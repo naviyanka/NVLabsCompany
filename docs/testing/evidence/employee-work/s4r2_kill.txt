@@ -1,0 +1,3 @@
+employee CLI pid 27032 parent 11228
+hard-killed backend pid 11228
+employee CLI 27032 gone after backend kill

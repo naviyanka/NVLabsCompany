@@ -1,0 +1,6 @@
+681dd0b Task attempt 1 for task 8b0c7576-5410-4d16-b7de-b5cb5e6d7de2
+77a6799 init
+ src/stats.py        | 38 ++++++++++++++++++++++++++++++++++++++
+ tests/test_stats.py | 35 +++++++++++++++++++++++++++++++++++
+ 2 files changed, 73 insertions(+)
+status:

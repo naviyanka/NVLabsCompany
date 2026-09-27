@@ -1,0 +1,1 @@
+04:02:58 {"id": "18645d1f-3bbc-4293-8cfb-baa93b6b00c8", "status": "running", "execution_id": "13ba5247-981f-431f-a076-b386bfdfd27d", "report_seq": 0, "claimed_by": "<host>:15076:660042b8", "session_id": "d89eb147-e285-4f10-afbf-d9ecad9dc727", "worktree_id": "d5cc5cfc-7ae6-4c93-8a7c-4299cbe7454a"}
