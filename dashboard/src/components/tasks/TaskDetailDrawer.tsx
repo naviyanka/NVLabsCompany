@@ -15,6 +15,7 @@ import { Button } from '@/components/common/Button';
 import { Badge } from '@/components/common/Badge';
 import { apiClient } from '@/api/client';
 import { getActiveCompanyId } from '@/config';
+import { TaskAttemptPanel } from '@/components/tasks/TaskAttemptPanel';
 
 interface TaskDetailDrawerProps {
   task: Task | null;
@@ -171,38 +172,42 @@ export function TaskDetailDrawer({
 
         {/* Body */}
         <div className="flex-1 overflow-y-auto p-4 space-y-5 font-sans">
-          {/* Status & Agent Runner Bar */}
-          <div className="p-4 bg-[#101012] border border-white/[0.08] rounded-[10px] space-y-3">
-            <div className="flex items-center justify-between text-xs font-mono">
-              <span className="text-gray-400">
-                Assigned Agent: <strong className="text-[#FFB020]">{agentName}</strong>
-              </span>
-              <Badge variant={task.status as any}>{task.status}</Badge>
-            </div>
+          {/* Work tasks finish only through the attempt service, never a status flip */}
+          {task.work_spec ? (
+            <TaskAttemptPanel task={task} agents={agents} />
+          ) : (
+            <div className="p-4 bg-[#101012] border border-white/[0.08] rounded-[10px] space-y-3">
+              <div className="flex items-center justify-between text-xs font-mono">
+                <span className="text-gray-400">
+                  Assigned Agent: <strong className="text-[#FFB020]">{agentName}</strong>
+                </span>
+                <Badge variant={task.status as any}>{task.status}</Badge>
+              </div>
 
-            <div className="flex items-center justify-between gap-2 pt-2 border-t border-white/[0.06]">
-              {task.status === 'pending' && (
-                <Button variant="secondary" size="xs" onClick={() => handleStatusChange('in_progress')}>
-                  Set In-Progress
-                </Button>
-              )}
-              {task.status === 'in_progress' && (
-                <Button variant="secondary" size="xs" onClick={() => handleStatusChange('completed')}>
-                  Mark Completed
-                </Button>
-              )}
+              <div className="flex items-center justify-between gap-2 pt-2 border-t border-white/[0.06]">
+                {task.status === 'pending' && (
+                  <Button variant="secondary" size="xs" onClick={() => handleStatusChange('in_progress')}>
+                    Set In-Progress
+                  </Button>
+                )}
+                {task.status === 'in_progress' && (
+                  <Button variant="secondary" size="xs" onClick={() => handleStatusChange('completed')}>
+                    Mark Completed
+                  </Button>
+                )}
 
-              <Button
-                variant="primary"
-                size="xs"
-                icon={isExecuting ? <Loader2 size={13} className="animate-spin" /> : <Play size={13} />}
-                onClick={handleRunAgentSolver}
-                disabled={isExecuting}
-              >
-                {isExecuting ? 'Agent Solving Task...' : 'Simulate Agent Solver'}
-              </Button>
+                <Button
+                  variant="primary"
+                  size="xs"
+                  icon={isExecuting ? <Loader2 size={13} className="animate-spin" /> : <Play size={13} />}
+                  onClick={handleRunAgentSolver}
+                  disabled={isExecuting}
+                >
+                  {isExecuting ? 'Agent Solving Task...' : 'Simulate Agent Solver'}
+                </Button>
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Description */}
           <div className="space-y-1.5 font-mono text-xs">
