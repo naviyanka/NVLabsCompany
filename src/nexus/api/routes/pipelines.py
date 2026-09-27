@@ -439,7 +439,9 @@ async def run_pipeline(
 
     run = PipelineRun(pipeline_id=pipeline_id, company_id=company_id, status="running")
     db.add(run)
-    await db.flush()
+    # Commit before dispatch: the workflow's first stage can run before this
+    # request ends, and must see the run without waiting on our write lock.
+    await db.commit()
 
     # Execute pipeline: prefer Temporal (durable) when enabled, fallback to BackgroundTasks
     from nexus.temporal.client import is_temporal_enabled, start_pipeline_workflow
