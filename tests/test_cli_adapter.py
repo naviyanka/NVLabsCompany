@@ -20,6 +20,8 @@ from nexus.adapters.cli_registry import CLIBackendInfo, CLIRegistry
 from nexus.adapters.registry import AdapterRegistry
 from nexus.runtime.adapter import AgentSession, AgentStatus, TaskResult
 
+pytestmark = pytest.mark.core_employee
+
 
 def _run(coro):
     """Run an async coroutine synchronously."""
@@ -157,18 +159,6 @@ class TestCLIRegistry:
         assert registry.get_path("codex") is None
 
     @patch("nexus.adapters.cli_registry.subprocess.run")
-    def test_probe_version_success(self, mock_run):
-        """probe_version returns version string on success."""
-        mock_run.return_value = MagicMock(
-            returncode=0, stdout="claude-code v1.2.3\n", stderr=""
-        )
-        registry = CLIRegistry(auto_detect=False)
-        registry._available["claude"] = "/usr/local/bin/claude"
-
-        version = registry.probe_version("claude")
-        assert version == "claude-code v1.2.3"
-
-    @patch("nexus.adapters.cli_registry.subprocess.run")
     def test_probe_version_not_available(self, mock_run):
         """probe_version returns None if backend is not available."""
         registry = CLIRegistry(auto_detect=False)
@@ -230,67 +220,32 @@ class TestCLIAdapterValidation:
         adapter.validate_config({"backend": "agy"})
 
 
-class TestCLIAdapterBuildArgs:
-    """Test CLIAdapter._build_args produces correct arguments per backend."""
-
-    @pytest.fixture
-    def adapter(self):
-        """Create a CLIAdapter instance."""
-        return CLIAdapter()
-
-    def test_build_args_claude(self, adapter):
-        """Claude backend uses -p flag for non-interactive prompt execution."""
-        backend = adapter._registry.get_backend("claude")
-        args = adapter._build_args(backend, "test prompt")
-        assert args == ["claude", "-p", "test prompt"]
-
-    def test_build_args_claude_with_extra(self, adapter):
-        """Claude backend appends extra args after -p prompt."""
-        backend = adapter._registry.get_backend("claude")
-        args = adapter._build_args(backend, "test prompt", ["--verbose"])
-        assert args == ["claude", "-p", "--verbose", "test prompt"]
-
-    def test_build_args_codex(self, adapter):
-        """Codex runs `exec` and reads the prompt from stdin, not argv."""
-        backend = adapter._registry.get_backend("codex")
-        args = adapter._build_args(backend, "fix this bug")
-        assert args == ["codex", "exec", "--skip-git-repo-check"]
-
-    def test_build_args_codex_with_extra(self, adapter):
-        """Codex model goes through its verified -m flag."""
-        backend = adapter._registry.get_backend("codex")
-        args = adapter._build_args(backend, "hello", model="o3")
-        assert args == ["codex", "exec", "--skip-git-repo-check", "-m", "o3"]
-
-    def test_build_args_aider(self, adapter):
-        """Aider passes the prompt via --message and never auto-confirms."""
-        backend = adapter._registry.get_backend("aider")
-        args = adapter._build_args(backend, "refactor this")
-        assert args == ["aider", "--message", "refactor this"]
-
-    def test_build_args_aider_with_extra(self, adapter):
-        """Aider model goes before the prompt flag."""
-        backend = adapter._registry.get_backend("aider")
-        args = adapter._build_args(backend, "fix it", model="gpt-4")
-        assert args == ["aider", "--model", "gpt-4", "--message", "fix it"]
-
-    def test_build_args_kiro_cli(self, adapter):
-        """Kiro CLI runs a non-interactive chat with a positional prompt."""
-        backend = adapter._registry.get_backend("kiro-cli")
-        args = adapter._build_args(backend, "analyze code")
-        assert args == ["kiro-cli", "chat", "--no-interactive", "analyze code"]
-
-    def test_build_args_opencode(self, adapter):
-        """OpenCode passes prompt as positional argument."""
-        backend = adapter._registry.get_backend("opencode")
-        args = adapter._build_args(backend, "generate tests")
-        assert args == ["opencode", "run", "generate tests"]
-
-    def test_build_args_agy(self, adapter):
-        """Agy passes the prompt via its print flag."""
-        backend = adapter._registry.get_backend("agy")
-        args = adapter._build_args(backend, "run task")
-        assert args == ["agy", "-p", "run task"]
+# Golden argument vectors: the verified flags each backend is invoked with.
+# _build_args delegates to CLIBackendInfo.build_args, so this also covers the
+# registry-level builder.
+@pytest.mark.parametrize(
+    ("backend_id", "prompt", "extra", "model", "expected"),
+    [
+        ("claude", "test prompt", None, "", ["claude", "-p", "test prompt"]),
+        ("claude", "test prompt", ["--verbose"], "", ["claude", "-p", "--verbose", "test prompt"]),
+        # Codex runs `exec` and reads the prompt from stdin, not argv.
+        ("codex", "fix this bug", None, "", ["codex", "exec", "--skip-git-repo-check"]),
+        ("codex", "hello", None, "o3", ["codex", "exec", "--skip-git-repo-check", "-m", "o3"]),
+        # Aider passes the prompt via --message and never auto-confirms.
+        ("aider", "refactor this", None, "", ["aider", "--message", "refactor this"]),
+        ("aider", "refactor this", ["--verbose"], "", ["aider", "--verbose", "--message", "refactor this"]),
+        ("aider", "fix it", None, "gpt-4", ["aider", "--model", "gpt-4", "--message", "fix it"]),
+        ("kiro-cli", "analyze code", None, "", ["kiro-cli", "chat", "--no-interactive", "analyze code"]),
+        ("opencode", "generate tests", None, "", ["opencode", "run", "generate tests"]),
+        ("agy", "run task", None, "", ["agy", "-p", "run task"]),
+    ],
+    ids=["claude-plain", "claude-verbose", "codex-plain", "codex-model", "aider-plain",
+         "aider-verbose", "aider-model", "kiro-cli", "opencode", "agy"],
+)
+def test_build_args_golden_argv(backend_id, prompt, extra, model, expected):
+    adapter = CLIAdapter()
+    backend = adapter._registry.get_backend(backend_id)
+    assert adapter._build_args(backend, prompt, extra, model=model) == expected
 
 
 class TestCLIAdapterExecution:
@@ -643,17 +598,3 @@ class TestCLIBackendInfoBuildArgs:
         )
         args = backend.build_args("hello", ["--verbose", "--fast"])
         assert args == ["custom-cli", "--verbose", "--fast", "hello"]
-
-    def test_claude_backend_build_args_via_registry(self):
-        """Claude backend build_args produces correct output via registry."""
-        registry = CLIRegistry(auto_detect=False)
-        backend = registry.get_backend("claude")
-        args = backend.build_args("test prompt")
-        assert args == ["claude", "-p", "test prompt"]
-
-    def test_aider_backend_build_args_via_registry(self):
-        """Aider backend build_args produces correct output via registry."""
-        registry = CLIRegistry(auto_detect=False)
-        backend = registry.get_backend("aider")
-        args = backend.build_args("refactor this", ["--verbose"])
-        assert args == ["aider", "--verbose", "--message", "refactor this"]

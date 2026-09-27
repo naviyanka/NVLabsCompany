@@ -18,6 +18,8 @@ import pytest
 from nexus.adapters.cli_adapter import CLIAdapter
 from nexus.runtime.adapter import AgentStatus
 
+pytestmark = pytest.mark.core_employee
+
 
 def _run(coro):
     """Run an async coroutine synchronously."""

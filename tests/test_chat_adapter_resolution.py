@@ -14,6 +14,8 @@ import pytest
 from nexus.adapters import uastl
 from nexus.api.routes.chat import _resolve_adapter_type
 
+pytestmark = pytest.mark.core_employee
+
 
 class _FakeAgent:
     """Minimal stand-in for the Agent model fields used in resolution."""

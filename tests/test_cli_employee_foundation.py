@@ -34,6 +34,8 @@ from nexus.models.agent import Agent
 from nexus.models.company import Company
 from nexus.tools.access import check_cli_args
 
+pytestmark = pytest.mark.core_employee
+
 REQUIRED_IDS = {
     "claude", "codex", "gemini", "agy", "kiro-cli", "freebuff", "qwen", "kimi",
     "opencode", "aider", "copilot", "goose", "crush", "pi", "hermes", "amazon-q",

@@ -20,6 +20,8 @@ from nexus.models.company import Company
 from nexus.models.task import Task
 from nexus.models.connection import LLMConnection
 
+pytestmark = [pytest.mark.postgres, pytest.mark.integration]
+
 
 @pytest.fixture(scope="module")
 def postgres_container():
