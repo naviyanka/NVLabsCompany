@@ -76,7 +76,9 @@ PUBLIC_PATH_PREFIXES = (
 )
 
 # Exact paths, for the two cases a prefix would over-match.
-PUBLIC_PATHS = frozenset({"/api/v1/auth", "/favicon.ico"})
+# The manager bridge authenticates its own execution-scoped credential (a
+# different JWT audience), so the middleware lets it through unauthenticated.
+PUBLIC_PATHS = frozenset({"/api/v1/auth", "/favicon.ico", "/api/v1/mcp/manager"})
 
 # ``/api/v1/companies/{company_id}/...`` — a large share of the API is shaped
 # this way, and the company in the URL has to be the one the caller proved

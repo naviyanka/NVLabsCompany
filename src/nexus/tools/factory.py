@@ -325,6 +325,9 @@ async def _record_invocation(
             claimed_agent_id=str(ctx.agent_id) if ctx.agent_id else None,
             claimed_session_id=str(ctx.session_id) if ctx.session_id else None,
         )
+        if ctx.turn_id is not None:
+            # A manager-bridge call; its principal_id is "run:<execution_id>".
+            detail["turn_id"] = str(ctx.turn_id)
         actor_type, _, actor_id = ctx.principal_id.partition(":")
     else:
         actor_type, actor_id = "agent", str(decision.agent_id)

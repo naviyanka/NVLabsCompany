@@ -131,15 +131,17 @@ def input_schema_for(node: NodeDefinition) -> dict[str, Any]:
 class MCPServer:
     """Serves the exposed node tools over one stdio session."""
 
-    def __init__(self, ctx: ExecutionContext) -> None:
+    def __init__(self, ctx: ExecutionContext, *, node_tools: bool = True) -> None:
         """Bind the server to one authenticated caller.
 
         Args:
             ctx: Built from the credential by :func:`authenticate`; scopes
                 every call to its company, principal, role and agent.
+            node_tools: False serves only the manager tools (the manager
+                bridge, :mod:`nexus.tools.manager_bridge`).
         """
         self._ctx = ctx
-        self._nodes = exposed_nodes()
+        self._nodes = exposed_nodes() if node_tools else {}
 
     async def list_tools(self) -> list[dict[str, Any]]:
         """The tools this caller may be offered, in MCP ``tools/list`` shape."""

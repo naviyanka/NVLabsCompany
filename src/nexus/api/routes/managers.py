@@ -4,19 +4,25 @@ Thin shells over :mod:`nexus.services.manager_service`. The reporting line
 itself is set by ``PUT /api/v1/agents/{agent_id}/manager``. A caller acting
 as an agent (a run token) may act only as its own manager identity. Every
 read here is audited, since it exposes another agent's work.
+
+Also the manager bridge's MCP endpoint (:mod:`nexus.tools.manager_bridge`),
+which a CLI manager calls during its own chat turn.
 """
 
 from __future__ import annotations
 
+import json
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Response, status
+from fastapi import APIRouter, HTTPException, Request, Response, status
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict
 
 from nexus.api.deps import CurrentCompanyId, CurrentPrincipal, DbSession, require_permission
 from nexus.runtime.task_attempts import attempt_view
 from nexus.services import manager_service
+from nexus.tools import manager_bridge
 
 router = APIRouter(tags=["managers"])
 
@@ -112,3 +118,59 @@ async def rollup(
     )
     await db.commit()
     return result
+
+
+# JSON-RPC messages to the bridge are small; anything larger is refused unread.
+BRIDGE_MAX_BODY = 64 * 1024
+
+
+def _rpc_error(status_code: int, code: int, message: str) -> JSONResponse:
+    return JSONResponse(
+        status_code=status_code,
+        content={"jsonrpc": "2.0", "id": None, "error": {"code": code, "message": message}},
+    )
+
+
+@router.post(manager_bridge.PATH, include_in_schema=False)
+async def manager_bridge_rpc(request: Request) -> Response:
+    """MCP (streamable HTTP, JSON responses) for one manager chat execution.
+
+    Public to the auth middleware: the bearer here is the bridge's own
+    execution-scoped credential, checked against the running turn on every
+    request. Serves only the manager tools, through ``MCPServer`` and
+    ``guarded_call``. Refusals never echo the credential.
+    """
+    scheme, _, token = request.headers.get("authorization", "").partition(" ")
+    try:
+        if scheme.lower() != "bearer" or not token:
+            raise manager_bridge.BridgeDeniedError("missing bridge credential")
+        ctx = await manager_bridge.authenticate(token.strip())
+    except manager_bridge.BridgeDeniedError:
+        return JSONResponse(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            content={"detail": "Invalid or expired bridge credential", "code": "BRIDGE_DENIED"},
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    content_type = request.headers.get("content-type", "").split(";")[0].strip().lower()
+    if content_type != "application/json":
+        return _rpc_error(415, -32600, "Content-Type must be application/json")
+    declared = request.headers.get("content-length")
+    if declared is not None and (not declared.isdigit() or int(declared) > BRIDGE_MAX_BODY):
+        return _rpc_error(413, -32600, "Request too large")
+    raw = bytearray()
+    async for chunk in request.stream():
+        raw += chunk
+        if len(raw) > BRIDGE_MAX_BODY:
+            return _rpc_error(413, -32600, "Request too large")
+    try:
+        body = json.loads(raw)
+    except ValueError:
+        return _rpc_error(400, -32700, "Parse error")
+    if not isinstance(body, dict) or body.get("jsonrpc") != "2.0":
+        return _rpc_error(400, -32600, "Invalid request")
+    from nexus.tools.mcp_server import MCPServer
+
+    reply = await MCPServer(ctx, node_tools=False).handle(body)
+    if reply is None:
+        return Response(status_code=status.HTTP_202_ACCEPTED)
+    return JSONResponse(reply)
