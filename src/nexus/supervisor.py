@@ -41,7 +41,8 @@ from pathlib import Path
 
 SUPERVISOR_PORT = int(os.environ.get("SUPERVISOR_PORT", "8001"))
 BACKEND_PORT = int(os.environ.get("BACKEND_PORT", "8000"))
-BACKEND_HOST = os.environ.get("BACKEND_HOST", "0.0.0.0")
+# Same default as Settings.server_host; the supervisor launches that server.
+BACKEND_HOST = os.environ.get("BACKEND_HOST", "0.0.0.0")  # nosec B104
 
 # Repo layout: this file is src/nexus/supervisor.py, so the backend cwd is src/.
 _SRC_DIR = Path(__file__).resolve().parent.parent
@@ -73,7 +74,8 @@ class BackendController:
         """Probe the backend's own health endpoint."""
         url = f"http://127.0.0.1:{BACKEND_PORT}/health"
         try:
-            with urllib.request.urlopen(url, timeout=timeout) as resp:
+            # Fixed http://127.0.0.1 URL, so no file: or custom scheme.
+            with urllib.request.urlopen(url, timeout=timeout) as resp:  # nosec B310
                 return 200 <= resp.status < 300
         except Exception:
             return False

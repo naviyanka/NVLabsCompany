@@ -115,7 +115,8 @@ def parse_note(content: str) -> ParsedNote:
     body = "".join(lines[closing_index + 1 :])
 
     try:
-        loaded = yaml.load(block, Loader=_NoAliasLoader)  # noqa: S506 - alias-refusing SafeLoader subclass
+        # _NoAliasLoader is a SafeLoader subclass that also refuses aliases.
+        loaded = yaml.load(block, Loader=_NoAliasLoader)  # noqa: S506  # nosec B506
     except (yaml.YAMLError, RecursionError, ValueError, TypeError):
         # RecursionError is the one that matters: PyYAML recurses per nesting
         # level, so a 1 KB note of 500 nested brackets — far under the size cap —

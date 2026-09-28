@@ -1,0 +1,1887 @@
+{
+ ".agents/skills/caveman-compress/scripts/benchmark.py": {
+  "I001": 1
+ },
+ ".agents/skills/caveman-compress/scripts/cli.py": {
+  "E402": 3
+ },
+ ".agents/skills/caveman-compress/scripts/compress.py": {
+  "E402": 2,
+  "E501": 6,
+  "N806": 1,
+  "UP006": 1,
+  "UP035": 1
+ },
+ ".agents/skills/caveman-compress/scripts/detect.py": {
+  "E501": 1,
+  "E741": 3
+ },
+ ".agents/skills/ui-ux-pro-max/scripts/core.py": {
+  "E501": 29,
+  "I001": 1,
+  "UP009": 1,
+  "UP015": 1
+ },
+ ".agents/skills/ui-ux-pro-max/scripts/design_system.py": {
+  "E501": 37,
+  "F541": 4,
+  "F841": 3,
+  "I001": 1,
+  "UP009": 1,
+  "UP015": 1,
+  "W293": 46
+ },
+ ".agents/skills/ui-ux-pro-max/scripts/search.py": {
+  "E501": 17,
+  "I001": 1,
+  "UP009": 1
+ },
+ ".agents/skills/ui-ux-pro-max/scripts/tests/test_core.py": {
+  "E402": 2,
+  "E501": 6,
+  "F401": 1,
+  "I001": 1,
+  "UP009": 1
+ },
+ ".agents/skills/ui-ux-pro-max/scripts/validate_data.py": {
+  "E501": 5,
+  "F401": 1,
+  "I001": 1,
+  "UP009": 1,
+  "UP015": 1
+ },
+ "alembic/env.py": {
+  "I001": 1
+ },
+ "alembic/versions/1e101df7eda6_add_api_keys_user_profiles_user_sessions.py": {
+  "E501": 2,
+  "I001": 1,
+  "UP007": 3,
+  "UP035": 1
+ },
+ "alembic/versions/a1b2c3d4e5f6_add_circuit_breaker_records_table.py": {
+  "E501": 1,
+  "I001": 1,
+  "UP007": 3,
+  "UP035": 1
+ },
+ "alembic/versions/a3f7c2d91b40_add_workflow_runs_table.py": {
+  "F401": 1,
+  "I001": 1,
+  "UP007": 3,
+  "UP035": 1
+ },
+ "alembic/versions/a4e2c8b91f50_cost_event_reservations.py": {
+  "I001": 1,
+  "UP007": 3,
+  "UP035": 1
+ },
+ "alembic/versions/a7c4e9b2d610_vault_write_grants.py": {
+  "I001": 1,
+  "UP007": 3,
+  "UP035": 1
+ },
+ "alembic/versions/b4e44200443e_add_okr_tables.py": {
+  "E501": 3,
+  "I001": 1,
+  "UP007": 3,
+  "UP035": 1
+ },
+ "alembic/versions/b5e8f3a72c10_add_repositories_local_path.py": {
+  "I001": 1,
+  "UP007": 3,
+  "UP035": 1
+ },
+ "alembic/versions/b6f3d1a72e60_approval_signatures.py": {
+  "I001": 1,
+  "UP007": 3,
+  "UP035": 1
+ },
+ "alembic/versions/b7d3c9e14f20_add_auth_columns_and_invites.py": {
+  "I001": 1,
+  "UP007": 3,
+  "UP035": 1
+ },
+ "alembic/versions/b8e5f2a1c930_add_business_hours_to_companies.py": {
+  "E501": 3,
+  "I001": 1,
+  "UP007": 3,
+  "UP035": 1
+ },
+ "alembic/versions/c1d4a8b62f30_add_agent_autonomy_policy.py": {
+  "I001": 1,
+  "UP007": 3,
+  "UP035": 1
+ },
+ "alembic/versions/c2f9a4d81b70_obsidian_documents.py": {
+  "I001": 1,
+  "UP007": 3,
+  "UP035": 1
+ },
+ "alembic/versions/c4f7d2e91b50_add_row_level_security.py": {
+  "E501": 1,
+  "I001": 1,
+  "UP007": 3,
+  "UP035": 1
+ },
+ "alembic/versions/c7d9e1f4a520_add_hr_tables.py": {
+  "I001": 1,
+  "UP007": 3,
+  "UP035": 1
+ },
+ "alembic/versions/c9a1e2b73d40_add_completion_reason.py": {
+  "I001": 1,
+  "UP007": 3,
+  "UP035": 1
+ },
+ "alembic/versions/ca7238bc6797_add_kill_switch_records_table.py": {
+  "E501": 1,
+  "I001": 1,
+  "UP007": 3,
+  "UP035": 1
+ },
+ "alembic/versions/cb75b52327c0_add_notifications_pipelines_repos_.py": {
+  "E501": 20,
+  "I001": 1,
+  "UP007": 3,
+  "UP035": 1
+ },
+ "alembic/versions/d1e2f3a4b5c6_create_idempotency_records_table.py": {
+  "E501": 3,
+  "I001": 1,
+  "UP007": 3,
+  "UP035": 1
+ },
+ "alembic/versions/d5b1f7a3c210_pgvector_knowledge_chunk_embeddings.py": {
+  "F401": 1,
+  "I001": 1,
+  "UP007": 3,
+  "UP031": 1,
+  "UP035": 1
+ },
+ "alembic/versions/d8e3b6c04a90_chunk_source_type.py": {
+  "I001": 1,
+  "UP007": 3,
+  "UP035": 1
+ },
+ "alembic/versions/db96cb66effc_initial_schema.py": {
+  "E501": 47,
+  "I001": 1,
+  "UP007": 3,
+  "UP035": 1,
+  "W291": 1
+ },
+ "alembic/versions/dd22d28a5678_add_workspaces_table.py": {
+  "I001": 1,
+  "UP007": 3,
+  "UP035": 1
+ },
+ "alembic/versions/e1a7b4c93d20_audit_log_hash_chain.py": {
+  "I001": 1,
+  "UP007": 3,
+  "UP035": 1
+ },
+ "alembic/versions/e2f3a4b5c6d7_add_atomic_budget_reservations.py": {
+  "E501": 2,
+  "I001": 1,
+  "UP007": 3,
+  "UP035": 1
+ },
+ "alembic/versions/e4a1c7b52d80_obsidian_retry_state.py": {
+  "I001": 1,
+  "UP007": 3,
+  "UP035": 1
+ },
+ "alembic/versions/f08ae95d1234_add_chat_messages_table.py": {
+  "F401": 1,
+  "I001": 1,
+  "UP007": 3,
+  "UP035": 1
+ },
+ "alembic/versions/f2c8d5a91e30_add_decision_queue_items_table.py": {
+  "I001": 1,
+  "UP007": 3,
+  "UP035": 1
+ },
+ "alembic/versions/f3a4b5c6d7e8_add_policy_id_to_cost_events.py": {
+  "I001": 1,
+  "UP007": 3,
+  "UP035": 1
+ },
+ "alembic/versions/f5b2e9c31a70_obsidian_wikilink_targets.py": {
+  "I001": 1,
+  "UP007": 3,
+  "UP035": 1
+ },
+ "alembic/versions/m0001branch00_merge_auth_and_workspaces.py": {
+  "UP007": 3,
+  "UP035": 1
+ },
+ "scripts/arch_guard.py": {
+  "E501": 1
+ },
+ "src/nexus/adapters/__init__.py": {
+  "I001": 1
+ },
+ "src/nexus/adapters/anthropic_adapter.py": {
+  "F401": 3,
+  "F821": 1,
+  "F841": 1,
+  "I001": 2
+ },
+ "src/nexus/adapters/azure_adapter.py": {
+  "I001": 1
+ },
+ "src/nexus/adapters/base.py": {
+  "UP017": 5
+ },
+ "src/nexus/adapters/bedrock_adapter.py": {
+  "E501": 1,
+  "I001": 1,
+  "UP012": 1,
+  "UP017": 1
+ },
+ "src/nexus/adapters/claude_code_adapter.py": {
+  "F401": 1,
+  "I001": 1,
+  "UP041": 3
+ },
+ "src/nexus/adapters/cli_adapter.py": {
+  "F401": 1,
+  "UP041": 3
+ },
+ "src/nexus/adapters/google_adapter.py": {
+  "I001": 1
+ },
+ "src/nexus/adapters/hermes_adapter.py": {
+  "E501": 10
+ },
+ "src/nexus/adapters/llm_circuit_breaker.py": {
+  "F401": 1,
+  "UP041": 1
+ },
+ "src/nexus/adapters/ollama_adapter.py": {
+  "I001": 1
+ },
+ "src/nexus/adapters/openai_adapter.py": {
+  "E501": 1,
+  "F401": 3,
+  "F821": 1,
+  "I001": 2
+ },
+ "src/nexus/adapters/provider_presets.py": {
+  "UP042": 1,
+  "UP045": 6
+ },
+ "src/nexus/adapters/registry.py": {
+  "F401": 2,
+  "I001": 1
+ },
+ "src/nexus/adapters/retry.py": {
+  "F401": 1,
+  "UP035": 1,
+  "UP047": 1
+ },
+ "src/nexus/adapters/uastl.py": {
+  "I001": 1
+ },
+ "src/nexus/agents/ceo_tools.py": {
+  "E501": 3
+ },
+ "src/nexus/agents/sop_engine.py": {
+  "E501": 6
+ },
+ "src/nexus/api/deps.py": {
+  "F401": 1
+ },
+ "src/nexus/api/idempotency_middleware.py": {
+  "E501": 4,
+  "F401": 2,
+  "I001": 1,
+  "UP017": 1
+ },
+ "src/nexus/api/middleware.py": {
+  "E501": 3,
+  "F401": 2,
+  "UP017": 1
+ },
+ "src/nexus/api/routes/activity.py": {
+  "E501": 1,
+  "UP035": 1,
+  "UP041": 1
+ },
+ "src/nexus/api/routes/adapters.py": {
+  "I001": 1,
+  "UP017": 2
+ },
+ "src/nexus/api/routes/agent_logs.py": {
+  "F401": 1,
+  "I001": 1
+ },
+ "src/nexus/api/routes/agent_profiling.py": {
+  "I001": 1,
+  "UP017": 1,
+  "W292": 1
+ },
+ "src/nexus/api/routes/agents.py": {
+  "E501": 13,
+  "I001": 2,
+  "UP017": 7
+ },
+ "src/nexus/api/routes/api_keys.py": {
+  "F401": 1,
+  "I001": 1
+ },
+ "src/nexus/api/routes/approvals.py": {
+  "F401": 1,
+  "I001": 1
+ },
+ "src/nexus/api/routes/audit.py": {
+  "F401": 1,
+  "I001": 1
+ },
+ "src/nexus/api/routes/auth.py": {
+  "F401": 1,
+  "F811": 1,
+  "I001": 1
+ },
+ "src/nexus/api/routes/chat.py": {
+  "E501": 28,
+  "F401": 1,
+  "F541": 1,
+  "I001": 2,
+  "UP037": 9,
+  "W293": 1
+ },
+ "src/nexus/api/routes/communication.py": {
+  "I001": 1,
+  "UP017": 1,
+  "UP045": 12
+ },
+ "src/nexus/api/routes/companies.py": {
+  "F401": 1,
+  "I001": 1
+ },
+ "src/nexus/api/routes/company_sim.py": {
+  "E501": 1,
+  "I001": 1,
+  "UP017": 2,
+  "UP045": 11
+ },
+ "src/nexus/api/routes/connections.py": {
+  "E501": 1
+ },
+ "src/nexus/api/routes/dashboard.py": {
+  "E501": 5,
+  "E712": 3,
+  "F401": 1,
+  "I001": 1,
+  "UP017": 3
+ },
+ "src/nexus/api/routes/departments.py": {
+  "E501": 2
+ },
+ "src/nexus/api/routes/events.py": {
+  "F401": 1,
+  "UP035": 1,
+  "UP041": 1,
+  "UP045": 2
+ },
+ "src/nexus/api/routes/evolution.py": {
+  "E501": 12,
+  "I001": 5,
+  "UP017": 6,
+  "UP045": 16
+ },
+ "src/nexus/api/routes/goals.py": {
+  "E501": 2,
+  "I001": 2,
+  "UP017": 2
+ },
+ "src/nexus/api/routes/health.py": {
+  "E501": 4,
+  "UP041": 1
+ },
+ "src/nexus/api/routes/hr.py": {
+  "E501": 16,
+  "F401": 1,
+  "I001": 1,
+  "UP017": 2
+ },
+ "src/nexus/api/routes/identity.py": {
+  "E402": 2,
+  "E501": 1,
+  "F401": 2,
+  "I001": 1
+ },
+ "src/nexus/api/routes/incidents.py": {
+  "I001": 1,
+  "UP017": 1
+ },
+ "src/nexus/api/routes/knowledge.py": {
+  "E501": 4,
+  "F401": 1,
+  "F811": 1,
+  "I001": 2,
+  "UP017": 1,
+  "UP045": 31
+ },
+ "src/nexus/api/routes/meetings.py": {
+  "E501": 4,
+  "I001": 1,
+  "UP017": 3,
+  "UP045": 11
+ },
+ "src/nexus/api/routes/memory.py": {
+  "E501": 1
+ },
+ "src/nexus/api/routes/memory_global.py": {
+  "E501": 17,
+  "I001": 1,
+  "UP017": 3
+ },
+ "src/nexus/api/routes/memory_graph.py": {
+  "E501": 2,
+  "I001": 1,
+  "UP017": 1
+ },
+ "src/nexus/api/routes/nodes.py": {
+  "E501": 1,
+  "I001": 1
+ },
+ "src/nexus/api/routes/notifications.py": {
+  "E501": 10,
+  "E712": 5,
+  "F401": 2,
+  "I001": 1,
+  "UP017": 1
+ },
+ "src/nexus/api/routes/obsidian.py": {
+  "UP045": 10,
+  "UP047": 1
+ },
+ "src/nexus/api/routes/okr.py": {
+  "UP017": 1
+ },
+ "src/nexus/api/routes/pipelines.py": {
+  "E402": 6,
+  "E501": 26,
+  "E712": 1,
+  "F401": 2,
+  "I001": 6,
+  "UP017": 9
+ },
+ "src/nexus/api/routes/plaza.py": {
+  "E501": 2
+ },
+ "src/nexus/api/routes/policies.py": {
+  "I001": 1,
+  "UP017": 2
+ },
+ "src/nexus/api/routes/profile.py": {
+  "F401": 1,
+  "I001": 1
+ },
+ "src/nexus/api/routes/repositories.py": {
+  "E501": 11,
+  "E712": 1,
+  "I001": 1,
+  "UP017": 2
+ },
+ "src/nexus/api/routes/runs.py": {
+  "F401": 1,
+  "UP017": 1
+ },
+ "src/nexus/api/routes/scim.py": {
+  "F401": 1,
+  "F841": 1,
+  "N803": 1,
+  "N815": 4,
+  "UP045": 3
+ },
+ "src/nexus/api/routes/secrets.py": {
+  "I001": 1,
+  "UP017": 3
+ },
+ "src/nexus/api/routes/settings.py": {
+  "I001": 1,
+  "UP017": 1
+ },
+ "src/nexus/api/routes/skills.py": {
+  "E501": 1,
+  "N815": 2,
+  "UP017": 1
+ },
+ "src/nexus/api/routes/sso.py": {
+  "F401": 1,
+  "F841": 1
+ },
+ "src/nexus/api/routes/tasks.py": {
+  "E501": 12,
+  "E711": 1,
+  "I001": 2,
+  "UP017": 8
+ },
+ "src/nexus/api/routes/telegram_bot.py": {
+  "F541": 1,
+  "I001": 1
+ },
+ "src/nexus/api/routes/tools.py": {
+  "E501": 1
+ },
+ "src/nexus/api/routes/triggers.py": {
+  "E501": 2,
+  "I001": 1,
+  "UP017": 3
+ },
+ "src/nexus/api/routes/workflows.py": {
+  "E501": 3,
+  "UP017": 1
+ },
+ "src/nexus/api/routes/workspaces.py": {
+  "E501": 6,
+  "I001": 1,
+  "UP017": 1
+ },
+ "src/nexus/auth/oidc.py": {
+  "F401": 1,
+  "I001": 2,
+  "UP045": 1
+ },
+ "src/nexus/auth/sessions.py": {
+  "F401": 1,
+  "I001": 1
+ },
+ "src/nexus/ceo_knowledge_seed.py": {
+  "E501": 21,
+  "F401": 2,
+  "I001": 1
+ },
+ "src/nexus/communication/__init__.py": {
+  "I001": 1
+ },
+ "src/nexus/communication/a2a.py": {
+  "I001": 1,
+  "UP017": 3,
+  "UP045": 8
+ },
+ "src/nexus/communication/a2a_router.py": {
+  "UP017": 3
+ },
+ "src/nexus/communication/channels.py": {
+  "F821": 1,
+  "UP017": 2,
+  "UP045": 12
+ },
+ "src/nexus/communication/email_channel.py": {
+  "I001": 1,
+  "UP045": 2
+ },
+ "src/nexus/communication/event_bus.py": {
+  "UP017": 1,
+  "UP035": 1,
+  "UP045": 9
+ },
+ "src/nexus/communication/group.py": {
+  "UP017": 6,
+  "UP045": 12
+ },
+ "src/nexus/communication/hive_manager.py": {
+  "UP045": 1
+ },
+ "src/nexus/communication/hive_protocol.py": {
+  "UP017": 1,
+  "UP042": 2,
+  "UP045": 3
+ },
+ "src/nexus/communication/hive_router.py": {
+  "F401": 1
+ },
+ "src/nexus/communication/hive_task.py": {
+  "UP017": 1,
+  "UP042": 1,
+  "UP045": 2
+ },
+ "src/nexus/company/__init__.py": {
+  "I001": 1
+ },
+ "src/nexus/company/okr.py": {
+  "E402": 2,
+  "I001": 1,
+  "UP045": 1
+ },
+ "src/nexus/company/org_chart.py": {
+  "E501": 1
+ },
+ "src/nexus/database.py": {
+  "E501": 4
+ },
+ "src/nexus/demo/seed.py": {
+  "E501": 8,
+  "F401": 3,
+  "F811": 1,
+  "I001": 3
+ },
+ "src/nexus/demo/setup.py": {
+  "E501": 1,
+  "F401": 3,
+  "I001": 1
+ },
+ "src/nexus/evaluation/benchmark.py": {
+  "UP017": 2
+ },
+ "src/nexus/evaluation/evaluator.py": {
+  "F401": 1,
+  "UP017": 2,
+  "UP035": 1
+ },
+ "src/nexus/evaluation/metrics.py": {
+  "E501": 1
+ },
+ "src/nexus/evaluation/reporter.py": {
+  "UP017": 2
+ },
+ "src/nexus/evolution/agent_evolution.py": {
+  "E501": 2,
+  "F841": 1,
+  "UP017": 2
+ },
+ "src/nexus/evolution/evaluator.py": {
+  "E501": 2,
+  "UP017": 3
+ },
+ "src/nexus/evolution/failure_alchemy.py": {
+  "F401": 1,
+  "UP017": 1,
+  "UP042": 1
+ },
+ "src/nexus/evolution/isolated_sandbox.py": {
+  "I001": 1,
+  "N818": 1,
+  "UP017": 1,
+  "UP035": 1,
+  "UP041": 1
+ },
+ "src/nexus/evolution/llm_evolution.py": {
+  "E501": 5,
+  "I001": 1,
+  "UP035": 1
+ },
+ "src/nexus/evolution/llm_proposer.py": {
+  "E501": 4,
+  "I001": 1,
+  "UP017": 2,
+  "UP035": 1
+ },
+ "src/nexus/evolution/observer.py": {
+  "E501": 3,
+  "UP017": 1,
+  "UP045": 1
+ },
+ "src/nexus/evolution/promoter.py": {
+  "UP017": 4
+ },
+ "src/nexus/evolution/proposer.py": {
+  "UP017": 5
+ },
+ "src/nexus/evolution/sandbox.py": {
+  "E501": 5,
+  "UP017": 1
+ },
+ "src/nexus/evolution/skill_evolution.py": {
+  "UP017": 3
+ },
+ "src/nexus/evolution/statistical.py": {
+  "E501": 1
+ },
+ "src/nexus/execution/__init__.py": {
+  "I001": 1
+ },
+ "src/nexus/execution/sandbox.py": {
+  "N818": 3,
+  "UP035": 1,
+  "UP041": 1,
+  "UP042": 1
+ },
+ "src/nexus/governance/__init__.py": {
+  "I001": 1
+ },
+ "src/nexus/governance/approvals.py": {
+  "UP017": 4
+ },
+ "src/nexus/governance/audit_persistent.py": {
+  "UP017": 1
+ },
+ "src/nexus/governance/audit_service.py": {
+  "UP017": 1
+ },
+ "src/nexus/governance/breaker_types.py": {
+  "F401": 1,
+  "I001": 1,
+  "UP042": 1
+ },
+ "src/nexus/governance/budget_enforcer.py": {
+  "F401": 1,
+  "UP017": 1,
+  "UP042": 2
+ },
+ "src/nexus/governance/budget_incident.py": {
+  "UP017": 1
+ },
+ "src/nexus/governance/bulkhead.py": {
+  "E501": 1,
+  "N818": 2,
+  "UP035": 1
+ },
+ "src/nexus/governance/circuit_breaker_advanced.py": {
+  "F401": 1
+ },
+ "src/nexus/governance/circuit_breaker_model.py": {
+  "UP017": 1,
+  "UP045": 2
+ },
+ "src/nexus/governance/compliance.py": {
+  "UP017": 2,
+  "UP042": 2
+ },
+ "src/nexus/governance/config_governance.py": {
+  "UP017": 1,
+  "UP031": 1,
+  "UP035": 1
+ },
+ "src/nexus/governance/decision_queue_model.py": {
+  "UP017": 2,
+  "UP045": 3
+ },
+ "src/nexus/governance/decision_queue_persistent.py": {
+  "UP017": 2
+ },
+ "src/nexus/governance/health.py": {
+  "F401": 1,
+  "UP017": 6,
+  "UP035": 1,
+  "UP042": 1
+ },
+ "src/nexus/governance/incidents.py": {
+  "UP017": 4,
+  "UP042": 2
+ },
+ "src/nexus/governance/kill_switch_model.py": {
+  "UP017": 1,
+  "UP045": 2
+ },
+ "src/nexus/governance/persistent_circuit_breaker.py": {
+  "F401": 2,
+  "UP017": 4
+ },
+ "src/nexus/governance/persistent_kill_switch.py": {
+  "I001": 3,
+  "UP017": 2
+ },
+ "src/nexus/governance/policies/__init__.py": {
+  "I001": 1
+ },
+ "src/nexus/governance/policies/builtin.py": {
+  "I001": 1
+ },
+ "src/nexus/governance/policies/context.py": {
+  "UP017": 2
+ },
+ "src/nexus/governance/policies/engine.py": {
+  "E501": 1,
+  "UP017": 3
+ },
+ "src/nexus/governance/rate_limiter.py": {
+  "F401": 1
+ },
+ "src/nexus/governance/redis_rate_limiter.py": {
+  "F401": 1
+ },
+ "src/nexus/governance/redis_state.py": {
+  "F401": 1
+ },
+ "src/nexus/governance/retention.py": {
+  "UP017": 5,
+  "UP042": 1
+ },
+ "src/nexus/governance/rollback.py": {
+  "UP017": 2
+ },
+ "src/nexus/governance/secrets/__init__.py": {
+  "I001": 1
+ },
+ "src/nexus/governance/secrets/access.py": {
+  "UP017": 4
+ },
+ "src/nexus/governance/secrets/vault.py": {
+  "F401": 2,
+  "UP017": 4,
+  "UP042": 1
+ },
+ "src/nexus/governance/tenant_guard.py": {
+  "I001": 1,
+  "N818": 1,
+  "UP017": 1
+ },
+ "src/nexus/identity/__init__.py": {
+  "I001": 1
+ },
+ "src/nexus/identity/persona.py": {
+  "F841": 1
+ },
+ "src/nexus/identity/soul.py": {
+  "E501": 2
+ },
+ "src/nexus/knowledge/document_converter.py": {
+  "E501": 1,
+  "F401": 1,
+  "I001": 1
+ },
+ "src/nexus/knowledge/embeddings.py": {
+  "E501": 2
+ },
+ "src/nexus/knowledge/experience.py": {
+  "UP017": 1,
+  "UP045": 2
+ },
+ "src/nexus/knowledge/parsers.py": {
+  "E501": 1
+ },
+ "src/nexus/knowledge/rag.py": {
+  "E501": 1,
+  "I001": 1,
+  "UP017": 2,
+  "UP045": 14,
+  "W293": 1
+ },
+ "src/nexus/knowledge/rankers.py": {
+  "F401": 1,
+  "W293": 1
+ },
+ "src/nexus/knowledge/retrievers.py": {
+  "F401": 2,
+  "I001": 1,
+  "UP045": 2
+ },
+ "src/nexus/logging_config.py": {
+  "I001": 1,
+  "UP012": 1,
+  "UP017": 1
+ },
+ "src/nexus/main.py": {
+  "E402": 1,
+  "E501": 5,
+  "I001": 5
+ },
+ "src/nexus/meetings/conductor.py": {
+  "F401": 1,
+  "UP017": 2
+ },
+ "src/nexus/meetings/scheduler.py": {
+  "UP017": 1,
+  "UP045": 2
+ },
+ "src/nexus/memory/__init__.py": {
+  "I001": 1
+ },
+ "src/nexus/memory/extract.py": {
+  "UP017": 1
+ },
+ "src/nexus/memory/layered.py": {
+  "F401": 1,
+  "UP017": 2
+ },
+ "src/nexus/memory/llm_extract.py": {
+  "I001": 1,
+  "UP017": 1
+ },
+ "src/nexus/memory/reflector.py": {
+  "UP037": 1
+ },
+ "src/nexus/memory/retriever.py": {
+  "I001": 1
+ },
+ "src/nexus/memory/scoping.py": {
+  "F401": 1
+ },
+ "src/nexus/memory/semantic.py": {
+  "UP042": 1
+ },
+ "src/nexus/memory/store.py": {
+  "F401": 1,
+  "I001": 1,
+  "UP017": 5
+ },
+ "src/nexus/memory/token_counter.py": {
+  "F401": 1
+ },
+ "src/nexus/models/__init__.py": {
+  "F401": 9,
+  "I001": 1
+ },
+ "src/nexus/models/agent.py": {
+  "E501": 2,
+  "I001": 1,
+  "UP017": 2,
+  "UP045": 23
+ },
+ "src/nexus/models/budget.py": {
+  "E501": 5,
+  "I001": 1,
+  "UP017": 4,
+  "UP045": 8
+ },
+ "src/nexus/models/chat.py": {
+  "E501": 1,
+  "I001": 1,
+  "UP017": 1,
+  "UP045": 5
+ },
+ "src/nexus/models/communication.py": {
+  "E501": 5,
+  "I001": 1,
+  "UP017": 4,
+  "UP045": 7
+ },
+ "src/nexus/models/company.py": {
+  "E501": 5,
+  "I001": 1,
+  "UP017": 5,
+  "UP045": 6
+ },
+ "src/nexus/models/connection.py": {
+  "UP017": 2,
+  "UP045": 2
+ },
+ "src/nexus/models/evolution.py": {
+  "E501": 6,
+  "I001": 1,
+  "UP017": 4,
+  "UP045": 11
+ },
+ "src/nexus/models/governance.py": {
+  "E501": 8,
+  "I001": 1,
+  "UP017": 8,
+  "UP045": 34
+ },
+ "src/nexus/models/heartbeat_run.py": {
+  "E501": 3,
+  "I001": 1,
+  "UP017": 2,
+  "UP042": 2
+ },
+ "src/nexus/models/hr.py": {
+  "F401": 1,
+  "I001": 1,
+  "UP017": 1
+ },
+ "src/nexus/models/idempotency.py": {
+  "I001": 1,
+  "UP017": 2,
+  "UP045": 2
+ },
+ "src/nexus/models/incident.py": {
+  "E501": 3,
+  "I001": 1,
+  "UP017": 3,
+  "UP045": 6
+ },
+ "src/nexus/models/knowledge.py": {
+  "E501": 4,
+  "I001": 1,
+  "UP017": 3,
+  "UP045": 11
+ },
+ "src/nexus/models/meeting.py": {
+  "E501": 5,
+  "I001": 1,
+  "UP017": 3,
+  "UP045": 7
+ },
+ "src/nexus/models/memory.py": {
+  "E501": 2,
+  "I001": 1,
+  "UP017": 2,
+  "UP045": 4
+ },
+ "src/nexus/models/notification.py": {
+  "E501": 3,
+  "I001": 1,
+  "UP017": 2,
+  "UP045": 3
+ },
+ "src/nexus/models/obsidian.py": {
+  "UP017": 2,
+  "UP045": 11
+ },
+ "src/nexus/models/okr.py": {
+  "E501": 4,
+  "UP017": 4,
+  "UP045": 2
+ },
+ "src/nexus/models/pipeline.py": {
+  "E501": 3,
+  "I001": 1,
+  "UP017": 3,
+  "UP045": 5
+ },
+ "src/nexus/models/plaza.py": {
+  "E501": 1,
+  "UP017": 1,
+  "UP045": 1
+ },
+ "src/nexus/models/policy.py": {
+  "E501": 4,
+  "I001": 1,
+  "UP017": 4,
+  "UP045": 5
+ },
+ "src/nexus/models/repository.py": {
+  "E501": 2,
+  "I001": 1,
+  "UP017": 2,
+  "UP045": 5
+ },
+ "src/nexus/models/secret.py": {
+  "E501": 5,
+  "I001": 1,
+  "UP017": 5,
+  "UP045": 3
+ },
+ "src/nexus/models/settings.py": {
+  "E501": 1,
+  "I001": 1,
+  "UP017": 1,
+  "UP045": 2
+ },
+ "src/nexus/models/skill.py": {
+  "E501": 2,
+  "I001": 1,
+  "UP017": 2,
+  "UP045": 3
+ },
+ "src/nexus/models/task.py": {
+  "E501": 6,
+  "I001": 1,
+  "UP017": 6,
+  "UP042": 1,
+  "UP045": 17
+ },
+ "src/nexus/models/tool.py": {
+  "E501": 9,
+  "I001": 1,
+  "UP017": 11,
+  "UP045": 5
+ },
+ "src/nexus/models/tool_invocation.py": {
+  "E501": 1,
+  "UP017": 1
+ },
+ "src/nexus/models/trigger.py": {
+  "E501": 2,
+  "I001": 1,
+  "UP017": 2,
+  "UP045": 7
+ },
+ "src/nexus/models/user_profile.py": {
+  "UP045": 7
+ },
+ "src/nexus/models/workflow_run.py": {
+  "E501": 2,
+  "I001": 1,
+  "UP017": 2,
+  "UP045": 7
+ },
+ "src/nexus/models/workspace.py": {
+  "E501": 1,
+  "I001": 1,
+  "UP017": 1,
+  "UP045": 3
+ },
+ "src/nexus/models_router/__init__.py": {
+  "I001": 1
+ },
+ "src/nexus/models_router/gateway_headers.py": {
+  "UP035": 1
+ },
+ "src/nexus/models_router/preflight.py": {
+  "N818": 1,
+  "UP035": 1
+ },
+ "src/nexus/models_router/provider_registry.py": {
+  "F401": 1
+ },
+ "src/nexus/models_router/providers/__init__.py": {
+  "UP035": 1
+ },
+ "src/nexus/models_router/providers/anthropic.py": {
+  "I001": 1,
+  "UP035": 1
+ },
+ "src/nexus/models_router/providers/google.py": {
+  "I001": 1,
+  "UP035": 1
+ },
+ "src/nexus/models_router/providers/ollama.py": {
+  "I001": 1,
+  "UP035": 1
+ },
+ "src/nexus/models_router/providers/openai.py": {
+  "I001": 1,
+  "UP035": 1
+ },
+ "src/nexus/nodes/__init__.py": {
+  "I001": 1
+ },
+ "src/nexus/nodes/categories/all_nodes.py": {
+  "E501": 164,
+  "I001": 1
+ },
+ "src/nexus/nodes/executor.py": {
+  "E501": 7,
+  "UP041": 1
+ },
+ "src/nexus/nodes/registry.py": {
+  "E501": 3,
+  "I001": 1,
+  "UP035": 1,
+  "UP042": 1
+ },
+ "src/nexus/observability/metrics.py": {
+  "E501": 1,
+  "F401": 1,
+  "I001": 1
+ },
+ "src/nexus/observability/tracing.py": {
+  "E501": 3,
+  "F401": 5,
+  "UP035": 1,
+  "UP037": 1
+ },
+ "src/nexus/obsidian/__init__.py": {
+  "I001": 1
+ },
+ "src/nexus/obsidian/authorization.py": {
+  "E501": 4,
+  "F401": 1,
+  "I001": 1,
+  "UP017": 1
+ },
+ "src/nexus/obsidian/indexer.py": {
+  "UP017": 1
+ },
+ "src/nexus/obsidian/provider.py": {
+  "UP017": 1
+ },
+ "src/nexus/obsidian/scanner.py": {
+  "UP017": 1
+ },
+ "src/nexus/obsidian/secret_scan.py": {
+  "E501": 1,
+  "UP031": 1
+ },
+ "src/nexus/obsidian/writer.py": {
+  "I001": 1,
+  "UP017": 3
+ },
+ "src/nexus/orchestration/__init__.py": {
+  "I001": 1
+ },
+ "src/nexus/orchestration/goal_loop.py": {
+  "E501": 1,
+  "UP035": 1
+ },
+ "src/nexus/orchestration/llm_critic.py": {
+  "E501": 2,
+  "I001": 1,
+  "UP035": 1
+ },
+ "src/nexus/orchestration/llm_planner.py": {
+  "E501": 2,
+  "I001": 1,
+  "UP035": 1
+ },
+ "src/nexus/orchestration/meeting.py": {
+  "E501": 3,
+  "F401": 1,
+  "I001": 1,
+  "UP035": 1
+ },
+ "src/nexus/orchestration/parallel.py": {
+  "I001": 1,
+  "UP017": 6,
+  "UP035": 1,
+  "UP041": 1
+ },
+ "src/nexus/orchestration/phase_machine.py": {
+  "UP042": 1
+ },
+ "src/nexus/orchestration/reasoning.py": {
+  "UP035": 1
+ },
+ "src/nexus/orchestration/retry.py": {
+  "F401": 3,
+  "I001": 1,
+  "UP035": 1
+ },
+ "src/nexus/orchestration/router.py": {
+  "F401": 1
+ },
+ "src/nexus/orchestration/smart_retry.py": {
+  "UP035": 1,
+  "UP042": 1
+ },
+ "src/nexus/plugins/plugin_registry.py": {
+  "F401": 1
+ },
+ "src/nexus/realtime/channels.py": {
+  "F401": 1
+ },
+ "src/nexus/realtime/event_bus.py": {
+  "F401": 1
+ },
+ "src/nexus/realtime/sse.py": {
+  "UP035": 1
+ },
+ "src/nexus/realtime/websocket_manager.py": {
+  "F401": 1
+ },
+ "src/nexus/runtime/__init__.py": {
+  "I001": 1
+ },
+ "src/nexus/runtime/adapter.py": {
+  "UP017": 2,
+  "UP042": 1
+ },
+ "src/nexus/runtime/checkpoint.py": {
+  "E501": 2
+ },
+ "src/nexus/runtime/cycle_guard.py": {
+  "I001": 1
+ },
+ "src/nexus/runtime/event_bridge.py": {
+  "E501": 2,
+  "F401": 5,
+  "I001": 2
+ },
+ "src/nexus/runtime/executor.py": {
+  "I001": 2,
+  "UP017": 6
+ },
+ "src/nexus/runtime/git_runner.py": {
+  "E501": 7,
+  "UP041": 1
+ },
+ "src/nexus/runtime/heartbeat_persistent.py": {
+  "N806": 3
+ },
+ "src/nexus/runtime/lifecycle.py": {
+  "F401": 1,
+  "I001": 1,
+  "UP017": 4
+ },
+ "src/nexus/runtime/orchestrator.py": {
+  "E501": 29,
+  "F401": 7,
+  "F541": 2,
+  "I001": 7,
+  "UP017": 9,
+  "UP041": 1
+ },
+ "src/nexus/runtime/redis_utils.py": {
+  "I001": 1
+ },
+ "src/nexus/runtime/replay.py": {
+  "UP017": 1,
+  "UP042": 1
+ },
+ "src/nexus/runtime/scheduler.py": {
+  "E501": 1,
+  "F401": 3,
+  "I001": 2,
+  "UP017": 3
+ },
+ "src/nexus/runtime/watchdog.py": {
+  "E501": 1,
+  "UP017": 2,
+  "UP042": 1
+ },
+ "src/nexus/runtime/watchdog_service.py": {
+  "I001": 1
+ },
+ "src/nexus/runtime/worktree.py": {
+  "E501": 1,
+  "UP017": 1
+ },
+ "src/nexus/services/__init__.py": {
+  "I001": 1
+ },
+ "src/nexus/services/agent_service.py": {
+  "I001": 1,
+  "UP017": 1
+ },
+ "src/nexus/services/approval_service.py": {
+  "UP017": 4
+ },
+ "src/nexus/services/budget_service.py": {
+  "E501": 8,
+  "I001": 1,
+  "N818": 1,
+  "UP017": 9
+ },
+ "src/nexus/services/task_service.py": {
+  "F401": 1,
+  "I001": 1,
+  "UP017": 7
+ },
+ "src/nexus/supervisor.py": {
+  "E501": 2
+ },
+ "src/nexus/templates/archetypes.py": {
+  "E501": 17
+ },
+ "src/nexus/templates/hire_manifest.py": {
+  "UP045": 13
+ },
+ "src/nexus/templates/registry.py": {
+  "F401": 1
+ },
+ "src/nexus/temporal/activities.py": {
+  "E501": 4
+ },
+ "src/nexus/temporal/client.py": {
+  "F401": 1
+ },
+ "src/nexus/temporal/worker.py": {
+  "E501": 1,
+  "I001": 1
+ },
+ "src/nexus/tools/__init__.py": {
+  "I001": 1
+ },
+ "src/nexus/tools/autonomy.py": {
+  "UP035": 1
+ },
+ "src/nexus/tools/executor.py": {
+  "I001": 1,
+  "UP017": 11,
+  "UP035": 1,
+  "UP041": 1
+ },
+ "src/nexus/tools/mcp_stdio.py": {
+  "UP041": 1
+ },
+ "src/nexus/tools/obsidian.py": {
+  "F401": 2,
+  "I001": 1,
+  "UP035": 1
+ },
+ "src/nexus/tools/registry.py": {
+  "UP017": 2
+ },
+ "src/nexus/tools/skills_catalog.py": {
+  "UP015": 1
+ },
+ "src/nexus/tools/tool_catalog.py": {
+  "I001": 1,
+  "UP042": 1
+ },
+ "src/nexus/triggers/__init__.py": {
+  "I001": 1
+ },
+ "src/nexus/triggers/executor.py": {
+  "I001": 1,
+  "UP017": 6,
+  "UP035": 1
+ },
+ "src/nexus/triggers/history.py": {
+  "F401": 1
+ },
+ "src/nexus/triggers/types.py": {
+  "UP042": 2
+ },
+ "src/nexus/triggers/webhook.py": {
+  "UP017": 2
+ },
+ "src/nexus/workflows/company_flow.py": {
+  "E501": 3,
+  "UP017": 15,
+  "UP042": 1
+ },
+ "src/nexus/workflows/task_flow.py": {
+  "UP017": 7,
+  "UP042": 1
+ },
+ "tests/conftest.py": {
+  "F401": 3
+ },
+ "tests/test_a2a_router.py": {
+  "UP017": 5
+ },
+ "tests/test_ab_testing.py": {
+  "E501": 2
+ },
+ "tests/test_adapters.py": {
+  "F401": 6,
+  "I001": 1
+ },
+ "tests/test_agent_sessions.py": {
+  "E501": 1
+ },
+ "tests/test_agents.py": {
+  "F401": 4,
+  "I001": 1
+ },
+ "tests/test_alembic_migration.py": {
+  "E501": 1,
+  "F401": 2,
+  "F841": 1,
+  "I001": 1
+ },
+ "tests/test_approvals_persistence.py": {
+  "F401": 2,
+  "F841": 1
+ },
+ "tests/test_archetypes.py": {
+  "F401": 19,
+  "I001": 1
+ },
+ "tests/test_auth_enforcement.py": {
+  "E501": 2
+ },
+ "tests/test_breaker_trip_propagation.py": {
+  "UP017": 1
+ },
+ "tests/test_budget_incidents.py": {
+  "F401": 2,
+  "I001": 1
+ },
+ "tests/test_budget_reservation.py": {
+  "E501": 3,
+  "UP017": 2
+ },
+ "tests/test_budget_tier2_wp22g.py": {
+  "F401": 1
+ },
+ "tests/test_bulkhead.py": {
+  "F401": 1,
+  "I001": 1
+ },
+ "tests/test_catalog_wp22c.py": {
+  "E501": 1,
+  "I001": 1
+ },
+ "tests/test_chat_adapter_resolution.py": {
+  "F401": 2
+ },
+ "tests/test_chat_session_compat.py": {
+  "E501": 1
+ },
+ "tests/test_checkpoint.py": {
+  "F401": 1,
+  "UP017": 1
+ },
+ "tests/test_chunk_source_migration.py": {
+  "UP017": 1
+ },
+ "tests/test_circuit_breaker_advanced.py": {
+  "F401": 11,
+  "F811": 2,
+  "F841": 1,
+  "I001": 2
+ },
+ "tests/test_claude_code_adapter.py": {
+  "E501": 1,
+  "F401": 4
+ },
+ "tests/test_cli_adapter.py": {
+  "F401": 2,
+  "F841": 1,
+  "I001": 2,
+  "UP041": 1
+ },
+ "tests/test_communication.py": {
+  "F401": 9,
+  "I001": 1,
+  "UP017": 1
+ },
+ "tests/test_company.py": {
+  "E501": 2,
+  "F401": 1,
+  "I001": 1
+ },
+ "tests/test_completion_reasons.py": {
+  "E501": 1,
+  "I001": 2,
+  "UP017": 2
+ },
+ "tests/test_compliance.py": {
+  "I001": 1,
+  "UP017": 1
+ },
+ "tests/test_connections_wp22b.py": {
+  "I001": 1
+ },
+ "tests/test_control_registry.py": {
+  "E501": 1
+ },
+ "tests/test_control_registry_persistence.py": {
+  "I001": 1
+ },
+ "tests/test_cost_micros_wp22d.py": {
+  "F401": 1
+ },
+ "tests/test_decision_queue_persistence.py": {
+  "UP017": 4
+ },
+ "tests/test_degradation_endpoint.py": {
+  "I001": 1
+ },
+ "tests/test_demo.py": {
+  "F401": 1,
+  "I001": 1
+ },
+ "tests/test_devops_enterprise.py": {
+  "E501": 4,
+  "I001": 1,
+  "UP012": 1,
+  "UP015": 4
+ },
+ "tests/test_docker_sandbox.py": {
+  "F401": 2,
+  "UP041": 1
+ },
+ "tests/test_durable_checkpoint_recovery.py": {
+  "E501": 17,
+  "F401": 5,
+  "F841": 1
+ },
+ "tests/test_embeddings.py": {
+  "E501": 1,
+  "F401": 2
+ },
+ "tests/test_evaluation_framework.py": {
+  "E501": 1,
+  "F401": 2,
+  "I001": 1
+ },
+ "tests/test_evolution.py": {
+  "E501": 12,
+  "F841": 1,
+  "I001": 1,
+  "UP017": 1
+ },
+ "tests/test_failure_alchemy.py": {
+  "E501": 1,
+  "F401": 1
+ },
+ "tests/test_governance.py": {
+  "F401": 6,
+  "I001": 1
+ },
+ "tests/test_guardrails.py": {
+  "F401": 1,
+  "I001": 1
+ },
+ "tests/test_hire_manifest.py": {
+  "F401": 1,
+  "I001": 1
+ },
+ "tests/test_hive_backend.py": {
+  "F401": 1
+ },
+ "tests/test_hive_manager.py": {
+  "F401": 1,
+  "F841": 1
+ },
+ "tests/test_hive_protocol.py": {
+  "F401": 1
+ },
+ "tests/test_hive_router.py": {
+  "F401": 3
+ },
+ "tests/test_idempotency_middleware.py": {
+  "E501": 2,
+  "F401": 2,
+  "I001": 1
+ },
+ "tests/test_identity.py": {
+  "E501": 1,
+  "I001": 1
+ },
+ "tests/test_incidents.py": {
+  "F401": 4,
+  "F841": 1,
+  "I001": 1
+ },
+ "tests/test_integration_registry.py": {
+  "I001": 1
+ },
+ "tests/test_knowledge.py": {
+  "E501": 3,
+  "F401": 1,
+  "I001": 1,
+  "UP017": 3
+ },
+ "tests/test_layered_memory.py": {
+  "F401": 1,
+  "I001": 1,
+  "UP017": 19
+ },
+ "tests/test_layered_memory_l1.py": {
+  "F401": 1
+ },
+ "tests/test_leftovers_channels_temporal_evolution.py": {
+  "F401": 2,
+  "UP017": 1
+ },
+ "tests/test_llm_circuit_breaker.py": {
+  "F401": 2,
+  "F841": 1
+ },
+ "tests/test_llm_critic.py": {
+  "E501": 1,
+  "I001": 1
+ },
+ "tests/test_llm_evolution.py": {
+  "E501": 1,
+  "F401": 2
+ },
+ "tests/test_llm_extract.py": {
+  "E501": 1,
+  "F401": 4,
+  "F841": 2,
+  "I001": 1
+ },
+ "tests/test_llm_planner.py": {
+  "F401": 1
+ },
+ "tests/test_logging_telemetry.py": {
+  "F401": 2,
+  "I001": 1
+ },
+ "tests/test_mcp_stdio.py": {
+  "E501": 2
+ },
+ "tests/test_meetings.py": {
+  "E501": 1,
+  "F401": 1,
+  "I001": 1,
+  "UP017": 3
+ },
+ "tests/test_memory.py": {
+  "F401": 3,
+  "I001": 1,
+  "UP017": 1
+ },
+ "tests/test_memory_reflector.py": {
+  "E402": 3,
+  "F401": 1
+ },
+ "tests/test_middleware_rate_limiting.py": {
+  "F841": 1
+ },
+ "tests/test_models.py": {
+  "F401": 2
+ },
+ "tests/test_node_executor.py": {
+  "F401": 3
+ },
+ "tests/test_observability_enterprise.py": {
+  "E501": 5,
+  "F401": 8,
+  "F841": 3
+ },
+ "tests/test_obsidian_indexer.py": {
+  "E501": 1
+ },
+ "tests/test_obsidian_temporal.py": {
+  "E501": 2,
+  "F541": 1
+ },
+ "tests/test_obsidian_wikilinks.py": {
+  "E501": 1,
+  "E741": 4
+ },
+ "tests/test_obsidian_writeback_preconditions.py": {
+  "E501": 7,
+  "F401": 1,
+  "I001": 1,
+  "N806": 4,
+  "UP012": 1
+ },
+ "tests/test_obsidian_writer.py": {
+  "E501": 12,
+  "F401": 1,
+  "I001": 1,
+  "UP017": 7
+ },
+ "tests/test_okr.py": {
+  "F401": 3,
+  "I001": 1
+ },
+ "tests/test_openai_adapter_wp22a.py": {
+  "F401": 1,
+  "I001": 1
+ },
+ "tests/test_orchestrator_recovery.py": {
+  "I001": 1
+ },
+ "tests/test_p6_0_security_prereqs.py": {
+  "E501": 4
+ },
+ "tests/test_p6_1_git_runner.py": {
+  "E501": 6
+ },
+ "tests/test_persistence.py": {
+  "F401": 2,
+  "I001": 1
+ },
+ "tests/test_persistent_circuit_breaker.py": {
+  "F401": 2,
+  "UP017": 8
+ },
+ "tests/test_pipeline_execution_context.py": {
+  "E501": 3
+ },
+ "tests/test_pipeline_save.py": {
+  "E501": 3,
+  "I001": 1
+ },
+ "tests/test_plugin_sdk.py": {
+  "F401": 2,
+  "I001": 1
+ },
+ "tests/test_policies.py": {
+  "E501": 1,
+  "F401": 8,
+  "I001": 1,
+  "UP017": 4
+ },
+ "tests/test_postgres_integration.py": {
+  "E501": 9,
+  "F401": 1,
+  "I001": 4,
+  "UP017": 3,
+  "W293": 1
+ },
+ "tests/test_prework_security_fixes.py": {
+  "E501": 2,
+  "I001": 1
+ },
+ "tests/test_pricing.py": {
+  "E501": 2
+ },
+ "tests/test_provider_adapters.py": {
+  "F401": 3
+ },
+ "tests/test_provider_registry.py": {
+  "I001": 1
+ },
+ "tests/test_rag_pipeline_enhanced.py": {
+  "E501": 5,
+  "F401": 2,
+  "I001": 1,
+  "UP017": 1,
+  "W293": 1
+ },
+ "tests/test_rate_limiter.py": {
+  "F401": 1,
+  "I001": 1
+ },
+ "tests/test_realtime_sse.py": {
+  "F401": 4
+ },
+ "tests/test_realtime_websocket.py": {
+  "F401": 4,
+  "I001": 1
+ },
+ "tests/test_reasoning.py": {
+  "I001": 1
+ },
+ "tests/test_redis_state.py": {
+  "F401": 2
+ },
+ "tests/test_replay_engine.py": {
+  "F401": 2,
+  "UP017": 4
+ },
+ "tests/test_repository_clone.py": {
+  "E501": 2
+ },
+ "tests/test_rollback.py": {
+  "F401": 4,
+  "F841": 2,
+  "I001": 1
+ },
+ "tests/test_scheduler_persistence.py": {
+  "UP017": 3
+ },
+ "tests/test_secret_backend_persistence.py": {
+  "E501": 1
+ },
+ "tests/test_secret_rotation.py": {
+  "UP017": 8
+ },
+ "tests/test_secrets.py": {
+  "I001": 1,
+  "UP017": 3
+ },
+ "tests/test_semantic_fallback.py": {
+  "F401": 2
+ },
+ "tests/test_semantic_memory.py": {
+  "F841": 1
+ },
+ "tests/test_session_compaction.py": {
+  "E501": 5,
+  "I001": 1
+ },
+ "tests/test_skills_catalog.py": {
+  "F401": 1
+ },
+ "tests/test_skills_discovery.py": {
+  "F401": 2
+ },
+ "tests/test_ssrf_protection.py": {
+  "I001": 1
+ },
+ "tests/test_statistical.py": {
+  "E501": 3
+ },
+ "tests/test_tenant_guard.py": {
+  "F401": 1,
+  "F841": 1
+ },
+ "tests/test_tool_audit.py": {
+  "F401": 3,
+  "N817": 1,
+  "UP017": 11
+ },
+ "tests/test_tool_governance.py": {
+  "F401": 1
+ },
+ "tests/test_triggers.py": {
+  "F401": 1,
+  "I001": 1
+ },
+ "tests/test_watchdog.py": {
+  "UP017": 23
+ },
+ "tests/test_webhook_queue.py": {
+  "F401": 1
+ },
+ "tests/test_workflow_routes.py": {
+  "E501": 1,
+  "N805": 1,
+  "UP017": 3
+ },
+ "tests/test_workflows.py": {
+  "F401": 7,
+  "I001": 1
+ },
+ "tests/test_worktree.py": {
+  "F841": 1
+ }
+}

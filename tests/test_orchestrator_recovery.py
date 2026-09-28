@@ -72,15 +72,23 @@ class TestSubtaskClaim:
     ) -> None:
         factory, company, _agent, _goal, task = company_db
 
+        class ProcessDied(BaseException):
+            """Nothing in the orchestrator may handle this, as with a killed process.
+
+            Not KeyboardInterrupt: raised inside a gathered subtask, asyncio
+            re-raises that out of the event loop and aborts the test run.
+            """
+
         async def boom(*_args, **_kwargs):
-            raise KeyboardInterrupt("process killed mid-call")
+            raise ProcessDied("process killed mid-call")
 
         monkeypatch.setattr(chat, "_call_llm", boom)
+        # Each subtask opens its own tenant session (WP-19a); point it at this DB.
+        monkeypatch.setattr("nexus.database.async_session_factory", factory)
 
         async with factory() as db:
             tasks = list((await db.execute(select(Task))).scalars())
-            with pytest.raises(KeyboardInterrupt):
-                await orchestrator._execute_subtasks(db, tasks, company.id)
+        await orchestrator._execute_subtasks(tasks, company.id)
 
         stored = await reload(factory, task.id)
         assert stored.status == "in_progress"
@@ -95,11 +103,11 @@ class TestSubtaskClaim:
             return "work complete", "m", 10
 
         monkeypatch.setattr(chat, "_call_llm", ok)
+        monkeypatch.setattr("nexus.database.async_session_factory", factory)
 
         async with factory() as db:
             tasks = list((await db.execute(select(Task))).scalars())
-            await orchestrator._execute_subtasks(db, tasks, company.id)
-            await db.commit()
+        await orchestrator._execute_subtasks(tasks, company.id)
 
         stored = await reload(factory, task.id)
         assert stored.status == "completed"

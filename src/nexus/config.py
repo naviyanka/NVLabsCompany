@@ -56,7 +56,8 @@ class Settings(BaseSettings):
     # Server
     debug: bool = False
     log_level: str = "INFO"
-    server_host: str = "0.0.0.0"
+    # The server runs in a container; the port mapping decides exposure.
+    server_host: str = "0.0.0.0"  # nosec B104
     server_port: int = 8000
 
     # Data directory for JSON-persisted runtime state (control registry, etc.)

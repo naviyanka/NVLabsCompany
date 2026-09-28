@@ -368,7 +368,8 @@ class DockerSandbox:
             f"--cpus={self.max_cpus}",
             "--network=none",
             "--read-only",
-            "--tmpfs", "/tmp",
+            # A tmpfs inside the sandbox container, not a host temp path.
+            "--tmpfs", "/tmp",  # nosec B108
         ]
 
         if env:

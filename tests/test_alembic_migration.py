@@ -235,6 +235,54 @@ class TestChainExecution:
         command.downgrade(cfg, "-1")
         command.upgrade(cfg, "head")
 
+    def test_migrated_schema_matches_the_models(self, tmp_path) -> None:
+        """A database built only by migrations has every model table and column.
+
+        Tests build tables with create_all, so a model column without a
+        migration went unnoticed until the startup seed failed on a fresh
+        database ("table agents has no column named focus_items"). Tables and
+        columns must match exactly. The FK/index differences below predate this
+        check and are listed one by one, so any new drift still fails.
+        """
+        from alembic.autogenerate import compare_metadata
+        from alembic.migration import MigrationContext
+
+        db_file = tmp_path / "chain.db"
+        cfg = Config("alembic.ini")
+        cfg.set_main_option("sqlalchemy.url", f"sqlite+aiosqlite:///{db_file.as_posix()}")
+        command.upgrade(cfg, "head")
+
+        engine = create_engine(f"sqlite:///{db_file.as_posix()}")
+        with engine.connect() as conn:
+            ctx = MigrationContext.configure(conn, opts={"compare_type": False})
+            diffs = compare_metadata(ctx, SQLModel.metadata)
+        engine.dispose()
+
+        def key(diff) -> tuple:
+            kind, obj = diff[0], diff[-1]
+            if kind in ("add_column", "remove_column"):
+                return (kind, diff[2], obj.name)
+            if kind in ("add_table", "remove_table"):
+                return (kind, obj.name, ())
+            table = obj.table.name
+            cols = tuple(sorted(c.name for c in getattr(obj, "columns", [])))
+            return (kind, table, cols)
+
+        found = {key(d) for d in diffs if isinstance(d, tuple)}
+        known = {
+            ("add_fk", "api_keys", ("created_by",)),
+            ("add_fk", "cost_events", ("policy_id",)),
+            ("remove_fk", "cost_events", ("policy_id",)),
+            ("add_fk", "tasks", ("goal_id",)),
+            ("remove_fk", "knowledge_chunks", ("source_id",)),
+            ("remove_index", "knowledge_chunks", ("source_id", "source_type")),
+            ("remove_index", "workflow_runs", ("status",)),
+            ("remove_index", "obsidian_documents", ("company_id", "vault_path")),
+            ("add_constraint", "obsidian_documents", ("company_id", "vault_path")),
+        }
+        assert not [d for d in diffs if not isinstance(d, tuple)], "column type/nullability diffs"
+        assert found - known == set(), f"Schema drift between models and migrations: {sorted(found - known)}"
+
 
 class TestSchemaCreation:
     """Verify full schema can be created in SQLite in-memory database."""

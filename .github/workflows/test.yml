@@ -46,7 +46,8 @@ jobs:
         with:
           python-version: '3.12'
           cache: 'pip'
-      - run: pip install -e ".[dev]"
+      # otel: tests/test_observability_enterprise.py asserts on real spans.
+      - run: pip install -e ".[dev,otel]"
         working-directory: .
       - run: pytest tests/ --ignore=tests/test_postgres_integration.py -x --tb=short -q
         env:
@@ -86,6 +87,8 @@ jobs:
       - name: Run Postgres Integration Tests
         run: pytest tests/test_postgres_integration.py -v
         env:
+          # The app's own engine (IdempotencyMiddleware) reads DATABASE_URL.
+          DATABASE_URL: postgresql+asyncpg://postgres:postgrespassword@localhost:5432/test
           TEST_DATABASE_URL: postgresql://postgres:postgrespassword@localhost:5432/test
           AUTH_ENABLED: "false"
 
@@ -95,7 +98,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22.23.1'
           cache: 'npm'
           cache-dependency-path: dashboard/package-lock.json
       - run: npm ci
@@ -118,7 +121,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22.23.1'
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -165,9 +168,11 @@ jobs:
           PROXY_API: "true"
           NEXUS_API_URL: http://localhost:8000
       - name: Wait for proxy
+        # The real /api/v1/companies needs a principal and answers 401 even
+        # with AUTH_ENABLED=false; setup-required is public and reads the DB.
         run: |
           for i in $(seq 60); do
-            curl -sf http://localhost:3000/api/v1/companies >/dev/null && exit 0
+            curl -sf http://localhost:3000/api/v1/auth/setup-required >/dev/null && exit 0
             sleep 1
           done
           echo "proxy never came up"; exit 1

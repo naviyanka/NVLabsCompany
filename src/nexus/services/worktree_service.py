@@ -66,7 +66,7 @@ import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime
-from pathlib import Path, PurePath
+from pathlib import Path, PurePath, PureWindowsPath
 from typing import Any, Literal
 
 from fastapi import HTTPException, status
@@ -172,7 +172,13 @@ def worktree_path(company_id: uuid.UUID, relative_path: str) -> Path:
     elsewhere is refused as well.
     """
     rel = PurePath(relative_path)
-    if not relative_path or rel.anchor or ".." in rel.parts:
+    # PureWindowsPath also catches C:\x and \\srv\share on POSIX.
+    if (
+        not relative_path
+        or rel.anchor
+        or PureWindowsPath(relative_path).anchor
+        or ".." in rel.parts
+    ):
         raise WorktreeError("invalid_path", "Worktree path must be relative to the worktree root")
     root = worktree_root(company_id)
     path = (root / rel).resolve()

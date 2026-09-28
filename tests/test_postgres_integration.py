@@ -538,6 +538,9 @@ async def test_orchestrator_tick_sees_work_as_app_role(
         )
         company = Company(id=cid, name="RLS Orchestrator Test Corp")
         session.add(company)
+        # No relationship() links these models, so the unit of work does not
+        # order the inserts by foreign key; write the company first.
+        await session.flush()
         agent = Agent(
             id=agent_id,
             company_id=cid,

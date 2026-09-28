@@ -7,13 +7,14 @@ the goal-execute route that shares the taxonomy), never by a test-only stub.
 
 import asyncio
 import uuid
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from nexus.models.task import RunCompletionReason
+from nexus.models.task import RunCompletionReason, Task
 from nexus.runtime import orchestrator as orch
 
 
@@ -109,10 +110,32 @@ def db_returning(*rows):
     return db
 
 
+def tenant_sessions(tasks, agent):
+    """Stand-in for ``nexus.database.tenant_session``.
+
+    Since WP-19a each subtask runs in its own tenant session and loads its task
+    and agent by ID, so the fake serves those rows from ``get``. The task rows
+    are the test's own objects, so the test can read the outcome from them.
+    """
+    by_id = {t.id: t for t in tasks}
+    opened = []
+
+    @asynccontextmanager
+    async def session(company_id):
+        opened.append(company_id)
+        db = db_returning()
+        db.get = AsyncMock(side_effect=lambda model, key: by_id.get(key) if model is Task else agent)
+        yield db
+
+    return session, opened
+
+
 async def run_subtask(task, agent, llm):
     """Drive _execute_subtasks for one task with a patched LLM."""
-    db = db_returning(agent)
-    with patch("nexus.api.routes.chat._call_llm", new=llm), patch(
+    session, opened = tenant_sessions([task], agent)
+    with patch("nexus.database.tenant_session", new=session), patch(
+        "nexus.api.routes.chat._call_llm", new=llm
+    ), patch(
         "nexus.api.routes.chat._fetch_agent_memories", new=AsyncMock(return_value=[])
     ), patch(
         "nexus.api.routes.chat._build_system_prompt", new=MagicMock(return_value="sys")
@@ -121,7 +144,9 @@ async def run_subtask(task, agent, llm):
     ), patch.object(
         orch, "_parse_adaptive_triggers", new=AsyncMock()
     ):
-        await orch._execute_subtasks(db, [task], task.company_id)
+        await orch._execute_subtasks([task], task.company_id)
+    # Every subtask runs in a session scoped to its own tenant.
+    assert opened == [task.company_id]
     return task
 
 
@@ -194,9 +219,11 @@ async def test_error_reason_on_unhandled_failure():
 async def test_max_iterations_reason_when_tick_budget_runs_out():
     tasks = [make_task() for _ in range(orch.MAX_ITERATIONS_PER_GOAL + 1)]
     agent = make_agent()
-    db = db_returning(*([agent] * len(tasks)))
+    session, opened = tenant_sessions(tasks, agent)
     llm = AsyncMock(return_value=("done", "gpt", 10))
-    with patch("nexus.api.routes.chat._call_llm", new=llm), patch(
+    with patch("nexus.database.tenant_session", new=session), patch(
+        "nexus.api.routes.chat._call_llm", new=llm
+    ), patch(
         "nexus.api.routes.chat._fetch_agent_memories", new=AsyncMock(return_value=[])
     ), patch(
         "nexus.api.routes.chat._build_system_prompt", new=MagicMock(return_value="sys")
@@ -205,9 +232,11 @@ async def test_max_iterations_reason_when_tick_budget_runs_out():
     ), patch.object(
         orch, "_parse_adaptive_triggers", new=AsyncMock()
     ):
-        await orch._execute_subtasks(db, tasks, tasks[0].company_id)
+        await orch._execute_subtasks(tasks, tasks[0].company_id)
 
     overflow = tasks[orch.MAX_ITERATIONS_PER_GOAL]
+    # The overflow task never opens a session, so it never runs.
+    assert len(opened) == orch.MAX_ITERATIONS_PER_GOAL
     assert overflow.status == "pending"
     assert overflow.completion_reason == RunCompletionReason.max_iterations
     assert tasks[0].completion_reason == RunCompletionReason.goal
