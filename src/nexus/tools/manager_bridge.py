@@ -44,6 +44,7 @@ from nexus.auth.run_tokens import ALGORITHM
 from nexus.config import settings
 from nexus.models._time import utcnow
 from nexus.tools import manager_tools
+from nexus.tools.ceo_tools import CEO_TOOLS
 from nexus.tools.context import INBOUND_MCP, ExecutionContext
 
 AUDIENCE = "nexus:manager-bridge"
@@ -97,8 +98,8 @@ async def open_bridge(
 ) -> Bridge | None:
     """The bridge for one CLI execution; None when it is not a manager's chat turn.
 
-    Only a plain chat turn (not a task attempt) of a manager
-    (:func:`manager_tools.is_manager`) is eligible; everything else runs
+    Only a plain chat turn (not a task attempt) of an agent offered governed
+    tools (:func:`manager_tools.catalog`: a manager or the CEO) is eligible; everything else runs
     exactly as before. An eligible turn on a backend without per-run MCP config
     gets ``Bridge(available=False)`` and runs without the tools.
 
@@ -112,9 +113,9 @@ async def open_bridge(
         and ctx.source == "chat"
         and ctx.work_mode is None
         and ctx.agent_id is not None
-        and await manager_tools.is_manager(ctx)
     )
-    if not eligible:
+    tools = await manager_tools.catalog(ctx) if eligible else {}
+    if not tools:
         if required:
             raise BridgeUnavailableError(
                 "MANAGER_TOOLS_UNAVAILABLE: manager tools need a chat turn of an agent "
@@ -122,6 +123,12 @@ async def open_bridge(
             )
         return None
     if not backend.mcp_config_flag:
+        if required and set(tools) & set(CEO_TOOLS):
+            raise BridgeUnavailableError(
+                f"CEO_TOOLS_UNSUPPORTED: {backend.name} cannot load an execution-scoped "
+                "MCP server, so it cannot run with CEO tools. It still chats, with the "
+                "server-provided executive context."
+            )
         if required:
             raise BridgeUnavailableError(
                 f"MANAGER_TOOLS_UNSUPPORTED: {backend.name} cannot load an "

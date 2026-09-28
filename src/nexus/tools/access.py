@@ -59,7 +59,14 @@ from nexus.tools.policy_engine import (
 # Tools that only an active allow ToolPolicy naming them exactly can permit:
 # never a ToolProfile default, a wildcard pattern or a risk-level rule. A
 # matching deny rule always wins, whatever its priority.
-EXPLICIT_ALLOW_ONLY = frozenset({"manager_request_hire"})
+EXPLICIT_ALLOW_ONLY = frozenset({
+    "manager_request_hire",
+    # CEO write tools (nexus.tools.ceo_tools.WRITE_TOOLS).
+    "ceo_delegate_task_to_manager",
+    "ceo_create_goal_or_work_order",
+    "ceo_record_decision",
+    "ceo_request_hire",
+})
 
 
 def names_tool(conditions: dict[str, Any] | None, tool_name: str) -> bool:

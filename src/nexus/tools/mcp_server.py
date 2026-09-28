@@ -50,6 +50,7 @@ from nexus.nodes.executor import execute_node, get_default_registry
 from nexus.nodes.registry import NodeCategory, NodeDefinition, NodeRegistry
 from nexus.tools import manager_tools
 from nexus.tools.access import BUILTIN_ENDPOINT, DENIED, check_tool_access
+from nexus.tools.ceo_tools import CEO_TOOLS
 from nexus.tools.context import INBOUND_MCP, ExecutionContext
 from nexus.tools.factory import _access_session, guarded_call
 
@@ -163,20 +164,19 @@ class MCPServer:
                             "inputSchema": input_schema_for(node),
                         }
                     )
-            # Manager tools are offered only to a manager (see manager_tools.is_manager).
-            if await manager_tools.is_manager(self._ctx):
-                for name, tool in manager_tools.MANAGER_TOOLS.items():
-                    decision = await check_tool_access(
-                        db, self._ctx, tool_name=name, default_risk=tool.risk
+            # Manager and CEO tools: only the agent's catalog (manager_tools.catalog).
+            for name, tool in (await manager_tools.catalog(self._ctx)).items():
+                decision = await check_tool_access(
+                    db, self._ctx, tool_name=name, default_risk=tool.risk
+                )
+                if decision.outcome != DENIED:
+                    tools.append(
+                        {
+                            "name": name,
+                            "description": tool.description,
+                            "inputSchema": manager_tools.input_schema(tool),
+                        }
                     )
-                    if decision.outcome != DENIED:
-                        tools.append(
-                            {
-                                "name": name,
-                                "description": tool.description,
-                                "inputSchema": manager_tools.input_schema(tool),
-                            }
-                        )
         return tools
 
     async def call_tool(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -186,7 +186,7 @@ class MCPServer:
         error: the client asked a well-formed question and deserves to see why
         the answer is no.
         """
-        if name in manager_tools.MANAGER_TOOLS:
+        if name in manager_tools.MANAGER_TOOLS or name in CEO_TOOLS:
             return await self._call_manager_tool(name, arguments)
         node = self._nodes.get(name)
         if node is None:
@@ -215,17 +215,28 @@ class MCPServer:
         }
 
     async def _call_manager_tool(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
-        """Run a manager tool through the same guarded boundary as a node tool."""
+        """Run a manager or CEO tool through the same guarded boundary as a node tool.
+
+        The access policy is checked (and audited) first; then only a tool of
+        the agent's current catalog runs: a tool it is not offered (not, or no
+        longer, a manager or the CEO) is refused.
+        """
         from fastapi import HTTPException
 
+        async def run() -> Any:
+            if name not in await manager_tools.catalog(self._ctx):
+                raise ValueError(f"TOOL_NOT_OFFERED: '{name}' is not available to this agent")
+            return await manager_tools.call(self._ctx, name, arguments)
+
+        tool = {**manager_tools.MANAGER_TOOLS, **CEO_TOOLS}[name]
         try:
             outcome = await guarded_call(
                 self._ctx,
                 name,
                 arguments,
-                lambda: manager_tools.call(self._ctx, name, arguments),
+                run,
                 source=INBOUND_MCP,
-                default_risk=manager_tools.MANAGER_TOOLS[name].risk,
+                default_risk=tool.risk,
             )
         except HTTPException as exc:
             detail = exc.detail if isinstance(exc.detail, dict) else {"message": exc.detail}

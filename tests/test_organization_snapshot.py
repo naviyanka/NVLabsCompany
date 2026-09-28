@@ -443,8 +443,9 @@ class TestAccess:
         assert snap.TOOL in {t["name"] for t in await lead.list_tools()}
         result = await lead.call_tool(snap.TOOL, {})
         assert not result["isError"] and '"scope": "manager"' in result["content"][0]["text"]
+        # An employee is not offered the tool, so calling it is refused before it runs.
         refused = await MCPServer(_ctx(org.acme, org.e1)).call_tool(snap.TOOL, {})
-        assert refused["isError"] and "SNAPSHOT_FORBIDDEN" in refused["content"][0]["text"]
+        assert refused["isError"] and "TOOL_NOT_OFFERED" in refused["content"][0]["text"]
         outsider = await MCPServer(_ctx(org.other, org.lead)).call_tool(snap.TOOL, {})
         assert outsider["isError"]
 

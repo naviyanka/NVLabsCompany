@@ -174,17 +174,19 @@ def input_schema(tool: ManagerTool) -> dict[str, Any]:
 
 
 async def call(ctx: Any, name: str, arguments: dict[str, Any]) -> Any:
-    """Run manager tool ``name`` as the context's agent, in the context's company.
+    """Run manager or CEO tool ``name`` as the context's agent, in its company.
 
     Raises:
         ValueError: No agent identity, or a missing or malformed argument.
         fastapi.HTTPException: The service refused (not found, not a report).
     """
     from nexus.database import tenant_session
+    from nexus.tools.ceo_tools import CEO_TOOLS
+    from nexus.tools.ceo_tools import run as run_ceo_tool
 
     if ctx.agent_id is None:
         raise ValueError("manager tools need an agent identity")
-    tool = MANAGER_TOOLS[name]
+    tool = MANAGER_TOOLS.get(name) or CEO_TOOLS[name]
     args: Any
     if tool.model is not None:
         try:
@@ -199,30 +201,42 @@ async def call(ctx: Any, name: str, arguments: dict[str, Any]) -> Any:
             args = {p: uuid.UUID(str(arguments[p])) for p in tool.params}
         except (KeyError, ValueError) as exc:
             raise ValueError(f"expected UUID arguments {list(tool.params)}") from exc
+    if name not in MANAGER_TOOLS:
+        return await run_ceo_tool(ctx, name, args)
     async with tenant_session(ctx.company_id) as db:
         return await tool.run(db, ctx.company_id, ctx.agent_id, args, f"agent:{ctx.agent_id}")
 
 
-async def is_manager(ctx: Any) -> bool:
-    """Whether the context's agent is served the manager tools.
+async def catalog(ctx: Any) -> dict[str, ManagerTool]:
+    """The governed tools the context's agent is offered, least privilege first.
 
-    An agent with at least one direct report is. So is one with none yet, when
-    an active allow ToolPolicy of its company names a manager tool and this
-    agent (``agent_id``) explicitly, and access to that tool is not denied:
-    that is how a new manager hires its first report. Role, title and prompt
-    text never count.
+    * The company's current CEO: the CEO tools.
+    * An agent with at least one direct report: the manager tools.
+    * An agent with none yet, pinned (``agent_id``) by an active allow
+      ToolPolicy of its company that names a manager tool, access to which is
+      not denied: the manager tools, which is how a new manager hires its
+      first report; or only :data:`org_snapshot.TOOL` when that is the one
+      tool so named.
+    * Anyone else: nothing.
+
+    Role, title and prompt text never count, and being offered a tool never
+    authorizes a call: every call still passes ``guarded_call``.
     """
     from sqlalchemy import select
 
     from nexus.database import tenant_session
     from nexus.models.tool import ToolPolicy
+    from nexus.services import ceo_service
     from nexus.tools.access import DENIED, check_tool_access, names_tool
+    from nexus.tools.ceo_tools import CEO_TOOLS
 
     if ctx.agent_id is None:
-        return False
+        return {}
     async with tenant_session(ctx.company_id) as db:
+        if await ceo_service.is_ceo(db, ctx.company_id, ctx.agent_id):
+            return dict(CEO_TOOLS)
         if await ms.direct_reports(db, ctx.company_id, ctx.agent_id):
-            return True
+            return dict(MANAGER_TOOLS)
         rows = (
             await db.execute(
                 select(ToolPolicy).where(
@@ -239,13 +253,16 @@ async def is_manager(ctx: Any) -> bool:
             for name in MANAGER_TOOLS
             if names_tool(r.conditions, name)
         }
+        allowed = set()
         for name in sorted(named):
             decision = await check_tool_access(
                 db, ctx, tool_name=name, default_risk=MANAGER_TOOLS[name].risk
             )
             if decision.outcome != DENIED:
-                return True
-        return False
+                allowed.add(name)
+    if allowed - {org_snapshot.TOOL}:
+        return dict(MANAGER_TOOLS)
+    return {name: MANAGER_TOOLS[name] for name in allowed}
 
 
 def _agent_ids(conditions: dict[str, Any] | None) -> list[str]:

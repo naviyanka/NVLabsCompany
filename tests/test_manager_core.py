@@ -409,8 +409,9 @@ class TestManagerTools:
         await _staffed(team)
         employee = MCPServer(_ctx(team["acme"], team["acme_agy"]))
         assert not any(t["name"].startswith("manager_") for t in await employee.list_tools())
-        # An employee's "team" is empty; it cannot reach its manager's.
-        assert _payload(await employee.call_tool("manager_list_reports", {})) == []
+        # An employee is not offered the tool, so it cannot reach its manager's team.
+        refused = await employee.call_tool("manager_list_reports", {})
+        assert refused["isError"] and "TOOL_NOT_OFFERED" in refused["content"][0]["text"]
         # A context claiming Lead under another company fails the access check.
         spoofed = MCPServer(_ctx(team["other"], team["lead"]))
         refused = await spoofed.call_tool("manager_list_reports", {})
