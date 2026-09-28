@@ -4,7 +4,7 @@ import asyncio
 import uuid
 import pytest
 
-from nexus.governance.bulkhead import TenantBulkhead, TenantSaturated
+from nexus.governance.bulkhead import GlobalSaturated, TenantBulkhead, TenantSaturated
 
 
 @pytest.mark.asyncio
@@ -46,7 +46,8 @@ async def test_tenant_bulkhead_enforces_global_cap():
 
     async with bulkhead.acquire(c1):
         async with bulkhead.acquire(c2):
-            with pytest.raises(TenantSaturated):
+            # A third tenant is under its own cap; the process-wide cap refuses it.
+            with pytest.raises(GlobalSaturated):
                 async with bulkhead.acquire(c3):
                     pass
     assert bulkhead.global_in_flight == 0
