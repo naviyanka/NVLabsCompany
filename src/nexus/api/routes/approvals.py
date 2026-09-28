@@ -17,6 +17,7 @@ from nexus.api.deps import (
 )
 from nexus.governance.approval_signing import SignatureError
 from nexus.models.governance import Approval
+from nexus.services import hiring_service
 from nexus.services.approval_service import ApprovalService
 
 router = APIRouter(tags=["approvals"])
@@ -80,6 +81,12 @@ async def create_approval(
     company_id: PathCompanyId, body: ApprovalCreate, db: DbSession
 ) -> Any:
     """Create a new approval request through the single approval service."""
+    if body.type == hiring_service.HIRE:
+        # Only the hiring service files these, after validating and evaluating them.
+        raise HTTPException(
+            status_code=422,
+            detail="Hiring requests are filed through /api/v1/agents/{manager_id}/hiring-requests",
+        )
     return await ApprovalService(db).request_approval(
         company_id=company_id,
         approval_type=body.type,
@@ -136,10 +143,16 @@ async def approve(
     existing = await db.execute(
         select(Approval).where(Approval.id == approval_id, Approval.company_id == company_id)
     )
-    if existing.scalar_one_or_none() is None:
+    found = existing.scalar_one_or_none()
+    if found is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Approval {approval_id} not found or not pending",
+        )
+    if found.type == hiring_service.HIRE:
+        # Re-evaluates the hiring policy, then creates the employee exactly once.
+        return await hiring_service.approve(
+            db, company_id, approval_id, principal, body.decision_note
         )
     try:
         approval = await ApprovalService(db).approve(
@@ -210,10 +223,15 @@ async def reject(
     existing = await db.execute(
         select(Approval).where(Approval.id == approval_id, Approval.company_id == company_id)
     )
-    if existing.scalar_one_or_none() is None:
+    found = existing.scalar_one_or_none()
+    if found is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Approval {approval_id} not found or not pending",
+        )
+    if found.type == hiring_service.HIRE:
+        return await hiring_service.reject(
+            db, company_id, approval_id, principal, body.decision_note
         )
     approval = await ApprovalService(db).reject(
         approval_id, principal.display_name, body.decision_note
