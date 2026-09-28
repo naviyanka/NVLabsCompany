@@ -26,9 +26,11 @@ from nexus.models.governance import AuditLog
 
 
 @pytest.fixture
-async def session_factory():
+async def session_factory(monkeypatch):
     """An isolated in-memory database with the audit table created."""
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    # tenant_session() picks its dialect from the URL, not from this factory.
+    monkeypatch.setattr("nexus.config.settings.database_url", str(engine.url))
     async with engine.begin() as conn:
         await conn.run_sync(SQLModel.metadata.create_all)
     factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)

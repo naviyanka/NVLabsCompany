@@ -150,6 +150,8 @@ async def test_tenant_session_factory_works_on_sqlite(tmp_path, monkeypatch):
         "async_session_factory",
         async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False),
     )
+    # tenant_session() picks its dialect from the URL, not from this factory.
+    monkeypatch.setattr("nexus.config.settings.database_url", str(engine.url))
     cid = uuid.uuid4()
     factory = database.tenant_session_factory(cid)
 
