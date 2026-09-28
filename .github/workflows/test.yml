@@ -87,6 +87,8 @@ jobs:
       - name: Run Postgres Integration Tests
         run: pytest tests/test_postgres_integration.py -v
         env:
+          # The app's own engine (IdempotencyMiddleware) reads DATABASE_URL.
+          DATABASE_URL: postgresql+asyncpg://postgres:postgrespassword@localhost:5432/test
           TEST_DATABASE_URL: postgresql://postgres:postgrespassword@localhost:5432/test
           AUTH_ENABLED: "false"
 
