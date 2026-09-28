@@ -53,25 +53,25 @@ async def list_audit_logs(
 
 @router.get("/api/v1/companies/{company_id}/audit-logs/verify")
 async def verify_audit_chain(company_id: uuid.UUID, db: DbSession) -> dict[str, Any]:
-    """Verify the audit hash chain's integrity.
+    """Verify this company's audit hash chain.
 
-    Recomputes each entry's hash over the persisted chain and reports whether
-    it is intact. The hash chain is global (one sequence across the whole
-    deployment), so this verifies the entire chain, not just this company's
-    rows — tampering anywhere invalidates it. `checked` is the number of
-    persisted entries the verifier walked.
+    Each company has its own chain. This recomputes every hash in it, in
+    sequence order, and reports whether it is intact; other companies' chains
+    are neither read nor needed. `checked` is the number of chained entries
+    the verifier walked.
     """
-    from nexus.database import async_session_factory
-    from nexus.governance.audit_persistent import PersistentAuditLogger
+    from nexus.database import tenant_session_factory
+    from nexus.governance.audit_persistent import PersistentAuditLogger, chain_is_intact
 
-    logger = PersistentAuditLogger(session_factory=async_session_factory)
-    valid = await logger.verify_chain_integrity()
-    checked = await logger.total_entries()
+    logger = PersistentAuditLogger(
+        session_factory=tenant_session_factory(company_id), company_id=company_id
+    )
+    entries = await logger.chain_entries()
 
     return {
-        "valid": bool(valid),
-        "checked": int(checked),
-        "scope": "global",
+        "valid": chain_is_intact(entries),
+        "checked": len(entries),
+        "scope": "company",
     }
 
 

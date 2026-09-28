@@ -37,10 +37,6 @@ ALLOWED: dict[str, tuple[str, str]] = {
         DISCOVERY,
         "resolves the MCP API key before the tenant is known",
     ),
-    "api/routes/audit.py::verify_audit_chain": (
-        SYSTEM,
-        "verifies the one global audit chain, which spans every company",
-    ),
     "governance/audit_persistent.py::PersistentAuditLogger._sessions": (
         SYSTEM,
         "default for chain verification and retention when no factory is given",
