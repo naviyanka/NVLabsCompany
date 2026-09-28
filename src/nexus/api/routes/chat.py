@@ -48,9 +48,13 @@ class ChatRequest(BaseModel):
     # Idempotency key (the Idempotency-Key header wins). A retry with the same
     # key attaches to the turn it already created instead of starting another.
     request_id: str | None = Field(default=None, min_length=1, max_length=255)
-    # Fail the turn rather than run a manager without its manager tools (on a
-    # backend without per-run MCP config). Can only refuse, never grant.
+    # Fail the turn rather than run a manager or the CEO without its governed
+    # tools (on a backend without per-run MCP config; a CEO is refused up front
+    # with CEO_TOOLS_UNSUPPORTED). Can only refuse, never grant.
     require_manager_tools: bool = False
+    # Store this prompt as a human directive in the CEO's executive memory.
+    # Only a human may, and only to the company's current CEO.
+    record_directive: bool = False
 
 
 class ChatMessage(BaseModel):
@@ -429,7 +433,9 @@ async def _fetch_agent_memories(
         # Fetch more candidates then rank by relevance
         stmt = (
             select(MemoryRecord)
-            .where(MemoryRecord.agent_id == agent_id, MemoryRecord.company_id == company_id)
+            # Executive memory reaches the CEO only through ceo_service.
+            .where(MemoryRecord.agent_id == agent_id, MemoryRecord.company_id == company_id,
+                   MemoryRecord.scope != "executive")
             .order_by(MemoryRecord.importance.desc())
             .limit(100)  # Fetch larger pool for re-ranking
         )
@@ -454,7 +460,8 @@ async def _fetch_agent_memories(
     else:
         stmt = (
             select(MemoryRecord)
-            .where(MemoryRecord.agent_id == agent_id, MemoryRecord.company_id == company_id)
+            .where(MemoryRecord.agent_id == agent_id, MemoryRecord.company_id == company_id,
+                   MemoryRecord.scope != "executive")
             .order_by(MemoryRecord.importance.desc(), MemoryRecord.created_at.desc())
             .limit(limit)
         )
@@ -638,14 +645,8 @@ def _build_system_prompt(agent: Agent, memories: list[dict[str, Any]] | None = N
     if agent.objectives:
         prompt += f"\n\nObjectives: {agent.objectives}"
 
-    if agent.role == "ceo":
-        prompt += (
-            "\n\n=== CEO OPERATIONAL DIRECTIVE ===\n"
-            "You are Navi, Chief Executive Officer (CEO) and System Orchestrator of NVLabsCompany. "
-            "You have complete operational authority to assign, delegate, and manage tasks across all company agents (including Punni and all workforce members). "
-            "When requested to assign a task to an agent, confirm the task assignment authoritatively. "
-            "Never output <policy_violation> or claim you cannot assign tasks. You execute task delegation directly in this platform."
-        )
+    # No role-string authority: the designated CEO's instructions come from
+    # ceo_service.chat_context, which _build_chat_prompt adds per turn.
 
     if working_ctx.recent_memories:
         mem_lines = [
@@ -1285,12 +1286,21 @@ async def _load_agent(db: "AsyncSession", agent_id: uuid.UUID, company_id: uuid.
 
 
 async def _build_chat_prompt(db: "AsyncSession", agent: Agent, company_id: uuid.UUID, prompt: str) -> str:
-    """System prompt from the agent's soul/persona, memories and live platform data."""
+    """System prompt from the agent's soul/persona, memories and live platform data.
+
+    The designated CEO gets the bounded, snapshot-backed executive context
+    instead of live platform data: no aggregation and no model call per turn.
+    """
+    from nexus.services import ceo_service
+
     agent_memories = await _fetch_agent_memories(db, agent.id, company_id, query=prompt)
     system_prompt = _build_system_prompt(agent, memories=agent_memories)
+    executive = await ceo_service.chat_context(db, company_id, agent.id)
+    if executive is not None:
+        return f"{system_prompt}\n\n{executive}"
 
     # Inject live platform context (workforce roster, active tasks, goals, live assignment) directly from DB
-    live_platform_context = await _fetch_live_platform_context(db, company_id, prompt, is_ceo=(agent.role == "ceo"), current_agent_id=agent.id)
+    live_platform_context = await _fetch_live_platform_context(db, company_id, prompt, current_agent_id=agent.id)
     if live_platform_context:
         system_prompt += (
             f"\n\n--- LIVE PLATFORM WORKFORCE & TASK DATA ---\n"
@@ -1669,6 +1679,7 @@ async def chat_with_agent(
         db, session, agent, body.prompt, principal=principal,
         idempotency_key=idempotency_key or body.request_id,
         require_manager_tools=body.require_manager_tools,
+        record_directive=body.record_directive,
     )
     result = await run_turn(company_id, queued.turn)
     if isinstance(result, JSONResponse):
@@ -1722,6 +1733,7 @@ async def chat_with_agent_stream(
         db, session, agent, body.prompt, principal=principal,
         idempotency_key=idempotency_key or body.request_id, stream=True,
         require_manager_tools=body.require_manager_tools,
+        record_directive=body.record_directive,
     )
     chat_turns.get_worker().wake(company_id)
     return _sse_response(turn_events(queued.turn.id, company_id, resume_offset(last_event_id)))

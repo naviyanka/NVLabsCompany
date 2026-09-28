@@ -88,6 +88,9 @@ class MemoryStore:
         Returns:
             The UUID string of the stored memory.
         """
+        if scope == "executive":
+            # Executive memory is written only by nexus.services.ceo_service.
+            raise ValueError("executive memory is recorded through the CEO service")
         memory_id = uuid.uuid4()
 
         # Store in warm tier (database)
