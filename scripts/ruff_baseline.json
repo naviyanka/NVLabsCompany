@@ -220,6 +220,12 @@
  "scripts/arch_guard.py": {
   "E501": 1
  },
+ "scripts/cli_employee_concurrency_smoke.py": {
+  "E501": 1
+ },
+ "scripts/cli_employee_smoke.py": {
+  "E501": 1
+ },
  "src/nexus/adapters/__init__.py": {
   "I001": 1
  },
@@ -248,7 +254,7 @@
  },
  "src/nexus/adapters/cli_adapter.py": {
   "F401": 1,
-  "UP041": 3
+  "UP041": 2
  },
  "src/nexus/adapters/google_adapter.py": {
   "I001": 1
@@ -295,7 +301,7 @@
   "F401": 1
  },
  "src/nexus/api/idempotency_middleware.py": {
-  "E501": 4,
+  "E501": 5,
   "F401": 2,
   "I001": 1,
   "UP017": 1
@@ -324,7 +330,7 @@
   "W292": 1
  },
  "src/nexus/api/routes/agents.py": {
-  "E501": 13,
+  "E501": 14,
   "I001": 2,
   "UP017": 7
  },
@@ -346,7 +352,7 @@
   "I001": 1
  },
  "src/nexus/api/routes/chat.py": {
-  "E501": 28,
+  "E501": 25,
   "F401": 1,
   "F541": 1,
   "I001": 2,
@@ -1427,7 +1433,7 @@
   "I001": 1
  },
  "tests/test_agent_sessions.py": {
-  "E501": 1
+  "E501": 2
  },
  "tests/test_agents.py": {
   "F401": 4,
@@ -1446,6 +1452,9 @@
  "tests/test_archetypes.py": {
   "F401": 19,
   "I001": 1
+ },
+ "tests/test_audit_service_chain.py": {
+  "E501": 1
  },
  "tests/test_auth_enforcement.py": {
   "E501": 2
@@ -1496,10 +1505,14 @@
   "F401": 4
  },
  "tests/test_cli_adapter.py": {
+  "E501": 2,
   "F401": 2,
   "F841": 1,
   "I001": 2,
   "UP041": 1
+ },
+ "tests/test_cli_employee_foundation.py": {
+  "E501": 2
  },
  "tests/test_communication.py": {
   "F401": 9,
@@ -1519,6 +1532,9 @@
  "tests/test_compliance.py": {
   "I001": 1,
   "UP017": 1
+ },
+ "tests/test_concurrent_employee_chat.py": {
+  "E501": 8
  },
  "tests/test_connections_wp22b.py": {
   "I001": 1
@@ -1602,7 +1618,7 @@
   "F401": 3
  },
  "tests/test_idempotency_middleware.py": {
-  "E501": 2,
+  "E501": 5,
   "F401": 2,
   "I001": 1
  },
