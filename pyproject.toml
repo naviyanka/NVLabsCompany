@@ -65,7 +65,8 @@ dev = [
     "httpx>=0.27.0",
     "aiosqlite>=0.20.0",
     "testcontainers[postgres]>=4.8.0",
-    "ruff>=0.4.0",
+    # Pinned: scripts/ruff_baseline.json counts depend on the ruff version.
+    "ruff==0.16.9",
     "mypy>=1.10.0",
 ]
 

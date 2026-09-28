@@ -34,12 +34,16 @@ jobs:
           python-version: '3.12'
           cache: 'pip'
 
+      # ruff is pinned because the ratchet baseline counts depend on its
+      # version; keep it equal to the dev extra in pyproject.toml.
       - name: Install Linting & Security Tools
         run: |
-          pip install ruff mypy bandit[toml] safety
+          pip install ruff==0.16.9 mypy "bandit[toml]==1.9.4" safety
 
-      - name: Python Code Quality (Ruff)
-        run: ruff check .
+      # Existing violations are baselined per file and rule; any increase
+      # fails. See scripts/ruff_ratchet.py and docs/CI_BASELINE.md.
+      - name: Python Code Quality (Ruff ratchet)
+        run: python scripts/ruff_ratchet.py
 
       - name: Python Security Audit (Bandit)
         run: bandit -r src/ -ll -q
