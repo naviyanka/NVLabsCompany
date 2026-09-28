@@ -334,6 +334,16 @@ async def _scheduler_loop(session_factory: async_sessionmaker[AsyncSession] | No
         except Exception as e:
             logger.error("Watchdog patrol error: %s", e)
 
+        # Organization snapshots: debounced regeneration of dirty companies and
+        # periodic reconciliation (nexus.services.org_snapshot).
+        try:
+            from nexus.services import org_snapshot
+
+            if await is_leader("org_snapshot"):
+                await org_snapshot.tick()
+        except Exception as e:
+            logger.error("Organization snapshot tick error: %s", e)
+
         await asyncio.sleep(TICK_INTERVAL)
     logger.info("Scheduler stopped")
 
