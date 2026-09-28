@@ -3,6 +3,7 @@ import { apiClient } from '@/api/client';
 import { AutonomyPolicyPanel } from '@/components/agents/AutonomyPolicyPanel';
 import { EditAgentModal } from '@/components/agents/EditAgentModal';
 import { FireAgentModal } from '@/components/agents/FireAgentModal';
+import { ManagerPanel } from '@/components/agents/ManagerPanel';
 import { Badge } from '@/components/common/Badge';
 import { Button } from '@/components/common/Button';
 import { Card } from '@/components/common/Card';
@@ -25,7 +26,8 @@ import {
   Pencil,
   Play,
   ShieldCheck,
-  Trash2
+  Trash2,
+  Users
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -271,6 +273,7 @@ export function AgentDetailPage() {
           { id: 'dossier', label: 'Soul & Capabilities Dossier', icon: <Cpu size={14} /> },
           { id: 'memory', label: 'Context Memory Entries', icon: <Database size={14} />, count: memories.length },
           { id: 'autonomy', label: 'Autonomy & Guardrails', icon: <ShieldCheck size={14} /> },
+          { id: 'team', label: 'Team', icon: <Users size={14} /> },
           { id: 'telemetry', label: 'Token Consumption Telemetry', icon: <Activity size={14} /> },
         ]}
       />
@@ -404,6 +407,8 @@ export function AgentDetailPage() {
           onSaved={(next) => setAgent((prev) => (prev ? { ...prev, autonomy_policy: next as Record<string, number> } : prev))}
         />
       )}
+
+      {activeTab === 'team' && <ManagerPanel agentId={agent.id} />}
 
       {activeTab === 'telemetry' && (
         <Card header={<span className="text-xs font-mono font-medium uppercase text-[#F2F1EE]">Recent Token Consumption & Latency (ms)</span>}>
