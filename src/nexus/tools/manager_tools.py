@@ -4,11 +4,13 @@ Served by the inbound MCP server (:mod:`nexus.tools.mcp_server`) through
 :func:`nexus.tools.factory.guarded_call`, like every other governed tool. The
 caller's identity is the server-built context's agent (from the run token),
 never an argument: each tool acts as that manager, inside its company, and
-only on agents whose ``manager_id`` is that manager. There is no org-wide or
-free-form query. ``manager_delegate_task`` and ``manager_request_hire`` are
-write-risk, so under the inbound default policy they stay denied until the
-company allows them. A manager cannot create an agent directly: it can only
-file a hiring request, which the hiring policy and a human decide.
+only on agents whose ``manager_id`` is that manager. There is no free-form
+query; the one org-wide read, ``organization_get_snapshot``, returns the
+precomputed snapshot and needs an explicit policy for more than the team.
+``manager_delegate_task`` and ``manager_request_hire`` are write-risk, so under
+the inbound default policy they stay denied until the company allows them. A
+manager cannot create an agent directly: it can only file a hiring request,
+which the hiring policy and a human decide.
 """
 
 from __future__ import annotations
@@ -22,7 +24,7 @@ from typing import Any
 from pydantic import BaseModel, ValidationError
 
 from nexus.runtime.task_attempts import attempt_view
-from nexus.services import hiring_service
+from nexus.services import hiring_service, org_snapshot
 from nexus.services import manager_service as ms
 
 
@@ -94,6 +96,10 @@ async def _get_hire(db, company_id, manager_id, args, actor):
     return await hiring_service.view(db, approval)
 
 
+async def _org_snapshot(db, company_id, manager_id, args, actor):
+    return await org_snapshot.read_as_agent(db, company_id, manager_id, actor)
+
+
 MANAGER_TOOLS: dict[str, ManagerTool] = {
     "manager_list_reports": ManagerTool(
         "List your direct reports.", "read", (), _list_reports
@@ -143,6 +149,14 @@ MANAGER_TOOLS: dict[str, ManagerTool] = {
         "read",
         ("request_id",),
         _get_hire,
+    ),
+    org_snapshot.TOOL: ManagerTool(
+        "The latest precomputed organization snapshot and its freshness: your team's "
+        "projection, or the whole organization when a policy explicitly allows you "
+        "org-wide reporting. Read-only.",
+        "read",
+        (),
+        _org_snapshot,
     ),
 }
 

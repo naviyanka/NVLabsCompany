@@ -80,6 +80,8 @@ EXPECTED_TABLES = {
     "obsidian_documents",
     "okr_key_results",
     "okr_objectives",
+    "organization_snapshot_state",
+    "organization_snapshots",
     "pipeline_runs",
     "pipelines",
     "plaza_posts",

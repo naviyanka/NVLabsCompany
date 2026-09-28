@@ -168,6 +168,47 @@ def _stale(attempt: TaskAttempt, now: datetime) -> bool:
     return attempt.updated_at is not None and now - attempt.updated_at > STALE_AFTER
 
 
+def work_bucket(task: Task, attempt: TaskAttempt | None, now: datetime) -> str:
+    """Where a task stands, from its newest attempt (or the task, before one).
+
+    One of ``stale``, ``active``, ``completed``, ``failed``, ``blocked`` or
+    ``queued``.
+    """
+    status = attempt.status if attempt is not None else task.status
+    if attempt is not None and _stale(attempt, now):
+        return "stale"
+    if status in LEASED_ATTEMPT_STATUSES:
+        return "active"
+    if status == "completed" or task.status == "completed":
+        return "completed"
+    if status == "blocked" or task.status == "blocked":
+        return "blocked"
+    if status in FAILED_STATUSES or task.status == "failed":
+        return "failed"
+    return "queued"
+
+
+async def latest_attempts(
+    db: Any, company_id: uuid.UUID, task_ids: list[uuid.UUID] | None
+) -> dict[uuid.UUID, TaskAttempt]:
+    """Each task's newest attempt, in one query; ``None`` means every task."""
+    if task_ids == []:
+        return {}
+    newest = select(TaskAttempt.task_id, func.max(TaskAttempt.attempt_number).label("n")).where(
+        TaskAttempt.company_id == company_id
+    )
+    if task_ids is not None:
+        newest = newest.where(TaskAttempt.task_id.in_(task_ids))
+    newest = newest.group_by(TaskAttempt.task_id).subquery()
+    rows = await db.execute(
+        select(TaskAttempt).join(
+            newest,
+            (TaskAttempt.task_id == newest.c.task_id) & (TaskAttempt.attempt_number == newest.c.n),
+        ).where(TaskAttempt.company_id == company_id)
+    )
+    return {a.task_id: a for a in rows.scalars().all()}
+
+
 def _attempt_ref(
     attempt: TaskAttempt | None, titles: dict[uuid.UUID, str]
 ) -> dict[str, Any] | None:
@@ -295,42 +336,16 @@ async def rollup(db: Any, company_id: uuid.UUID, manager_id: uuid.UUID) -> dict[
         if names
         else []
     )
-    latest: dict[uuid.UUID, TaskAttempt] = {}
-    if tasks:
-        newest = (
-            select(TaskAttempt.task_id, func.max(TaskAttempt.attempt_number).label("n"))
-            .where(
-                TaskAttempt.company_id == company_id,
-                TaskAttempt.task_id.in_([t.id for t in tasks]),
-            )
-            .group_by(TaskAttempt.task_id)
-            .subquery()
-        )
-        rows = await db.execute(
-            select(TaskAttempt).join(
-                newest,
-                (TaskAttempt.task_id == newest.c.task_id)
-                & (TaskAttempt.attempt_number == newest.c.n),
-            ).where(TaskAttempt.company_id == company_id)
-        )
-        latest = {a.task_id: a for a in rows.scalars().all()}
+    latest = await latest_attempts(db, company_id, [t.id for t in tasks])
 
     work: dict[str, list[dict[str, Any]]] = {
         "active": [], "queued": [], "completed": [], "failed_blocked": [], "stale": []
     }
     for task in tasks:
         attempt = latest.get(task.id)
-        status = attempt.status if attempt is not None else task.status
-        if attempt is not None and _stale(attempt, now):
-            bucket = "stale"
-        elif status in LEASED_ATTEMPT_STATUSES:
-            bucket = "active"
-        elif status == "completed" or task.status == "completed":
-            bucket = "completed"
-        elif status in FAILED_STATUSES or task.status in ("failed", "blocked"):
+        bucket = work_bucket(task, attempt, now)
+        if bucket in ("failed", "blocked"):
             bucket = "failed_blocked"
-        else:
-            bucket = "queued"
         work[bucket].append(
             {
                 "task_id": str(task.id),

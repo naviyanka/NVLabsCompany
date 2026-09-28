@@ -65,6 +65,7 @@ from nexus.models.workflow_run import WorkflowRun
 from nexus.models.workspace import Workspace
 from nexus.models.okr import OKRObjective, OKRKeyResult
 from nexus.models.idempotency import IdempotencyRecord
+from nexus.models.organization_snapshot import OrganizationSnapshot, OrganizationSnapshotState
 
 __all__ = [
     # Company / Organization
@@ -169,4 +170,7 @@ __all__ = [
     # OKR
     "OKRObjective",
     "OKRKeyResult",
+    # Organization snapshot
+    "OrganizationSnapshot",
+    "OrganizationSnapshotState",
 ]

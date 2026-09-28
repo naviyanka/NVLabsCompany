@@ -21,6 +21,7 @@ import { AddDepartmentModal } from '@/components/org/AddDepartmentModal';
 import { AddSquadModal } from '@/components/org/AddSquadModal';
 import { OrgTreeGraph } from '@/components/org/OrgTreeGraph';
 import { DepartmentDetailDrawer } from '@/components/org/DepartmentDetailDrawer';
+import { OrganizationSnapshotPanel } from '@/components/org/OrganizationSnapshotPanel';
 
 export function Organization() {
   const navigate = useNavigate();
@@ -124,6 +125,8 @@ export function Organization() {
           </Button>
         </div>
       </div>
+
+      <OrganizationSnapshotPanel />
 
       {/* Top Analytics Metrics */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
