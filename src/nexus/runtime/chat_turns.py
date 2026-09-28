@@ -188,6 +188,7 @@ async def create_turn(
     idempotency_key: str | None = None,
     stream: bool = False,
     work_mode: str | None = None,
+    require_manager_tools: bool = False,
 ) -> Enqueued:
     """Store the user's prompt and its queued turn in one transaction, then commit.
 
@@ -224,6 +225,8 @@ async def create_turn(
     if work_mode is not None:
         # Server-chosen (task attempts only); the adapter maps it to flags.
         context = dataclasses.replace(context, work_mode=work_mode)
+    if require_manager_tools:
+        context = dataclasses.replace(context, manager_tools_required=True)
 
     message = await chat._persist_message_to_db(
         db, pinned.id, company_id, "user", prompt, session_id=record.id
