@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import os
 import uuid
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 from nexus.config import settings
 
@@ -193,7 +193,14 @@ def resolve_note_path(company_id: uuid.UUID, relative_path: str) -> Path:
     root = company_vault_root(company_id)
 
     candidate = Path(relative_path)
-    if candidate.is_absolute() or candidate.drive or candidate.root:
+    # PureWindowsPath also catches C:\x and \\host\share on POSIX, where Path
+    # reads them as relative names.
+    if (
+        candidate.is_absolute()
+        or candidate.drive
+        or candidate.root
+        or PureWindowsPath(relative_path).anchor
+    ):
         # An absolute path ignores the root entirely, so refuse it outright
         # rather than trying to reinterpret it as relative.
         raise VaultBoundaryError(
