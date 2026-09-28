@@ -63,6 +63,7 @@ from nexus.api.routes.slack_events import router as slack_events_router
 from nexus.api.routes.sso import router as sso_router
 from nexus.api.routes.tasks import router as tasks_router
 from nexus.api.routes.task_attempts import router as task_attempts_router
+from nexus.api.routes.managers import router as managers_router
 from nexus.api.routes.telegram_bot import router as telegram_bot_router
 from nexus.api.routes.tools import router as tools_router
 from nexus.api.routes.portability import router as portability_router
@@ -495,6 +496,7 @@ app.include_router(control_router)
 app.include_router(agents_router)
 app.include_router(tasks_router)
 app.include_router(task_attempts_router)
+app.include_router(managers_router)
 app.include_router(goals_router)
 app.include_router(skills_router)
 app.include_router(tools_router)
