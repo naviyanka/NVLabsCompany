@@ -59,6 +59,9 @@ class Settings(BaseSettings):
     # The server runs in a container; the port mapping decides exposure.
     server_host: str = "0.0.0.0"  # nosec B104
     server_port: int = 8000
+    # Where a CLI manager's MCP client reaches this API's manager bridge.
+    # Empty: http://127.0.0.1:{server_port}/api/v1/mcp/manager.
+    manager_bridge_url: str = ""
 
     # Data directory for JSON-persisted runtime state (control registry, etc.)
     data_dir: str = "./data"

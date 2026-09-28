@@ -61,6 +61,12 @@ class CLIBackendInfo:
     # "read_only"), as ((mode, args), ...) so the dataclass stays hashable.
     # A backend without an entry cannot run that mode.
     work_args: tuple[tuple[str, tuple[str, ...]], ...] = ()
+    # Execution-scoped MCP: the flag that loads one run's MCP config file, and
+    # the cataloged args that confine the run to that server's tools. Empty:
+    # the CLI has no per-run MCP config, so a manager on it chats without its
+    # manager tools (see nexus.tools.manager_bridge).
+    mcp_config_flag: str = ""
+    mcp_bridge_args: tuple[str, ...] = ()
     version_args: tuple[str, ...] = ("--version",)
     # stdout | stderr | either
     version_stream: str = "either"
@@ -153,6 +159,11 @@ _DEFAULT_BACKENDS: list[CLIBackendInfo] = [
             ),
             ("read_only", ("--permission-mode", "plan")),
         ),
+        # --mcp-config is variadic, so a flag must follow its file. Verified on
+        # 2.1.283: without --allowedTools a -p run denies MCP tools; with
+        # "mcp__<server>__*" it may call that server's tools and nothing more.
+        mcp_config_flag="--mcp-config",
+        mcp_bridge_args=("--strict-mcp-config", "--allowedTools=mcp__nexus__*"),
         supports_model=True,
         model_flag="--model",
         supports_resume=True,
@@ -217,6 +228,8 @@ _DEFAULT_BACKENDS: list[CLIBackendInfo] = [
         model_flag="--model",
         supports_resume=True,
         resume_flag="--conversation",
+        # Agy 1.2.12 has only persistent, global `agy mcp add`; no per-run
+        # MCP config, so no manager bridge.
         notes="No instruction file is written; instructions are sent inline.",
     ),
     CLIBackendInfo(

@@ -155,6 +155,18 @@ _SENSITIVE_ENV_PATTERNS: list[str] = [
 _SECRET_NAME_MARKERS = ("KEY", "TOKEN", "SECRET", "PASSWORD", "PASSWD", "CREDENTIAL")
 
 
+def _redact_result(result: TaskResult, bridge: Any) -> None:
+    """Scrub a manager bridge's credential from everything a run returns."""
+    if isinstance(result.output, str):
+        result.output = bridge.redact(result.output)
+    result.error = bridge.redact(result.error)
+    result.logs = [bridge.redact(line) for line in result.logs]
+    for artifact in result.artifacts:
+        for key, value in artifact.items():
+            if isinstance(value, str):
+                artifact[key] = bridge.redact(value)
+
+
 def _filter_env(env: dict[str, str], allow: list[str] | None) -> dict[str, str]:
     """Drop secret-looking variables unless the backend allowlists them.
 
@@ -284,12 +296,19 @@ class CLIAdapter(BaseAdapter):
         timeout, an explicit cancel, a client disconnect and the cancellation
         of running work at shutdown. A worker killed outright never gets here;
         its file carries the dead pid and ``recover_instruction_files`` removes
-        it later.
+        it later. The same ``finally`` removes a manager bridge's MCP config,
+        and the bridge credential is scrubbed from everything returned.
         """
         written: list[tuple[str, str]] = []
+        bridges: list[Any] = []
         try:
-            return await self._run_cli(session, task_id, payload, written)
+            result = await self._run_cli(session, task_id, payload, written, bridges)
+            for bridge in bridges:
+                _redact_result(result, bridge)
+            return result
         finally:
+            for bridge in bridges:
+                bridge.close()
             for workspace, path in written:
                 self._cleanup_instruction_file(path, workspace)
 
@@ -299,6 +318,7 @@ class CLIAdapter(BaseAdapter):
         task_id: uuid.UUID,
         payload: dict[str, Any],
         written: list[tuple[str, str]],
+        bridges: list[Any],
     ) -> TaskResult:
         """Execute a task by spawning the configured CLI backend as a subprocess.
 
@@ -349,6 +369,34 @@ class CLIAdapter(BaseAdapter):
             )
         backend_id = backend.id
 
+        # A manager's chat turn gets its manager tools over an execution-scoped
+        # MCP server. Built only from the server-side context; setup failure
+        # refuses the turn rather than run it half-configured.
+        from nexus.tools import manager_bridge
+
+        try:
+            bridge = await manager_bridge.open_bridge(
+                getattr(session, "context", None), task_id, backend, float(timeout)
+            )
+        except manager_bridge.BridgeUnavailableError as exc:
+            return TaskResult(
+                task_id=task_id, agent_id=session.agent_id, success=False, error=str(exc)
+            )
+        except Exception as exc:
+            # The type only: the message could carry the credential.
+            return TaskResult(
+                task_id=task_id,
+                agent_id=session.agent_id,
+                success=False,
+                error=(
+                    "MANAGER_TOOLS_UNAVAILABLE: the manager tool bridge could not be set "
+                    f"up ({type(exc).__name__})."
+                ),
+            )
+        if bridge is not None:
+            bridges.append(bridge)
+        bridge_args = bridge.args if bridge is not None else []
+
         # The executable comes only from the catalog's command candidates on
         # PATH, never from config or the request. Unresolved falls back to the
         # bare command, which fails below as "not found".
@@ -378,8 +426,8 @@ class CLIAdapter(BaseAdapter):
         work_mode = getattr(getattr(session, "context", None), "work_mode", None)
         try:
             cmd = self._build_args(
-                backend, prompt, extra_args, model=model, executable=executable,
-                work_mode=work_mode,
+                backend, prompt, [*bridge_args, *extra_args], model=model,
+                executable=executable, work_mode=work_mode,
             )
         except ValueError as exc:
             return TaskResult(
@@ -405,7 +453,7 @@ class CLIAdapter(BaseAdapter):
         started = time.monotonic()
 
         def _meta(exit_code: int | None) -> dict[str, Any]:
-            return {
+            meta = {
                 "type": "cli_execution",
                 "adapter": "cli",
                 "backend": backend_id,
@@ -417,6 +465,9 @@ class CLIAdapter(BaseAdapter):
                 "session_id": session.session_id,
                 "task_id": str(task_id),
             }
+            if bridge is not None:
+                meta["manager_tools_available"] = bridge.available
+            return meta
 
         # Track files before execution for artifact detection
         pre_files = self._snapshot_workspace(workspace)
@@ -433,6 +484,8 @@ class CLIAdapter(BaseAdapter):
 
         operator_allow = [v.strip() for v in settings.cli_env_allowlist.split(",") if v.strip()]
         env = _filter_env(env, [*(backend.allow_env or []), *operator_allow])
+        if bridge is not None:
+            env.update(bridge.env)
 
         is_interactive = session.metadata.get("is_interactive", False)
         process: asyncio.subprocess.Process | None = None

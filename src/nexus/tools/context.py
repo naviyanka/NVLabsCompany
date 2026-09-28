@@ -39,6 +39,11 @@ class ExecutionContext:
     # Set for task-attempt turns: "write" or "read_only". The CLI adapter maps
     # it to the backend's own cataloged permission flags; never model-chosen.
     work_mode: str | None = None
+    # A chat turn whose caller requires the manager tool bridge: the CLI
+    # adapter refuses the turn rather than run it without the tools.
+    manager_tools_required: bool = False
+    # The chat turn a manager-bridge call belongs to (tool audit detail only).
+    turn_id: uuid.UUID | None = None
 
     @classmethod
     def for_principal(
@@ -142,5 +147,5 @@ class ExecutionContext:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> ExecutionContext:
         """Inverse of :meth:`to_dict`. Only for data the server itself produced."""
-        ids = ("company_id", "agent_id", "session_id")
+        ids = ("company_id", "agent_id", "session_id", "turn_id")
         return cls(**{k: uuid.UUID(v) if k in ids and v else v for k, v in data.items()})

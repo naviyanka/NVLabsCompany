@@ -48,6 +48,9 @@ class ChatRequest(BaseModel):
     # Idempotency key (the Idempotency-Key header wins). A retry with the same
     # key attaches to the turn it already created instead of starting another.
     request_id: str | None = Field(default=None, min_length=1, max_length=255)
+    # Fail the turn rather than run a manager without its manager tools (on a
+    # backend without per-run MCP config). Can only refuse, never grant.
+    require_manager_tools: bool = False
 
 
 class ChatMessage(BaseModel):
@@ -1665,6 +1668,7 @@ async def chat_with_agent(
     queued = await chat_turns.create_turn(
         db, session, agent, body.prompt, principal=principal,
         idempotency_key=idempotency_key or body.request_id,
+        require_manager_tools=body.require_manager_tools,
     )
     result = await run_turn(company_id, queued.turn)
     if isinstance(result, JSONResponse):
@@ -1717,6 +1721,7 @@ async def chat_with_agent_stream(
     queued = await chat_turns.create_turn(
         db, session, agent, body.prompt, principal=principal,
         idempotency_key=idempotency_key or body.request_id, stream=True,
+        require_manager_tools=body.require_manager_tools,
     )
     chat_turns.get_worker().wake(company_id)
     return _sse_response(turn_events(queued.turn.id, company_id, resume_offset(last_event_id)))
