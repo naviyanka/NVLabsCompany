@@ -48,7 +48,8 @@ from tests.test_manager_core import _payload, _staffed, team  # noqa: F401 -- fi
 pytestmark = pytest.mark.employee_work
 
 MANAGER_TOOLS = {"manager_list_reports", "manager_employee_status", "manager_delegate_task",
-                 "manager_task_evidence", "manager_rollup"}
+                 "manager_task_evidence", "manager_rollup", "manager_list_hiring_requests",
+                 "manager_get_hiring_request"}
 REGISTRY = CLIRegistry(auto_detect=False)
 CLAUDE, AGY = REGISTRY.get_backend("claude"), REGISTRY.get_backend("agy")
 _SEQ = itertools.count(1000)
@@ -124,12 +125,13 @@ async def _allow_delegation(db, company):  # noqa: F811
 
 
 class TestEndpoint:
-    async def test_manager_gets_the_five_manager_tools_and_nothing_else(self, db, team, rpc):  # noqa: F811
+    async def test_manager_gets_the_manager_tools_and_nothing_else(self, db, team, rpc):  # noqa: F811
         await _staffed(team)
         await _allow_delegation(db, team["acme"])
         token = await _token(await _turn(db, team["lead"]))
         assert (await rpc(token, "initialize")).json()["result"]["serverInfo"]["name"]
-        # Node tools are not served here, even under an allow-all read policy.
+        # Node tools are not served here, even under an allow-all read policy;
+        # hiring (write) is not served without its own explicit allow.
         assert await _tools(rpc, token) == MANAGER_TOOLS
         notified = await rpc(token, "notifications/initialized", content=json.dumps(
             {"jsonrpc": "2.0", "method": "notifications/initialized"}))

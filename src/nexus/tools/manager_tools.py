@@ -5,8 +5,10 @@ Served by the inbound MCP server (:mod:`nexus.tools.mcp_server`) through
 caller's identity is the server-built context's agent (from the run token),
 never an argument: each tool acts as that manager, inside its company, and
 only on agents whose ``manager_id`` is that manager. There is no org-wide or
-free-form query. ``manager_delegate_task`` is write-risk, so under the inbound
-default policy it stays denied until the company allows it.
+free-form query. ``manager_delegate_task`` and ``manager_request_hire`` are
+write-risk, so under the inbound default policy they stay denied until the
+company allows them. A manager cannot create an agent directly: it can only
+file a hiring request, which the hiring policy and a human decide.
 """
 
 from __future__ import annotations
@@ -17,7 +19,10 @@ from dataclasses import dataclass
 from types import SimpleNamespace
 from typing import Any
 
+from pydantic import BaseModel, ValidationError
+
 from nexus.runtime.task_attempts import attempt_view
+from nexus.services import hiring_service
 from nexus.services import manager_service as ms
 
 
@@ -26,7 +31,9 @@ class ManagerTool:
     description: str
     risk: str
     params: tuple[str, ...]
-    run: Callable[[Any, uuid.UUID, uuid.UUID, dict[str, uuid.UUID], str], Awaitable[Any]]
+    run: Callable[[Any, uuid.UUID, uuid.UUID, Any, str], Awaitable[Any]]
+    # Arguments other than UUIDs: validated by this model, which forbids extras.
+    model: type[BaseModel] | None = None
 
 
 async def _list_reports(db, company_id, manager_id, args, actor):
@@ -72,6 +79,21 @@ async def _rollup(db, company_id, manager_id, args, actor):
     return result
 
 
+async def _request_hire(db, company_id, manager_id, args, actor):
+    approval, created = await hiring_service.submit(db, company_id, manager_id, args, actor)
+    return {"created": created, **await hiring_service.view(db, approval)}
+
+
+async def _list_hires(db, company_id, manager_id, args, actor):
+    rows = await hiring_service.list_requests(db, company_id, manager_id)
+    return [await hiring_service.view(db, a) for a in rows]
+
+
+async def _get_hire(db, company_id, manager_id, args, actor):
+    approval = await hiring_service.get_request(db, company_id, args["request_id"], manager_id)
+    return await hiring_service.view(db, approval)
+
+
 MANAGER_TOOLS: dict[str, ManagerTool] = {
     "manager_list_reports": ManagerTool(
         "List your direct reports.", "read", (), _list_reports
@@ -101,11 +123,34 @@ MANAGER_TOOLS: dict[str, ManagerTool] = {
         (),
         _rollup,
     ),
+    "manager_request_hire": ManagerTool(
+        "Request a new direct report. The company's hiring policy decides: auto-approved "
+        "within explicit limits, otherwise a human approves or rejects it. Idempotent per "
+        "idempotency_key. Backends come from the server's CLI registry.",
+        "write",
+        (),
+        _request_hire,
+        hiring_service.HireRequest,
+    ),
+    "manager_list_hiring_requests": ManagerTool(
+        "Your hiring requests: status, policy decision, costs and the hired employee.",
+        "read",
+        (),
+        _list_hires,
+    ),
+    "manager_get_hiring_request": ManagerTool(
+        "One of your hiring requests.",
+        "read",
+        ("request_id",),
+        _get_hire,
+    ),
 }
 
 
 def input_schema(tool: ManagerTool) -> dict[str, Any]:
-    """MCP ``inputSchema`` for a manager tool: its UUID parameters, all required."""
+    """MCP ``inputSchema`` for a manager tool: its model's, or its UUID parameters."""
+    if tool.model is not None:
+        return tool.model.model_json_schema()
     return {
         "type": "object",
         "properties": {p: {"type": "string", "format": "uuid"} for p in tool.params},
@@ -126,13 +171,20 @@ async def call(ctx: Any, name: str, arguments: dict[str, Any]) -> Any:
     if ctx.agent_id is None:
         raise ValueError("manager tools need an agent identity")
     tool = MANAGER_TOOLS[name]
-    extra = set(arguments) - set(tool.params)
-    if extra:
-        raise ValueError(f"unexpected arguments: {sorted(extra)}")
-    try:
-        args = {p: uuid.UUID(str(arguments[p])) for p in tool.params}
-    except (KeyError, ValueError) as exc:
-        raise ValueError(f"expected UUID arguments {list(tool.params)}") from exc
+    args: Any
+    if tool.model is not None:
+        try:
+            args = tool.model.model_validate(arguments)
+        except ValidationError as exc:
+            raise ValueError(f"invalid arguments: {exc.errors(include_url=False)}") from exc
+    else:
+        extra = set(arguments) - set(tool.params)
+        if extra:
+            raise ValueError(f"unexpected arguments: {sorted(extra)}")
+        try:
+            args = {p: uuid.UUID(str(arguments[p])) for p in tool.params}
+        except (KeyError, ValueError) as exc:
+            raise ValueError(f"expected UUID arguments {list(tool.params)}") from exc
     async with tenant_session(ctx.company_id) as db:
         return await tool.run(db, ctx.company_id, ctx.agent_id, args, f"agent:{ctx.agent_id}")
 
