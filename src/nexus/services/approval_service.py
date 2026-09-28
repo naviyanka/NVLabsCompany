@@ -21,6 +21,11 @@ from nexus.models.governance import (
 )
 
 
+def _now() -> datetime:
+    # The columns are naive UTC (see the model defaults); asyncpg refuses an aware value.
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
 class ApprovalService:
     """Service layer for approval workflow operations.
 
@@ -123,8 +128,8 @@ class ApprovalService:
                 status="approved",
                 decided_by=decided_by,
                 decision_note=decision_note,
-                decided_at=datetime.now(timezone.utc),
-                updated_at=datetime.now(timezone.utc),
+                decided_at=_now(),
+                updated_at=_now(),
             )
         )
         await self._db.execute(stmt)
@@ -244,8 +249,8 @@ class ApprovalService:
                 status="rejected",
                 decided_by=decided_by,
                 decision_note=decision_note,
-                decided_at=datetime.now(timezone.utc),
-                updated_at=datetime.now(timezone.utc),
+                decided_at=_now(),
+                updated_at=_now(),
             )
         )
         await self._db.execute(stmt)
