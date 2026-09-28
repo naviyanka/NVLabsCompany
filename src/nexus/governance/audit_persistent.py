@@ -2,8 +2,9 @@
 
 Entries are written to the `audit_log` table (append-only, guarded by a DB
 trigger). Tamper detection uses SHA-256 hash chaining ordered by
-`sequence_number`; retention copies rows to `audit_log_archive` and marks the
-source row archived rather than deleting from the verified chain.
+`sequence_number`, one chain per company plus one for events without a
+company; retention copies rows to `audit_log_archive` and marks the source row
+archived rather than deleting from the verified chain.
 """
 
 import hashlib
@@ -118,6 +119,59 @@ def compute_entry_hash(entry: PersistentAuditEntry, previous_hash: str) -> str:
     return hashlib.sha256(hash_input.encode("utf-8")).hexdigest()
 
 
+# Action of the row that migration e7a1c2d3f404 appended to each company's
+# chain when chains became per company. It seals the company's rows from the
+# former global chain, whose links point at other companies' rows. Its
+# resource_id, which is hashed, records whether the migration found every
+# legacy row intact and linked to an earlier row.
+CHAIN_SEALED_ACTION = "audit.chain_sealed"
+LEGACY_INTACT = "legacy_intact"
+
+
+def legacy_digest(entries: list[PersistentAuditEntry]) -> str:
+    """Digest of a company's rows from the former global chain, in sequence order.
+
+    Must stay identical to the copy in migration e7a1c2d3f404.
+    """
+    joined = "|".join(f"{e.sequence_number}:{e.entry_hash}" for e in entries)
+    return hashlib.sha256(f"legacy-global-chain|{joined}".encode()).hexdigest()
+
+
+def chain_is_intact(entries: list[PersistentAuditEntry]) -> bool:
+    """Verify one chain: one company's chained rows in sequence order.
+
+    Every entry's hash is recomputed and must link to the entry before it,
+    starting from "genesis". A company that already had rows when chains
+    became per company starts at its seal row instead: the seal's previous
+    hash is the digest of the rows before it, and each of those rows must
+    still match its own hash. Changing, removing or inserting any of them
+    changes the digest.
+    """
+    previous = "genesis"
+    seal = next((i for i, e in enumerate(entries) if e.action == CHAIN_SEALED_ACTION), None)
+    if seal is not None:
+        legacy, entries = entries[:seal], entries[seal:]
+        if entries[0].resource_id != LEGACY_INTACT:
+            return False  # the migration found the former chain already broken
+        if any(compute_entry_hash(e, e.previous_hash) != e.entry_hash for e in legacy):
+            return False
+        previous = legacy_digest(legacy)
+    for entry in entries:
+        if entry.previous_hash != previous:
+            return False
+        if compute_entry_hash(entry, previous) != entry.entry_hash:
+            return False
+        previous = entry.entry_hash
+    return True
+
+
+def _in_chain(company_id: uuid.UUID | None) -> Any:
+    """WHERE clause for the chained rows of one company (or of no company)."""
+    column = AuditLog.company_id
+    scope = column.is_(None) if company_id is None else column == company_id
+    return scope & AuditLog.sequence_number.is_not(None)
+
+
 @dataclass
 class RetentionPolicy:
     """Policy for audit log retention.
@@ -138,8 +192,14 @@ class PersistentAuditLogger:
 
     Buffers entries in memory and batch-inserts them into `audit_log`. Each
     entry is linked to the previous via SHA-256 hash chain for tamper
-    detection. Call `resume()` once after construction to continue the chain
-    from whatever is already in the database.
+    detection. A logger writes and verifies one chain: that of ``company_id``
+    (None: events without a company). Call `resume()` once after construction
+    to continue the chain from whatever is already in the database.
+
+    The buffered links are computed without the chain lock `record_audit`
+    takes. If another writer extends the same chain in between, the flush
+    fails on the unique ``(company_id, sequence_number)`` and nothing is
+    written; rows are never inserted without their links.
     """
 
     def __init__(
@@ -147,6 +207,7 @@ class PersistentAuditLogger:
         buffer_size: int = 100,
         last_hash: str | None = None,
         session_factory: Any | None = None,
+        company_id: uuid.UUID | None = None,
     ) -> None:
         """Initialize the persistent audit logger.
 
@@ -156,6 +217,7 @@ class PersistentAuditLogger:
                 new entries will chain from this hash instead of "genesis".
             session_factory: Async session factory to use. Defaults to the
                 application factory from `nexus.database`.
+            company_id: The company whose chain this logger writes and verifies.
         """
         self._buffer: list[PersistentAuditEntry] = []
         self._buffer_size = buffer_size
@@ -163,6 +225,7 @@ class PersistentAuditLogger:
         self._sequence: int = 0
         self._retention_policies: dict[uuid.UUID | None, RetentionPolicy] = {}
         self._session_factory = session_factory
+        self._company_id = company_id
 
     def _sessions(self) -> Any:
         """Return the async session factory, resolved lazily."""
@@ -181,7 +244,7 @@ class PersistentAuditLogger:
         async with self._sessions()() as session:
             result = await session.execute(
                 select(AuditLog)
-                .where(AuditLog.sequence_number.is_not(None))
+                .where(_in_chain(self._company_id))
                 .order_by(AuditLog.sequence_number.desc())
                 .limit(1)
             )
@@ -233,11 +296,13 @@ class PersistentAuditLogger:
             resource_type: Type of resource affected.
             resource_id: Identifier of the affected resource.
             details: Additional context about the action.
-            company_id: Company scope.
+            company_id: Company scope; must be this logger's company if given.
 
         Returns:
             The created PersistentAuditEntry with hash chain.
         """
+        if company_id is not None and company_id != self._company_id:
+            raise ValueError("entry belongs to another company's audit chain")
         self._sequence += 1
         entry = PersistentAuditEntry(
             actor_type=actor_type,
@@ -246,7 +311,7 @@ class PersistentAuditLogger:
             resource_type=resource_type,
             resource_id=resource_id,
             details=details or {},
-            company_id=company_id,
+            company_id=self._company_id,
             previous_hash=self._last_hash,
             sequence_number=self._sequence,
         )
@@ -279,38 +344,28 @@ class PersistentAuditLogger:
         return len(pending)
 
     async def verify_chain_integrity(self) -> bool:
-        """Verify the integrity of the persisted hash chain.
+        """Verify the integrity of this logger's company chain.
 
-        Reads `audit_log` ordered by `sequence_number`, recomputes each hash,
-        and checks it matches. Detects any tampering with the audit log.
-        Unflushed buffer entries are verified after the persisted tail.
+        Reads the company's chained `audit_log` rows ordered by
+        `sequence_number` and checks them with `chain_is_intact`. Other
+        companies' chains are not read. Unflushed buffer entries are verified
+        after the persisted tail.
 
         Returns:
             True if the chain is valid, False if tampered.
         """
+        stored = await self.chain_entries()
+        return chain_is_intact(stored + self._buffer)
+
+    async def chain_entries(self) -> list[PersistentAuditEntry]:
+        """The persisted rows of this logger's company chain, in sequence order."""
         async with self._sessions()() as session:
             result = await session.execute(
                 select(AuditLog)
-                .where(AuditLog.sequence_number.is_not(None))
+                .where(_in_chain(self._company_id))
                 .order_by(AuditLog.sequence_number)
             )
-            rows = result.scalars().all()
-
-        stored = [PersistentAuditEntry.from_row(row) for row in rows]
-        all_entries = stored + self._buffer
-        if not all_entries:
-            return True
-
-        previous_hash = "genesis"
-        for entry in all_entries:
-            expected_hash = self.compute_entry_hash(entry, previous_hash)
-            if entry.entry_hash != expected_hash:
-                return False
-            if entry.previous_hash != previous_hash:
-                return False
-            previous_hash = entry.entry_hash
-
-        return True
+            return [PersistentAuditEntry.from_row(row) for row in result.scalars().all()]
 
     async def _fetch_all(self) -> list[PersistentAuditEntry]:
         """Read every persisted entry in chain order, then buffered entries."""

@@ -149,9 +149,11 @@ async def rows(factory) -> list[ToolInvocation]:
         return list((await db.execute(select(ToolInvocation))).scalars())
 
 
-async def audits(factory) -> list[AuditLog]:
+async def audits(factory, prefix: str = "tool.") -> list[AuditLog]:
+    """Audit entries whose action starts with ``prefix``: tool access by default."""
     async with factory() as db:
-        return list((await db.execute(select(AuditLog))).scalars())
+        stmt = select(AuditLog).where(AuditLog.action.startswith(prefix))
+        return list((await db.execute(stmt)).scalars())
 
 
 def expected(kind: str, mode: str) -> tuple[str, bool]:
@@ -522,3 +524,10 @@ async def test_path_matrix(factory, t, monkeypatch, path, kind, mode) -> None:
     assert bool(executed) is runs, executed
     await assert_recorded(factory, t, authorization,
                           agentless=soft_is_agentless and kind == "soft")
+    if path == "node_rest":
+        # The REST endpoint audits each node execution it performs, in its own chain.
+        node_entries = await audits(factory, "node_execute:")
+        assert [(e.action, e.company_id) for e in node_entries] == (
+            [(f"node_execute:{NODE}", t["acme"])] if runs else []
+        )
+        assert all(e.sequence_number is not None and e.entry_hash for e in node_entries)

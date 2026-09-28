@@ -1,0 +1,189 @@
+{
+ "7141d465-d37c-4bf4-b667-054b3fb23d39": {
+  "attempts": [
+   {
+    "id": "778703ae-ba9a-45e6-b1e0-736c26f0cc90",
+    "attempt_number": "1",
+    "status": "completed",
+    "completion_reason": "goal",
+    "error_code": null,
+    "recoveries": "0",
+    "session_id": "004a73b6-82f5-459e-bafa-fd3c1d422e2e",
+    "worktree_id": "2ffe801e-b95c-410e-89d9-e3a4b7c7982e",
+    "chat_turn_id": "845539ab-51af-42e4-91fe-c1ef21bdf923"
+   }
+  ],
+  "work_effects": [
+   {
+    "kind": "file_write_batch",
+    "effect_key": "evidence:778703ae-ba9a-45e6-b1e0-736c26f0cc90",
+    "status": "done"
+   },
+   {
+    "kind": "git_commit",
+    "effect_key": "commit:778703ae-ba9a-45e6-b1e0-736c26f0cc90",
+    "status": "done"
+   }
+  ],
+  "duplicate_effect_keys": [],
+  "chat_turns": [
+   {
+    "id": "845539ab-51af-42e4-91fe-c1ef21bdf923",
+    "status": "completed",
+    "execution_id": "844143ce-e242-4aa1-ae44-73e8fa3a5e30"
+   }
+  ],
+  "audit_actions": {
+   "task.attempt_claimed": 1,
+   "task.attempt_completed": 1,
+   "task.attempt_queued": 1,
+   "task.created": 1
+  }
+ },
+ "8fc0e17b-69fd-4a25-b232-4e58f638a690": {
+  "attempts": [
+   {
+    "id": "a9c28b79-0d58-4b83-a096-717ca45c5b48",
+    "attempt_number": "1",
+    "status": "completed",
+    "completion_reason": "goal",
+    "error_code": null,
+    "recoveries": "0",
+    "session_id": "4c1083d3-2fc3-44dc-a085-847f03f5f487",
+    "worktree_id": "4054b7c8-bb65-4a76-a2ec-3fd3ace038e7",
+    "chat_turn_id": "c79b92cd-d496-4fb5-817a-f8a2de86d369"
+   }
+  ],
+  "work_effects": [
+   {
+    "kind": "file_write_batch",
+    "effect_key": "evidence:a9c28b79-0d58-4b83-a096-717ca45c5b48",
+    "status": "done"
+   }
+  ],
+  "duplicate_effect_keys": [],
+  "chat_turns": [
+   {
+    "id": "c79b92cd-d496-4fb5-817a-f8a2de86d369",
+    "status": "completed",
+    "execution_id": "976397e1-1e3e-4799-927f-8756bc59afe7"
+   }
+  ],
+  "audit_actions": {
+   "task.attempt_claimed": 1,
+   "task.attempt_completed": 1,
+   "task.attempt_queued": 1,
+   "task.created": 1
+  }
+ },
+ "6ac0dcac-811c-4bf6-a146-31672afb591b": {
+  "attempts": [
+   {
+    "id": "bd675134-e71e-4347-ac8f-9026533c2baf",
+    "attempt_number": "1",
+    "status": "failed",
+    "completion_reason": "verification_failed",
+    "error_code": "VERIFICATION_FAILED",
+    "recoveries": "0",
+    "session_id": "e230e773-88b8-4cb6-9f1f-7dc9ceffa84f",
+    "worktree_id": "61b00580-228f-4fdc-8fb7-9f6f0fea211f",
+    "chat_turn_id": "d4986b4d-5eed-4c3b-8d71-bda0143b1f52"
+   },
+   {
+    "id": "54eb4ba8-4373-44c2-ac80-ffac3a6b1953",
+    "attempt_number": "2",
+    "status": "completed",
+    "completion_reason": "goal",
+    "error_code": null,
+    "recoveries": "0",
+    "session_id": "e230e773-88b8-4cb6-9f1f-7dc9ceffa84f",
+    "worktree_id": "61b00580-228f-4fdc-8fb7-9f6f0fea211f",
+    "chat_turn_id": "25647195-2631-4e51-8d7b-d9832c350e7e"
+   }
+  ],
+  "work_effects": [
+   {
+    "kind": "file_write_batch",
+    "effect_key": "evidence:bd675134-e71e-4347-ac8f-9026533c2baf",
+    "status": "done"
+   },
+   {
+    "kind": "notification",
+    "effect_key": "notify:bd675134-e71e-4347-ac8f-9026533c2baf",
+    "status": "done"
+   },
+   {
+    "kind": "file_write_batch",
+    "effect_key": "evidence:54eb4ba8-4373-44c2-ac80-ffac3a6b1953",
+    "status": "done"
+   },
+   {
+    "kind": "git_commit",
+    "effect_key": "commit:54eb4ba8-4373-44c2-ac80-ffac3a6b1953",
+    "status": "done"
+   }
+  ],
+  "duplicate_effect_keys": [],
+  "chat_turns": [
+   {
+    "id": "d4986b4d-5eed-4c3b-8d71-bda0143b1f52",
+    "status": "completed",
+    "execution_id": "b23957df-f77f-43d0-8c36-1fb76b14b59c"
+   },
+   {
+    "id": "25647195-2631-4e51-8d7b-d9832c350e7e",
+    "status": "completed",
+    "execution_id": "41e7e5b6-8fc3-4891-9079-52c95d70ed59"
+   }
+  ],
+  "audit_actions": {
+   "task.attempt_claimed": 2,
+   "task.attempt_completed": 1,
+   "task.attempt_failed": 1,
+   "task.attempt_queued": 2,
+   "task.created": 1
+  }
+ },
+ "8b0c7576-5410-4d16-b7de-b5cb5e6d7de2": {
+  "attempts": [
+   {
+    "id": "f3a47561-f517-4d4c-b10c-20576b38792a",
+    "attempt_number": "1",
+    "status": "completed",
+    "completion_reason": "goal",
+    "error_code": null,
+    "recoveries": "1",
+    "session_id": "a6aedbcd-8ad2-4f55-b261-65a9f7c201ab",
+    "worktree_id": "0968179b-ec2d-4370-a9b7-923adc550335",
+    "chat_turn_id": "e7cd0502-012a-4b86-a52f-23d50a594030"
+   }
+  ],
+  "work_effects": [
+   {
+    "kind": "file_write_batch",
+    "effect_key": "evidence:f3a47561-f517-4d4c-b10c-20576b38792a",
+    "status": "done"
+   },
+   {
+    "kind": "git_commit",
+    "effect_key": "commit:f3a47561-f517-4d4c-b10c-20576b38792a",
+    "status": "done"
+   }
+  ],
+  "duplicate_effect_keys": [],
+  "chat_turns": [
+   {
+    "id": "e7cd0502-012a-4b86-a52f-23d50a594030",
+    "status": "completed",
+    "execution_id": "9d06fdc1-b970-4adf-862c-cbd47071641b"
+   }
+  ],
+  "audit_actions": {
+   "task.attempt_claimed": 2,
+   "task.attempt_completed": 1,
+   "task.attempt_queued": 1,
+   "task.attempt_recovered": 1,
+   "task.created": 1
+  }
+ }
+}

@@ -1,0 +1,3 @@
+?? .claude/CLAUDE.md
+?? .nexus/report.json
+?? src/stats.py

@@ -1,0 +1,5 @@
+ddec51c Work left in worktree d5cc5cfc-7ae6-4c93-8a7c-4299cbe7454a when its session ended
+ecadba9 Task attempt 1 for task 0642756a-9b82-4d71-9475-d83813e5ce17
+77a6799 init
+ .claude/CLAUDE.md | 23 +++++++++++++++++++++++
+ 1 file changed, 23 insertions(+)

@@ -1,0 +1,5 @@
+c42922d Task attempt 2 for task 6ac0dcac-811c-4bf6-a146-31672afb591b
+77a6799 init
+ src/calculator.py        | 19 +++++++++++++++++++
+ tests/test_calculator.py | 28 ++++++++++++++++++++++++++++
+ 2 files changed, 47 insertions(+)

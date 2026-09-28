@@ -3,8 +3,9 @@
 import uuid
 from datetime import timezone, datetime
 from enum import Enum
-from typing import Optional
+from typing import Any, Optional
 
+from sqlalchemy import JSON, Column
 from sqlmodel import Field, SQLModel
 
 
@@ -23,6 +24,8 @@ class RunCompletionReason(str, Enum):
     doom_loop = "doom_loop"  # repeated re-decomposition without progress
     needs_help = "needs_help"  # agent explicitly escalated to a human
     error = "error"  # unhandled failure
+    verification_failed = "verification_failed"  # deterministic verifier rejected the work
+    cancelled = "cancelled"  # an operator cancelled the attempt
 
 
 class Goal(SQLModel, table=True):
@@ -92,6 +95,9 @@ class Task(SQLModel, table=True):
     result: Optional[str] = Field(default=None)
     error: Optional[str] = Field(default=None)
     completion_reason: Optional[str] = Field(default=None, max_length=32, index=True)
+    # Work tasks carry a validated WorkSpec (nexus.runtime.task_attempts).
+    # They complete only through a verified TaskAttempt, never on LLM prose.
+    work_spec: Optional[dict[str, Any]] = Field(default=None, sa_column=Column(JSON))
     started_at: Optional[datetime] = Field(default=None)
     completed_at: Optional[datetime] = Field(default=None)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None))

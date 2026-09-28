@@ -366,7 +366,9 @@ export function Tasks() {
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
-                        handleUpdateStatus(task.id, 'in_progress');
+                        // Work tasks start through the attempt panel in the drawer.
+                        if (task.work_spec) setSelectedTask(task);
+                        else handleUpdateStatus(task.id, 'in_progress');
                       }}
                       className="text-[#FFB020] hover:underline flex items-center gap-1 cursor-pointer font-bold"
                     >
@@ -418,15 +420,17 @@ export function Tasks() {
 
                   <div className="flex items-center justify-between pt-2 border-t border-white/[0.04] text-[10px] font-mono text-[#6B6B6E]">
                     <span>Agent: {getAgentName(task.assigned_agent_id)}</span>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleUpdateStatus(task.id, 'completed');
-                      }}
-                      className="text-[#22C55E] hover:underline flex items-center gap-1 cursor-pointer font-bold"
-                    >
-                      <Check size={11} /> Complete
-                    </button>
+                    {!task.work_spec && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleUpdateStatus(task.id, 'completed');
+                        }}
+                        className="text-[#22C55E] hover:underline flex items-center gap-1 cursor-pointer font-bold"
+                      >
+                        <Check size={11} /> Complete
+                      </button>
+                    )}
                   </div>
                 </div>
               ))}

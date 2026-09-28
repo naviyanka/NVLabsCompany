@@ -74,7 +74,12 @@ def _hardening() -> tuple[str, ...]:
         # An empty directory works the same on every platform. If it is ever
         # deleted, git finds no hooks at the missing path either.
         _hooks_dir = tempfile.mkdtemp(prefix="nexus-git-no-hooks-")
-    return ("-c", f"core.hooksPath={_hooks_dir}", "-c", "core.fsmonitor=false")
+    # core.longPaths: on Windows, files deeper than MAX_PATH (a pytest cache
+    # name under a long worktree root) otherwise fail ``add`` and ``clean``.
+    return (
+        "-c", f"core.hooksPath={_hooks_dir}", "-c", "core.fsmonitor=false",
+        "-c", "core.longPaths=true",
+    )
 
 
 def _env(extra: dict[str, str] | None = None) -> dict[str, str]:
@@ -448,6 +453,56 @@ class GitRunner:
 
     async def stage_all(self) -> None:
         await self._ok("add", "--all")
+
+    async def changed_paths(self) -> list[str]:
+        """Worktree-relative paths that differ from HEAD, untracked files included.
+
+        ``-z`` keeps names verbatim: no quoting, no escaping of odd characters.
+        A rename entry is followed by its source path, which is skipped.
+        """
+        out = await self._ok("status", "--porcelain", "-z", "--untracked-files=all")
+        fields = out.split("\0")
+        paths: list[str] = []
+        i = 0
+        while i < len(fields):
+            entry = fields[i]
+            i += 1
+            if len(entry) < 4:
+                continue
+            paths.append(entry[3:])
+            if entry[0] in "RC":
+                i += 1
+        return paths
+
+    async def stage_all_except(
+        self, excluded: tuple[str, ...], anywhere: tuple[str, ...] = ()
+    ) -> None:
+        """``add --all`` minus the given top-level directories (pathspec excludes)
+        and the ``anywhere`` directories at any depth."""
+        specs = [f":(exclude){check_ref_text(name)}" for name in excluded]
+        specs += [f":(exclude,glob)**/{check_ref_text(name)}/**" for name in anywhere]
+        await self._ok("add", "--all", "--", ".", *specs)
+
+    async def remove_untracked(
+        self, anywhere: tuple[str, ...], top: tuple[str, ...] = ()
+    ) -> None:
+        """Delete untracked files under the ``anywhere`` directories at any depth
+        and under the ``top`` directories at the root.
+
+        ``clean`` never touches tracked or ignored files and removes a link
+        itself, never what it points to.
+        """
+        specs = [f":(glob)**/{check_ref_text(name)}/**" for name in anywhere]
+        specs += [f":(glob){check_ref_text(name)}/**" for name in top]
+        await self._ok("clean", "--force", "-d", "--", *specs)
+
+    async def find_commit_with(self, text: str) -> str | None:
+        """SHA of the newest commit on HEAD whose message contains ``text`` literally."""
+        result = await self._run(
+            "log", "--max-count=1", "--fixed-strings", f"--grep={text}", "--pretty=format:%H"
+        )
+        sha = result.stdout.strip()
+        return sha if result.returncode == 0 and sha else None
 
     async def commit(self, message: str, *, author: tuple[str, str] | None = None) -> str:
         """Commit the index. Signing is off, so no configured signing program runs."""

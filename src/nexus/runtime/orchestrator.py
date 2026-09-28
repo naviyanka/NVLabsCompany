@@ -108,7 +108,8 @@ async def _reap_stale_subtasks(db: AsyncSession) -> int:
         Task.started_at.is_not(None),
         Task.started_at < cutoff,
     )
-    stale = list((await db.execute(stmt)).scalars().all())
+    # A work task's attempt holds its own lease; task_attempts recovers it.
+    stale = [t for t in (await db.execute(stmt)).scalars().all() if not t.work_spec]
 
     handled = 0
     for task in stale:
@@ -484,7 +485,12 @@ async def _drive_goal(db: AsyncSession, goal: Any) -> None:
             return
 
         # Execute assigned pending subtasks
-        pending_assigned = [t for t in subtasks if t.status == "pending" and t.assigned_agent_id]
+        # Work tasks run only as verified attempts (task_attempts), never as a plain LLM call.
+        pending_assigned = [
+            t
+            for t in subtasks
+            if t.status == "pending" and t.assigned_agent_id and not t.work_spec
+        ]
         if pending_assigned:
             await _execute_subtasks(pending_assigned, company_id)
     finally:

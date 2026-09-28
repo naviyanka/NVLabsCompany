@@ -2,10 +2,11 @@
 
 import logging
 import uuid
-from collections.abc import AsyncGenerator, AsyncIterator
-from contextlib import asynccontextmanager
+from collections.abc import AsyncGenerator, AsyncIterator, Callable
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
+from functools import partial
 
-from sqlalchemy import text
+from sqlalchemy import event, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.sql import Select
 from sqlmodel import select
@@ -64,27 +65,45 @@ def get_system_session_factory() -> async_sessionmaker[AsyncSession]:
 system_session_factory = _system_session_factory or async_session_factory
 
 
+def _bind_tenant(session: AsyncSession, company_id: uuid.UUID) -> None:
+    """Set the RLS tenant (WP-7, WP-9) at the start of every transaction.
+
+    A commit hands the session's connection back to the pool and the next
+    transaction may get another one, so the tenant is set per transaction,
+    not once per session. ``is_local`` scopes it to that transaction: it
+    never goes back to the pool on the connection for the next borrower.
+    """
+    if settings.database_url.startswith("sqlite"):
+        return
+
+    @event.listens_for(session.sync_session, "after_begin")
+    def _set_tenant(_session: object, _transaction: object, connection: object) -> None:
+        connection.execute(  # type: ignore[attr-defined]
+            text("SELECT set_config('nexus.company_id', :cid, true)"), {"cid": str(company_id)}
+        )
+
+
 @asynccontextmanager
 async def tenant_session(company_id: uuid.UUID) -> AsyncIterator[AsyncSession]:
-    """Session with session-level RLS tenant context (WP-7, WP-9) and safe pool reset."""
+    """Session whose every transaction carries the RLS tenant context."""
     async with async_session_factory() as session:
-        is_postgres = not settings.database_url.startswith("sqlite")
-        if is_postgres:
-            await session.execute(
-                text("SELECT set_config('nexus.company_id', :cid, false)"),
-                {"cid": str(company_id)},
-            )
+        _bind_tenant(session, company_id)
         try:
             yield session
         except Exception:
             await session.rollback()
             raise
-        finally:
-            if is_postgres:
-                try:
-                    await session.execute(text("RESET nexus.company_id;"))
-                except Exception as exc:
-                    logger.debug("tenant_session reset failed: %s", exc)
+
+
+def tenant_session_factory(
+    company_id: uuid.UUID,
+) -> Callable[[], AbstractAsyncContextManager[AsyncSession]]:
+    """A ``session_factory`` for services that open ``async with factory() as s``.
+
+    Every session it opens is a :func:`tenant_session` for ``company_id``, so a
+    service built for one tenant's work cannot write without the RLS tenant.
+    """
+    return partial(tenant_session, company_id)
 
 
 @asynccontextmanager
@@ -164,12 +183,8 @@ async def get_session(company_id: uuid.UUID | None = None) -> AsyncGenerator[Asy
     Yields an AsyncSession and ensures it is closed and reset after use.
     """
     async with async_session_factory() as session:
-        is_postgres = not settings.database_url.startswith("sqlite")
-        if is_postgres and company_id:
-            await session.execute(
-                text("SELECT set_config('nexus.company_id', :cid, false)"),
-                {"cid": str(company_id)},
-            )
+        if company_id:
+            _bind_tenant(session, company_id)
         try:
             yield session
             await session.commit()
@@ -177,9 +192,4 @@ async def get_session(company_id: uuid.UUID | None = None) -> AsyncGenerator[Asy
             await session.rollback()
             raise
         finally:
-            if is_postgres and company_id:
-                try:
-                    await session.execute(text("RESET nexus.company_id;"))
-                except Exception as exc:
-                    logger.debug("get_session reset failed: %s", exc)
             await session.close()

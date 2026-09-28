@@ -131,22 +131,16 @@ async def execute_node_endpoint(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=outcome["error"])
     result = outcome["result"]
 
-    try:
-        from nexus.database import async_session_factory
-        from nexus.models.governance import AuditLog
+    from nexus.governance.audit_service import record_audit
 
-        async with async_session_factory() as audit_db:
-            audit_db.add(AuditLog(
-                company_id=company_id,
-                action=f"node_execute:{node_id}",
-                resource_type="node",
-                resource_id=node_id,
-                actor=str(company_id),
-                details=f"success={result.success}" + (f" error={result.error}" if result.error else ""),
-            ))
-            await audit_db.commit()
-    except Exception:
-        pass
+    await record_audit(
+        company_id,
+        f"node_execute:{node_id}",
+        actor_id=str(company_id),
+        resource_type="node",
+        resource_id=node_id,
+        details={"success": result.success, "error": result.error},
+    )
 
     return NodeExecuteResponse(
         node_id=node_id,

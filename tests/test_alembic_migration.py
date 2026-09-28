@@ -94,6 +94,7 @@ EXPECTED_TABLES = {
     "secrets",
     "skill_versions",
     "skills",
+    "task_attempts",
     "tasks",
     "teams",
     "tool_access",
@@ -109,6 +110,7 @@ EXPECTED_TABLES = {
     "user_profiles",
     "user_sessions",
     "vault_write_grants",
+    "work_effects",
     "workflow_runs",
     "workspaces",
 }

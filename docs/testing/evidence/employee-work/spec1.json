@@ -1,0 +1,9 @@
+{"mode": "write", "repository_id": "d40bb825-419e-4efe-9206-c5b3fa43bef9",
+ "objective": "Create src/calculator.py with add, subtract, multiply and divide(a, b) functions (divide raises ZeroDivisionError on b == 0), and tests/test_calculator.py with pytest tests for each function including the divide-by-zero case. Run the tests.",
+ "deliverables": ["src/calculator.py", "tests/test_calculator.py"],
+ "verification": [{"command": "pytest", "paths": ["tests/test_calculator.py"]}],
+ "acceptance_criteria": [
+   {"kind": "file_exists", "path": "src/calculator.py"},
+   {"kind": "pattern_count", "path": "tests/test_calculator.py", "pattern": "def test_", "min_count": 4},
+   {"kind": "command_passes", "command": "pytest"}],
+ "timeout_seconds": 600}

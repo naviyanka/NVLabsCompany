@@ -5,11 +5,12 @@ W-04 inbound: handles Slack's URL verification challenge and app_mention events
 """
 
 import logging
-import uuid
 from typing import Any
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
+
+from nexus.api.deps import CurrentCompanyId
 
 router = APIRouter(tags=["channels"])
 
@@ -17,12 +18,17 @@ logger = logging.getLogger(__name__)
 
 
 @router.post("/api/v1/channels/slack/events")
-async def slack_events(request: Request) -> Any:
+async def slack_events(request: Request, company_id: CurrentCompanyId) -> Any:
     """Handle Slack Events API callbacks.
 
     Supports:
     - url_verification challenge (required by Slack on endpoint registration)
     - event_callback with app_mention type → creates a Task for the company
+
+    The company is the one the caller's credential is bound to: there is no
+    Slack installation table mapping a workspace to a tenant, and an API key is
+    issued for exactly one company. A request without a credential is refused
+    with 401 before this runs. It is never written into a default company.
     """
     body = await request.json()
     event_type = body.get("type")
@@ -37,12 +43,12 @@ async def slack_events(request: Request) -> Any:
             user = event.get("user", "unknown")
             channel = event.get("channel", "")
             try:
-                from nexus.database import async_session_factory
+                from nexus.database import tenant_session
                 from nexus.models.task import Task
 
-                async with async_session_factory() as db:
+                async with tenant_session(company_id) as db:
                     task = Task(
-                        company_id=uuid.UUID("00000000-0000-4000-8000-000000000001"),
+                        company_id=company_id,
                         title=f"Slack mention from {user}",
                         description=f"Channel: {channel}\n\n{text}",
                         status="pending",

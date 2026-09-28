@@ -2,7 +2,9 @@
 
 This service is the single entry point for audit logging. Every subsystem
 calls `record_audit()` to write an immutable record. The function is async
-and fire-and-forget (errors are swallowed so audit never blocks operations).
+and fire-and-forget (errors are logged, not raised, so audit never blocks
+operations) unless the caller passes ``raise_on_error``. A row is written with
+its chain links or not at all.
 
 Events captured:
 - Chat messages sent/received
@@ -17,6 +19,7 @@ Events captured:
 """
 
 import asyncio
+import contextlib
 import logging
 import uuid
 import weakref
@@ -76,25 +79,36 @@ async def record_audit(
             # cannot poison the transaction of the request being audited.
             await _chain_in_savepoint(db, entry)
         else:
-            # Create a new session (for background tasks / orchestrator)
-            from nexus.database import async_session_factory
-            async with async_session_factory() as new_db:
+            # Create a new session (for background tasks / orchestrator), in
+            # the event's tenant: audit_log is under row-level security.
+            from nexus.database import tenant_session
+            async with tenant_session(company_id) as new_db:
                 await _write_with_chain_retry(new_db, entry)
 
         logger.info("Audit: %s [%s] %s", action, actor_type, resource_type or "")
     except Exception as exc:
-        logger.warning("Audit log write failed: %s", exc)
+        # The row was not written. It is never written without chain links.
+        logger.error("Audit log write failed for %s: %s", action, exc)
         if raise_on_error:
             raise RuntimeError("audit log write failed") from exc
 
 
 async def _chain(session: Any, entry: Any) -> None:
-    """Stamp `entry` with the next sequence number and hash-chain links.
+    """Stamp `entry` with the next link of its company's chain.
 
-    Without this the row lands in `audit_log` with NULL chain columns, where
-    `PersistentAuditLogger.verify_chain_integrity` skips it — the event would
-    be recorded but not tamper-evident.
+    Each company has its own chain: the sequence number and the previous hash
+    come from that company's tail only, and ``(company_id, sequence_number)``
+    is unique. Events without a company (system events) form one more chain.
+    A tenant cannot see another tenant's rows under RLS, so a single global
+    chain could neither be allocated nor verified by the application role.
+
+    On PostgreSQL a transaction-scoped advisory lock on the company's chain is
+    taken first. It is held until the transaction that inserts the row ends, so
+    writers of one company serialise across processes, and the tail read after
+    it sees every committed link. Writers of different companies do not wait
+    on each other.
     """
+    from sqlalchemy import text
     from sqlmodel import select
 
     from nexus.governance.audit_persistent import (
@@ -103,9 +117,19 @@ async def _chain(session: Any, entry: Any) -> None:
     )
     from nexus.models.governance import AuditLog
 
+    if _is_postgres(session):
+        await session.execute(
+            text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
+            {"key": f"audit_chain:{entry.company_id or 'system'}"},
+        )
+    scope = (
+        AuditLog.company_id.is_(None)
+        if entry.company_id is None
+        else AuditLog.company_id == entry.company_id
+    )
     result = await session.execute(
         select(AuditLog)
-        .where(AuditLog.sequence_number.is_not(None))
+        .where(scope, AuditLog.sequence_number.is_not(None))
         .order_by(AuditLog.sequence_number.desc())
         .limit(1)
     )
@@ -118,75 +142,68 @@ async def _chain(session: Any, entry: Any) -> None:
     )
 
 
-async def _chain_in_savepoint(session: Any, entry: Any) -> None:
-    """Add `entry` to the caller's session without risking their transaction.
+def _is_postgres(session: Any) -> bool:
+    return session.get_bind().dialect.name == "postgresql"
 
-    A sequence-number collision raises IntegrityError on flush, which would leave
-    the caller's transaction unusable. Flushing inside a nested savepoint keeps
-    the damage local: on collision the savepoint rolls back and the row is added
-    unchained, so the audited request still succeeds.
-    """
-    from sqlalchemy.exc import IntegrityError
 
-    # The audit row goes into the caller's transaction on purpose: it must not
-    # outlive a request that rolls back, and it needs to see that request's
-    # uncommitted state.
-    #
-    # `_chain_lock` serialises tail-read-then-flush within this process, so two
-    # coroutines here cannot claim the same sequence number. Across processes
-    # they can: a second worker's tail read sees only committed rows, so it can
-    # pick a number this process has flushed but not committed. That collision
-    # raises on the nested flush below, inside the savepoint, so it degrades to
-    # an unchained row rather than poisoning the caller's transaction. The gap
-    # is that such a row is invisible to chain verification -- allocating the
-    # number from a DB sequence would close it, and needs a migration.
-    async with _chain_lock():
-        await _chain_safely(session, entry)
-        try:
-            async with session.begin_nested():
-                session.add(entry)
-                await session.flush()
-            return
-        except IntegrityError:
-            logger.warning(
-                "Audit chain collision on action %s; writing row without chain links",
-                entry.action,
-            )
-
+def _unstamp(entry: Any) -> None:
     entry.sequence_number = None
     entry.previous_hash = None
     entry.entry_hash = None
-    session.add(entry)
-    await session.flush()
 
 
-async def _chain_safely(session: Any, entry: Any) -> None:
-    """Chain `entry`, but never let a chain failure lose the audit row.
+class AuditChainError(RuntimeError):
+    """The next link of an audit chain could not be allocated.
 
-    Losing the event entirely is worse than losing its tamper-evident link, so a
-    failure here leaves the chain columns NULL and warns rather than raising.
+    Raised instead of writing the row without chain links: an unchained row is
+    invisible to chain verification, so it is never written.
     """
-    try:
-        await _chain(session, entry)
-    except Exception as exc:  # noqa: BLE001 - the row must still be written
-        logger.warning(
-            "Audit chain could not be stamped for action %s; "
-            "row will be written without chain links: %s",
-            entry.action,
-            exc,
-        )
 
 
-# Reading the chain tail and committing the next link must not interleave, or
-# two writers pick the same sequence number and one loses the race on a UNIQUE
-# violation. This lock serialises them within a process; the retry loop below
-# still covers the cross-process case, where a second API worker or the Temporal
-# worker writes concurrently.
+async def _chain_in_savepoint(session: Any, entry: Any, attempts: int = 5) -> None:
+    """Add `entry` to the caller's session without risking their transaction.
+
+    The audit row goes into the caller's transaction on purpose: it must not
+    outlive a request that rolls back, and it needs to see that request's
+    uncommitted state. Chaining and the flush run inside a savepoint, so a
+    failure (a lock timeout, a unique violation) rolls back only the savepoint
+    and leaves the caller's transaction usable. On PostgreSQL the chain lock
+    taken inside the savepoint passes to the caller's transaction when the
+    savepoint is released, and is held until the caller commits.
+
+    Raises:
+        AuditChainError: no link could be allocated; nothing was written.
+    """
+    async with _local_lock(session):
+        for _ in range(attempts):
+            try:
+                async with session.begin_nested():
+                    await _chain(session, entry)
+                    session.add(entry)
+                    await session.flush()
+                return
+            except Exception as exc:  # noqa: BLE001 - retried, then raised below
+                last = exc
+                if entry in session:
+                    session.expunge(entry)
+                _unstamp(entry)
+    raise AuditChainError(
+        f"audit chain link for {entry.action!r} not allocated after {attempts} attempts"
+    ) from last
+
+
+# SQLite has no advisory locks. There, reading the chain tail and inserting the
+# next link must not interleave within the process, or two writers pick the
+# same sequence number; this lock serialises them. The unique constraint on
+# (company_id, sequence_number) and the bounded retries cover what it cannot.
+#
+# PostgreSQL uses the advisory lock in `_chain` instead, and must not also take
+# this one: a writer holding the advisory lock until its caller commits could
+# then wait here on a writer that waits on the advisory lock.
 #
 # One lock per event loop: an asyncio.Lock binds to the first loop that waits on
 # it, and a later loop (asyncio.run in a worker thread, a test) would then get
-# RuntimeError on every contended write -- which record_audit swallows, silently
-# dropping the row.
+# RuntimeError on every contended write.
 _chain_locks: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Lock] = (
     weakref.WeakKeyDictionary()
 )
@@ -200,36 +217,33 @@ def _chain_lock() -> asyncio.Lock:
     return lock
 
 
+def _local_lock(session: Any) -> Any:
+    return contextlib.nullcontext() if _is_postgres(session) else _chain_lock()
+
+
 async def _write_with_chain_retry(session: Any, entry: Any, attempts: int = 5) -> None:
-    """Insert `entry` on its own session, retrying if the sequence number races.
+    """Insert `entry` on its own session, retrying if allocating the link fails.
 
-    On the final attempt the row is written without chain links rather than
-    dropped: losing the event is worse than losing its tamper-evident link.
+    Each attempt is one transaction: chain lock, tail read, insert, commit.
+
+    Raises:
+        AuditChainError: every attempt failed; nothing was written.
     """
-    from sqlalchemy.exc import IntegrityError
-
-    async with _chain_lock():
-        for attempt in range(attempts):
-            await _chain_safely(session, entry)
-            session.add(entry)
+    async with _local_lock(session):
+        for _ in range(attempts):
             try:
+                await _chain(session, entry)
+                session.add(entry)
                 await session.commit()
                 return
-            except IntegrityError:
+            except Exception as exc:  # noqa: BLE001 - retried, then raised below
+                last = exc
                 await session.rollback()
                 # Rollback detaches the instance; clear the stamped columns so
                 # the next pass re-reads a fresh tail.
                 if entry in session:
                     session.expunge(entry)
-                entry.sequence_number = None
-                entry.previous_hash = None
-                entry.entry_hash = None
-                if attempt == attempts - 1:
-                    logger.warning(
-                        "Audit chain contention on action %s after %d attempts; "
-                        "writing row without chain links",
-                        entry.action,
-                        attempts,
-                    )
-                    session.add(entry)
-                    await session.commit()
+                _unstamp(entry)
+    raise AuditChainError(
+        f"audit chain link for {entry.action!r} not allocated after {attempts} attempts"
+    ) from last

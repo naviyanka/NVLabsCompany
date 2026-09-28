@@ -354,6 +354,9 @@ def test_every_reason_is_covered_by_a_test():
         RunCompletionReason.doom_loop,
         RunCompletionReason.needs_help,
         RunCompletionReason.error,
+        # Reached by task attempts; covered in tests/test_employee_work.py.
+        RunCompletionReason.verification_failed,
+        RunCompletionReason.cancelled,
     }
     assert set(RunCompletionReason) == tested
 

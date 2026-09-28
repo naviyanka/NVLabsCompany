@@ -10,6 +10,8 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel
 
+from nexus.api.deps import CurrentCompanyId
+
 router = APIRouter(tags=["identity"])
 
 
@@ -149,7 +151,7 @@ async def get_agent_soul(agent_id: uuid.UUID) -> dict[str, Any]:
     response_model=SoulResponse,
 )
 async def update_agent_soul(
-    agent_id: uuid.UUID, body: SoulUpdateRequest
+    agent_id: uuid.UUID, body: SoulUpdateRequest, company_id: CurrentCompanyId
 ) -> dict[str, Any]:
     """Update an agent's soul definition.
 
@@ -188,7 +190,7 @@ async def update_agent_soul(
     # Also persist to the Agent model in DB for durability
     try:
         import json as _json
-        from nexus.database import async_session_factory
+        from nexus.database import tenant_session
         from nexus.models.agent import Agent
         from sqlalchemy import update as sa_update
         import asyncio
@@ -202,9 +204,11 @@ async def update_agent_soul(
             f"{existing.get('background', '')}"
         ).strip()
 
-        async with async_session_factory() as db:
+        async with tenant_session(company_id) as db:
             await db.execute(
-                sa_update(Agent).where(Agent.id == agent_id).values(soul_description=structured_soul)
+                sa_update(Agent)
+                .where(Agent.id == agent_id, Agent.company_id == company_id)
+                .values(soul_description=structured_soul)
             )
             await db.commit()
     except Exception:

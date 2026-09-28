@@ -4,7 +4,7 @@ import uuid
 from datetime import timezone, datetime
 from typing import Any, Optional
 
-from sqlalchemy import JSON, UniqueConstraint
+from sqlalchemy import JSON, Index, UniqueConstraint, text
 from sqlmodel import Column, Field, SQLModel
 
 
@@ -119,10 +119,25 @@ class AuditLog(SQLModel, table=True):
 
     Append-only: a DB trigger rejects DELETE and any UPDATE other than
     ``archived_at``. Rows carry a SHA-256 hash chain
-    (``previous_hash`` -> ``entry_hash``) ordered by ``sequence_number``.
+    (``previous_hash`` -> ``entry_hash``) ordered by ``sequence_number``, one
+    chain per company (and one for events without a company).
     """
 
     __tablename__ = "audit_log"
+    __table_args__ = (
+        # One sequence per chain. NULLS NOT DISTINCT makes the events without
+        # a company one chain too; rows written before chaining have no
+        # sequence and are left out.
+        Index(
+            "uq_audit_log_company_sequence",
+            "company_id",
+            "sequence_number",
+            unique=True,
+            postgresql_nulls_not_distinct=True,
+            postgresql_where=text("sequence_number IS NOT NULL"),
+            sqlite_where=text("sequence_number IS NOT NULL"),
+        ),
+    )
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     company_id: Optional[uuid.UUID] = Field(
@@ -137,7 +152,7 @@ class AuditLog(SQLModel, table=True):
     ip_address: Optional[str] = Field(default=None, max_length=45)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
     # Hash-chain columns (Phase 0.1)
-    sequence_number: Optional[int] = Field(default=None, index=True, unique=True)
+    sequence_number: Optional[int] = Field(default=None, index=True)
     entry_hash: Optional[str] = Field(default=None, max_length=64)
     previous_hash: Optional[str] = Field(default=None, max_length=64)
     archived_at: Optional[datetime] = Field(default=None)

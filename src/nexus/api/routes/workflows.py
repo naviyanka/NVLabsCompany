@@ -216,9 +216,9 @@ async def _persist_completion(
     caller of the flow supplies, and without it a background runner would write
     another tenant's run row on a collision or a mixed-up id.
     """
-    from nexus.database import async_session_factory
+    from nexus.database import tenant_session
 
-    async with async_session_factory() as session:
+    async with tenant_session(company_id) as session:
         result_q = await session.execute(
             select(WorkflowRun).where(
                 WorkflowRun.id == run_id, WorkflowRun.company_id == company_id
@@ -241,10 +241,10 @@ async def _persist_completion(
 
 async def _register_company_agents(company_uuid: uuid.UUID, task_flow: Any) -> None:
     """Load the company's agents into a TaskFlow so selection works on real rows."""
-    from nexus.database import async_session_factory
+    from nexus.database import tenant_session
     from nexus.models.agent import Agent
 
-    async with async_session_factory() as session:
+    async with tenant_session(company_uuid) as session:
         result = await session.execute(
             select(Agent).where(Agent.company_id == company_uuid, Agent.status != "terminated")
         )

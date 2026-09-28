@@ -44,6 +44,9 @@ class Principal:
     # without re-parsing the token.
     run_id: uuid.UUID | None = None
     agent_id: uuid.UUID | None = None
+    # Audit name for an in-process service principal that holds no API key,
+    # such as a background worker acting for the server itself.
+    label: str = ""
 
     @property
     def is_service(self) -> bool:
@@ -53,8 +56,12 @@ class Principal:
     @property
     def display_name(self) -> str:
         """A short label for audit lines."""
+        if self.label:
+            return self.label
         if self.kind == "service":
-            return f"service:{self.api_key_id}"
+            # The only keyless service principal from a request is the
+            # AUTH_ENABLED=false X-Company-Id fallback; never "service:None".
+            return f"service:{self.api_key_id or 'auth-disabled'}"
         if self.kind == "run":
             return f"run:{self.run_id}:agent:{self.agent_id}"
         return self.email or f"user:{self.user_id}"

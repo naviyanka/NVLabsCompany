@@ -14,6 +14,7 @@ import subprocess
 import tempfile
 import time
 import uuid
+import weakref
 from pathlib import Path
 from typing import Any
 
@@ -38,6 +39,80 @@ _CREATE_NEW = (
 def _resolves_to_itself(path: Path) -> bool:
     """True when no symlink or junction lies anywhere on ``path``."""
     return os.path.normcase(str(path.resolve())) == os.path.normcase(str(path))
+
+
+# First line of every instruction file NEXUS writes, naming the writing
+# process. It is the ownership record: a file without it is the user's and is
+# never touched, and one whose writer is dead was left by a killed worker.
+_INSTRUCTION_MARK = "<!-- nexus:generated-instructions pid="
+# Instruction files this process wrote for executions still running, and
+# the workspace each belongs to.
+_live_instruction_files: dict[str, Path] = {}
+
+
+def _instruction_owner(path: Path) -> int | None:
+    """The pid in the mark of an instruction file NEXUS wrote, else None."""
+    if is_link(path):
+        return None
+    try:
+        with open(path, encoding="utf-8") as f:
+            first = f.readline(200)
+        if first.startswith(_INSTRUCTION_MARK):
+            return int(first[len(_INSTRUCTION_MARK):].split()[0])
+    except (OSError, UnicodeDecodeError, ValueError, IndexError):
+        pass
+    return None
+
+
+def release_instruction_file(workspace: str | Path, path: str | Path) -> None:
+    """Remove an instruction file NEXUS wrote into ``workspace``, then its empty directories.
+
+    Idempotent. The file must lie under the workspace with no link on the
+    way, and must still carry the NEXUS mark: a file the user or the CLI put
+    in its place is left alone.
+    """
+    root = Path(workspace).resolve()
+    # abspath folds "..", so the containment check below is not lexical only.
+    file_path = Path(os.path.abspath(path))
+    _live_instruction_files.pop(str(file_path), None)
+    try:
+        rel = file_path.relative_to(root)
+        parent = file_path.parent
+        with pinned_directory(parent):
+            if not _resolves_to_itself(parent) or _instruction_owner(file_path) is None:
+                return
+            file_path.unlink()
+        for directory in [root / p for p in rel.parents][:-1]:
+            if is_link(directory) or any(directory.iterdir()):
+                break
+            directory.rmdir()
+    except (OSError, ValueError):
+        pass  # best effort; a later recovery tries again
+
+
+def recover_instruction_files(workspace: str | Path) -> None:
+    """Remove the instruction files a dead NEXUS process left in ``workspace``.
+
+    A killed worker never reaches its cleanup. Files written by a live
+    process (this one's running executions included) are left alone.
+    """
+    from nexus.runtime.heartbeat_persistent import process_alive
+
+    root = Path(workspace).resolve()
+    paths = {b.instruction_path for b in get_cli_registry().get_all() if b.instruction_path}
+    for rel in paths:
+        path = root / rel
+        owner = _instruction_owner(path)
+        if owner is None or str(path) in _live_instruction_files:
+            continue
+        if owner == os.getpid() or not process_alive(owner):
+            release_instruction_file(root, path)
+
+
+def release_all_instruction_files() -> None:
+    """Remove every instruction file this process still holds, at shutdown."""
+    for path, root in list(_live_instruction_files.items()):
+        release_instruction_file(root, path)
 
 
 # Default timeout for CLI execution (10 minutes)
@@ -202,6 +277,29 @@ class CLIAdapter(BaseAdapter):
     async def _do_execute(
         self, session: AgentSession, task_id: uuid.UUID, payload: dict[str, Any]
     ) -> TaskResult:
+        """Run one CLI execution and remove the instruction file it wrote.
+
+        Every execution (plain chat, streamed chat and task attempts all come
+        through ``execute_task``) ends in this ``finally``: success, failure,
+        timeout, an explicit cancel, a client disconnect and the cancellation
+        of running work at shutdown. A worker killed outright never gets here;
+        its file carries the dead pid and ``recover_instruction_files`` removes
+        it later.
+        """
+        written: list[tuple[str, str]] = []
+        try:
+            return await self._run_cli(session, task_id, payload, written)
+        finally:
+            for workspace, path in written:
+                self._cleanup_instruction_file(path, workspace)
+
+    async def _run_cli(
+        self,
+        session: AgentSession,
+        task_id: uuid.UUID,
+        payload: dict[str, Any],
+        written: list[tuple[str, str]],
+    ) -> TaskResult:
         """Execute a task by spawning the configured CLI backend as a subprocess.
 
         Args:
@@ -261,13 +359,32 @@ class CLIAdapter(BaseAdapter):
             payload.get("system_prompt", "")
             or session.config.get("system_prompt", "")
         )
-        if system_prompt and not backend.instruction_path:
-            # No instruction file this CLI reads natively: carry it inline.
+        # Written before the workspace snapshot so it is never an artifact.
+        instruction_file = None
+        if system_prompt and backend.instruction_path:
+            instruction_file = self._write_instruction_file(
+                workspace, backend, system_prompt, session
+            )
+            if instruction_file:
+                written.append((workspace, instruction_file))
+        if system_prompt and not instruction_file:
+            # No instruction file (the CLI reads none natively, or the user's
+            # own file is there): carry the system prompt inline.
             prompt = f"{system_prompt}\n\n---\n\n{prompt}"
 
-        cmd = self._build_args(
-            backend, prompt, extra_args, model=model, executable=executable
-        )
+        # A task attempt's permission mode comes from the server-built context
+        # and maps to cataloged flags only. A backend without flags for the
+        # mode is refused rather than run with its default permissions.
+        work_mode = getattr(getattr(session, "context", None), "work_mode", None)
+        try:
+            cmd = self._build_args(
+                backend, prompt, extra_args, model=model, executable=executable,
+                work_mode=work_mode,
+            )
+        except ValueError as exc:
+            return TaskResult(
+                task_id=task_id, agent_id=session.agent_id, success=False, error=str(exc)
+            )
         if executable.lower().endswith((".cmd", ".bat")) and any(
             _CMD_SHIM_UNSAFE & set(arg) for arg in cmd[1:]
         ):
@@ -304,13 +421,6 @@ class CLIAdapter(BaseAdapter):
         # Track files before execution for artifact detection
         pre_files = self._snapshot_workspace(workspace)
 
-        # Write instruction file if backend supports it and a system prompt is available
-        instruction_file_path: str | None = None
-        if backend.instruction_path and system_prompt:
-            instruction_file_path = self._write_instruction_file(
-                workspace, backend, system_prompt, session
-            )
-
         # Prepare environment - strip sensitive vars and backend-specific deletions.
         # Only pass env vars that the backend actually needs. Backends that require
         # specific API keys (e.g., claude needs ANTHROPIC_API_KEY, codex needs
@@ -342,6 +452,7 @@ class CLIAdapter(BaseAdapter):
                 env=env,
                 start_new_session=os.name != "nt",
             )
+            _contain(process)
             self._processes[session.session_id] = process
 
             # For interactive sessions, spawn _stream_output as a background
@@ -484,9 +595,8 @@ class CLIAdapter(BaseAdapter):
             )
         finally:
             self._processes.pop(session.session_id, None)
-            # Clean up temporary instruction file
-            if instruction_file_path:
-                self._cleanup_instruction_file(instruction_file_path)
+            if process is not None:
+                _release_job(process)
 
     async def send_message(self, session_id: str, message: str) -> str:
         """Send a message to the stdin of a running interactive process.
@@ -603,6 +713,8 @@ class CLIAdapter(BaseAdapter):
         self._conversation_history.pop(session.session_id, None)
 
         workspace_path = self._workspaces.pop(session.session_id, None)
+        for root in {session.worktree_path, workspace_path} - {None, ""}:
+            recover_instruction_files(root)
         if workspace_path and session.metadata.get("_temp_workspace", False):
             try:
                 shutil.rmtree(workspace_path, ignore_errors=True)
@@ -634,6 +746,7 @@ class CLIAdapter(BaseAdapter):
         extra_args: list[str] | None = None,
         model: str = "",
         executable: str | None = None,
+        work_mode: str | None = None,
     ) -> list[str]:
         """Build the CLI command arguments for the given backend.
 
@@ -648,11 +761,14 @@ class CLIAdapter(BaseAdapter):
             extra_args: Additional CLI arguments to append.
             model: Model name, passed only through the backend's model flag.
             executable: Resolved executable path; defaults to the bare command.
+            work_mode: A task attempt's mode, mapped to cataloged flags.
 
         Returns:
             List of command-line arguments ready for subprocess exec.
         """
-        return backend.build_args(prompt, extra_args, model=model, executable=executable)
+        return backend.build_args(
+            prompt, extra_args, model=model, executable=executable, work_mode=work_mode
+        )
 
     def _write_instruction_file(
         self,
@@ -681,6 +797,9 @@ class CLIAdapter(BaseAdapter):
 
         root = Path(workspace).resolve()
         instruction_path = root / backend.instruction_path
+        # A file left by a worker that was killed is NEXUS's, not the user's:
+        # remove it so it neither blocks this write nor gets committed.
+        recover_instruction_files(root)
         try:
             # Create parent directories one at a time, refusing any that is a link
             parent = root
@@ -690,7 +809,8 @@ class CLIAdapter(BaseAdapter):
                     raise OSError(f"{parent} is a link")
                 parent.mkdir(exist_ok=True)
 
-            # Don't overwrite existing instruction files the user has set up
+            # Never replace a file that is already there: it is the user's, or
+            # a running execution's. The caller carries the prompt inline.
             if os.path.lexists(instruction_path):
                 self._add_log(
                     session.session_id,
@@ -701,6 +821,7 @@ class CLIAdapter(BaseAdapter):
             # Write the system prompt as the instruction file
             agent_name = session.config.get("agent_name", "Agent")
             content = (
+                f"{_INSTRUCTION_MARK}{os.getpid()} -->\n"
                 f"# {agent_name} — System Instructions\n\n"
                 f"{system_prompt}\n"
             )
@@ -712,6 +833,7 @@ class CLIAdapter(BaseAdapter):
                 fd = os.open(instruction_path, _CREATE_NEW, 0o644)
                 with os.fdopen(fd, "w", encoding="utf-8") as f:
                     f.write(content)
+            _live_instruction_files[str(instruction_path)] = root
             self._add_log(
                 session.session_id,
                 f"Wrote instruction file: {instruction_path}",
@@ -724,25 +846,14 @@ class CLIAdapter(BaseAdapter):
             )
             return None
 
-    def _cleanup_instruction_file(self, path: str) -> None:
+    def _cleanup_instruction_file(self, path: str, workspace: str | Path | None = None) -> None:
         """Remove a temporary instruction file created for a CLI execution.
 
-        The CLI ran in the workspace in between. If the file or any directory
-        above it is now a link, nothing is removed, so cleanup cannot delete
-        a file the link points to.
+        See ``release_instruction_file``: only a NEXUS-marked file inside the
+        workspace, never through a link.
         """
-        try:
-            file_path = Path(path)
-            parent = file_path.parent
-            with pinned_directory(parent):
-                if not _resolves_to_itself(parent) or is_link(file_path) or not file_path.is_file():
-                    return
-                file_path.unlink()
-            # Remove parent dir if it's empty and was created by us
-            if not any(parent.iterdir()):
-                parent.rmdir()
-        except OSError:
-            pass  # Best effort cleanup
+        root = workspace or _live_instruction_files.get(path) or Path(path).parent
+        release_instruction_file(root, path)
 
     def _snapshot_workspace(self, workspace: str) -> dict[str, float]:
         """Take a snapshot of files in the workspace with modification times.
@@ -864,15 +975,123 @@ async def _communicate_bounded(
     return stdout, stderr
 
 
+# Windows job objects of running CLIs, by process. A job created with
+# KILL_ON_JOB_CLOSE ends every process in it when its last handle closes, so
+# the tree dies with this server even if the server itself is killed.
+#
+# OS limits: the CLI is assigned to its job right after it starts, so anything
+# it spawns in that first instant can escape the job (asyncio cannot start a
+# process suspended); taskkill /T then remains the fallback. On POSIX the CLI
+# leads its own process group and is stopped by signalling that group; a
+# descendant that starts a new session, or a server killed with SIGKILL, can
+# still leave processes behind there.
+_jobs: "weakref.WeakKeyDictionary[asyncio.subprocess.Process, int]" = weakref.WeakKeyDictionary()
+
+if os.name == "nt":
+    import ctypes
+    from ctypes import wintypes
+
+    class _IoCounters(ctypes.Structure):
+        _fields_ = [(name, ctypes.c_ulonglong) for name in (
+            "ReadOperationCount", "WriteOperationCount", "OtherOperationCount",
+            "ReadTransferCount", "WriteTransferCount", "OtherTransferCount",
+        )]
+
+    class _BasicLimits(ctypes.Structure):
+        _fields_ = [
+            ("PerProcessUserTimeLimit", ctypes.c_int64),
+            ("PerJobUserTimeLimit", ctypes.c_int64),
+            ("LimitFlags", wintypes.DWORD),
+            ("MinimumWorkingSetSize", ctypes.c_size_t),
+            ("MaximumWorkingSetSize", ctypes.c_size_t),
+            ("ActiveProcessLimit", wintypes.DWORD),
+            ("Affinity", ctypes.c_size_t),
+            ("PriorityClass", wintypes.DWORD),
+            ("SchedulingClass", wintypes.DWORD),
+        ]
+
+    class _ExtendedLimits(ctypes.Structure):
+        _fields_ = [
+            ("BasicLimitInformation", _BasicLimits),
+            ("IoInfo", _IoCounters),
+            ("ProcessMemoryLimit", ctypes.c_size_t),
+            ("JobMemoryLimit", ctypes.c_size_t),
+            ("PeakProcessMemoryUsed", ctypes.c_size_t),
+            ("PeakJobMemoryUsed", ctypes.c_size_t),
+        ]
+
+    _kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    _kernel32.CreateJobObjectW.restype = wintypes.HANDLE
+    _kernel32.CreateJobObjectW.argtypes = (ctypes.c_void_p, wintypes.LPCWSTR)
+    _kernel32.SetInformationJobObject.argtypes = (
+        wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD,
+    )
+    _kernel32.OpenProcess.restype = wintypes.HANDLE
+    _kernel32.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
+    _kernel32.AssignProcessToJobObject.argtypes = (wintypes.HANDLE, wintypes.HANDLE)
+    _kernel32.TerminateJobObject.argtypes = (wintypes.HANDLE, wintypes.UINT)
+    _kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
+
+    _JOB_KILL_ON_CLOSE = 0x2000
+    _JOB_EXTENDED_LIMITS = 9
+    _PROCESS_SET_QUOTA_AND_TERMINATE = 0x0100 | 0x0001
+
+    def _new_job(pid: int) -> int | None:
+        job = _kernel32.CreateJobObjectW(None, None)
+        if not job:
+            return None
+        info = _ExtendedLimits()
+        info.BasicLimitInformation.LimitFlags = _JOB_KILL_ON_CLOSE
+        handle = None
+        try:
+            if not _kernel32.SetInformationJobObject(
+                job, _JOB_EXTENDED_LIMITS, ctypes.byref(info), ctypes.sizeof(info)
+            ):
+                raise OSError(ctypes.get_last_error())
+            handle = _kernel32.OpenProcess(_PROCESS_SET_QUOTA_AND_TERMINATE, False, pid)
+            if not handle or not _kernel32.AssignProcessToJobObject(job, handle):
+                raise OSError(ctypes.get_last_error())
+            return job
+        except OSError:
+            _kernel32.CloseHandle(job)
+            return None
+        finally:
+            if handle:
+                _kernel32.CloseHandle(handle)
+
+
+def _contain(process: Any) -> None:
+    """Windows: put a freshly started CLI in its own kill-on-close job object.
+
+    Only real processes; a failure leaves the taskkill fallback in place.
+    """
+    if os.name != "nt" or not isinstance(process, asyncio.subprocess.Process):
+        return
+    job = _new_job(process.pid)
+    if job is not None:
+        _jobs[process] = job
+
+
+def _release_job(process: Any) -> None:
+    """Close the process's job handle; anything still running in the job ends."""
+    job = _jobs.pop(process, None)
+    if job is not None:
+        _kernel32.CloseHandle(job)
+
+
 async def _terminate_tree(process: asyncio.subprocess.Process) -> None:
     """Stop a CLI and everything it spawned: SIGTERM, then SIGKILL.
 
-    Windows uses ``taskkill /T /F``; POSIX signals the process group the child
-    leads (it was started with ``start_new_session``).
+    Windows ends the CLI's job object, falling back to ``taskkill /T /F`` when
+    it has none; POSIX signals the process group the child leads (it was
+    started with ``start_new_session``).
     """
     pid = process.pid
+    job = _jobs.get(process)
     try:
-        if isinstance(pid, int) and os.name == "nt":
+        if job is not None:
+            _kernel32.TerminateJobObject(job, 1)
+        elif isinstance(pid, int) and os.name == "nt":
             await asyncio.to_thread(
                 subprocess.run,
                 ["taskkill", "/T", "/F", "/PID", str(pid)],
@@ -894,3 +1113,5 @@ async def _terminate_tree(process: asyncio.subprocess.Process) -> None:
             await process.wait()
     except (ProcessLookupError, PermissionError, OSError, subprocess.SubprocessError):
         pass
+    finally:
+        _release_job(process)

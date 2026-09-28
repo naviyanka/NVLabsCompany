@@ -36,6 +36,9 @@ class ExecutionContext:
     session_id: uuid.UUID | None = None
     adapter: str | None = None
     model: str | None = None
+    # Set for task-attempt turns: "write" or "read_only". The CLI adapter maps
+    # it to the backend's own cataloged permission flags; never model-chosen.
+    work_mode: str | None = None
 
     @classmethod
     def for_principal(
@@ -63,7 +66,7 @@ class ExecutionContext:
             agent_id = principal.agent_id
             principal_id = f"run:{principal.run_id}"
         elif principal.kind == "service":
-            principal_id = f"service:{principal.api_key_id}"
+            principal_id = principal.display_name
         else:
             principal_id = f"user:{principal.user_id}"
         return cls(

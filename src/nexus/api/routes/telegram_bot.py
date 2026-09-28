@@ -19,6 +19,8 @@ import httpx
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
+from nexus.api.deps import CurrentCompanyId
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["channels"])
@@ -50,28 +52,13 @@ async def _handle_status(chat_id: str) -> None:
         await _reply(chat_id, f"Error fetching status: {exc}")
 
 
-async def _telegram_company_id(db: Any) -> uuid.UUID:
-    """The tenant the bot acts on.
-
-    ``TELEGRAM_BOT_TOKEN`` names a bot, not a company, so the webhook has no
-    tenant in its payload. Resolving it the same way first-run setup does keeps
-    the bot in one company instead of reading across all of them — and replaces
-    the hardcoded seeded-development UUID ``/task`` used to write, which points
-    at a row that does not exist on a deployment that was never seeded.
-    """
-    from nexus.auth.users import pick_setup_company
-
-    return (await pick_setup_company(db)).id
-
-
-async def _handle_agents(chat_id: str) -> None:
+async def _handle_agents(chat_id: str, company_id: uuid.UUID) -> None:
     try:
-        from nexus.database import async_session_factory
+        from nexus.database import tenant_session
         from nexus.models.agent import Agent
         from sqlmodel import select
 
-        async with async_session_factory() as db:
-            company_id = await _telegram_company_id(db)
+        async with tenant_session(company_id) as db:
             result = await db.execute(
                 select(Agent)
                 .where(Agent.company_id == company_id, Agent.status == "active")
@@ -91,17 +78,17 @@ async def _handle_agents(chat_id: str) -> None:
         await _reply(chat_id, f"Error: {exc}")
 
 
-async def _handle_task(chat_id: str, description: str) -> None:
+async def _handle_task(chat_id: str, description: str, company_id: uuid.UUID) -> None:
     if not description.strip():
         await _reply(chat_id, "Usage: /task <description>")
         return
     try:
-        from nexus.database import async_session_factory
+        from nexus.database import tenant_session
         from nexus.models.task import Task
 
-        async with async_session_factory() as db:
+        async with tenant_session(company_id) as db:
             task = Task(
-                company_id=await _telegram_company_id(db),
+                company_id=company_id,
                 title=description[:200],
                 description=f"Created via Telegram remote control",
                 status="pending",
@@ -124,7 +111,15 @@ _HELP_TEXT = """*NEXUS Telegram Remote Control*
 
 
 @router.post("/api/v1/channels/telegram/webhook")
-async def telegram_webhook(request: Request) -> Any:
+async def telegram_webhook(request: Request, company_id: CurrentCompanyId) -> Any:
+    """Run one bot command for the company of the authenticated caller.
+
+    ``TELEGRAM_BOT_TOKEN`` names a bot, not a company, and the update carries no
+    tenant. The only binding to a company is the credential the webhook arrives
+    with (an API key is issued for exactly one company), so the tenant comes
+    from it. A request without one is refused with 401 before this runs; it is
+    never assigned to a default or "oldest" company.
+    """
     body = await request.json()
 
     message = body.get("message", {})
@@ -141,9 +136,9 @@ async def telegram_webhook(request: Request) -> Any:
     if command == "/status":
         await _handle_status(chat_id)
     elif command == "/agents":
-        await _handle_agents(chat_id)
+        await _handle_agents(chat_id, company_id)
     elif command == "/task":
-        await _handle_task(chat_id, args)
+        await _handle_task(chat_id, args, company_id)
     elif command in ("/help", "/start"):
         await _reply(chat_id, _HELP_TEXT)
     else:

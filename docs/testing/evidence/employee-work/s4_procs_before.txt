@@ -1,0 +1,11 @@
+
+ProcessId ParentProcessId Name
+--------- --------------- ----
+    13140            8484 claude.exe
+     5924           14724 claude.exe
+     1552            5924 claude.exe
+     2860            1552 claude.exe
+    15104           16708 claude.exe
+    18888           15076 claude.exe
+
+

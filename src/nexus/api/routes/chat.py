@@ -303,8 +303,8 @@ async def _fetch_live_platform_context(
 
                 title_clean = task_title[:150]
                 
-                from nexus.database import async_session_factory
-                async with async_session_factory() as task_db:
+                from nexus.database import tenant_session
+                async with tenant_session(company_id) as task_db:
                     existing_stmt = select(Task).where(
                         Task.company_id == company_id,
                         Task.assigned_agent_id == target_agent.id,
@@ -494,11 +494,11 @@ async def _fetch_shared_knowledge(
         list when the lookup fails.
     """
     try:
-        from nexus.database import async_session_factory
+        from nexus.database import tenant_session_factory
         from nexus.memory.layered_persistent import L3_SCOPE, PersistentLayeredMemory
 
         memory = PersistentLayeredMemory(
-            session_factory=async_session_factory, company_id=company_id
+            session_factory=tenant_session_factory(company_id), company_id=company_id
         )
         return [
             {
@@ -535,7 +535,7 @@ async def _remember_response(agent: Agent, response_text: str) -> int:
         How many new facts were stored.
     """
     try:
-        from nexus.database import async_session_factory
+        from nexus.database import tenant_session_factory
         from nexus.memory.extract import FactExtractor
         from nexus.memory.layered_persistent import PersistentLayeredMemory
 
@@ -544,7 +544,8 @@ async def _remember_response(agent: Agent, response_text: str) -> int:
             return 0
 
         memory = PersistentLayeredMemory(
-            session_factory=async_session_factory, company_id=agent.company_id
+            session_factory=tenant_session_factory(agent.company_id),
+            company_id=agent.company_id,
         )
         stored = 0
         for fact in facts:
@@ -661,10 +662,10 @@ async def _resolve_connection(agent: Agent) -> dict[str, Any] | None:
     """
     if not getattr(agent, "connection_id", None):
         return None
-    from nexus.database import async_session_factory
+    from nexus.database import tenant_session
     from nexus.models.connection import LLMConnection
 
-    async with async_session_factory() as conn_db:
+    async with tenant_session(agent.company_id) as conn_db:
         conn = await conn_db.get(LLMConnection, agent.connection_id)
         if conn is None or not conn.is_active:
             return None
@@ -764,10 +765,10 @@ async def _reserve_budget(
     estimate_cents = max(1, round(estimate_usd * 100))
 
     try:
-        from nexus.database import async_session_factory
+        from nexus.database import tenant_session
         from nexus.services.budget_service import BudgetService
 
-        async with async_session_factory() as budget_db:
+        async with tenant_session(agent.company_id) as budget_db:
             # BudgetService already scopes to active policies and to the policy's
             # own window, so a monthly cap stays monthly rather than becoming a
             # lifetime one.
@@ -830,6 +831,8 @@ async def _link_cost_events(
 async def _settle_budget(
     reservation_id: Any,
     cost_cents: int,
+    *,
+    company_id: uuid.UUID,
     input_tokens: int = 0,
     output_tokens: int = 0,
     model: str | None = None,
@@ -845,6 +848,7 @@ async def _settle_budget(
         reservation_id: Id from :func:`_reserve_budget`, or None when no hold
             was taken.
         cost_cents: Actual cost in cents.
+        company_id: Tenant of the holds; settling updates its budget policies.
         input_tokens: Actual input tokens.
         output_tokens: Actual output tokens.
         model: Model actually used.
@@ -855,22 +859,23 @@ async def _settle_budget(
     # agent). Settle every one. A bare id is still accepted for back-compat.
     ids = reservation_id if isinstance(reservation_id, list) else [reservation_id]
     for rid in ids:
-        await _settle_one(rid, cost_cents, input_tokens, output_tokens, model)
+        await _settle_one(rid, cost_cents, company_id, input_tokens, output_tokens, model)
 
 
 async def _settle_one(
     reservation_id: Any,
     cost_cents: int,
+    company_id: uuid.UUID,
     input_tokens: int = 0,
     output_tokens: int = 0,
     model: str | None = None,
 ) -> None:
     """Settle or release a single hold."""
     try:
-        from nexus.database import async_session_factory
+        from nexus.database import tenant_session
         from nexus.services.budget_service import BudgetService
 
-        async with async_session_factory() as budget_db:
+        async with tenant_session(company_id) as budget_db:
             service = BudgetService(budget_db)
             if cost_cents > 0:
                 await service.commit_reservation(
@@ -978,10 +983,10 @@ async def _call_llm(
     # so the refusal reaches the caller.
     workspace = None
     if execution_context.session_id is not None:
-        from nexus.database import async_session_factory
+        from nexus.database import tenant_session
         from nexus.services.worktree_service import session_workspace
 
-        async with async_session_factory() as worktree_db:
+        async with tenant_session(agent.company_id) as worktree_db:
             workspace = await session_workspace(
                 worktree_db, agent.company_id, agent.id, execution_context.session_id
             )
@@ -992,9 +997,9 @@ async def _call_llm(
     if registry_key in ("anthropic", "openai", "azure_openai") and not api_key:
         # No API key configured — create a Secret Proposal for human approval
         try:
-            from nexus.database import async_session_factory
+            from nexus.database import tenant_session
             from nexus.models.governance import Approval
-            async with async_session_factory() as proposal_db:
+            async with tenant_session(agent.company_id) as proposal_db:
                 env_var = {"anthropic": "ANTHROPIC_API_KEY", "openai": "OPENAI_API_KEY", "azure_openai": "AZURE_OPENAI_API_KEY"}.get(registry_key, f"{registry_key.upper()}_API_KEY")
                 # Check if a proposal already exists to avoid duplicates
                 from sqlalchemy import func
@@ -1051,7 +1056,7 @@ async def _call_llm(
         # Hermes tool calls use same DB-backed ToolAccess, autonomy, approval,
         # vault-grant, and writer path as every other governed tool.
         if hasattr(adapter, "register_tool"):
-            from nexus.database import async_session_factory
+            from nexus.database import tenant_session, tenant_session_factory
             from nexus.tools import (
                 OBSIDIAN_NOTE_REPLACE_NAME,
                 OBSIDIAN_NOTE_REPLACE_SCHEMA,
@@ -1061,7 +1066,8 @@ async def _call_llm(
                 register_obsidian_note_replace,
             )
 
-            tool_registry = ToolRegistry(async_session_factory)
+            tenant_factory = tenant_session_factory(agent.company_id)
+            tool_registry = ToolRegistry(tenant_factory)
             definition = register_obsidian_note_replace(tool_registry, agent.company_id)
             await tool_registry.persist_tool(definition)
             tool_id = definition.id
@@ -1070,12 +1076,12 @@ async def _call_llm(
                 call_arguments = dict(arguments)
                 # Approval identity comes only from AutonomyGate, never model input.
                 call_arguments.pop("approval_id", None)
-                async with async_session_factory() as tool_db:
+                async with tenant_session(agent.company_id) as tool_db:
                     executor = build_tool_executor(tool_db, default_autonomy_level=3)
                     tool = ObsidianNoteReplaceTool(
                         tool_db,
                         registry=tool_registry,
-                        session_factory=async_session_factory,
+                        session_factory=tenant_factory,
                         company_id=agent.company_id,
                         agent_id=agent.id,
                         tool_id=tool_id,
@@ -1251,6 +1257,7 @@ async def _call_llm(
             await _settle_budget(
                 reservation_id,
                 cost_cents=spend["cost_cents"],
+                company_id=agent.company_id,
                 input_tokens=spend["input"],
                 output_tokens=spend["output"],
                 model=spend["model"],
@@ -1315,7 +1322,7 @@ async def _record_chat_audit(
     await record_audit(
         company_id, "chat.response_generated",
         actor_type="agent", actor_id=str(agent_id),
-        resource_type="chat",
+        resource_type="chat", resource_id=str(session_id),
         details={"model": model_used, "tokens": tokens_used, "response_preview": response_text[:100], "session_id": str(session_id),
                  "execution_id": execution_id},
         db=db,

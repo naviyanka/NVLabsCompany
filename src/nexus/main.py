@@ -62,6 +62,7 @@ from nexus.api.routes.skills import router as skills_router
 from nexus.api.routes.slack_events import router as slack_events_router
 from nexus.api.routes.sso import router as sso_router
 from nexus.api.routes.tasks import router as tasks_router
+from nexus.api.routes.task_attempts import router as task_attempts_router
 from nexus.api.routes.telegram_bot import router as telegram_bot_router
 from nexus.api.routes.tools import router as tools_router
 from nexus.api.routes.portability import router as portability_router
@@ -280,6 +281,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     from nexus.runtime.chat_turns import start_worker, stop_worker
     await start_worker()
 
+    # Employee work: claims queued task attempts, runs each as a chat turn in an
+    # isolated worktree, verifies it and sweeps expired attempt leases
+    # (nexus.runtime.task_attempts). Attempts wait on chat turns, so this stops first.
+    from nexus.runtime import task_attempts
+    await task_attempts.start_worker()
+
     # The watchdog patrol rides the scheduler tick (see runtime/scheduler.py); it
     # detects stuck agents and silently stalled runs, and files a human decision
     # for stalls it cannot explain (Phase 1.4). Only shutdown needs wiring here.
@@ -297,11 +304,17 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     yield
 
     # Shutdown: stop orchestrator, stop scheduler, persist state, close connections
-    # Drain chat turns first; unfinished ones go back to the queue for another worker.
+    # Drain task attempts, then chat turns; unfinished ones go back to the queue
+    # for another worker.
+    await task_attempts.stop_worker()
     await stop_worker()
     await stop_orchestrator()
     await stop_scheduler()
     await stop_watchdog()
+    # Workers are stopped; remove any instruction file still held.
+    from nexus.adapters.cli_adapter import release_all_instruction_files
+
+    release_all_instruction_files()
 
     # Flush accumulated budget spend to DB
     try:
@@ -481,6 +494,7 @@ app.include_router(companies_router)
 app.include_router(control_router)
 app.include_router(agents_router)
 app.include_router(tasks_router)
+app.include_router(task_attempts_router)
 app.include_router(goals_router)
 app.include_router(skills_router)
 app.include_router(tools_router)

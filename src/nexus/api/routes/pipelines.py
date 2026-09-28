@@ -140,21 +140,25 @@ async def _execute_pipeline_bg(
     Output from stage N is injected into stage N+1's prompt as context.
     """
     import logging
-    from nexus.database import async_session_factory
+    from nexus.database import tenant_session
     from nexus.models.agent import Agent
 
     logger = logging.getLogger(__name__)
 
-    async with async_session_factory() as db:
+    async with tenant_session(company_id) as db:
         # Load the run
-        stmt = select(PipelineRun).where(PipelineRun.id == run_id)
+        stmt = select(PipelineRun).where(
+            PipelineRun.id == run_id, PipelineRun.company_id == company_id
+        )
         result = await db.execute(stmt)
         run = result.scalar_one_or_none()
         if not run:
             return
 
         # Load the pipeline definition
-        pipeline_stmt = select(Pipeline).where(Pipeline.id == pipeline_id)
+        pipeline_stmt = select(Pipeline).where(
+            Pipeline.id == pipeline_id, Pipeline.company_id == company_id
+        )
         p_res = await db.execute(pipeline_stmt)
         pipeline = p_res.scalar_one_or_none()
         if not pipeline or not pipeline.stages:
