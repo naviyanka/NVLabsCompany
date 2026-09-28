@@ -49,7 +49,7 @@ pytestmark = pytest.mark.employee_work
 
 MANAGER_TOOLS = {"manager_list_reports", "manager_employee_status", "manager_delegate_task",
                  "manager_task_evidence", "manager_rollup", "manager_list_hiring_requests",
-                 "manager_get_hiring_request"}
+                 "manager_get_hiring_request", "organization_get_snapshot"}
 REGISTRY = CLIRegistry(auto_detect=False)
 CLAUDE, AGY = REGISTRY.get_backend("claude"), REGISTRY.get_backend("agy")
 _SEQ = itertools.count(1000)

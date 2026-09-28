@@ -64,6 +64,7 @@ from nexus.api.routes.sso import router as sso_router
 from nexus.api.routes.tasks import router as tasks_router
 from nexus.api.routes.task_attempts import router as task_attempts_router
 from nexus.api.routes.managers import router as managers_router
+from nexus.api.routes.organization import router as organization_router
 from nexus.api.routes.telegram_bot import router as telegram_bot_router
 from nexus.api.routes.tools import router as tools_router
 from nexus.api.routes.portability import router as portability_router
@@ -288,6 +289,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     from nexus.runtime import task_attempts
     await task_attempts.start_worker()
 
+    # Organization snapshot: marks a company dirty on its change events; the
+    # scheduler tick regenerates it (nexus.services.org_snapshot).
+    from nexus.services import org_snapshot
+    await org_snapshot.start_listener()
+
     # The watchdog patrol rides the scheduler tick (see runtime/scheduler.py); it
     # detects stuck agents and silently stalled runs, and files a human decision
     # for stalls it cannot explain (Phase 1.4). Only shutdown needs wiring here.
@@ -307,6 +313,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Shutdown: stop orchestrator, stop scheduler, persist state, close connections
     # Drain task attempts, then chat turns; unfinished ones go back to the queue
     # for another worker.
+    await org_snapshot.stop_listener()
     await task_attempts.stop_worker()
     await stop_worker()
     await stop_orchestrator()
@@ -497,6 +504,7 @@ app.include_router(agents_router)
 app.include_router(tasks_router)
 app.include_router(task_attempts_router)
 app.include_router(managers_router)
+app.include_router(organization_router)
 app.include_router(goals_router)
 app.include_router(skills_router)
 app.include_router(tools_router)
