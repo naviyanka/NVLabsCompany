@@ -163,6 +163,8 @@ async def db(tmp_path, monkeypatch):
 
     monkeypatch.setattr(database, "async_session_factory", factory)
     monkeypatch.setattr(database, "_system_session_factory", factory)
+    # tenant_session() picks its dialect from the URL, not from this factory.
+    monkeypatch.setattr(settings, "database_url", str(engine.url))
     monkeypatch.setattr(settings, "repository_roots", str(tmp_path / "repos" / "{company_id}"))
     monkeypatch.setattr(settings, "worktree_root", str(tmp_path / "wt" / "{company_id}"))
     monkeypatch.setattr(
