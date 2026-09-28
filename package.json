@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "description": "NEXUS transforms multiple open-source agent frameworks into a unified system that operates as a real autonomous AI company. It combines organizational structure, durable agent execution, persistent identity, proactive behavior, and self-evolution into a single coherent platform.",
   "main": "index.js",
+  "engines": {
+    "node": "^22.22.2"
+  },
   "directories": {
     "doc": "docs",
     "test": "tests"
