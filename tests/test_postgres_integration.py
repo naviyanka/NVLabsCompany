@@ -104,11 +104,16 @@ async def system_user_postgres_url(migrated_postgres_url):
 
 @pytest.mark.asyncio
 async def test_postgres_audit_log_immutability(migrated_postgres_url):
-    """PostgreSQL trigger audit_log_append_only must reject UPDATE and DELETE."""
+    """PostgreSQL trigger audit_log_append_only must reject UPDATE and DELETE.
+
+    The row is written by the production writer, so it takes the next link of
+    its company's chain; the suite can run again on the same database.
+    """
+    from nexus.governance.audit_service import record_audit
+
     engine = create_async_engine(migrated_postgres_url)
     session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
-    test_id = uuid.uuid4()
     company_id = uuid.uuid4()
 
     async with session_factory() as session:
@@ -127,19 +132,18 @@ async def test_postgres_audit_log_immutability(migrated_postgres_url):
         session.add(company)
         await session.flush()
 
-        entry = AuditLog(
-            id=test_id,
-            company_id=company_id,
+        await record_audit(
+            company_id,
+            "security.test",
             actor_type="user",
             actor_id="admin-1",
-            action="security.test",
-            created_at=datetime.now(timezone.utc).replace(tzinfo=None),
-            sequence_number=1,
-            entry_hash="hash1",
-            previous_hash="genesis",
+            db=session,
+            raise_on_error=True,
         )
-        session.add(entry)
         await session.commit()
+        test_id = (
+            await session.execute(sa.select(AuditLog.id).where(AuditLog.company_id == company_id))
+        ).scalar_one()
 
     # Attempt to UPDATE immutable column
     async with session_factory() as session:
@@ -862,3 +866,181 @@ async def test_background_audit_write_carries_the_tenant(app_user_postgres_url, 
         assert rows == ["test.background_event"]
     finally:
         await engine.dispose()
+
+
+@pytest.fixture
+async def app_role(app_user_postgres_url, monkeypatch):
+    """The application's session factory, connected as the RLS-bound app role."""
+    from nexus.config import settings
+
+    monkeypatch.setattr(settings, "database_url", app_user_postgres_url)
+    engine = create_async_engine(app_user_postgres_url)
+    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    monkeypatch.setattr("nexus.database.async_session_factory", factory)
+    yield factory
+    await engine.dispose()
+
+
+async def _companies(factory, count: int) -> list[uuid.UUID]:
+    ids = [uuid.uuid4() for _ in range(count)]
+    async with factory() as session:
+        for cid in ids:
+            session.add(Company(id=cid, name=f"Tenant {cid}"))
+        await session.commit()
+    return ids
+
+
+async def test_concurrent_audit_writes_form_one_valid_chain_per_company(app_role):
+    """Racing writers of two companies, through both writer paths, as the app role.
+
+    Each company gets its own gap-free chain from genesis, both verify, no
+    sequence repeats within a company, no row is left unchained, and the
+    verify endpoint of one company reads only that company's chain.
+    """
+    import asyncio
+
+    from nexus.api.routes.audit import verify_audit_chain
+    from nexus.database import tenant_session
+    from nexus.governance.audit_service import record_audit
+
+    first, second = await _companies(app_role, 2)
+    per_company = 12
+
+    async def in_callers_session(cid: uuid.UUID, index: int) -> None:
+        async with tenant_session(cid) as db:
+            await record_audit(cid, f"caller.{index}", db=db, raise_on_error=True)
+            await db.commit()
+
+    writes = []
+    for index in range(per_company // 2):
+        for cid in (first, second):
+            writes.append(record_audit(cid, f"own.{index}", raise_on_error=True))
+            writes.append(in_callers_session(cid, index))
+    await asyncio.gather(*writes)
+
+    for cid, other in ((first, second), (second, first)):
+        async with tenant_session(cid) as db:
+            rows = (
+                await db.execute(sa.select(AuditLog).order_by(AuditLog.sequence_number))
+            ).scalars().all()
+            leaked = (
+                await db.execute(sa.select(AuditLog).where(AuditLog.company_id == other))
+            ).scalars().all()
+        assert leaked == []
+        assert {row.company_id for row in rows} == {cid}
+        assert [row.sequence_number for row in rows] == list(range(1, per_company + 1))
+        assert rows[0].previous_hash == "genesis"
+        assert await verify_audit_chain(cid, db=None) == {
+            "valid": True, "checked": per_company, "scope": "company",
+        }
+
+
+async def test_an_audit_write_without_a_tenant_is_refused_not_unchained(app_role):
+    """A row the app role may not insert is not retried into an unchained row."""
+    from nexus.governance.audit_service import record_audit
+
+    (cid,) = await _companies(app_role, 1)
+    async with app_role() as db:  # no tenant context
+        with pytest.raises(RuntimeError, match="audit log write failed"):
+            await record_audit(cid, "no.tenant", db=db, raise_on_error=True)
+        await db.rollback()
+    async with app_role() as db:
+        await db.execute(
+            sa.text("SELECT set_config('nexus.company_id', :cid, false)"), {"cid": str(cid)}
+        )
+        assert (await db.execute(sa.select(AuditLog))).scalars().all() == []
+
+
+async def test_alternating_tenants_on_one_pooled_connection(app_user_postgres_url, monkeypatch):
+    """tenant_session on a pool of one: every session sees only its own tenant."""
+    from nexus.config import settings
+    from nexus.database import tenant_session
+
+    monkeypatch.setattr(settings, "database_url", app_user_postgres_url)
+    engine = create_async_engine(app_user_postgres_url, pool_size=1, max_overflow=0)
+    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    monkeypatch.setattr("nexus.database.async_session_factory", factory)
+    try:
+        tenants = await _companies(factory, 2)
+        pids = set()
+        for round_ in range(3):
+            for cid in tenants:
+                async with tenant_session(cid) as db:
+                    db.add(Task(company_id=cid, title=f"{cid}:{round_}"))
+                    await db.commit()
+                    pids.add((await db.execute(sa.text("SELECT pg_backend_pid()"))).scalar_one())
+                    titles = (await db.execute(sa.select(Task.title))).scalars().all()
+                assert sorted(titles) == [f"{cid}:{r}" for r in range(round_ + 1)]
+        assert len(pids) == 1, "the scenario needs one shared connection"
+        async with factory() as db:
+            assert (await db.execute(sa.select(Task))).scalars().all() == []
+    finally:
+        await engine.dispose()
+
+
+async def test_a_session_without_a_tenant_cannot_mutate_tenant_rows(app_role):
+    from sqlalchemy.exc import DBAPIError
+
+    from nexus.database import tenant_session
+
+    (cid,) = await _companies(app_role, 1)
+    async with tenant_session(cid) as db:
+        task = Task(company_id=cid, title="protected")
+        db.add(task)
+        await db.commit()
+
+    async with app_role() as db:
+        updated = await db.execute(sa.update(Task).where(Task.id == task.id).values(title="x"))
+        deleted = await db.execute(sa.delete(Task).where(Task.id == task.id))
+        assert (updated.rowcount, deleted.rowcount) == (0, 0)
+        await db.commit()
+    async with app_role() as db:
+        db.add(Task(company_id=cid, title="smuggled"))
+        with pytest.raises(DBAPIError, match="row-level security"):
+            await db.commit()
+
+    async with tenant_session(cid) as db:
+        assert (await db.execute(sa.select(Task.title))).scalars().all() == ["protected"]
+
+
+@pytest.mark.parametrize(
+    "path, body, title",
+    [
+        (
+            "/api/v1/channels/slack/events",
+            {
+                "type": "event_callback",
+                "event": {"type": "app_mention", "text": "hi", "user": "U1"},
+            },
+            "Slack mention from U1",
+        ),
+        (
+            "/api/v1/channels/telegram/webhook",
+            {"message": {"text": "/task write the report", "chat": {"id": 7}}},
+            "write the report",
+        ),
+    ],
+)
+async def test_channel_webhooks_write_into_the_callers_company(
+    app_role, monkeypatch, path, body, title
+):
+    """Slack and Telegram tasks land in the caller's company under RLS."""
+    import httpx
+
+    from nexus.config import settings
+    from nexus.database import tenant_session
+    from nexus.main import app
+
+    caller, other = await _companies(app_role, 2)
+    monkeypatch.setattr(settings, "auth_enabled", False)  # X-Company-Id is the principal
+    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        response = await client.post(path, json=body, headers={"X-Company-Id": str(caller)})
+    assert response.status_code == 200
+
+    async with tenant_session(caller) as db:
+        assert (await db.execute(sa.select(Task.title))).scalars().all() == [title]
+    async with tenant_session(other) as db:
+        assert (await db.execute(sa.select(Task))).scalars().all() == []
