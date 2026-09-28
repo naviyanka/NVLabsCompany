@@ -166,9 +166,11 @@ jobs:
           PROXY_API: "true"
           NEXUS_API_URL: http://localhost:8000
       - name: Wait for proxy
+        # The real /api/v1/companies needs a principal and answers 401 even
+        # with AUTH_ENABLED=false; setup-required is public and reads the DB.
         run: |
           for i in $(seq 60); do
-            curl -sf http://localhost:3000/api/v1/companies >/dev/null && exit 0
+            curl -sf http://localhost:3000/api/v1/auth/setup-required >/dev/null && exit 0
             sleep 1
           done
           echo "proxy never came up"; exit 1
