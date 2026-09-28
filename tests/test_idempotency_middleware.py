@@ -1,11 +1,12 @@
 """Tests for IdempotencyMiddleware (F3)."""
 
+import asyncio
 import json
 import uuid
 import pytest
 from starlette.applications import Starlette
 from starlette.requests import Request
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, StreamingResponse
 from starlette.routing import Route
 from starlette.testclient import TestClient
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
@@ -25,8 +26,22 @@ async def sample_endpoint(request: Request):
     data = await request.json()
     return JSONResponse({"status": "created", "echo": data.get("name"), "count": call_count}, status_code=201)
 
+async def sample_stream(request: Request):
+    global call_count
+    call_count += 1
+
+    async def events():
+        await asyncio.sleep(0)  # a real stream awaits the DB before its first event
+        yield "data: one\n\n"
+        yield "data: two\n\n"
+
+    return StreamingResponse(events(), media_type="text/event-stream")
+
+
 routes = [
     Route("/api/v1/test/resource", sample_endpoint, methods=["POST"]),
+    Route("/api/v1/test/stream", sample_stream, methods=["POST"]),
+    Route("/api/v1/agents/{agent_id}/chat/stream", sample_stream, methods=["POST"]),
 ]
 
 class FakeAuthMiddleware:
@@ -95,3 +110,39 @@ def test_idempotency_key_reuse_with_different_body_is_rejected():
     resp2 = client.post("/api/v1/test/resource", headers=headers, json={"name": "Item B"})
     assert resp2.status_code == 422
     assert resp2.json()["code"] == "IDEMPOTENCY_KEY_REUSED"
+
+
+def test_streaming_response_with_key_is_not_cut_off():
+    """The client is still connected after the body: a stream must not see a disconnect."""
+    p = Principal(kind="user", company_id=uuid.uuid4(), role="admin", email="test@nvlabs.com")
+    app = create_app(p)
+
+    async def as_uvicorn(scope: Scope, receive: Receive, send: Send) -> None:
+        # uvicorn says ASGI 2.3, so StreamingResponse watches receive() for a
+        # disconnect (TestClient says 2.4, which skips that).
+        await app({**scope, "asgi": {"version": "3.0", "spec_version": "2.3"}}, receive, send)
+
+    client = TestClient(as_uvicorn)
+
+    resp = client.post("/api/v1/test/stream", headers={"Idempotency-Key": f"key-{uuid.uuid4()}"}, json={})
+    assert resp.status_code == 200
+    assert resp.text == "data: one\n\ndata: two\n\n"
+
+
+def test_chat_turn_routes_bypass_the_generic_cache():
+    """Chat turn POSTs dedupe on ChatTurn.idempotency_key and re-attach on retry.
+
+    The generic cache would answer a retry with 409 while the stream runs, or
+    with an empty cached body after it ends.
+    """
+    p = Principal(kind="user", company_id=uuid.uuid4(), role="admin", email="test@nvlabs.com")
+    client = TestClient(create_app(p))
+    headers = {"Idempotency-Key": f"key-{uuid.uuid4()}"}
+
+    first = client.post(f"/api/v1/agents/{uuid.uuid4()}/chat/stream", headers=headers, json={"prompt": "hi"})
+    retry = client.post(f"/api/v1/agents/{uuid.uuid4()}/chat/stream", headers=headers, json={"prompt": "hi"})
+    assert first.status_code == retry.status_code == 200
+    assert retry.text == "data: one\n\ndata: two\n\n"
+    assert "Idempotent-Replay" not in retry.headers
+    # The route saw both requests; its own turn table decides what is a duplicate.
+    assert call_count == 2

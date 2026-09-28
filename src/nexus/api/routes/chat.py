@@ -12,12 +12,12 @@ import json
 import logging
 import uuid
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Annotated, Any
 
-from fastapi import APIRouter, HTTPException, status
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, Header, HTTPException, Query, status
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from nexus.api.deps import CurrentCompanyId, CurrentPrincipal, DbSession
 from nexus.auth.principal import Principal
@@ -45,6 +45,9 @@ class ChatRequest(BaseModel):
 
     prompt: str = Field(..., min_length=1, max_length=10000)
     conversation_id: str | None = None
+    # Idempotency key (the Idempotency-Key header wins). A retry with the same
+    # key attaches to the turn it already created instead of starting another.
+    request_id: str | None = Field(default=None, min_length=1, max_length=255)
 
 
 class ChatMessage(BaseModel):
@@ -54,6 +57,14 @@ class ChatMessage(BaseModel):
     sender: str  # "user" or "agent"
     text: str
     timestamp: str
+    # Stable placement and provenance, so a client can merge a refetched
+    # transcript by ID and label each reply with what actually produced it.
+    seq: int | None = None
+    session_id: str | None = None
+    model_used: str | None = None
+    adapter_used: str | None = None
+    backend_used: str | None = None
+    partial: bool = False
 
 
 class ChatResponse(BaseModel):
@@ -63,6 +74,11 @@ class ChatResponse(BaseModel):
     history: list[ChatMessage]
     model_used: str | None = None
     tokens_used: int = 0
+    # Which adapter / CLI backend actually produced the reply (None when the
+    # adapter reports nothing, e.g. an API adapter has no CLI backend).
+    adapter_used: str | None = None
+    backend_used: str | None = None
+    execution_id: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -197,27 +213,50 @@ async def _persist_message_to_db(
 async def _load_history_from_db(
     db: "AsyncSession", agent_id: uuid.UUID, company_id: uuid.UUID, limit: int = 100
 ) -> list[dict[str, Any]]:
-    """Load chat history from DB into the in-memory cache."""
+    """The agent's last ``limit`` messages in conversation order, as ``_message_out``.
+
+    Sessions in the order they started, each in ``seq`` order (``seq`` is the
+    session's commit order; ``created_at`` is taken before the session lock
+    and can disagree with it under concurrent turns). A reply sits right after
+    its prompt even when a later prompt was stored first, as the model saw it
+    (``chat_turns.session_history``).
+    """
     try:
+        from nexus.models.agent_session import AgentSessionRecord
         from nexus.models.chat import ChatMessage as ChatMessageModel
+        from nexus.models.chat_turn import ChatTurn
+
+        started = func.coalesce(AgentSessionRecord.started_at, ChatMessageModel.created_at)
+        place = func.coalesce(ChatTurn.turn_seq, ChatMessageModel.seq)
         stmt = (
             select(ChatMessageModel)
-            .where(ChatMessageModel.agent_id == agent_id, ChatMessageModel.company_id == company_id)
-            .order_by(ChatMessageModel.created_at.desc())
+            .outerjoin(
+                AgentSessionRecord,
+                (AgentSessionRecord.id == ChatMessageModel.session_id)
+                & (AgentSessionRecord.company_id == company_id),
+            )
+            .outerjoin(
+                ChatTurn,
+                (ChatTurn.response_message_id == ChatMessageModel.id)
+                & (ChatTurn.company_id == company_id),
+            )
+            .where(
+                ChatMessageModel.agent_id == agent_id,
+                ChatMessageModel.company_id == company_id,
+                ChatMessageModel.kind == "message",
+            )
+            .order_by(
+                started.desc(),
+                place.desc(),
+                ChatMessageModel.seq.desc(),
+                ChatMessageModel.created_at.desc(),
+            )
             .limit(limit)
         )
         result = await db.execute(stmt)
-        records = list(reversed(list(result.scalars().all())))
-        return [
-            {
-                "id": str(r.id),
-                "sender": r.sender,
-                "text": r.text,
-                "timestamp": r.created_at.isoformat() if r.created_at else "",
-            }
-            for r in records
-        ]
+        return [_message_out(r) for r in reversed(list(result.scalars().all()))]
     except Exception:
+        logger.warning("could not load chat history for agent %s", agent_id, exc_info=True)
         return []
 
 
@@ -669,11 +708,21 @@ def _resolve_adapter_type(
     Connection is async, so callers use :func:`_resolve_connection` first; this
     stays sync so the existing resolution tests keep working.
     """
-    from nexus.adapters.uastl import resolve_provider
+    from nexus.adapters.uastl import ProviderResolutionError, resolve_provider
 
-    return resolve_provider(
-        agent.adapter_type or "anthropic", agent.model, connection=connection
-    )
+    try:
+        return resolve_provider(
+            agent.adapter_type or "anthropic",
+            agent.model,
+            connection=connection,
+            adapter_config=getattr(agent, "adapter_config", None),
+        )
+    except ProviderResolutionError as exc:
+        # Fail closed: never answer through a provider nobody configured.
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "ADAPTER_CONFIG_INVALID", "message": str(exc)},
+        ) from exc
 
 
 async def _reserve_budget(
@@ -849,6 +898,7 @@ async def _call_llm(
     principal: Principal | None = None,
     source: str | None = None,
     context: ExecutionContext | None = None,
+    execution: dict[str, Any] | None = None,
 ) -> tuple[str, str, int]:
     """Call the LLM adapter to get a real response.
 
@@ -872,6 +922,8 @@ async def _call_llm(
             activity. Used instead of ``principal``: its principal, role and
             source are kept and it is bound to ``agent``. It must be for the
             agent's company and name no other agent.
+        execution: Optional dict the caller passes to learn which adapter,
+            CLI backend and execution ID produced the reply.
 
     Returns:
         Tuple of (response_text, model_used, tokens_used).
@@ -881,8 +933,18 @@ async def _call_llm(
     from nexus.adapters.registry import AdapterRegistry
     from nexus.tools.context import ExecutionContext
 
+    if getattr(agent, "status", None) == "configuration_required":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "AGENT_CONFIGURATION_REQUIRED",
+                "message": f"{agent.name} must be configured before it can receive work",
+            },
+        )
     connection = await _resolve_connection(agent)
     registry_key, config = _resolve_adapter_type(agent, connection)
+    if execution is not None:
+        execution.update(adapter=registry_key, backend=config.get("backend"))
     try:
         if context is None:
             execution_context = ExecutionContext.for_call(
@@ -1058,7 +1120,9 @@ async def _call_llm(
             })
 
         # Execute the chat task with GenAI tracing and metrics
-        task_id = uuid.uuid4()
+        # A durable turn fixes its execution ID when it is claimed.
+        preset = (execution or {}).get("execution_id")
+        task_id = uuid.UUID(preset) if preset else uuid.uuid4()
         payload = {
             "objective": user_message,
             "messages": messages,
@@ -1087,6 +1151,12 @@ async def _call_llm(
 
             # Clean up session
             await adapter.terminate(session)
+
+            if execution is not None:
+                execution["execution_id"] = str(task_id)
+                for artifact in result.artifacts or []:
+                    if isinstance(artifact, dict) and artifact.get("type") == "cli_execution":
+                        execution["cli"] = artifact
 
             if result.success and result.output:
                 response_text = str(result.output)
@@ -1172,15 +1242,19 @@ async def _call_llm(
         )
 
     finally:
-        # Every exit above — success, provider error, in-character fallback —
-        # passes through here, so a hold is never left dangling for its TTL.
-        await _settle_budget(
-            reservation_id,
-            cost_cents=spend["cost_cents"],
-            input_tokens=spend["input"],
-            output_tokens=spend["output"],
-            model=spend["model"],
-        )
+        # Every exit above — success, provider error, in-character fallback,
+        # a cancelled request — passes through here, so a hold is never left
+        # dangling for its TTL. Shielded: a cancelled scope re-cancels awaits.
+        import anyio
+
+        with anyio.CancelScope(shield=True):
+            await _settle_budget(
+                reservation_id,
+                cost_cents=spend["cost_cents"],
+                input_tokens=spend["input"],
+                output_tokens=spend["output"],
+                model=spend["model"],
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -1226,6 +1300,7 @@ async def _record_chat_audit(
     model_used: str,
     tokens_used: int,
     session_id: uuid.UUID,
+    execution_id: str | None = None,
 ) -> None:
     """Audit both sides of a turn and record its spend on the in-process tracker."""
     from nexus.governance.audit_service import record_audit
@@ -1233,14 +1308,16 @@ async def _record_chat_audit(
     await record_audit(
         company_id, "chat.message_sent",
         actor_type="user", resource_type="agent", resource_id=str(agent_id),
-        details={"prompt_preview": prompt[:100], "model": model_used, "tokens": tokens_used, "session_id": str(session_id)},
+        details={"prompt_preview": prompt[:100], "model": model_used, "tokens": tokens_used, "session_id": str(session_id),
+                 "execution_id": execution_id},
         db=db,
     )
     await record_audit(
         company_id, "chat.response_generated",
         actor_type="agent", actor_id=str(agent_id),
         resource_type="chat",
-        details={"model": model_used, "tokens": tokens_used, "response_preview": response_text[:100], "session_id": str(session_id)},
+        details={"model": model_used, "tokens": tokens_used, "response_preview": response_text[:100], "session_id": str(session_id),
+                 "execution_id": execution_id},
         db=db,
     )
 
@@ -1253,147 +1330,244 @@ async def _record_chat_audit(
         _budget_tracker.record_spend(company_id, estimated_cost_cents)
 
 
-async def _stream_reply(
+async def _stream_llm(
     agent: Agent,
-    company_id: uuid.UUID,
     system_prompt: str,
     prompt: str,
     history: list[dict[str, Any]],
+    *,
     session_id: uuid.UUID,
-    principal: Principal | None = None,
-):
-    """Generate SSE events — uses true token streaming when adapter supports it.
+    context: ExecutionContext | None,
+    execution: dict[str, Any],
+    on_chunk: Any,
+) -> tuple[str, str, int]:
+    """One turn's model call, reporting text through ``on_chunk`` as it is generated.
 
-    The frontend expects Server-Sent Events with JSON payloads:
-      data: {"type": "chunk", "text": "partial..."}
-      data: {"type": "done", "message": {...}}
-      data: [DONE]
-
-    The reply is stored before or while the client sees it, so a client that
-    disconnects mid-stream does not lose it: a simulated stream stores the
-    whole reply before the first chunk, and a true stream that is cut off
-    stores what was generated so far with ``payload={"partial": true}``.
+    Token streaming for API adapters that support it; any other adapter goes
+    through ``_call_llm`` and its reply arrives whole. The caller (the turn
+    worker) stores the result either way.
     """
+    from dataclasses import replace
+
     import anyio
 
-    agent_id = agent.id
-    try:
-        from nexus.adapters.registry import AdapterRegistry
-        from nexus.tools.context import ExecutionContext
+    from nexus.adapters.registry import AdapterRegistry
+    from nexus.tools.context import ExecutionContext
 
-        connection = await _resolve_connection(agent)
-        registry_key, config = _resolve_adapter_type(agent, connection)
-        api_key = config.get("api_key", "")
-
-        # Try true token-level streaming for Anthropic/OpenAI adapters
-        use_true_streaming = (
-            registry_key in ("anthropic", "openai")
-            and api_key  # API key must be configured
+    registry_key, config = _resolve_adapter_type(agent, await _resolve_connection(agent))
+    adapter = None
+    if registry_key in ("anthropic", "openai") and config.get("api_key"):
+        adapter = AdapterRegistry().create_adapter(registry_key)
+    if adapter is None or not hasattr(adapter, "stream_execute"):
+        return await _call_llm(
+            agent, system_prompt, prompt, history, session_id=session_id, context=context,
+            execution=execution,
         )
 
-        if use_true_streaming:
-            # True streaming: yield tokens as they arrive from the API
-            adapter_registry = AdapterRegistry()
-            adapter = adapter_registry.create_adapter(registry_key)
+    execution.update(adapter=registry_key, backend=config.get("backend"))
+    model_used = config.get("model", "unknown")
+    session = await adapter.create_session(agent.id, {**config, "system_prompt": system_prompt})
+    if context is None:
+        session.context = ExecutionContext.for_agent(
+            agent, source="chat", session_id=session_id, adapter=registry_key, model=model_used
+        )
+    else:
+        session.context = replace(
+            context, agent_id=agent.id, session_id=session_id, adapter=registry_key,
+            model=model_used,
+        )
+    preset = execution.get("execution_id")
+    task_id = uuid.UUID(preset) if preset else uuid.uuid4()
+    execution["execution_id"] = str(task_id)
+    text = ""
+    try:
+        request = {"prompt": prompt, "max_tokens": 4096}
+        async for chunk in adapter.stream_execute(session, task_id, request):
+            text += chunk
+            on_chunk(chunk)
+    finally:
+        with anyio.CancelScope(shield=True):
+            await adapter.terminate(session)
+    return text, model_used, len(text.split()) * 2  # rough estimate
 
-            session_config = {**config, "system_prompt": system_prompt}
-            session = await adapter.create_session(agent.id, session_config)
-            session.context = ExecutionContext.for_call(
-                agent,
-                principal,
-                source="chat",
-                session_id=session_id,
-                adapter=registry_key,
-                model=config.get("model"),
+
+def _message_out(row: Any) -> dict[str, Any]:
+    """A stored chat message in the API's message shape."""
+    payload = row.payload or {}
+    execution = payload.get("execution") or {}
+    return {
+        "id": str(row.id),
+        "sender": row.sender,
+        "text": row.text,
+        "timestamp": row.created_at.isoformat() if row.created_at else "",
+        "seq": row.seq,
+        "session_id": str(row.session_id) if row.session_id else None,
+        "model_used": row.model_used,
+        "adapter_used": execution.get("adapter"),
+        "backend_used": execution.get("backend"),
+        "partial": bool(payload.get("partial")),
+    }
+
+
+async def _load_message(company_id: uuid.UUID, message_id: uuid.UUID | None) -> Any:
+    from nexus.database import tenant_session
+    from nexus.models.chat import ChatMessage as ChatMessageModel
+
+    if message_id is None:
+        return None
+    async with tenant_session(company_id) as db:
+        return (
+            await db.execute(
+                select(ChatMessageModel).where(
+                    ChatMessageModel.id == message_id, ChatMessageModel.company_id == company_id
+                )
             )
+        ).scalar_one_or_none()
 
-            task_id = uuid.uuid4()
-            payload = {"prompt": prompt, "max_tokens": 4096}
-            accumulated = ""
-            finished = False
 
+def turn_reply(turn: Any, reply: Any) -> dict[str, Any]:
+    """A finished turn as every entry point reports it (POST body, SSE done event)."""
+    return {
+        "session_id": str(turn.session_id),
+        "agent_id": str(turn.agent_id),
+        "turn_id": str(turn.id),
+        "status": turn.status,
+        "message": _message_out(reply) if reply is not None else None,
+        "message_id": str(reply.id) if reply is not None else None,
+        "seq": reply.seq if reply is not None else None,
+        "model_used": turn.model_used,
+        "tokens_used": (turn.result or {}).get("tokens_used", 0),
+        "adapter_used": turn.adapter_used,
+        "backend_used": turn.backend_used,
+        "execution_id": turn.execution_id,
+    }
+
+
+def _pending(turn: Any, retry_after: int | None) -> JSONResponse:
+    from nexus.runtime import chat_turns
+
+    retry_after = retry_after or 5
+    return JSONResponse(
+        status_code=status.HTTP_202_ACCEPTED,
+        content=chat_turns.turn_state(turn, retry_after),
+        headers={"Retry-After": str(retry_after)},
+    )
+
+
+async def run_turn(company_id: uuid.UUID, turn: Any) -> dict[str, Any] | JSONResponse:
+    """Wait for a queued turn: its reply once it completes, 202 while it is still pending.
+
+    The turn does not depend on this request. If the client goes away, or the
+    wait ends first, the turn still runs and is read back later by its ID.
+    """
+    from nexus.config import settings
+    from nexus.models.chat_turn import TERMINAL_STATUSES
+    from nexus.runtime import chat_turns
+
+    chat_turns.get_worker().wake(company_id)
+    turn, retry_after = await chat_turns.wait_for_turn(
+        company_id, turn.id, settings.chat_turn_wait_seconds
+    )
+    if turn.status not in TERMINAL_STATUSES:
+        return _pending(turn, retry_after)
+    chat_turns.raise_for_outcome(turn)
+    return turn_reply(turn, await _load_message(company_id, turn.response_message_id))
+
+
+def _sse(data: Any, event_id: int | None = None) -> str:
+    head = f"id: {event_id}\n" if event_id is not None else ""
+    return f"{head}data: {json.dumps(data, default=str)}\n\n"
+
+
+def _words(text: str) -> list[str]:
+    return [w if i == 0 else " " + w for i, w in enumerate(text.split(" "))] if text else []
+
+
+def resume_offset(last_event_id: str | None) -> int:
+    """Characters of the reply a reconnecting client already has (its Last-Event-ID)."""
+    try:
+        return max(0, int(last_event_id or 0))
+    except ValueError:
+        return 0
+
+
+async def turn_events(turn_id: uuid.UUID, company_id: uuid.UUID, offset: int = 0):
+    """SSE for one turn. Attaches to the turn and never executes it.
+
+    The frontend expects Server-Sent Events with JSON payloads:
+      data: {"type": "turn", "turn_id": ..., "status": "queued" | "running" | ...}
+      data: {"type": "chunk", "text": "partial..."}      (id: characters so far)
+      data: {"type": "done", "message": {...}, "turn_id": ..., "execution_id": ...}
+      data: [DONE]
+
+    A client that disconnects loses nothing: the turn keeps running and stores
+    its reply. Reconnecting (``GET .../turns/{id}/events``, or retrying the
+    POST with the same idempotency key) with ``Last-Event-ID`` resumes after
+    the text the client already has; the done event always carries the whole
+    stored reply. Chunks are live only while the turn runs in this process;
+    otherwise the reply is sent once the turn finishes.
+    """
+    from nexus.config import settings
+    from nexus.models.chat_turn import TERMINAL_STATUSES
+    from nexus.runtime import chat_turns
+
+    worker = chat_turns.get_worker()
+    queue, buffered = worker.subscribe(turn_id)
+    sent = offset
+    try:
+        turn = await chat_turns.get_turn(company_id, turn_id)
+        if turn is None:
+            yield _sse({"type": "error", "status": 404, "text": f"Turn {turn_id} not found"})
+            yield "data: [DONE]\n\n"
+            return
+        shown = turn.status
+        yield _sse({"type": "turn", **chat_turns.turn_state(turn, worker.saturated.get(turn_id))})
+        if len(buffered) > sent:
+            yield _sse({"type": "chunk", "text": buffered[sent:]}, len(buffered))
+            sent = len(buffered)
+        quiet = 0
+        while turn.status not in TERMINAL_STATUSES:
             try:
-                if hasattr(adapter, "stream_execute"):
-                    async for chunk in adapter.stream_execute(session, task_id, payload):
-                        accumulated += chunk
-                        event = json.dumps({"type": "chunk", "text": chunk})
-                        yield f"data: {event}\n\n"
-                else:
-                    # Fallback for adapters without stream_execute
-                    result = await adapter.execute_task(session, task_id, payload)
-                    accumulated = str(result.output) if result.output else ""
-                    # Emit word-by-word
-                    for i, word in enumerate(accumulated.split(" ")):
-                        chunk = word if i == 0 else " " + word
-                        event = json.dumps({"type": "chunk", "text": chunk})
-                        yield f"data: {event}\n\n"
-                        await asyncio.sleep(0.01)
-                finished = True
-            finally:
-                # A disconnect cancels the generator mid-stream; shield the
-                # cleanup so the adapter is released and the tokens already
-                # generated (and paid for) still reach the transcript.
-                with anyio.CancelScope(shield=True):
-                    await adapter.terminate(session)
-                    if not finished and accumulated:
-                        await _persist_from_generator(
-                            agent_id, company_id, "agent", accumulated,
-                            session_id=session_id, model_used=config.get("model", "unknown"),
-                            tokens_used=len(accumulated.split()) * 2,
-                            payload={"partial": True},
-                        )
+                item = await asyncio.wait_for(queue.get(), settings.chat_turn_poll_seconds)
+            except TimeoutError:
+                item = None
+                quiet += 1
+                if quiet % 15 == 0:
+                    yield ": keepalive\n\n"
+            if item is not None:
+                quiet = 0
+                sent += len(item)
+                yield _sse({"type": "chunk", "text": item}, sent)
+                continue
+            turn = await chat_turns.get_turn(company_id, turn_id)
+            if turn.status != shown and turn.status not in TERMINAL_STATUSES:
+                shown = turn.status
+                yield _sse({"type": "turn", **chat_turns.turn_state(turn)})
 
-            # Store response and emit done
-            model_used = config.get("model", "unknown")
-            tokens_used = len(accumulated.split()) * 2  # Rough estimate
-            agent_msg = _add_message(str(agent_id), "agent", accumulated)
-            await _persist_from_generator(
-                agent_id, company_id, "agent", accumulated,
-                session_id=session_id, model_used=model_used, tokens_used=tokens_used,
-            )
-            done_event = json.dumps({
-                "type": "done",
-                "message": agent_msg,
-                "model_used": model_used,
-                "tokens_used": tokens_used,
-            })
-            yield f"data: {done_event}\n\n"
-            yield "data: [DONE]\n\n"
+        reply = await _load_message(company_id, turn.response_message_id)
+        if turn.status == "completed" and reply is not None:
+            for chunk in _words(reply.text[sent:]):
+                sent += len(chunk)
+                yield _sse({"type": "chunk", "text": chunk}, sent)
+            yield _sse({"type": "done", **turn_reply(turn, reply)}, sent)
         else:
-            # Fallback: call LLM, then emit word-by-word (simulated streaming)
-            response_text, model_used, tokens_used = await _call_llm(
-                agent, system_prompt, prompt, history, session_id=session_id, principal=principal
-            )
-            # Stored before the first chunk, so a disconnect cannot lose it.
-            agent_msg = _add_message(str(agent_id), "agent", response_text)
-            await _persist_from_generator(
-                agent_id, company_id, "agent", response_text,
-                session_id=session_id, model_used=model_used, tokens_used=tokens_used,
-            )
-
-            words = response_text.split(" ")
-            for i, word in enumerate(words):
-                chunk = word if i == 0 else " " + word
-                event = json.dumps({"type": "chunk", "text": chunk})
-                yield f"data: {event}\n\n"
-                await asyncio.sleep(0.02)
-            done_event = json.dumps({
-                "type": "done",
-                "message": agent_msg,
-                "model_used": model_used,
-                "tokens_used": tokens_used,
+            result = turn.result or {}
+            detail = result.get("detail")
+            if not isinstance(detail, dict):
+                detail = {"message": detail or turn.error_message}
+            code = {"cancelled": "TURN_CANCELLED", "expired": "TURN_EXPIRED"}.get(turn.status)
+            yield _sse({
+                **detail,
+                **({"code": code} if code else {}),
+                "text": detail.get("message") or f"The turn was {turn.status}",
+                **turn_reply(turn, reply),
+                "type": "error",
+                "status": result.get("http_status", 409),
+                "turn_status": turn.status,
             })
-            yield f"data: {done_event}\n\n"
-            yield "data: [DONE]\n\n"
-
-    except Exception as e:
-        logger.error("Streaming chat error for agent %s: %s", agent_id, e)
-        error_event = json.dumps({
-            "type": "error",
-            "text": f"Chat error: {type(e).__name__}: {e}",
-        })
-        yield f"data: {error_event}\n\n"
         yield "data: [DONE]\n\n"
+    finally:
+        worker.unsubscribe(turn_id, queue)
 
 
 def _sse_response(events) -> StreamingResponse:
@@ -1429,6 +1603,31 @@ async def get_chat_history(
     return history
 
 
+@router.get("/api/v1/agents/{agent_id}/chat/turns")
+async def list_agent_chat_turns(
+    agent_id: uuid.UUID,
+    db: DbSession,
+    company_id: CurrentCompanyId,
+    pending: bool = Query(default=False, description="Only turns that are not finished"),
+    limit: int = Query(default=50, ge=1, le=200),
+) -> list[dict[str, Any]]:
+    """The agent's latest chat turns, oldest first.
+
+    A refreshed page calls this with ``pending=true`` to show which prompts
+    are still queued or running and to re-attach to them
+    (``GET /api/v1/agent-sessions/{session_id}/turns/{turn_id}/events``).
+    """
+    from nexus.models.chat_turn import TERMINAL_STATUSES, ChatTurn
+    from nexus.runtime import chat_turns
+
+    await _load_agent(db, agent_id, company_id)
+    stmt = select(ChatTurn).where(ChatTurn.company_id == company_id, ChatTurn.agent_id == agent_id)
+    if pending:
+        stmt = stmt.where(ChatTurn.status.not_in(TERMINAL_STATUSES))
+    rows = (await db.execute(stmt.order_by(ChatTurn.queued_at.desc()).limit(limit))).scalars()
+    return [chat_turns.turn_state(t) for t in reversed(list(rows))]
+
+
 @router.post("/api/v1/agents/{agent_id}/chat", response_model=ChatResponse)
 async def chat_with_agent(
     agent_id: uuid.UUID,
@@ -1436,56 +1635,44 @@ async def chat_with_agent(
     db: DbSession,
     company_id: CurrentCompanyId,
     principal: CurrentPrincipal = None,
+    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key", max_length=255)] = None,
 ) -> Any:
     """Send a message to an agent and get a real LLM-powered response.
 
-    Flow:
-    1. Load agent from DB (role, capabilities, soul, adapter config)
-    2. Build system prompt from Soul/persona data
-    3. Get conversation history for context
-    4. Call the LLM adapter (Anthropic/OpenAI/Ollama/CLI)
-    5. Store conversation (in the agent's default session) and return response
+    The prompt and a queued turn are stored in the agent's default session in
+    one transaction, and the turn worker runs it on the session's pinned
+    adapter/model (see ``nexus.runtime.chat_turns``). The request waits for
+    the reply up to ``chat_turn_wait_seconds``. If the turn is still queued or
+    running then, or the tenant is at its concurrency limit, the answer is 202
+    with the ``turn_id``, and the turn completes on its own.
 
-    The turn runs on the default session's pinned adapter/model; if that pin
-    is no longer usable the request fails with 409 before anything is stored.
+    An unusable pin, an agent that needs configuration or an unresolvable
+    adapter fails with 409/422 before anything is stored.
     """
-    from nexus.services.session_service import (
-        begin_session_turn,
-        get_or_create_default_session,
-    )
+    from nexus.runtime import chat_turns
+    from nexus.services.session_service import get_or_create_default_session
 
     agent = await _load_agent(db, agent_id, company_id)
     # The legacy per-agent conversation lives in the agent's default session.
     session = await get_or_create_default_session(db, agent)
-    agent = await begin_session_turn(db, session, agent)
-    system_prompt = await _build_chat_prompt(db, agent, company_id, body.prompt)
-
-    # Get history for context (TTL-fresh across workers)
-    history = await _get_history_fresh(db, str(agent_id), company_id)
-
-    # Store user message
-    _add_message(str(agent_id), "user", body.prompt)
-    await _persist_message_to_db(db, agent_id, company_id, "user", body.prompt, session_id=session.id)
-
-    # Call LLM
-    response_text, model_used, tokens_used = await _call_llm(
-        agent, system_prompt, body.prompt, history, session_id=session.id, principal=principal
+    queued = await chat_turns.create_turn(
+        db, session, agent, body.prompt, principal=principal,
+        idempotency_key=idempotency_key or body.request_id,
     )
+    result = await run_turn(company_id, queued.turn)
+    if isinstance(result, JSONResponse):
+        return result
 
-    # Store agent response
-    agent_msg = _add_message(str(agent_id), "agent", response_text)
-    await _persist_message_to_db(
-        db, agent_id, company_id, "agent", response_text,
-        session_id=session.id, model_used=model_used, tokens_used=tokens_used,
-    )
-
-    await _record_chat_audit(db, company_id, agent_id, body.prompt, response_text, model_used, tokens_used, session.id)
-
+    history = await _load_history_from_db(db, agent_id, company_id)
+    _conversations[str(agent_id)] = history
     return ChatResponse(
-        message=ChatMessage(**agent_msg),
-        history=[ChatMessage(**m) for m in _get_history(str(agent_id))],
-        model_used=model_used,
-        tokens_used=tokens_used,
+        message=ChatMessage(**result["message"]),
+        history=[ChatMessage(**m) for m in history],
+        model_used=result["model_used"],
+        tokens_used=result["tokens_used"],
+        adapter_used=result["adapter_used"],
+        backend_used=result["backend_used"],
+        execution_id=result["execution_id"],
     )
 
 
@@ -1507,32 +1694,22 @@ async def chat_with_agent_stream(
     db: DbSession,
     company_id: CurrentCompanyId,
     principal: CurrentPrincipal = None,
+    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key", max_length=255)] = None,
+    last_event_id: Annotated[str | None, Header(alias="Last-Event-ID")] = None,
 ) -> StreamingResponse:
-    """Send a message to an agent and stream the response via SSE (see ``_stream_reply``).
+    """Send a message to an agent and stream the turn via SSE (see ``turn_events``).
 
-    Runs on the default session's pin exactly like ``chat_with_agent``.
+    Stores the turn exactly like ``chat_with_agent``. The stream only attaches
+    to it, so a dropped connection neither stops nor repeats the turn.
     """
-    from nexus.services.session_service import (
-        begin_session_turn,
-        get_or_create_default_session,
-    )
+    from nexus.runtime import chat_turns
+    from nexus.services.session_service import get_or_create_default_session
 
     agent = await _load_agent(db, agent_id, company_id)
     session = await get_or_create_default_session(db, agent)
-    agent = await begin_session_turn(db, session, agent)
-    system_prompt = await _build_chat_prompt(db, agent, company_id, body.prompt)
-
-    # Get history for context (TTL-fresh across workers)
-    history = await _get_history_fresh(db, str(agent_id), company_id)
-
-    # Store user message. The request session is still open here, so this one
-    # can go through it; the agent's reply is written later from the generator.
-    _add_message(str(agent_id), "user", body.prompt)
-    await _persist_message_to_db(db, agent_id, company_id, "user", body.prompt, session_id=session.id)
-    # Commit now: the generator writes the reply on its own connection and
-    # bumps the same session row, which must not wait on this transaction.
-    await db.commit()
-
-    return _sse_response(
-        _stream_reply(agent, company_id, system_prompt, body.prompt, history, session.id, principal)
+    queued = await chat_turns.create_turn(
+        db, session, agent, body.prompt, principal=principal,
+        idempotency_key=idempotency_key or body.request_id, stream=True,
     )
+    chat_turns.get_worker().wake(company_id)
+    return _sse_response(turn_events(queued.turn.id, company_id, resume_offset(last_event_id)))

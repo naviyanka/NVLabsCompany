@@ -1,0 +1,4 @@
+[REAL] PASS claude (7.0s, exit=0, exe=claude.EXE, version=2.1.283 (Claude Code)): {"employee":"claude","result":55}
+exit=0
+[REAL] PASS agy (26.0s, exit=0, exe=agy.EXE, version=1.2.12): {"employee":"agy","result":55}
+exit=0

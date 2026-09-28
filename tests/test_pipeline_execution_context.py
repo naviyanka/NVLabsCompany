@@ -215,6 +215,21 @@ async def test_a_manager_run_hands_temporal_the_managers_context(world, monkeypa
         f"user:{world.manager_id}", "manager", "pipeline", None)
 
 
+async def test_the_run_is_committed_before_its_workflow_starts(world, monkeypatch) -> None:
+    """A stage may run before the request ends; it must see the run, not wait on its lock."""
+    seen: list[list[tuple]] = []
+
+    class Watching(FakeTemporal):
+        async def start_workflow(self, fn, arg, *, id, task_queue):
+            seen.append(await runs(world))
+            return await super().start_workflow(fn, arg, id=id, task_queue=task_queue)
+
+    use_temporal(monkeypatch, Watching())
+
+    assert (await start(world, "manager")).status_code == 201
+    assert seen == [[(world.acme, "running")]]
+
+
 @pytest.mark.parametrize(("who", "status"), [("viewer", 403), ("outsider", 404)])
 async def test_a_refused_caller_starts_no_workflow(world, monkeypatch, who, status) -> None:
     temporal = FakeTemporal()

@@ -1,0 +1,27 @@
+18:57:52.646 GET :8000 events turn=6a57e475-1ce1-4632-a202-e7042e386eae {'Last-Event-ID': '1900'}
+18:57:52.676 HTTP 200
+18:57:52.679 id=None {"type": "turn", "turn_id": "6a57e475-1ce1-4632-a202-e7042e386eae", "session_id": "e86e3629-63b4-4b6a-a401-352b736ad251", "agent_id": "81747b39-d56f-4b05-839d-c2d68d806920", "execution_id": "c1d7dfda-99cf-4af7-b069-70638670c843", "status": "completed", "seq": 7, "prompt_message_id": "f167ce63-7b43-498b-93ca-1151b2e6575c", "attempt_count": 1, "error_code": null, "cancel_requested": false, "retry_after": null}
+18:57:52.682 id=1900 {"type": "chunk", "len": 0}
+18:57:52.682 id=1906 {"type": "chunk", "len": 6}
+18:57:52.682 id=1913 {"type": "chunk", "len": 7}
+18:57:52.682 id=1920 {"type": "chunk", "len": 7}
+18:57:52.682 id=1933 {"type": "chunk", "len": 13}
+18:57:52.682 id=1939 {"type": "chunk", "len": 6}
+18:57:52.682 id=1945 {"type": "chunk", "len": 6}
+18:57:52.682 id=1951 {"type": "chunk", "len": 6}
+18:57:52.682 id=1954 {"type": "chunk", "len": 3}
+18:57:52.682 id=1959 {"type": "chunk", "len": 5}
+18:57:52.682 id=1963 {"type": "chunk", "len": 4}
+18:57:52.682 id=1967 {"type": "chunk", "len": 4}
+18:57:52.682 id=1970 {"type": "chunk", "len": 3}
+18:57:52.682 id=1981 {"type": "chunk", "len": 11}
+18:57:52.682 id=1986 {"type": "chunk", "len": 5}
+18:57:52.682 id=1992 {"type": "chunk", "len": 6}
+18:57:52.683 id=1997 {"type": "chunk", "len": 5}
+18:57:52.683 id=2004 {"type": "chunk", "len": 7}
+18:57:52.683 id=2009 {"type": "chunk", "len": 5}
+18:57:52.683 id=2018 {"type": "chunk", "len": 9}
+18:57:52.683 id=2024 {"type": "chunk", "len": 6}
+18:57:52.683 id=2029 {"type": "chunk", "len": 5}
+18:57:52.683 id=2036 {"type": "chunk", "len": 7}
+18:57:52.683 id=2036 {"type": "done", "session_id": "e86e3629-63b4-4b6a-a401-352b736ad251", "agent_id": "81747b39-d56f-4b05-839d-c2d68d806920", "turn_id": "6a57e475-1ce1-4632-a202-e7042e386eae", "status": "completed", "message": {"id": "cd6e7f64-69f5-4f00-a31e-0857da14b54e", "sender": "agent", "text": "1. Keep each test focused on one behavior so failures point ...", "timestamp": "2026-09-27T18:57:44.987331", "seq": 8, "session_id": "e86e3629-63b4-4b6a-a401-352b736ad251", "model_used": "", "adapter_used": "cli", "backend_used": "claude", "partial": false}, "message_id": "cd6e7f64-69f5-4f00-a31e-0857da14b54e", "seq": 8, "model_used": "", "tokens_used": 0, "adapter_used": "cli", "backend_used": "claude", "execution_id": "c1d7dfda-99cf-4af7-b069-70638670c843"}

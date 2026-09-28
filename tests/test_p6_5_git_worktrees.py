@@ -17,7 +17,7 @@ import shutil
 import subprocess
 import uuid
 from pathlib import Path
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from sqlalchemy import event
@@ -700,9 +700,10 @@ async def test_session_workspace_refuses_a_git_file_pointing_at_another_reposito
 
 
 def _fake_process():
-    process = AsyncMock()
-    process.communicate = AsyncMock(return_value=(b"done\n", b""))
-    process.returncode = 0
+    process = MagicMock(pid=None, returncode=0, stdin=None)
+    process.stdout.read = AsyncMock(side_effect=[b"done\n", b""])
+    process.stderr.read = AsyncMock(side_effect=[b"", b""])
+    process.wait = AsyncMock(return_value=0)
     return process
 
 

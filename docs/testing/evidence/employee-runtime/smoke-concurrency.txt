@@ -1,0 +1,4 @@
+[REAL] PASS claude (6.7s, exit=0, exe=claude.EXE, version=2.1.283 (Claude Code)): {"employee":"claude","result":55}
+[REAL] PASS agy (24.3s, exit=0, exe=agy.EXE, version=1.2.12): {"employee":"agy","result":55}
+[REAL] overlap PASS: 6.5s shared
+exit=0

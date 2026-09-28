@@ -4,6 +4,7 @@ Provides mock database sessions (AsyncMock), sample company/agent/task fixtures,
 and pytest-asyncio configuration.
 """
 
+import os
 import uuid
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -15,6 +16,16 @@ import pytest
 def pytest_configure(config):
     """Configure pytest-asyncio to auto mode."""
     config.addinivalue_line("markers", "asyncio: mark test as async")
+
+
+def pytest_collection_modifyitems(config, items):
+    """Real-CLI tests call installed CLIs (and their paid accounts): opt-in only."""
+    if os.environ.get("NEXUS_REAL_CLI") == "1":
+        return
+    skip = pytest.mark.skip(reason="real_cli: set NEXUS_REAL_CLI=1 to run against installed CLIs")
+    for item in items:
+        if "real_cli" in item.keywords:
+            item.add_marker(skip)
 
 
 @pytest.fixture

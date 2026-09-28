@@ -29,6 +29,7 @@ from nexus.models.connection import LLMConnection
 from nexus.models.governance import AuditLog
 from nexus.models.tool_invocation import ToolInvocation
 from nexus.models.workspace import Workspace
+from nexus.runtime import chat_turns
 from nexus.runtime.checkpoint import ExecutionCheckpoint
 from nexus.services import session_service
 
@@ -43,6 +44,8 @@ async def db_factory(tmp_path, monkeypatch):
     import nexus.database as database
 
     monkeypatch.setattr(database, "async_session_factory", factory)
+    # tenant_session() picks its dialect from the URL, not from this factory.
+    monkeypatch.setattr("nexus.config.settings.database_url", str(engine.url))
 
     async def fake_prompt(db, agent, company_id, prompt):
         return "system"
@@ -391,7 +394,7 @@ async def _drain(resp, stop_after=None):
 
 @pytest.fixture
 def simulated_stream(monkeypatch):
-    """Route _stream_reply through its call-then-chunk path (no provider key)."""
+    """Route _stream_llm through its whole-reply path (no provider key)."""
     monkeypatch.setattr(
         chat_routes, "_resolve_adapter_type", lambda agent, conn=None: ("openai", {})
     )
@@ -550,7 +553,8 @@ class TestStreaming:
                 out.id, api.SessionMessageRequest(prompt="hi"), tenants["acme"], db
             )
             # The user message is committed before a single event is streamed.
-            assert [(m.seq, m.sender) for m in await _messages(db_factory)] == [(1, "user")]
+            first = (await _messages(db_factory))[0]
+            assert (first.seq, first.sender, first.text) == (1, "user", "hi")
             events = await _drain(resp)
         assert any('"type": "done"' in e for e in events)
         assert events[-1] == "data: [DONE]\n\n"
@@ -571,15 +575,17 @@ class TestStreaming:
                 out.id, api.SessionMessageRequest(prompt="hi"), tenants["acme"], db
             )
             await _drain(resp, stop_after=1)
+        # The turn belongs to the worker, not to the connection.
+        await chat_turns.drain()
         rows = await _messages(db_factory)
         assert [(m.seq, m.text, m.payload) for m in rows] == [
             (1, "hi", None),
             (2, "echo: hi", None),
         ]
 
-    async def test_true_stream_disconnect_keeps_partial(
-        self, db_factory, tenants, monkeypatch
-    ) -> None:
+    @staticmethod
+    def _fake_stream(monkeypatch, gate=None):
+        """A token-streaming adapter; with ``gate``, it holds after the first chunk."""
         from nexus.adapters.registry import AdapterRegistry
 
         class FakeAdapter:
@@ -590,7 +596,10 @@ class TestStreaming:
                 return type("Session", (), {})()
 
             async def stream_execute(self, session, task_id, payload):
-                for chunk in ("a", " b", " c"):
+                yield "a"
+                if gate is not None:
+                    await gate.wait()
+                for chunk in (" b", " c"):
                     yield chunk
 
             async def terminate(self, session):
@@ -604,7 +613,12 @@ class TestStreaming:
         monkeypatch.setattr(
             AdapterRegistry, "create_adapter", lambda self, key, config=None: FakeAdapter()
         )
+        return FakeAdapter
 
+    async def test_true_stream_disconnect_keeps_full_reply(
+        self, db_factory, tenants, monkeypatch
+    ) -> None:
+        adapter = self._fake_stream(monkeypatch)
         cut, full = await _create(db_factory, tenants), await _create(db_factory, tenants)
         async with db_factory() as db:
             resp = await api.stream_message(
@@ -615,17 +629,59 @@ class TestStreaming:
             resp = await api.stream_message(
                 full.id, api.SessionMessageRequest(prompt="hi"), tenants["acme"], db
             )
-            await _drain(resp)
+            events = await _drain(resp)
+        await chat_turns.drain()
 
-        assert FakeAdapter.terminated == 2
-        assert [(m.seq, m.text, m.payload) for m in await _messages(db_factory, cut.id)] == [
-            (1, "hi", None),
-            (2, "a", {"partial": True}),
-        ]
-        assert [(m.seq, m.text, m.payload) for m in await _messages(db_factory, full.id)] == [
-            (1, "hi", None),
-            (2, "a b c", None),
-        ]
+        assert adapter.terminated == 2
+        # Closing the stream is not a cancel: both turns store the whole reply.
+        for session_id in (cut.id, full.id):
+            rows = await _messages(db_factory, session_id)
+            assert [(m.seq, m.text) for m in rows] == [(1, "hi"), (2, "a b c")]
+            assert rows[1].payload["execution"]["adapter"] == "anthropic"
+            assert "partial" not in rows[1].payload
+        assert events[0].startswith("data: ") and '"type": "turn"' in events[0]
+        done = next(e for e in events if '"type": "done"' in e)
+        assert f'"message_id": "{rows[1].id}"' in done
+
+    async def test_cancel_mid_stream_keeps_partial(
+        self, db_factory, tenants, monkeypatch
+    ) -> None:
+        import asyncio
+
+        gate = asyncio.Event()
+        adapter = self._fake_stream(monkeypatch, gate)
+        out = await _create(db_factory, tenants)
+        acme = tenants["acme"]
+        async with db_factory() as db:
+            resp = await api.stream_message(out.id, api.SessionMessageRequest(prompt="hi"), acme, db)
+        body, events = resp.body_iterator, []
+        async for event in body:
+            events.append(event)
+            if '"type": "chunk"' in event:
+                break
+        turn_id = uuid.UUID(events[0].split('"turn_id": "')[1].split('"')[0])
+        async with db_factory() as db:
+            state = await api.cancel_turn(out.id, turn_id, acme, db)
+        assert state["cancel_requested"] is True
+        events += [e async for e in body]
+        await chat_turns.drain()
+        gate.set()
+
+        error = next(e for e in events if '"type": "error"' in e)
+        assert '"code": "TURN_CANCELLED"' in error and '"turn_status": "cancelled"' in error
+        assert adapter.terminated == 1
+        rows = await _messages(db_factory, out.id)
+        assert [(m.seq, m.text) for m in rows] == [(1, "hi"), (2, "a")]
+        assert rows[1].payload["partial"] is True
+        async with db_factory() as db:
+            turn = await chat_turns.get_turn(acme, turn_id)
+            assert (turn.status, turn.response_message_id) == ("cancelled", rows[1].id)
+            actions = (
+                await db.execute(
+                    select(AuditLog.action).where(AuditLog.resource_id == str(turn_id))
+                )
+            ).scalars().all()
+        assert {"chat.turn_cancel_requested", "chat.turn_cancelled"} <= set(actions)
 
 
 class TestConcurrency:

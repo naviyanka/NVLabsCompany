@@ -10,13 +10,20 @@ import os
 import re
 import shutil
 import signal
+import subprocess
 import tempfile
+import time
 import uuid
 from pathlib import Path
 from typing import Any
 
 from nexus.adapters.base import BaseAdapter
-from nexus.adapters.cli_registry import CLIBackendInfo, CLIRegistry
+from nexus.adapters.cli_registry import (
+    CLIBackendInfo,
+    CLIRegistry,
+    _redact_home,
+    get_cli_registry,
+)
 from nexus.governance.fs_roots import is_link, pinned_directory
 from nexus.runtime.adapter import AgentSession, AgentStatus, TaskResult
 
@@ -35,6 +42,14 @@ def _resolves_to_itself(path: Path) -> bool:
 
 # Default timeout for CLI execution (10 minutes)
 DEFAULT_TIMEOUT_SECONDS = 600
+
+# Most bytes kept from each of stdout and stderr; the rest is drained and dropped
+# so a chatty CLI cannot exhaust server memory.
+MAX_OUTPUT_BYTES = 1_000_000
+
+# cmd.exe re-parses the command line of a .cmd/.bat shim, so no quoting makes
+# these characters safe in its arguments.
+_CMD_SHIM_UNSAFE = frozenset('"%&|<>^!\r\n')
 
 # Regex patterns for parsing CLI output
 TOKEN_PATTERN = re.compile(
@@ -60,6 +75,27 @@ _SENSITIVE_ENV_PATTERNS: list[str] = [
     "GITLAB_TOKEN",
     "NEXUS_SECRET_KEY",
 ]
+
+
+_SECRET_NAME_MARKERS = ("KEY", "TOKEN", "SECRET", "PASSWORD", "PASSWD", "CREDENTIAL")
+
+
+def _filter_env(env: dict[str, str], allow: list[str] | None) -> dict[str, str]:
+    """Drop secret-looking variables unless the backend allowlists them.
+
+    Name-based so a new ``*_API_KEY`` or ``*_TOKEN`` is stripped without
+    anyone remembering to list it; the explicit list covers the rest.
+    """
+    allowed = {v.upper() for v in allow or []}
+    return {
+        k: v
+        for k, v in env.items()
+        if k.upper() in allowed
+        or not (
+            k.upper() in _SENSITIVE_ENV_PATTERNS
+            or any(m in k.upper() for m in _SECRET_NAME_MARKERS)
+        )
+    }
 
 
 class CLIAdapter(BaseAdapter):
@@ -106,6 +142,11 @@ class CLIAdapter(BaseAdapter):
                 f"Supported backends: "
                 + ", ".join(b.id for b in self._registry.get_all())
             )
+        if not backend.execution_supported:
+            raise ValueError(
+                f"CLI backend '{backend.id}' is catalog-only: its non-interactive "
+                "invocation is not verified"
+            )
 
     async def _do_create_session(self, session: AgentSession) -> None:
         """Initialize CLI session with workspace isolation.
@@ -149,7 +190,10 @@ class CLIAdapter(BaseAdapter):
         session.metadata["timeout"] = session.config.get(
             "timeout", DEFAULT_TIMEOUT_SECONDS
         )
-        session.metadata["backend"] = session.config["backend"]
+        # Canonical ID, so an alias ("antigravity") runs the backend it names.
+        session.metadata["backend"] = self._registry.resolve_backend_id(
+            session.config["backend"]
+        )
         session.metadata["is_interactive"] = session.config.get(
             "interactive", False
         )
@@ -172,7 +216,11 @@ class CLIAdapter(BaseAdapter):
         timeout = payload.get(
             "timeout", session.metadata.get("timeout", DEFAULT_TIMEOUT_SECONDS)
         )
-        extra_args = payload.get("args", [])
+        # Stored employee args first, then per-request args; both are guarded.
+        extra_args = [
+            *(session.config.get("extra_args") or []),
+            *(payload.get("args") or []),
+        ]
         from nexus.tools.access import check_cli_args
 
         refused = check_cli_args(extra_args)
@@ -190,29 +238,74 @@ class CLIAdapter(BaseAdapter):
                 success=False,
                 error="Session has no workspace",
             )
-        backend_id = session.metadata.get("backend", "claude")
-
+        # No default: a session without a known, executable backend fails
+        # closed rather than running some other CLI.
+        backend_id = session.metadata.get("backend")
         backend = self._registry.get_backend(backend_id)
-        if backend is None:
+        if backend is None or not backend.execution_supported:
             return TaskResult(
                 task_id=task_id,
                 agent_id=session.agent_id,
                 success=False,
-                error=f"Backend '{backend_id}' not found in registry.",
+                error=f"CLI backend '{backend_id}' is unknown or not executable.",
             )
+        backend_id = backend.id
 
-        # Build command arguments
-        cmd = self._build_args(backend, prompt, extra_args)
+        # The executable comes only from the catalog's command candidates on
+        # PATH, never from config or the request. Unresolved falls back to the
+        # bare command, which fails below as "not found".
+        executable = get_cli_registry().get_path(backend_id) or backend.command
+        model = str(session.config.get("model") or "")
+
+        system_prompt = (
+            payload.get("system_prompt", "")
+            or session.config.get("system_prompt", "")
+        )
+        if system_prompt and not backend.instruction_path:
+            # No instruction file this CLI reads natively: carry it inline.
+            prompt = f"{system_prompt}\n\n---\n\n{prompt}"
+
+        cmd = self._build_args(
+            backend, prompt, extra_args, model=model, executable=executable
+        )
+        if executable.lower().endswith((".cmd", ".bat")) and any(
+            _CMD_SHIM_UNSAFE & set(arg) for arg in cmd[1:]
+        ):
+            return TaskResult(
+                task_id=task_id,
+                agent_id=session.agent_id,
+                success=False,
+                error=(
+                    f"{backend.name} is installed as a Windows batch shim, which "
+                    "cannot safely receive quotes, %, &, |, <, >, ^, ! or line "
+                    "breaks in arguments. Install a native executable or rephrase."
+                ),
+            )
+        stdin_prompt = backend.prompt_transport == "stdin"
+        # Off the event loop: a cache miss spawns `<cli> --version`, which
+        # would otherwise stall every other chat while it runs.
+        version = await asyncio.to_thread(get_cli_registry().probe_version, backend_id)
+        started = time.monotonic()
+
+        def _meta(exit_code: int | None) -> dict[str, Any]:
+            return {
+                "type": "cli_execution",
+                "adapter": "cli",
+                "backend": backend_id,
+                "model": model,
+                "executable": _redact_home(executable),
+                "version": version,
+                "duration_ms": int((time.monotonic() - started) * 1000),
+                "exit_code": exit_code,
+                "session_id": session.session_id,
+                "task_id": str(task_id),
+            }
 
         # Track files before execution for artifact detection
         pre_files = self._snapshot_workspace(workspace)
 
         # Write instruction file if backend supports it and a system prompt is available
         instruction_file_path: str | None = None
-        system_prompt = (
-            payload.get("system_prompt", "")
-            or session.config.get("system_prompt", "")
-        )
         if backend.instruction_path and system_prompt:
             instruction_file_path = self._write_instruction_file(
                 workspace, backend, system_prompt, session
@@ -226,26 +319,33 @@ class CLIAdapter(BaseAdapter):
         for var in backend.delete_env:
             env.pop(var, None)
         # Strip sensitive variables unless the backend explicitly needs them
-        allowed = set(getattr(backend, "allow_env", None) or [])
-        for sensitive_var in _SENSITIVE_ENV_PATTERNS:
-            if sensitive_var not in allowed:
-                env.pop(sensitive_var, None)
+        from nexus.config import settings
 
+        operator_allow = [v.strip() for v in settings.cli_env_allowlist.split(",") if v.strip()]
+        env = _filter_env(env, [*(backend.allow_env or []), *operator_allow])
+
+        is_interactive = session.metadata.get("is_interactive", False)
+        process: asyncio.subprocess.Process | None = None
         try:
-            # Spawn subprocess
+            # Argument array, never a shell. The child leads its own process
+            # group on POSIX so a timeout can kill everything it spawned.
             process = await asyncio.create_subprocess_exec(
                 *cmd,
-                stdin=asyncio.subprocess.PIPE,
+                stdin=(
+                    asyncio.subprocess.PIPE
+                    if stdin_prompt or is_interactive
+                    else asyncio.subprocess.DEVNULL
+                ),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=workspace,
                 env=env,
+                start_new_session=os.name != "nt",
             )
             self._processes[session.session_id] = process
 
             # For interactive sessions, spawn _stream_output as a background
             # task so output is surfaced in real time while the process runs.
-            is_interactive = session.metadata.get("is_interactive", False)
             stream_task: asyncio.Task | None = None  # type: ignore[type-arg]
             if is_interactive and process.stdout is not None:
                 stream_task = asyncio.create_task(
@@ -254,8 +354,9 @@ class CLIAdapter(BaseAdapter):
                 # Mark session as awaiting input once streaming starts
                 session.metadata["awaiting_input"] = True
 
-            # Send prompt via stdin if backend supports it
-            stdin_data = prompt.encode("utf-8") if backend.supports_stdin else None
+            # The prompt goes on stdin only for stdin-transport backends; the
+            # others already carry it in argv.
+            stdin_data = prompt.encode("utf-8") if stdin_prompt else None
 
             try:
                 if is_interactive:
@@ -273,12 +374,12 @@ class CLIAdapter(BaseAdapter):
                     # Read any stderr that was buffered
                     stderr_bytes = b""
                     if process.stderr is not None:
-                        stderr_bytes = await process.stderr.read()
+                        stderr_bytes = await _read_bounded(process.stderr)
                     # stdout was consumed by _stream_output
                     stdout_bytes = b""
                 else:
                     stdout_bytes, stderr_bytes = await asyncio.wait_for(
-                        process.communicate(input=stdin_data),
+                        _communicate_bounded(process, stdin_data),
                         timeout=timeout,
                     )
             except asyncio.TimeoutError:
@@ -289,30 +390,18 @@ class CLIAdapter(BaseAdapter):
                         await stream_task
                     except asyncio.CancelledError:
                         pass
-                # Graceful termination: SIGTERM then SIGKILL
                 self._add_log(
                     session.session_id,
-                    f"Timeout after {timeout}s, sending SIGTERM",
+                    f"Timeout after {timeout}s, terminating process tree",
                 )
-                try:
-                    process.send_signal(signal.SIGTERM)
-                    try:
-                        await asyncio.wait_for(process.wait(), timeout=5.0)
-                    except asyncio.TimeoutError:
-                        self._add_log(
-                            session.session_id,
-                            "SIGTERM timeout, sending SIGKILL",
-                        )
-                        process.kill()
-                        await process.wait()
-                except ProcessLookupError:
-                    pass
+                await _terminate_tree(process)
 
                 return TaskResult(
                     task_id=task_id,
                     agent_id=session.agent_id,
                     success=False,
                     error=f"Execution timed out after {timeout} seconds",
+                    artifacts=[_meta(None)],
                     logs=[f"Timeout: {timeout}s exceeded"],
                 )
 
@@ -343,15 +432,21 @@ class CLIAdapter(BaseAdapter):
                     "type": "stderr",
                     "content": stderr_text[:5000],
                 })
+            artifacts.append(_meta(return_code))
 
             success = return_code == 0
+            error = None
+            if not success:
+                error = _redact_home(stderr_text.strip()[:4000]) or (
+                    f"{backend.name} exited with code {return_code}"
+                )
 
             return TaskResult(
                 task_id=task_id,
                 agent_id=session.agent_id,
                 success=success,
                 output=stdout_text,
-                error=stderr_text if not success else None,
+                error=error,
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
                 cost_cents=cost_cents,
@@ -359,10 +454,17 @@ class CLIAdapter(BaseAdapter):
                 logs=[
                     f"Backend: {backend_id}",
                     f"Exit code: {return_code}",
-                    f"Workspace: {workspace}",
+                    f"Workspace: {_redact_home(workspace)}",
                 ],
             )
 
+        except asyncio.CancelledError:
+            # The request was cancelled (client disconnect or Cancel): stop
+            # this turn's own process tree and nothing else. Shielded so the
+            # kill finishes even if the cancellation is delivered again.
+            if process is not None and process.returncode is None:
+                await asyncio.shield(asyncio.ensure_future(_terminate_tree(process)))
+            raise
         except FileNotFoundError:
             return TaskResult(
                 task_id=task_id,
@@ -378,7 +480,7 @@ class CLIAdapter(BaseAdapter):
                 task_id=task_id,
                 agent_id=session.agent_id,
                 success=False,
-                error=f"Subprocess error: {type(e).__name__}: {e}",
+                error=_redact_home(f"Subprocess error: {type(e).__name__}: {e}"),
             )
         finally:
             self._processes.pop(session.session_id, None)
@@ -496,15 +598,7 @@ class CLIAdapter(BaseAdapter):
         """
         process = self._processes.pop(session.session_id, None)
         if process and process.returncode is None:
-            try:
-                process.send_signal(signal.SIGTERM)
-                try:
-                    await asyncio.wait_for(process.wait(), timeout=5.0)
-                except asyncio.TimeoutError:
-                    process.kill()
-                    await process.wait()
-            except ProcessLookupError:
-                pass
+            await _terminate_tree(process)
 
         self._conversation_history.pop(session.session_id, None)
 
@@ -538,6 +632,8 @@ class CLIAdapter(BaseAdapter):
         backend: CLIBackendInfo,
         prompt: str,
         extra_args: list[str] | None = None,
+        model: str = "",
+        executable: str | None = None,
     ) -> list[str]:
         """Build the CLI command arguments for the given backend.
 
@@ -550,11 +646,13 @@ class CLIAdapter(BaseAdapter):
             backend: The backend info describing the CLI tool.
             prompt: The task prompt to pass.
             extra_args: Additional CLI arguments to append.
+            model: Model name, passed only through the backend's model flag.
+            executable: Resolved executable path; defaults to the bare command.
 
         Returns:
             List of command-line arguments ready for subprocess exec.
         """
-        return backend.build_args(prompt, extra_args)
+        return backend.build_args(prompt, extra_args, model=model, executable=executable)
 
     def _write_instruction_file(
         self,
@@ -736,3 +834,63 @@ class CLIAdapter(BaseAdapter):
             except (ValueError, IndexError):
                 pass
         return 0
+
+
+async def _read_bounded(stream: Any, limit: int = MAX_OUTPUT_BYTES) -> bytes:
+    """Read a stream to EOF, keeping at most ``limit`` bytes."""
+    kept = bytearray()
+    while True:
+        chunk = await stream.read(65536)
+        if not chunk:
+            return bytes(kept)
+        if len(kept) < limit:
+            kept.extend(chunk[: limit - len(kept)])
+
+
+async def _communicate_bounded(
+    process: asyncio.subprocess.Process, stdin_data: bytes | None
+) -> tuple[bytes, bytes]:
+    """``communicate()`` with each output stream capped at MAX_OUTPUT_BYTES."""
+    if stdin_data is not None and process.stdin is not None:
+        try:
+            process.stdin.write(stdin_data)
+            await process.stdin.drain()
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+        process.stdin.close()
+    stdout, stderr, _ = await asyncio.gather(
+        _read_bounded(process.stdout), _read_bounded(process.stderr), process.wait()
+    )
+    return stdout, stderr
+
+
+async def _terminate_tree(process: asyncio.subprocess.Process) -> None:
+    """Stop a CLI and everything it spawned: SIGTERM, then SIGKILL.
+
+    Windows uses ``taskkill /T /F``; POSIX signals the process group the child
+    leads (it was started with ``start_new_session``).
+    """
+    pid = process.pid
+    try:
+        if isinstance(pid, int) and os.name == "nt":
+            await asyncio.to_thread(
+                subprocess.run,
+                ["taskkill", "/T", "/F", "/PID", str(pid)],
+                capture_output=True,
+                timeout=10,
+                check=False,
+            )
+        elif isinstance(pid, int):
+            os.killpg(pid, signal.SIGTERM)
+        else:
+            process.send_signal(signal.SIGTERM)
+        try:
+            await asyncio.wait_for(process.wait(), timeout=5.0)
+        except asyncio.TimeoutError:
+            if isinstance(pid, int) and os.name != "nt":
+                os.killpg(pid, signal.SIGKILL)
+            else:
+                process.kill()
+            await process.wait()
+    except (ProcessLookupError, PermissionError, OSError, subprocess.SubprocessError):
+        pass

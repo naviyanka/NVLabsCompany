@@ -5,7 +5,7 @@ from datetime import timezone, datetime
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, computed_field
 from sqlalchemy import select, update
 
 from nexus.api.deps import CurrentCompanyId, CurrentPrincipal, DbSession, require_permission
@@ -13,6 +13,36 @@ from nexus.models.agent import Agent
 from nexus.realtime.publish import TOPOLOGY_CHANNEL, publish_event
 
 router = APIRouter(tags=["agents"])
+
+# Statuses that must never be routed work: the employee exists but its
+# execution backend is not usable yet.
+CONFIGURATION_REQUIRED = "configuration_required"
+
+
+def normalize_cli_employee(
+    adapter_type: str,
+    adapter_config: dict[str, Any] | None,
+    model: str | None,
+    allow_unavailable: bool = False,
+) -> tuple[dict[str, Any], str | None]:
+    """Validate a ``cli`` employee config; shared by every hiring path.
+
+    Returns ``(canonical_adapter_config, status_override)``. The override is
+    ``configuration_required`` when an unavailable backend was explicitly
+    allowed, else None. Raises HTTP 422 ``{"code", "message"}`` on refusal.
+    """
+    from nexus.adapters.cli_registry import CLIConfigError, validate_employee_cli_config
+
+    try:
+        config, ready = validate_employee_cli_config(
+            adapter_type, adapter_config, model, allow_unavailable=allow_unavailable
+        )
+    except CLIConfigError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={"code": exc.code, "message": exc.message},
+        ) from exc
+    return config, (None if ready else CONFIGURATION_REQUIRED)
 
 
 class AgentCreate(BaseModel):
@@ -32,6 +62,9 @@ class AgentCreate(BaseModel):
     soul_description: str | None = None
     budget_monthly_cents: int = 0
     autonomy_policy: dict[str, Any] | None = None
+    # Hire a CLI employee whose backend is not installed; it is stored as
+    # ``configuration_required`` and receives no work until fixed.
+    allow_unavailable_backend: bool = False
 
 
 class AgentUpdate(BaseModel):
@@ -64,6 +97,8 @@ class AgentResponse(BaseModel):
     manager_id: uuid.UUID | None = None
     status: str
     adapter_type: str
+    # Read only to derive cli_backend; other adapters may hold connection details.
+    adapter_config: dict[str, Any] | None = Field(default=None, exclude=True)
     model: str | None = None
     capabilities: list[str] | None = None
     responsibilities: str | None = None
@@ -76,6 +111,20 @@ class AgentResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
 
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def cli_backend(self) -> str | None:
+        """Canonical CLI backend this employee executes through, if any."""
+        from nexus.adapters.uastl import ProviderResolutionError, resolve_provider
+
+        try:
+            key, config = resolve_provider(
+                self.adapter_type, adapter_config=self.adapter_config
+            )
+        except ProviderResolutionError:
+            return None
+        return config.get("backend") if key == "cli" else None
+
 
 @router.post(
     "/api/v1/companies/{company_id}/agents",
@@ -86,6 +135,13 @@ async def create_agent(
     company_id: uuid.UUID, body: AgentCreate, db: DbSession
 ) -> Any:
     """Create a new agent in a company."""
+    adapter_config, model = body.adapter_config, body.model
+    status_override = None
+    if body.adapter_type == "cli":
+        adapter_config, status_override = normalize_cli_employee(
+            body.adapter_type, adapter_config, model, body.allow_unavailable_backend
+        )
+        model = (model or "").strip()
     agent = Agent(
         company_id=company_id,
         name=body.name,
@@ -94,8 +150,8 @@ async def create_agent(
         department_id=body.department_id,
         team_id=body.team_id,
         adapter_type=body.adapter_type,
-        adapter_config=body.adapter_config,
-        model=body.model,
+        adapter_config=adapter_config,
+        model=model,
         capabilities=body.capabilities,
         responsibilities=body.responsibilities,
         objectives=body.objectives,
@@ -103,6 +159,8 @@ async def create_agent(
         budget_monthly_cents=body.budget_monthly_cents,
         autonomy_policy=body.autonomy_policy,
     )
+    if status_override:
+        agent.status = status_override
     db.add(agent)
     await db.flush()
 
@@ -111,7 +169,14 @@ async def create_agent(
     await record_audit(
         company_id, "agent.created",
         actor_type="user", resource_type="agent", resource_id=str(agent.id),
-        details={"name": agent.name, "role": agent.role, "adapter_type": agent.adapter_type},
+        details={
+            "name": agent.name,
+            "role": agent.role,
+            "adapter_type": agent.adapter_type,
+            "cli_backend": (adapter_config or {}).get("backend") if body.adapter_type == "cli" else None,
+            "model": agent.model,
+            "status": agent.status,
+        },
         db=db,
     )
 
@@ -171,6 +236,47 @@ async def get_agent_company_scoped(
     return agent
 
 
+async def _guard_cli_update(
+    db: Any, agent_id: uuid.UUID, company_id: uuid.UUID, updates: dict[str, Any]
+) -> None:
+    """Re-validate a CLI employee whose adapter, model or status is changing.
+
+    Stops an update from producing an unvalidated ``cli`` agent, or from
+    marking a ``configuration_required`` employee routable while its backend
+    is still unusable.
+    """
+    if not {"adapter_type", "model", "status"} & set(updates):
+        return
+    agent = (
+        await db.execute(select(Agent).where(Agent.id == agent_id, Agent.company_id == company_id))
+    ).scalar_one_or_none()
+    if agent is None:
+        return  # the caller reports 404
+    adapter_type = updates.get("adapter_type", agent.adapter_type)
+    if adapter_type != "cli":
+        return
+    new_status = updates.get("status", agent.status)
+    stored = (agent.adapter_config or {}) if agent.adapter_type == "cli" else {}
+    # Only these keys reach the runtime; a legacy "cli" agent without a
+    # backend always ran Claude Code.
+    base = {
+        k: stored[k]
+        for k in ("backend", "interactive", "use_worktree", "autonomy_mode", "extra_args")
+        if k in stored
+    }
+    if agent.adapter_type == "cli":
+        base.setdefault("backend", "claude")
+    config, status_override = normalize_cli_employee(
+        adapter_type,
+        base,
+        updates.get("model", agent.model),
+        allow_unavailable=new_status == CONFIGURATION_REQUIRED,
+    )
+    updates["adapter_config"] = config
+    if status_override is None and new_status == CONFIGURATION_REQUIRED and "status" not in updates:
+        updates["status"] = "idle"  # backend became usable
+
+
 @router.put("/api/v1/agents/{agent_id}", response_model=AgentResponse)
 async def update_agent(
     agent_id: uuid.UUID, body: AgentUpdate, db: DbSession, company_id: CurrentCompanyId
@@ -182,6 +288,7 @@ async def update_agent(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="No fields to update",
         )
+    await _guard_cli_update(db, agent_id, company_id, updates)
     updates["updated_at"] = datetime.now(timezone.utc)
     stmt = update(Agent).where(Agent.id == agent_id, Agent.company_id == company_id).values(**updates)
     await db.execute(stmt)
@@ -218,6 +325,7 @@ async def patch_agent_company_scoped(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="No fields to update",
         )
+    await _guard_cli_update(db, agent_id, company_id, updates)
     updates["updated_at"] = datetime.now(timezone.utc)
     stmt = update(Agent).where(Agent.id == agent_id, Agent.company_id == company_id).values(**updates)
     await db.execute(stmt)

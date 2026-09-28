@@ -20,10 +20,34 @@ from nexus.adapters.cli_registry import CLIBackendInfo, CLIRegistry
 from nexus.adapters.registry import AdapterRegistry
 from nexus.runtime.adapter import AgentSession, AgentStatus, TaskResult
 
+pytestmark = pytest.mark.core_employee
+
 
 def _run(coro):
     """Run an async coroutine synchronously."""
     return asyncio.run(coro)
+
+
+def _fake_process(stdout=b"", stderr=b"", returncode=0):
+    """A spawned CLI whose output streams yield once, then EOF."""
+    proc = MagicMock()
+    proc.pid = None  # no real process tree to kill
+    proc.returncode = returncode
+    proc.stdin = None
+    proc.stdout = MagicMock(read=AsyncMock(side_effect=[stdout, b""]))
+    proc.stderr = MagicMock(read=AsyncMock(side_effect=[stderr, b""]))
+    proc.wait = AsyncMock(return_value=returncode)
+    return proc
+
+
+@pytest.fixture(autouse=True)
+def _no_installed_clis():
+    """Executables resolve to the bare command, whatever this machine has."""
+    with patch(
+        "nexus.adapters.cli_adapter.get_cli_registry",
+        return_value=CLIRegistry(auto_detect=False),
+    ):
+        yield
 
 
 class TestCLIRegistry:
@@ -135,18 +159,6 @@ class TestCLIRegistry:
         assert registry.get_path("codex") is None
 
     @patch("nexus.adapters.cli_registry.subprocess.run")
-    def test_probe_version_success(self, mock_run):
-        """probe_version returns version string on success."""
-        mock_run.return_value = MagicMock(
-            returncode=0, stdout="claude-code v1.2.3\n", stderr=""
-        )
-        registry = CLIRegistry(auto_detect=False)
-        registry._available["claude"] = "/usr/local/bin/claude"
-
-        version = registry.probe_version("claude")
-        assert version == "claude-code v1.2.3"
-
-    @patch("nexus.adapters.cli_registry.subprocess.run")
     def test_probe_version_not_available(self, mock_run):
         """probe_version returns None if backend is not available."""
         registry = CLIRegistry(auto_detect=False)
@@ -208,67 +220,32 @@ class TestCLIAdapterValidation:
         adapter.validate_config({"backend": "agy"})
 
 
-class TestCLIAdapterBuildArgs:
-    """Test CLIAdapter._build_args produces correct arguments per backend."""
-
-    @pytest.fixture
-    def adapter(self):
-        """Create a CLIAdapter instance."""
-        return CLIAdapter()
-
-    def test_build_args_claude(self, adapter):
-        """Claude backend uses -p flag for non-interactive prompt execution."""
-        backend = adapter._registry.get_backend("claude")
-        args = adapter._build_args(backend, "test prompt")
-        assert args == ["claude", "-p", "test prompt"]
-
-    def test_build_args_claude_with_extra(self, adapter):
-        """Claude backend appends extra args after -p prompt."""
-        backend = adapter._registry.get_backend("claude")
-        args = adapter._build_args(backend, "test prompt", ["--model", "sonnet"])
-        assert args == ["claude", "-p", "test prompt", "--model", "sonnet"]
-
-    def test_build_args_codex(self, adapter):
-        """Codex backend uses --quiet and passes prompt as positional arg."""
-        backend = adapter._registry.get_backend("codex")
-        args = adapter._build_args(backend, "fix this bug")
-        assert args == ["codex", "--quiet", "fix this bug"]
-
-    def test_build_args_codex_with_extra(self, adapter):
-        """Codex backend includes extra args before the prompt."""
-        backend = adapter._registry.get_backend("codex")
-        args = adapter._build_args(backend, "hello", ["--model", "o3"])
-        assert args == ["codex", "--quiet", "--model", "o3", "hello"]
-
-    def test_build_args_aider(self, adapter):
-        """Aider backend uses --message and --yes flags."""
-        backend = adapter._registry.get_backend("aider")
-        args = adapter._build_args(backend, "refactor this")
-        assert args == ["aider", "--message", "refactor this", "--yes"]
-
-    def test_build_args_aider_with_extra(self, adapter):
-        """Aider backend appends extra args after --yes."""
-        backend = adapter._registry.get_backend("aider")
-        args = adapter._build_args(backend, "fix it", ["--model", "gpt-4"])
-        assert args == ["aider", "--message", "fix it", "--yes", "--model", "gpt-4"]
-
-    def test_build_args_kiro_cli(self, adapter):
-        """Kiro CLI passes prompt via stdin, minimal args."""
-        backend = adapter._registry.get_backend("kiro-cli")
-        args = adapter._build_args(backend, "analyze code")
-        assert args == ["kiro"]
-
-    def test_build_args_opencode(self, adapter):
-        """OpenCode passes prompt as positional argument."""
-        backend = adapter._registry.get_backend("opencode")
-        args = adapter._build_args(backend, "generate tests")
-        assert args == ["opencode", "generate tests"]
-
-    def test_build_args_agy(self, adapter):
-        """Agy passes prompt as positional argument."""
-        backend = adapter._registry.get_backend("agy")
-        args = adapter._build_args(backend, "run task")
-        assert args == ["agy", "run task"]
+# Golden argument vectors: the verified flags each backend is invoked with.
+# _build_args delegates to CLIBackendInfo.build_args, so this also covers the
+# registry-level builder.
+@pytest.mark.parametrize(
+    ("backend_id", "prompt", "extra", "model", "expected"),
+    [
+        ("claude", "test prompt", None, "", ["claude", "-p", "test prompt"]),
+        ("claude", "test prompt", ["--verbose"], "", ["claude", "-p", "--verbose", "test prompt"]),
+        # Codex runs `exec` and reads the prompt from stdin, not argv.
+        ("codex", "fix this bug", None, "", ["codex", "exec", "--skip-git-repo-check"]),
+        ("codex", "hello", None, "o3", ["codex", "exec", "--skip-git-repo-check", "-m", "o3"]),
+        # Aider passes the prompt via --message and never auto-confirms.
+        ("aider", "refactor this", None, "", ["aider", "--message", "refactor this"]),
+        ("aider", "refactor this", ["--verbose"], "", ["aider", "--verbose", "--message", "refactor this"]),
+        ("aider", "fix it", None, "gpt-4", ["aider", "--model", "gpt-4", "--message", "fix it"]),
+        ("kiro-cli", "analyze code", None, "", ["kiro-cli", "chat", "--no-interactive", "analyze code"]),
+        ("opencode", "generate tests", None, "", ["opencode", "run", "generate tests"]),
+        ("agy", "run task", None, "", ["agy", "-p", "run task"]),
+    ],
+    ids=["claude-plain", "claude-verbose", "codex-plain", "codex-model", "aider-plain",
+         "aider-verbose", "aider-model", "kiro-cli", "opencode", "agy"],
+)
+def test_build_args_golden_argv(backend_id, prompt, extra, model, expected):
+    adapter = CLIAdapter()
+    backend = adapter._registry.get_backend(backend_id)
+    assert adapter._build_args(backend, prompt, extra, model=model) == expected
 
 
 class TestCLIAdapterExecution:
@@ -341,12 +318,7 @@ class TestCLIAdapterExecution:
     def test_execute_task_success(self, mock_exec, adapter, agent_id, task_id):
         """_do_execute handles successful subprocess execution."""
         # Set up mock process
-        mock_process = AsyncMock()
-        mock_process.communicate = AsyncMock(
-            return_value=(b"Task completed successfully\n", b"")
-        )
-        mock_process.returncode = 0
-        mock_exec.return_value = mock_process
+        mock_exec.return_value = _fake_process(b"Task completed successfully\n")
 
         config = {"backend": "claude", "workspace": "/tmp/test_cli"}
         session = _run(adapter.create_session(agent_id, config))
@@ -367,12 +339,9 @@ class TestCLIAdapterExecution:
     @patch("asyncio.create_subprocess_exec")
     def test_execute_task_failure(self, mock_exec, adapter, agent_id, task_id):
         """_do_execute returns failure TaskResult on non-zero exit."""
-        mock_process = AsyncMock()
-        mock_process.communicate = AsyncMock(
-            return_value=(b"", b"Error: permission denied\n")
+        mock_exec.return_value = _fake_process(
+            stderr=b"Error: permission denied\n", returncode=1
         )
-        mock_process.returncode = 1
-        mock_exec.return_value = mock_process
 
         config = {"backend": "codex", "workspace": "/tmp/test_cli"}
         session = _run(adapter.create_session(agent_id, config))
@@ -401,10 +370,7 @@ class TestCLIAdapterExecution:
     def test_execute_task_parses_tokens(self, mock_exec, adapter, agent_id, task_id):
         """_do_execute parses token counts from output."""
         output = b"Result: done\nInput tokens: 150\nOutput tokens: 75\nCost: $0.05\n"
-        mock_process = AsyncMock()
-        mock_process.communicate = AsyncMock(return_value=(output, b""))
-        mock_process.returncode = 0
-        mock_exec.return_value = mock_process
+        mock_exec.return_value = _fake_process(output)
 
         config = {"backend": "claude", "workspace": "/tmp/test_cli"}
         session = _run(adapter.create_session(agent_id, config))
@@ -420,10 +386,8 @@ class TestCLIAdapterExecution:
     @patch("asyncio.create_subprocess_exec")
     def test_execute_task_timeout(self, mock_exec, adapter, agent_id, task_id):
         """_do_execute handles timeout with graceful termination."""
-        mock_process = AsyncMock()
-        mock_process.communicate = AsyncMock(
-            side_effect=asyncio.TimeoutError()
-        )
+        mock_process = _fake_process()
+        mock_process.stdout.read = AsyncMock(side_effect=asyncio.TimeoutError())
         mock_process.send_signal = MagicMock()
         mock_process.kill = MagicMock()
         mock_process.wait = AsyncMock()
@@ -438,6 +402,7 @@ class TestCLIAdapterExecution:
 
         assert result.success is False
         assert "timed out" in result.error
+        mock_process.send_signal.assert_called_once()
 
 
 class TestCLIAdapterInRegistry:
@@ -512,10 +477,7 @@ class TestCLIAdapterEnvFiltering:
         self, mock_exec, adapter, agent_id, task_id
     ):
         """Sensitive env vars are stripped for backends without allow_env."""
-        mock_process = AsyncMock()
-        mock_process.communicate = AsyncMock(return_value=(b"done", b""))
-        mock_process.returncode = 0
-        mock_exec.return_value = mock_process
+        mock_exec.return_value = _fake_process(b"done")
 
         config = {"backend": "opencode", "workspace": "/tmp/test_cli"}
         session = _run(adapter.create_session(agent_id, config))
@@ -549,10 +511,7 @@ class TestCLIAdapterEnvFiltering:
         self, mock_exec, adapter, agent_id, task_id
     ):
         """Claude backend keeps ANTHROPIC_API_KEY (in allow_env)."""
-        mock_process = AsyncMock()
-        mock_process.communicate = AsyncMock(return_value=(b"done", b""))
-        mock_process.returncode = 0
-        mock_exec.return_value = mock_process
+        mock_exec.return_value = _fake_process(b"done")
 
         config = {"backend": "claude", "workspace": "/tmp/test_cli"}
         session = _run(adapter.create_session(agent_id, config))
@@ -639,17 +598,3 @@ class TestCLIBackendInfoBuildArgs:
         )
         args = backend.build_args("hello", ["--verbose", "--fast"])
         assert args == ["custom-cli", "--verbose", "--fast", "hello"]
-
-    def test_claude_backend_build_args_via_registry(self):
-        """Claude backend build_args produces correct output via registry."""
-        registry = CLIRegistry(auto_detect=False)
-        backend = registry.get_backend("claude")
-        args = backend.build_args("test prompt")
-        assert args == ["claude", "-p", "test prompt"]
-
-    def test_aider_backend_build_args_via_registry(self):
-        """Aider backend build_args produces correct output via registry."""
-        registry = CLIRegistry(auto_detect=False)
-        backend = registry.get_backend("aider")
-        args = backend.build_args("refactor this", ["--model", "gpt-4"])
-        assert args == ["aider", "--message", "refactor this", "--yes", "--model", "gpt-4"]

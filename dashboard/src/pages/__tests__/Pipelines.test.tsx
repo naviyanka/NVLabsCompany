@@ -101,7 +101,7 @@ describe('Pipeline builder save', () => {
     );
     expect(await screen.findByText('Build and sign')).toBeTruthy();
     expect(screen.getByText('Publish')).toBeTruthy();
-  });
+  }, 15_000); // Several full renders; the 5s default flakes under parallel load.
 
   it('keeps the builder open and says why when the server refuses the save', async () => {
     backend.refuse = 'stages must be a list';

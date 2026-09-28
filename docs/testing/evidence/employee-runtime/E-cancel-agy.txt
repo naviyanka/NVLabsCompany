@@ -1,0 +1,5 @@
+19:00:53.177 POST :8001 agy idempotency-key=ec294803-d88a-48d6-a180-79d32d3d734b
+19:00:53.208 HTTP 200
+19:00:53.213 id=None {"type": "turn", "turn_id": "5273f597-1ac0-4f1b-8416-f829ed3436b9", "session_id": "6dbfc916-90a0-4dcc-a8f4-60a579bac207", "agent_id": "33e71503-3791-4e0d-8bd3-0ba61df45867", "execution_id": null, "status": "queued", "seq": 5, "prompt_message_id": "4c4ffc2b-a984-4b7f-936c-40cc181714e3", "attempt_count": 0, "error_code": null, "cancel_requested": false, "retry_after": null}
+19:00:54.239 id=None {"type": "turn", "turn_id": "5273f597-1ac0-4f1b-8416-f829ed3436b9", "session_id": "6dbfc916-90a0-4dcc-a8f4-60a579bac207", "agent_id": "33e71503-3791-4e0d-8bd3-0ba61df45867", "execution_id": "1ccbb254-6285-49b7-95a3-d128be2bdecc", "status": "running", "seq": 5, "prompt_message_id": "4c4ffc2b-a984-4b7f-936c-40cc181714e3", "attempt_count": 1, "error_code": null, "cancel_requested": false, "retry_after": null}
+19:00:54.240 disconnected last-event-id=None

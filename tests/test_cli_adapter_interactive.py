@@ -18,6 +18,8 @@ import pytest
 from nexus.adapters.cli_adapter import CLIAdapter
 from nexus.runtime.adapter import AgentStatus
 
+pytestmark = pytest.mark.core_employee
+
 
 def _run(coro):
     """Run an async coroutine synchronously."""
@@ -355,11 +357,10 @@ class TestBackwardCompatibility:
         self, mock_exec, adapter, agent_id, task_id
     ):
         """Non-interactive execute_task still works as before."""
-        mock_process = AsyncMock()
-        mock_process.communicate = AsyncMock(
-            return_value=(b"Task done\n", b"")
-        )
-        mock_process.returncode = 0
+        mock_process = MagicMock(pid=None, returncode=0, stdin=None)
+        mock_process.stdout.read = AsyncMock(side_effect=[b"Task done\n", b""])
+        mock_process.stderr.read = AsyncMock(side_effect=[b"", b""])
+        mock_process.wait = AsyncMock(return_value=0)
         mock_exec.return_value = mock_process
 
         config = {"backend": "claude", "workspace": "/tmp/test_cli"}

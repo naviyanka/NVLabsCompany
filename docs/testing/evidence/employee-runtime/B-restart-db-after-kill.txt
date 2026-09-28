@@ -1,0 +1,6 @@
+== chat_turns
+{"id": "8e7f1072-5bc4-42d3-a1b7-5ab181fa7c4e", "agent": "Agy Emp", "session_id": "6dbfc916-90a0-4dcc-a8f4-60a579bac207", "status": "running", "attempt_count": "1", "claimed_by": "Navi:11488:92ffe65e", "execution_id": "9c3e912f-e919-4550-872a-cd4713a9d2dd", "adapter_used": null, "backend_used": null, "error_code": null, "cancelled_by": null, "prompt_message_id": "f859203e-a2f8-4e76-9ff8-f2df83ab7554", "response_message_id": null, "queued_at": "2026-09-27 18:58:11.147516", "claimed_at": "2026-09-27 18:58:11.157269", "started_at": "2026-09-27 18:58:11.177383", "completed_at": null, "lease_expires_at": "2026-09-27 18:58:41.157269"}
+== chat_messages
+{"id": "f859203e-a2f8-4e76-9ff8-f2df83ab7554", "agent": "Agy Emp", "session_id": "6dbfc916-90a0-4dcc-a8f4-60a579bac207", "sender": "user", "kind": "message", "seq": "1", "text": "Without using any tools, write a detailed 40-item numbered checklist f...", "created_at": "2026-09-27 18:58:11.146572"}
+== audit_log
+{"created_at": "2026-09-27 18:58:11.1489

@@ -38,6 +38,8 @@ const FORWARDED_REQUEST_HEADERS = [
   'authorization',
   'content-type',
   'cookie',
+  'idempotency-key',
+  'last-event-id',
   'user-agent',
   'x-api-key',
   'x-company-id',

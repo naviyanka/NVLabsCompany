@@ -33,19 +33,19 @@ SAFE_FLAG_NAMES: frozenset[str] = frozenset([
     "--verbose",
 ])
 
-# Known valid providers (from AgentProviderID, excluding 'custom' for security)
-KNOWN_PROVIDERS: frozenset[str] = frozenset([
-    "claude",
-    "codex",
-    "grok",
-    "kimi",
-    "antigravity",
-    "qwen",
-    "opencode",
-    "crush",
-    "pi",
-    "copilot",
-])
+def _known_providers() -> frozenset[str]:
+    """Canonical CLI backend IDs plus their aliases, from the one catalog."""
+    from nexus.adapters.cli_registry import CLIRegistry
+
+    return frozenset(
+        name
+        for b in CLIRegistry(auto_detect=False).get_all()
+        for name in (b.id, *b.aliases)
+    )
+
+
+# Known valid providers ('custom' is never cataloged, so it stays rejected).
+KNOWN_PROVIDERS: frozenset[str] = _known_providers()
 
 
 class HireManifest(BaseModel):

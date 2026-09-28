@@ -79,6 +79,11 @@ class Settings(BaseSettings):
     # as a repository. A worktree's stored relative_path is relative to this.
     worktree_root: str = "./data/worktrees/{company_id}"
 
+    # Comma-separated secret-looking env var names every CLI employee may
+    # inherit, on top of each backend's own allowlist, e.g. the key a custom
+    # provider in ~/.codex/config.toml reads. Operator-only; never per request.
+    cli_env_allowlist: str = ""
+
     # Secret vault backend: "fernet" (encrypted rows in the `secrets` table),
     # "keyring" (OS keychain, requires the `keyring` package), or "env"
     # (read-only, values come from NEXUS_SECRET_<REF> environment variables).
@@ -140,6 +145,13 @@ class Settings(BaseSettings):
     tenant_bulkhead_per_tenant: int = 16
     budget_reconcile_enabled: bool = True
     rag_ranker: str = "rrf"
+
+    # Durable employee chat turns (nexus.runtime.chat_turns)
+    chat_turn_lease_seconds: int = 30  # renewed every third of this while a turn runs
+    chat_turn_wait_seconds: float = 120.0  # POST waits this long, then answers 202
+    chat_turn_max_attempts: int = 3  # executions before a turn with lost leases fails
+    chat_turn_queue_ttl_seconds: int = 3600  # a turn queued this long expires
+    chat_turn_poll_seconds: float = 1.0  # worker and waiter re-read the database this often
 
     model_config = {
         "env_prefix": "",

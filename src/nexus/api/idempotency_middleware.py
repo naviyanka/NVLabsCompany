@@ -3,6 +3,7 @@
 import hashlib
 import json
 import logging
+import re
 import uuid
 from datetime import datetime, timedelta, timezone
 from starlette.datastructures import Headers
@@ -19,6 +20,9 @@ logger = logging.getLogger(__name__)
 
 MUTATING_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 MAX_BODY_CACHE_BYTES = 256 * 1024  # 256 KB
+# Chat turn POSTs dedupe on ChatTurn.idempotency_key and re-attach a retry to
+# the running turn; a cached (possibly empty, streamed) body would be wrong.
+SELF_IDEMPOTENT_PATHS = re.compile(r"^/api/v1/(agents/[^/]+/chat|sessions/[^/]+/messages)(/stream)?/?$")
 
 
 def _canonical_json_hash(body_bytes: bytes) -> str:
@@ -43,7 +47,7 @@ class IdempotencyMiddleware:
             return
 
         method = scope.get("method", "GET").upper()
-        if method not in MUTATING_METHODS:
+        if method not in MUTATING_METHODS or SELF_IDEMPOTENT_PATHS.match(scope.get("path", "")):
             await self.app(scope, receive, send)
             return
 
@@ -158,7 +162,8 @@ class IdempotencyMiddleware:
             if not body_sent:
                 body_sent = True
                 return {"type": "http.request", "body": full_body, "more_body": False}
-            return {"type": "http.disconnect"}
+            # Wait for the real disconnect: a fake one ends streaming responses early.
+            return await receive()
 
         response_status = 500
         response_headers: dict[bytes, bytes] = {}

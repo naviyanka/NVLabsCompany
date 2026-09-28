@@ -62,16 +62,10 @@ class TestGetPreset:
             preset = get_preset(pid)
             assert preset.id == pid
 
-    def test_fallback_to_claude(self) -> None:
-        """Unknown provider ID falls back to Claude preset."""
-        # Simulate an unknown ID by passing a string that looks like a valid
-        # AgentProviderID but isn't in the mapping. We test the dict.get fallback.
-        # Since AgentProviderID is an enum, we test by ensuring get_preset with
-        # a valid ID returns the correct one, and the fallback mechanism works.
-        claude_preset = PROVIDER_PRESETS[AgentProviderID.claude]
-        # Access the internal dict.get fallback by passing a non-existent key
-        result = PROVIDER_PRESETS.get("nonexistent", claude_preset)  # type: ignore[arg-type]
-        assert result.id == AgentProviderID.claude
+    def test_unknown_id_does_not_fall_back(self) -> None:
+        """Unknown provider IDs raise instead of silently becoming Claude."""
+        with pytest.raises(KeyError):
+            get_preset("nonexistent")  # type: ignore[arg-type]
 
 
 class TestClaudePreset:

@@ -11,6 +11,8 @@ export interface Agent {
   manager_id: UUID | null;
   status: AgentStatus;
   adapter_type: string;
+  /** Resolved CLI backend ID, or null for non-CLI adapters. */
+  cli_backend?: string | null;
   model: string;
   capabilities: string[];
   responsibilities: string;
@@ -34,6 +36,10 @@ export interface AgentCreateRequest {
   team_id?: UUID;
   manager_id?: UUID;
   adapter_type: string;
+  /** Canonical CLI config when adapter_type is "cli". */
+  adapter_config?: { backend: string; interactive: false; use_worktree: false; autonomy_mode: 'safe'; extra_args: string[] };
+  /** Hire into status configuration_required when the backend is not usable yet. */
+  allow_unavailable_backend?: boolean;
   model: string;
   capabilities?: string[];
   responsibilities?: string;

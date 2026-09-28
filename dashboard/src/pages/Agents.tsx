@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AgentList } from '@/components/agents/AgentList';
-import { AgentChatDrawer } from '@/components/agents/AgentChatDrawer';
 import { FireAgentModal } from '@/components/agents/FireAgentModal';
 import { Button } from '@/components/common/Button';
 import { useApi } from '@/hooks/useApi';
@@ -9,12 +8,13 @@ import { listAgents, deleteAgent } from '@/api/agents';
 import type { Agent } from '@/types/agent';
 import { UserPlus, Users } from 'lucide-react';
 import { HireAgentModal } from '@/components/agents/HireAgentModal';
+import { useChatManager } from '@/contexts/ChatManagerContext';
 
 export function Agents() {
   const [showHireModal, setShowHireModal] = useState(false);
-  const [chatAgent, setChatAgent] = useState<Agent | null>(null);
   const [firingAgent, setFiringAgent] = useState<Agent | null>(null);
   const navigate = useNavigate();
+  const chat = useChatManager();
 
   const { data: agents, loading, error, refetch } = useApi<Agent[]>(
     () => listAgents(),
@@ -23,7 +23,7 @@ export function Agents() {
 
   const displayAgents = agents || [];
 
-  // Listen for /hire slash command from AgentChatDrawer
+  // Listen for the /hire slash command from the chat dock
   useEffect(() => {
     const handler = () => setShowHireModal(true);
     window.addEventListener('nexus:open-hire-modal', handler);
@@ -35,7 +35,7 @@ export function Agents() {
   };
 
   const handleAgentChat = (agent: Agent) => {
-    setChatAgent(agent);
+    chat.open(agent);
   };
 
   const handleOpenFireModal = (agent: Agent) => {
@@ -100,13 +100,6 @@ export function Agents() {
         isOpen={!!firingAgent}
         onClose={() => setFiringAgent(null)}
         onConfirm={handleConfirmFire}
-      />
-
-      {/* Agent Chat Drawer */}
-      <AgentChatDrawer
-        agent={chatAgent}
-        isOpen={!!chatAgent}
-        onClose={() => setChatAgent(null)}
       />
     </div>
   );

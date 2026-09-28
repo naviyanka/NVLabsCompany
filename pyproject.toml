@@ -76,6 +76,13 @@ where = ["src"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+markers = [
+    "core_employee: fast employee chat/session/adapter/CLI checks (docs/testing/EMPLOYEE_CORE_TESTING.md)",
+    "integration: exercises a real external service or several subsystems together",
+    "slow: takes several seconds; deselect with -m \"not slow\"",
+    "postgres: needs PostgreSQL (TEST_DATABASE_URL or testcontainers)",
+    "real_cli: spawns an installed employee CLI; skipped unless NEXUS_REAL_CLI=1",
+]
 
 [tool.ruff]
 target-version = "py312"
