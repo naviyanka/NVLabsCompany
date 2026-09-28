@@ -370,7 +370,12 @@ async def build(db: Any, company_id: uuid.UUID, now: datetime) -> dict[str, Any]
         "company": {"id": str(company.id), "name": company.name, "status": company.status},
         "data_as_of": max(stamps, default=None),
         "sources": sources,
-        "hierarchy": {"roots": roots, "depth": depth, "managers": managers},
+        "hierarchy": {
+            "ceo_id": next((str(a.id) for a in agents if a.is_ceo), None),
+            "roots": roots,
+            "depth": depth,
+            "managers": managers,
+        },
         "employees": {
             "total": len(agents),
             "by_status": dict(Counter(a.status for a in agents)),
@@ -648,16 +653,19 @@ async def history(db: Any, company_id: uuid.UUID, limit: int) -> list[dict[str, 
 async def agent_scope(db: Any, company_id: uuid.UUID, agent_id: uuid.UUID) -> str | None:
     """What an agent may read: ``organization``, ``manager`` or nothing.
 
-    Organization-wide only when an active allow ToolPolicy of the company
-    names :data:`TOOL` literally and pins this agent, and access to the tool is
-    not denied. Otherwise a manager (an agent with direct reports) gets its
-    own projection, and anyone else nothing.
+    Organization-wide for the company's current CEO, or when an active allow
+    ToolPolicy of the company names :data:`TOOL` literally and pins this agent,
+    and access to the tool is not denied. Otherwise a manager (an agent with
+    direct reports) gets its own projection, and anyone else nothing.
     """
     from nexus.models.tool import ToolPolicy
+    from nexus.services import ceo_service
     from nexus.tools.access import DENIED, check_tool_access, names_tool
     from nexus.tools.context import INBOUND_MCP, ExecutionContext
     from nexus.tools.manager_tools import _agent_ids
 
+    if await ceo_service.is_ceo(db, company_id, agent_id):
+        return "organization"
     allows = (
         await db.execute(
             select(ToolPolicy).where(

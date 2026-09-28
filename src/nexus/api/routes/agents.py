@@ -95,6 +95,7 @@ class AgentResponse(BaseModel):
     department_id: uuid.UUID | None = None
     team_id: uuid.UUID | None = None
     manager_id: uuid.UUID | None = None
+    is_ceo: bool = False
     status: str
     adapter_type: str
     # Read only to derive cli_backend; other adapters may hold connection details.
@@ -523,6 +524,11 @@ async def set_agent_manager(
     if agent is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail=f"Agent {agent_id} not found"
+        )
+    if agent.is_ceo and body.manager_id is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "CEO_IS_ROOT", "message": "The CEO reports to no one"},
         )
     if body.manager_id is not None:
         exists = (
