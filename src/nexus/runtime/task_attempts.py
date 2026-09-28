@@ -571,9 +571,12 @@ async def start_attempt(
     *,
     agent_id: uuid.UUID | None = None,
     idempotency_key: str | None = None,
+    audit_details: dict[str, Any] | None = None,
 ) -> tuple[TaskAttempt, bool]:
     """Queue an attempt, or return the one this start already made or attaches to.
 
+    ``audit_details`` are added to the ``task.attempt_queued`` row, so a caller
+    records why it started the attempt without a second audit write.
     Returns ``(attempt, created)``. Commits.
     """
     from nexus.models.agent import Agent
@@ -642,7 +645,12 @@ async def start_attempt(
             raise _error(409, "ATTEMPT_CONFLICT", "A concurrent start conflicted; retry") from None
         return found, False
     await _audit(
-        db, attempt, "task.attempt_queued", actor_type=principal.kind, actor=principal.display_name
+        db,
+        attempt,
+        "task.attempt_queued",
+        actor_type=principal.kind,
+        actor=principal.display_name,
+        **(audit_details or {}),
     )
     await db.commit()
     STATS["queued"] += 1
