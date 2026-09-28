@@ -21,6 +21,11 @@ updates. Nothing here is a second approval, budget or hiring system:
   other hiring path, with an ID derived from the request, so a retried or
   concurrent materialization yields the same single employee. No CLI or model
   runs; nothing executable or secret is stored.
+* The approval's ``amount_cents`` is the first-year commitment,
+  ``one_time + 12 * monthly`` (:func:`commitment_cents`), so a hire takes part
+  in the existing signature quorum (``required_signatures_for``). A request that
+  needs a quorum is never auto-approved, and approval recomputes the amount
+  from the stored request rather than trusting the stored total.
 """
 
 from __future__ import annotations
@@ -35,6 +40,7 @@ from sqlalchemy import select, text, update
 from sqlalchemy.exc import IntegrityError
 
 from nexus.api.routes.agents import normalize_cli_employee
+from nexus.governance.approval_signing import SignatureError, required_signatures_for
 from nexus.models.agent import Agent
 from nexus.models.company import Company
 from nexus.models.governance import Approval
@@ -49,6 +55,8 @@ AUTO_APPROVED, APPROVAL_REQUIRED, REJECTED = "auto_approved", "approval_required
 _NAMESPACE = uuid.UUID("5d0b6c0e-2f4a-4b8e-9d3c-6a1f0e7b9c21")
 _PRIORITY = {"low": "low", "normal": "medium", "high": "high", "critical": "critical"}
 _error = ms._error
+# Fits a signed 32-bit integer; the request's own bounds keep totals far below it.
+MAX_COMMITMENT_CENTS = 2**31 - 1
 
 
 class HireRequest(BaseModel):
@@ -69,6 +77,18 @@ class HireRequest(BaseModel):
     # Hire onto a backend that is not installed; the employee is stored as
     # ``configuration_required`` and always needs a human approval.
     allow_configuration_required: bool = False
+
+
+def commitment_cents(req: HireRequest) -> int:
+    """The hire's approval amount: total first-year commitment, in integer cents.
+
+    ``estimated_one_time_cents + 12 * estimated_monthly_cents``.
+    """
+    total = req.estimated_one_time_cents + 12 * req.estimated_monthly_cents
+    if not 0 <= total <= MAX_COMMITMENT_CENTS:
+        raise _error(422, "HIRING_AMOUNT_OUT_OF_RANGE",
+                     f"First-year commitment {total} is out of range")
+    return total
 
 
 def employee_id_for(request_id: uuid.UUID) -> uuid.UUID:
@@ -266,6 +286,14 @@ async def evaluate(
             no("HIRING_BUDGET_EXCEEDED",
                f"This month's hiring budget of {cap} cents would be exceeded")
 
+    amount = commitment_cents(req)
+    quorum = required_signatures_for(HIRE, {"amount_cents": amount})
+    if quorum > 1:
+        # Policy cannot stand in for a signature quorum.
+        held.append({"code": "SIGNATURE_QUORUM_REQUIRED",
+                     "message": f"A first-year commitment of {amount} cents needs "
+                                f"{quorum} signatures"})
+
     auto = rules.get("auto_approve") if isinstance(rules.get("auto_approve"), dict) else {}
     max_monthly, max_once = _limit(auto, "max_monthly_cents"), _limit(auto, "max_one_time_cents")
     # Auto-approval only under an explicit rule with both bounds set.
@@ -291,6 +319,8 @@ async def evaluate(
         "reasons": rejected or held,
         "backend": backend,
         "configuration_required": bool(override),
+        "amount_cents": amount,
+        "required_signatures": quorum,
         "evaluated_at": datetime.now(UTC).isoformat(),
     }
 
@@ -325,9 +355,9 @@ async def submit(
 
     decision = await evaluate(db, company_id, manager, req)
     service = ApprovalService(db)
-    # No ``amount_cents`` in the payload: it would switch on the signature quorum.
     approval = await service.request_approval(
-        company_id, HIRE, manager_id, {"request": body, "policy": decision},
+        company_id, HIRE, manager_id,
+        {"request": body, "amount_cents": decision["amount_cents"], "policy": decision},
         approval_id=request_id,
     )
     common = {"manager_id": str(manager_id), "role": req.role, "backend": decision["backend"]}
@@ -385,6 +415,13 @@ async def approve(
         approval = await get_request(db, company_id, request_id)
     if approval.status == "pending":
         req = HireRequest(**approval.payload["request"])
+        amount = commitment_cents(req)
+        if (approval.payload.get("amount_cents") != amount
+                or approval.required_signatures < required_signatures_for(
+                    HIRE, {"amount_cents": amount})):
+            await db.rollback()
+            raise _error(409, "HIRING_AMOUNT_MISMATCH",
+                         "The request's stored amount does not match its costs")
         manager = await ms.get_agent(db, company_id, approval.requested_by_agent_id)
         decision = await evaluate(db, company_id, manager, req, exclude=request_id)
         await ms.audit(db, company_id, "hiring.policy_evaluated", principal.display_name,
@@ -397,7 +434,11 @@ async def approve(
                 "message": "; ".join(r["message"] for r in decision["reasons"]),
                 "reasons": decision["reasons"],
             })
-        approval = await ApprovalService(db).approve(request_id, principal.display_name, note)
+        try:
+            approval = await ApprovalService(db).approve(request_id, principal.display_name, note)
+        except SignatureError as exc:
+            await db.commit()
+            raise _error(409, "APPROVAL_QUORUM_NOT_MET", str(exc)) from exc
         if approval.status != "approved":
             await db.rollback()
             raise _error(409, "HIRING_REQUEST_DECIDED", f"The request is already {approval.status}")
@@ -435,8 +476,8 @@ async def reject(
 
 async def materialize(db: Any, approval: Approval, actor: str) -> Agent:
     """The approved request's employee, creating it once. Commits."""
-    employee_id = employee_id_for(approval.id)
-    company_id = approval.company_id
+    request_id, company_id = approval.id, approval.company_id
+    employee_id = employee_id_for(request_id)
     await db.commit()
     await _lock(db, company_id)
     existing = await db.get(Agent, employee_id, populate_existing=True)
@@ -469,11 +510,12 @@ async def materialize(db: Any, approval: Approval, actor: str) -> Agent:
         existing = await db.get(Agent, employee_id, populate_existing=True)
         if existing is not None:
             return existing
-        await _failed(db, approval, actor, "EMPLOYEE_INSERT_FAILED", "The employee row was refused")
+        await _failed(db, company_id, request_id, actor, "EMPLOYEE_INSERT_FAILED",
+                      "The employee row was refused")
         raise _error(409, "HIRING_MATERIALIZATION_FAILED", "The employee could not be created")
     except HTTPException as exc:
         await db.rollback()
-        await _failed(db, approval, actor, exc.detail["code"], exc.detail["message"])
+        await _failed(db, company_id, request_id, actor, exc.detail["code"], exc.detail["message"])
         raise _error(409, "HIRING_MATERIALIZATION_FAILED", exc.detail["message"]) from exc
     details = {"name": agent.name, "role": agent.role, "adapter_type": "cli",
                "cli_backend": config["backend"], "model": agent.model, "status": agent.status,
@@ -485,9 +527,12 @@ async def materialize(db: Any, approval: Approval, actor: str) -> Agent:
     return agent
 
 
-async def _failed(db: Any, approval: Approval, actor: str, code: str, message: str) -> None:
-    await ms.audit(db, approval.company_id, "hiring.materialization_failed", actor, "approval",
-                   approval.id, code=code, message=message)
+async def _failed(
+    db: Any, company_id: uuid.UUID, request_id: uuid.UUID, actor: str, code: str, message: str
+) -> None:
+    # Takes ids, not the Approval: after the rollback its attributes are expired.
+    await ms.audit(db, company_id, "hiring.materialization_failed", actor, "approval",
+                   request_id, code=code, message=message)
     await db.commit()
 
 
@@ -523,6 +568,8 @@ async def view(db: Any, approval: Approval) -> dict[str, Any]:
         "policy_decision": policy.get("outcome"),
         "policy_rule": policy.get("rule"),
         "policy_reasons": policy.get("reasons", []),
+        "amount_cents": approval.payload.get("amount_cents"),
+        "required_signatures": approval.required_signatures,
         "decided_by": approval.decided_by,
         "decided_at": approval.decided_at.isoformat() if approval.decided_at else None,
         "rejection_reason": approval.decision_note if approval.status == "rejected" else None,

@@ -1055,6 +1055,8 @@ async def test_hiring_races_hold_limits_and_hire_once(app_role, monkeypatch):
     """
     import asyncio
 
+    from fastapi import HTTPException
+
     from nexus.adapters import cli_registry
     from nexus.auth.principal import Principal
     from nexus.database import tenant_session
@@ -1082,16 +1084,17 @@ async def test_hiring_races_hold_limits_and_hire_once(app_role, monkeypatch):
             await db.commit()
             managers[cid] = manager.id
 
-    def request(key: str) -> hiring_service.HireRequest:
+    def request(key: str, once: int = 0) -> hiring_service.HireRequest:
+        # 800 a month: a 9600-cent first year, under the signature quorum.
         return hiring_service.HireRequest(
             role="engineer", title=f"Engineer {key}", reason="Ship", backend="claude",
-            estimated_monthly_cents=1000, idempotency_key=key,
+            estimated_monthly_cents=800, estimated_one_time_cents=once, idempotency_key=key,
         )
 
-    async def submit(cid: uuid.UUID, key: str) -> str:
+    async def submit(cid: uuid.UUID, key: str, once: int = 0) -> str:
         async with tenant_session(cid) as db:
             approval, _ = await hiring_service.submit(
-                db, cid, managers[cid], request(key), "agent:x"
+                db, cid, managers[cid], request(key, once), "agent:x"
             )
             await db.commit()
             return approval.status
@@ -1122,6 +1125,44 @@ async def test_hiring_races_hold_limits_and_hire_once(app_role, monkeypatch):
             await db.execute(sa.select(Agent).where(Agent.role == "engineer"))
         ).scalars().all()
     assert [a.id for a in hired] == [hiring_service.employee_id_for(pending.id)]
+
+    # Above the quorum threshold: racing signatures, then racing final approvals.
+    from nexus.models.governance import Approval, ApprovalSignerKey
+    from nexus.services.approval_service import ApprovalService
+    from tests.test_approval_signing import _keypair, _sign
+
+    assert await submit(manual_co, "big", once=20_000) == "pending"
+    [quorum] = [a for a in await _hiring(manual_co) if a.payload["amount_cents"] == 29_600]
+    assert quorum.required_signatures == 2
+    keys = {subject: _keypair() for subject in ("alice", "bob")}
+    async with tenant_session(manual_co) as db:
+        db.add_all([ApprovalSignerKey(company_id=manual_co, subject=s, public_key=k[1])
+                    for s, k in keys.items()])
+        await db.commit()
+
+    async def sign(subject: str) -> None:
+        async with tenant_session(manual_co) as db:
+            approval = await db.get(Approval, quorum.id)
+            signature = _sign(keys[subject][0], approval)
+            await ApprovalService(db).add_signature(quorum.id, subject, signature)
+            await db.commit()
+
+    async def approve_big() -> str:
+        async with tenant_session(manual_co) as db:
+            try:
+                approval = await hiring_service.approve(db, manual_co, quorum.id, admin, None)
+            except HTTPException as exc:
+                return exc.detail["code"]
+            await db.commit()
+            return approval.status
+
+    assert await approve_big() == "APPROVAL_QUORUM_NOT_MET"
+    await asyncio.gather(sign("alice"), sign("bob"))
+    assert await asyncio.gather(*(approve_big() for _ in range(5))) == ["approved"] * 5
+    async with tenant_session(manual_co) as db:
+        hired = (await db.execute(sa.select(Agent.id).where(Agent.role == "engineer"))).all()
+    expected = [hiring_service.employee_id_for(a.id) for a in (pending, quorum)]
+    assert sorted(r.id for r in hired) == sorted(expected)
 
     assert await _hiring(other) == []
 

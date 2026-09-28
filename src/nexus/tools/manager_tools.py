@@ -190,10 +190,50 @@ async def call(ctx: Any, name: str, arguments: dict[str, Any]) -> Any:
 
 
 async def is_manager(ctx: Any) -> bool:
-    """Whether the context's agent has at least one direct report."""
+    """Whether the context's agent is served the manager tools.
+
+    An agent with at least one direct report is. So is one with none yet, when
+    an active allow ToolPolicy of its company names a manager tool and this
+    agent (``agent_id``) explicitly, and access to that tool is not denied:
+    that is how a new manager hires its first report. Role, title and prompt
+    text never count.
+    """
+    from sqlalchemy import select
+
     from nexus.database import tenant_session
+    from nexus.models.tool import ToolPolicy
+    from nexus.tools.access import DENIED, check_tool_access, names_tool
 
     if ctx.agent_id is None:
         return False
     async with tenant_session(ctx.company_id) as db:
-        return bool(await ms.direct_reports(db, ctx.company_id, ctx.agent_id))
+        if await ms.direct_reports(db, ctx.company_id, ctx.agent_id):
+            return True
+        rows = (
+            await db.execute(
+                select(ToolPolicy).where(
+                    ToolPolicy.company_id == ctx.company_id,
+                    ToolPolicy.is_active == True,  # noqa: E712
+                    ToolPolicy.effect == "allow",
+                )
+            )
+        ).scalars().all()
+        named = {
+            name
+            for r in rows
+            if str(ctx.agent_id) in _agent_ids(r.conditions)
+            for name in MANAGER_TOOLS
+            if names_tool(r.conditions, name)
+        }
+        for name in sorted(named):
+            decision = await check_tool_access(
+                db, ctx, tool_name=name, default_risk=MANAGER_TOOLS[name].risk
+            )
+            if decision.outcome != DENIED:
+                return True
+        return False
+
+
+def _agent_ids(conditions: dict[str, Any] | None) -> list[str]:
+    ids = (conditions or {}).get("agent_id")
+    return [ids] if isinstance(ids, str) else list(ids or [])

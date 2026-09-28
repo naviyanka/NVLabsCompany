@@ -163,7 +163,7 @@ class MCPServer:
                             "inputSchema": input_schema_for(node),
                         }
                     )
-            # Manager tools are offered only to an agent that has direct reports.
+            # Manager tools are offered only to a manager (see manager_tools.is_manager).
             if await manager_tools.is_manager(self._ctx):
                 for name, tool in manager_tools.MANAGER_TOOLS.items():
                     decision = await check_tool_access(

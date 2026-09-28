@@ -462,3 +462,58 @@ class TestCLIAdapter:
         assert not os.path.exists(seen["config_path"])
         _, seen = await _execute(tmp_path, ctx, hang="forever")
         assert not os.path.exists(seen["config_path"])
+
+
+class TestZeroReportBootstrap:
+    """A manager with no reports yet gets the bridge only by explicit ToolPolicy."""
+
+    @staticmethod
+    async def _bridge(db, company, agent):  # noqa: F811
+        turn = await _turn(db, agent)
+        bridge = await mb.open_bridge(_chat_ctx(company, agent), uuid.UUID(turn.execution_id),
+                                      CLAUDE, 600)
+        if bridge is not None:
+            bridge.close()
+        return bridge
+
+    @staticmethod
+    async def _policy(db, company, effect, agent=None, tool="manager_request_hire"):  # noqa: F811
+        conditions = {"tool_name": [tool]}
+        if agent is not None:
+            conditions["agent_id"] = [str(agent)]
+        async with db() as s:
+            s.add(ToolPolicy(company_id=company, name=f"{effect}-{tool}", effect=effect,
+                             conditions=conditions))
+            await s.commit()
+
+    async def test_an_authorized_manager_with_no_reports_gets_the_bridge(self, db, team, rpc):  # noqa: F811
+        # Lead has no reports yet (no _staffed); its role text alone grants nothing.
+        assert await self._bridge(db, team["acme"], team["lead"]) is None
+        # Nor does a company-wide allow, or a read allow, make every agent a manager.
+        await self._policy(db, team["acme"], "allow")
+        await _allow_delegation(db, team["acme"])
+        assert await self._bridge(db, team["acme"], team["lead"]) is None
+        await self._policy(db, team["acme"], "allow", team["lead"])
+        token = await _token(await _turn(db, team["lead"]))
+        assert "manager_request_hire" in await _tools(rpc, token)
+        # No reports yet: the report and request lists are simply empty.
+        assert _payload(await _tool(rpc, token, "manager_list_reports")) == []
+        assert _payload(await _tool(rpc, token, "manager_list_hiring_requests")) == []
+        # A deny on the tool withdraws the bootstrap.
+        await self._policy(db, team["acme"], "deny", team["lead"])
+        assert await self._bridge(db, team["acme"], team["lead"]) is None
+
+    async def test_an_ordinary_employee_with_no_reports_gets_nothing(self, db, team):  # noqa: F811
+        await self._policy(db, team["acme"], "allow")
+        await self._policy(db, team["acme"], "allow", team["lead"])
+        # A pinned allow for another agent, or a pinned non-manager tool, grants nothing.
+        await self._policy(db, team["acme"], "allow", team["acme_agy"], tool="read_file")
+        assert await self._bridge(db, team["acme"], team["acme_agy"]) is None
+
+    async def test_another_tenants_policy_grants_nothing(self, db, team):  # noqa: F811
+        # A policy written in "other" naming acme's Lead does not reach acme.
+        await self._policy(db, team["other"], "allow", team["lead"])
+        assert await self._bridge(db, team["acme"], team["lead"]) is None
+        # Nor does acme's pinned allow reach the other tenant's manager.
+        await self._policy(db, team["acme"], "allow", team["other_lead"])
+        assert await self._bridge(db, team["other"], team["other_lead"]) is None

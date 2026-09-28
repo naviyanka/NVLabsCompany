@@ -97,10 +97,10 @@ async def open_bridge(
 ) -> Bridge | None:
     """The bridge for one CLI execution; None when it is not a manager's chat turn.
 
-    Only a plain chat turn (not a task attempt) of an agent with direct reports
-    is eligible; everything else runs exactly as before. An eligible turn on a
-    backend without per-run MCP config gets ``Bridge(available=False)`` and
-    runs without the tools.
+    Only a plain chat turn (not a task attempt) of a manager
+    (:func:`manager_tools.is_manager`) is eligible; everything else runs
+    exactly as before. An eligible turn on a backend without per-run MCP config
+    gets ``Bridge(available=False)`` and runs without the tools.
 
     Raises:
         BridgeUnavailableError: The context requires manager tools and this
@@ -118,7 +118,7 @@ async def open_bridge(
         if required:
             raise BridgeUnavailableError(
                 "MANAGER_TOOLS_UNAVAILABLE: manager tools need a chat turn of an agent "
-                "with direct reports."
+                "with direct reports or an explicit manager-tool policy."
             )
         return None
     if not backend.mcp_config_flag:
