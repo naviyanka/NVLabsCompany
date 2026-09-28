@@ -6,7 +6,9 @@ same wire protocol: newline-delimited JSON-RPC on stdin/stdout, with
 
 The tools exposed are the executable entries of the workflow node library, so
 there is one definition of what a tool is and one code path that runs it
-(:func:`nexus.nodes.executor.execute_node`). Nothing new is registered here.
+(:func:`nexus.nodes.executor.execute_node`). The one addition is the manager
+tools (:mod:`nexus.tools.manager_tools`), offered only to an agent that has
+direct reports and scoped to them.
 
 Every call crosses the same boundary as an adapter's outbound tool call,
 :func:`nexus.tools.factory.guarded_call`: identity, MCP binding, RBAC,
@@ -46,6 +48,7 @@ from typing import Any
 
 from nexus.nodes.executor import execute_node, get_default_registry
 from nexus.nodes.registry import NodeCategory, NodeDefinition, NodeRegistry
+from nexus.tools import manager_tools
 from nexus.tools.access import BUILTIN_ENDPOINT, DENIED, check_tool_access
 from nexus.tools.context import INBOUND_MCP, ExecutionContext
 from nexus.tools.factory import _access_session, guarded_call
@@ -158,6 +161,20 @@ class MCPServer:
                             "inputSchema": input_schema_for(node),
                         }
                     )
+            # Manager tools are offered only to an agent that has direct reports.
+            if await manager_tools.is_manager(self._ctx):
+                for name, tool in manager_tools.MANAGER_TOOLS.items():
+                    decision = await check_tool_access(
+                        db, self._ctx, tool_name=name, default_risk=tool.risk
+                    )
+                    if decision.outcome != DENIED:
+                        tools.append(
+                            {
+                                "name": name,
+                                "description": tool.description,
+                                "inputSchema": manager_tools.input_schema(tool),
+                            }
+                        )
         return tools
 
     async def call_tool(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -167,6 +184,8 @@ class MCPServer:
         error: the client asked a well-formed question and deserves to see why
         the answer is no.
         """
+        if name in manager_tools.MANAGER_TOOLS:
+            return await self._call_manager_tool(name, arguments)
         node = self._nodes.get(name)
         if node is None:
             return _tool_error(f"Unknown tool '{name}'")
@@ -190,6 +209,32 @@ class MCPServer:
 
         return {
             "content": [{"type": "text", "text": json.dumps(result.outputs, default=str)}],
+            "isError": False,
+        }
+
+    async def _call_manager_tool(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+        """Run a manager tool through the same guarded boundary as a node tool."""
+        from fastapi import HTTPException
+
+        try:
+            outcome = await guarded_call(
+                self._ctx,
+                name,
+                arguments,
+                lambda: manager_tools.call(self._ctx, name, arguments),
+                source=INBOUND_MCP,
+                default_risk=manager_tools.MANAGER_TOOLS[name].risk,
+            )
+        except HTTPException as exc:
+            detail = exc.detail if isinstance(exc.detail, dict) else {"message": exc.detail}
+            return _tool_error(f"{detail.get('code', exc.status_code)}: {detail.get('message')}")
+        except ValueError as exc:
+            return _tool_error(str(exc))
+        if outcome["status"] != "success":
+            logger.warning("Refused tool %s: %s", name, outcome["error"])
+            return _tool_error(outcome["error"])
+        return {
+            "content": [{"type": "text", "text": json.dumps(outcome["result"], default=str)}],
             "isError": False,
         }
 
