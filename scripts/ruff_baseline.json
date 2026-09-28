@@ -1434,6 +1434,7 @@
   "I001": 1
  },
  "tests/test_alembic_migration.py": {
+  "E501": 1,
   "F401": 2,
   "F841": 1,
   "I001": 1
@@ -1511,6 +1512,7 @@
   "I001": 1
  },
  "tests/test_completion_reasons.py": {
+  "E501": 1,
   "I001": 2,
   "UP017": 2
  },
@@ -1551,7 +1553,7 @@
   "UP041": 1
  },
  "tests/test_durable_checkpoint_recovery.py": {
-  "E501": 18,
+  "E501": 17,
   "F401": 5,
   "F841": 1
  },
