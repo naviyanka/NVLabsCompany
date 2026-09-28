@@ -363,6 +363,8 @@ async def world(tmp_path, monkeypatch, fake_path):
     import nexus.database as database
 
     monkeypatch.setattr(database, "async_session_factory", factory)
+    # tenant_session() picks its dialect from the URL, not from this factory.
+    monkeypatch.setattr("nexus.config.settings.database_url", str(engine.url))
     acme = Company(name="Acme")
     async with factory() as db:
         db.add(acme)

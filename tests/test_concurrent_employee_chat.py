@@ -98,6 +98,8 @@ async def world(tmp_path, monkeypatch):
     import nexus.database as database
 
     monkeypatch.setattr(database, "async_session_factory", factory)
+    # tenant_session() picks its dialect from the URL, not from this factory.
+    monkeypatch.setattr("nexus.config.settings.database_url", str(engine.url))
     monkeypatch.setattr(cli_registry_mod.shutil, "which", lambda name: FAKE_PATH.get(name))
     monkeypatch.setattr(cli_registry_mod, "_shared_registry", None)
     monkeypatch.setattr(CLIRegistry, "probe_version", lambda self, bid, timeout=5: "1.0.0")

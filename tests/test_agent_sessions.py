@@ -44,6 +44,8 @@ async def db_factory(tmp_path, monkeypatch):
     import nexus.database as database
 
     monkeypatch.setattr(database, "async_session_factory", factory)
+    # tenant_session() picks its dialect from the URL, not from this factory.
+    monkeypatch.setattr("nexus.config.settings.database_url", str(engine.url))
 
     async def fake_prompt(db, agent, company_id, prompt):
         return "system"
