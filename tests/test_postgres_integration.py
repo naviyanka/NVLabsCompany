@@ -1173,3 +1173,75 @@ async def _hiring(cid: uuid.UUID) -> list:
 
     async with tenant_session(cid) as db:
         return (await db.execute(sa.select(Approval))).scalars().all()
+
+
+@pytest.mark.asyncio
+async def test_organization_snapshot_race_and_rls(
+    app_user_postgres_url, system_user_postgres_url, monkeypatch
+):
+    """Organization snapshots on PostgreSQL as the application role.
+
+    Racing generations create one version; an unchanged payload creates none;
+    a changed one creates the next; another tenant sees no snapshot or state
+    row (RLS, no WHERE clause); and the system-role tick reconciles every
+    company.
+    """
+    import asyncio
+
+    from nexus.config import settings
+    from nexus.models.organization_snapshot import OrganizationSnapshot, OrganizationSnapshotState
+    from nexus.services import org_snapshot
+
+    monkeypatch.setattr(settings, "database_url", app_user_postgres_url)
+    monkeypatch.setattr(settings, "system_database_url", system_user_postgres_url)
+    app_engine = create_async_engine(app_user_postgres_url)
+    app_factory = async_sessionmaker(app_engine, class_=AsyncSession, expire_on_commit=False)
+    sys_engine = create_async_engine(system_user_postgres_url)
+    sys_factory = async_sessionmaker(sys_engine, class_=AsyncSession, expire_on_commit=False)
+    monkeypatch.setattr("nexus.database.async_session_factory", app_factory)
+    monkeypatch.setattr("nexus.database._system_session_factory", sys_factory)
+
+    async def as_tenant(session, cid):
+        await session.execute(
+            sa.text("SELECT set_config('nexus.company_id', :cid, false)"), {"cid": str(cid)}
+        )
+
+    mine, theirs = uuid.uuid4(), uuid.uuid4()
+    for cid in (mine, theirs):
+        async with app_factory() as session:
+            await as_tenant(session, cid)
+            session.add(Company(id=cid, name=f"Snapshot {cid}"))
+            await session.commit()
+
+    try:
+        results = await asyncio.gather(*(org_snapshot.generate(mine) for _ in range(8)))
+        assert [r["outcome"] for r in results].count("created") == 1
+        assert (await org_snapshot.generate(mine))["outcome"] == "unchanged"
+        async with app_factory() as session:
+            await as_tenant(session, mine)
+            session.add(Task(company_id=mine, title="New work"))
+            await session.commit()
+        assert (await org_snapshot.generate(mine)) == {"outcome": "created", "version": 2}
+
+        async with app_factory() as session:
+            await as_tenant(session, theirs)
+            assert (await session.execute(sa.select(OrganizationSnapshot))).scalars().all() == []
+            assert (
+                await session.execute(sa.select(OrganizationSnapshotState))
+            ).scalars().all() == []
+            empty = await org_snapshot.read(session, mine)
+        assert empty["snapshot"] is None and empty["version"] is None
+
+        # Other tests' companies share this database; reconcile them all.
+        monkeypatch.setattr(org_snapshot, "MAX_PER_TICK", 10_000)
+        reconciled = await org_snapshot.tick()
+        assert theirs in reconciled
+        async with app_factory() as session:
+            await as_tenant(session, mine)
+            versions = (
+                await session.execute(sa.select(OrganizationSnapshot.version))
+            ).scalars().all()
+        assert sorted(versions) == [1, 2]
+    finally:
+        await app_engine.dispose()
+        await sys_engine.dispose()
