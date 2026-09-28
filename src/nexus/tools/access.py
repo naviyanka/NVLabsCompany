@@ -56,6 +56,18 @@ from nexus.tools.policy_engine import (
     ToolPolicyEngine,
 )
 
+# Tools that only an active allow ToolPolicy naming them exactly can permit:
+# never a ToolProfile default, a wildcard pattern or a risk-level rule. A
+# matching deny rule always wins, whatever its priority.
+EXPLICIT_ALLOW_ONLY = frozenset({"manager_request_hire"})
+
+
+def names_tool(conditions: dict[str, Any] | None, tool_name: str) -> bool:
+    """Whether ``conditions`` names ``tool_name`` literally (no pattern)."""
+    names = (conditions or {}).get("tool_name")
+    return tool_name in ([names] if isinstance(names, str) else names or [])
+
+
 ALLOWED = "allowed"
 WOULD_DENY = "would_deny"
 DENIED = "denied"
@@ -365,13 +377,17 @@ async def _evaluate_policy(
     ]
     if external and not rules:
         rules = [default_read_policy(company_id)]
+    context = {"company_id": str(company_id), "hour": datetime.now(UTC).hour}
+    if tool_name in EXPLICIT_ALLOW_ONLY:
+        denies = ToolPolicyEngine(default_effect="allow")
+        denies.load_policies([r for r in rules if r.effect != "allow"])
+        denied = denies.evaluate(agent_id, tool_name, risk_level, context)
+        if not denied.allowed:
+            return denied
+        engine = ToolPolicyEngine(default_effect="deny")
+        rules = [r for r in rules if r.effect == "allow" and names_tool(r.conditions, tool_name)]
     engine.load_policies(rules)
-    return engine.evaluate(
-        agent_id,
-        tool_name,
-        risk_level,
-        {"company_id": str(company_id), "hour": datetime.now(UTC).hour},
-    )
+    return engine.evaluate(agent_id, tool_name, risk_level, context)
 
 
 def default_read_policy(company_id: uuid.UUID) -> PolicyRule:

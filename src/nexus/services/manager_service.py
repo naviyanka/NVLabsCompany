@@ -103,7 +103,11 @@ async def audit(
     await record_audit(
         company_id,
         action,
-        actor_type="agent" if actor.startswith(("agent:", "run:")) else "user",
+        actor_type=(
+            "agent" if actor.startswith(("agent:", "run:"))
+            else "system" if actor.startswith("policy:")
+            else "user"
+        ),
         actor_id=actor,
         resource_type=resource_type,
         resource_id=str(resource_id),

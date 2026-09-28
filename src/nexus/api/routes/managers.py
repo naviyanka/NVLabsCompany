@@ -21,7 +21,7 @@ from pydantic import BaseModel, ConfigDict
 
 from nexus.api.deps import CurrentCompanyId, CurrentPrincipal, DbSession, require_permission
 from nexus.runtime.task_attempts import attempt_view
-from nexus.services import manager_service
+from nexus.services import hiring_service, manager_service
 from nexus.tools import manager_bridge
 
 router = APIRouter(tags=["managers"])
@@ -118,6 +118,54 @@ async def rollup(
     )
     await db.commit()
     return result
+
+
+@router.post("/api/v1/agents/{manager_id}/hiring-requests", dependencies=WRITE)
+async def request_hire(
+    manager_id: uuid.UUID,
+    body: hiring_service.HireRequest,
+    response: Response,
+    db: DbSession,
+    company_id: CurrentCompanyId,
+    principal: CurrentPrincipal,
+) -> dict[str, Any]:
+    """File a hiring request for the manager; 201 when new, 200 for a repeated key.
+
+    Decided through the approval queue (``/api/v1/approvals/{id}/approve|reject``).
+    """
+    _as_manager(principal, manager_id)
+    approval, created = await hiring_service.submit(
+        db, company_id, manager_id, body, principal.display_name
+    )
+    response.status_code = status.HTTP_201_CREATED if created else status.HTTP_200_OK
+    return await hiring_service.view(db, approval)
+
+
+@router.get("/api/v1/agents/{manager_id}/hiring-requests", dependencies=READ)
+async def list_hiring_requests(
+    manager_id: uuid.UUID,
+    db: DbSession,
+    company_id: CurrentCompanyId,
+    principal: CurrentPrincipal,
+) -> list[dict[str, Any]]:
+    """The manager's hiring requests, newest first."""
+    _as_manager(principal, manager_id)
+    rows = await hiring_service.list_requests(db, company_id, manager_id)
+    return [await hiring_service.view(db, a) for a in rows]
+
+
+@router.get("/api/v1/agents/{manager_id}/hiring-requests/{request_id}", dependencies=READ)
+async def get_hiring_request(
+    manager_id: uuid.UUID,
+    request_id: uuid.UUID,
+    db: DbSession,
+    company_id: CurrentCompanyId,
+    principal: CurrentPrincipal,
+) -> dict[str, Any]:
+    """One of the manager's hiring requests."""
+    _as_manager(principal, manager_id)
+    approval = await hiring_service.get_request(db, company_id, request_id, manager_id)
+    return await hiring_service.view(db, approval)
 
 
 # JSON-RPC messages to the bridge are small; anything larger is refused unread.
