@@ -494,11 +494,11 @@ async def _fetch_shared_knowledge(
         list when the lookup fails.
     """
     try:
-        from nexus.database import async_session_factory
+        from nexus.database import tenant_session_factory
         from nexus.memory.layered_persistent import L3_SCOPE, PersistentLayeredMemory
 
         memory = PersistentLayeredMemory(
-            session_factory=async_session_factory, company_id=company_id
+            session_factory=tenant_session_factory(company_id), company_id=company_id
         )
         return [
             {
@@ -535,7 +535,7 @@ async def _remember_response(agent: Agent, response_text: str) -> int:
         How many new facts were stored.
     """
     try:
-        from nexus.database import async_session_factory
+        from nexus.database import tenant_session_factory
         from nexus.memory.extract import FactExtractor
         from nexus.memory.layered_persistent import PersistentLayeredMemory
 
@@ -544,7 +544,8 @@ async def _remember_response(agent: Agent, response_text: str) -> int:
             return 0
 
         memory = PersistentLayeredMemory(
-            session_factory=async_session_factory, company_id=agent.company_id
+            session_factory=tenant_session_factory(agent.company_id),
+            company_id=agent.company_id,
         )
         stored = 0
         for fact in facts:
@@ -1055,7 +1056,7 @@ async def _call_llm(
         # Hermes tool calls use same DB-backed ToolAccess, autonomy, approval,
         # vault-grant, and writer path as every other governed tool.
         if hasattr(adapter, "register_tool"):
-            from nexus.database import async_session_factory, tenant_session
+            from nexus.database import tenant_session, tenant_session_factory
             from nexus.tools import (
                 OBSIDIAN_NOTE_REPLACE_NAME,
                 OBSIDIAN_NOTE_REPLACE_SCHEMA,
@@ -1065,7 +1066,8 @@ async def _call_llm(
                 register_obsidian_note_replace,
             )
 
-            tool_registry = ToolRegistry(async_session_factory)
+            tenant_factory = tenant_session_factory(agent.company_id)
+            tool_registry = ToolRegistry(tenant_factory)
             definition = register_obsidian_note_replace(tool_registry, agent.company_id)
             await tool_registry.persist_tool(definition)
             tool_id = definition.id
@@ -1079,7 +1081,7 @@ async def _call_llm(
                     tool = ObsidianNoteReplaceTool(
                         tool_db,
                         registry=tool_registry,
-                        session_factory=async_session_factory,
+                        session_factory=tenant_factory,
                         company_id=agent.company_id,
                         agent_id=agent.id,
                         tool_id=tool_id,

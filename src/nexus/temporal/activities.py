@@ -100,16 +100,16 @@ async def call_llm_activity(input: LLMCallInput) -> LLMCallOutput:
     from sqlalchemy import select
 
     from nexus.api.routes.chat import _build_system_prompt, _call_llm, _fetch_agent_memories
-    from nexus.database import async_session_factory
+    from nexus.database import tenant_session
     from nexus.models.agent import Agent
     from nexus.tools.context import ExecutionContext
 
     try:
-        async with async_session_factory() as db:
-            context = ExecutionContext.from_dict(input.context) if input.context else None
-            agent_uuid = uuid.UUID(input.agent_id)
-            company_uuid = uuid.UUID(input.company_id)
-
+        context = ExecutionContext.from_dict(input.context) if input.context else None
+        agent_uuid = uuid.UUID(input.agent_id)
+        company_uuid = uuid.UUID(input.company_id)
+        # The session closes before the model call: no transaction is held for it.
+        async with tenant_session(company_uuid) as db:
             stmt = select(Agent).where(
                 Agent.id == agent_uuid, Agent.company_id == company_uuid
             )
@@ -125,16 +125,16 @@ async def call_llm_activity(input: LLMCallInput) -> LLMCallOutput:
             else:
                 system_prompt = input.system_prompt
 
-            response_text, model_used, tokens_used = await _call_llm(
-                agent, system_prompt, input.prompt, [], context=context
-            )
+        response_text, model_used, tokens_used = await _call_llm(
+            agent, system_prompt, input.prompt, [], context=context
+        )
 
-            return LLMCallOutput(
-                response_text=response_text,
-                model_used=model_used,
-                tokens_used=tokens_used,
-                success=True,
-            )
+        return LLMCallOutput(
+            response_text=response_text,
+            model_used=model_used,
+            tokens_used=tokens_used,
+            success=True,
+        )
     except Exception as e:
         logger.error("LLM activity failed: %s", e)
         return LLMCallOutput(response_text="", model_used="", tokens_used=0, success=False, error=str(e))
@@ -148,13 +148,13 @@ async def route_task_activity(input: RouteTaskInput) -> str | None:
     """
     from sqlalchemy import select
 
-    from nexus.database import async_session_factory
+    from nexus.database import tenant_session
     from nexus.models.agent import Agent
     from nexus.orchestration.router import AgentCandidate, AgentRouter
 
     try:
-        async with async_session_factory() as db:
-            company_uuid = uuid.UUID(input.company_id)
+        company_uuid = uuid.UUID(input.company_id)
+        async with tenant_session(company_uuid) as db:
             stmt = select(Agent).where(Agent.company_id == company_uuid, Agent.status.in_(["active", "ready"]))
             result = await db.execute(stmt)
             agents = list(result.scalars().all())

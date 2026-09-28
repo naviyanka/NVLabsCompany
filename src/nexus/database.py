@@ -2,8 +2,9 @@
 
 import logging
 import uuid
-from collections.abc import AsyncGenerator, AsyncIterator
-from contextlib import asynccontextmanager
+from collections.abc import AsyncGenerator, AsyncIterator, Callable
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
+from functools import partial
 
 from sqlalchemy import event, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
@@ -92,6 +93,17 @@ async def tenant_session(company_id: uuid.UUID) -> AsyncIterator[AsyncSession]:
         except Exception:
             await session.rollback()
             raise
+
+
+def tenant_session_factory(
+    company_id: uuid.UUID,
+) -> Callable[[], AbstractAsyncContextManager[AsyncSession]]:
+    """A ``session_factory`` for services that open ``async with factory() as s``.
+
+    Every session it opens is a :func:`tenant_session` for ``company_id``, so a
+    service built for one tenant's work cannot write without the RLS tenant.
+    """
+    return partial(tenant_session, company_id)
 
 
 @asynccontextmanager

@@ -53,15 +53,17 @@ async def _handle_task_failure(
     # We'll check failure count and potentially create a proposal
     # This is fire-and-forget; failures in analysis don't block the event flow
     try:
-        from nexus.database import async_session_factory
+        from nexus.database import tenant_session
         from nexus.models.task import Task
         from sqlalchemy import select, func
 
-        async with async_session_factory() as db:
+        company_uuid = uuid.UUID(str(company_id))
+        async with tenant_session(company_uuid) as db:
             # Count recent failures for this agent
             count_stmt = (
                 select(func.count(Task.id))
                 .where(
+                    Task.company_id == company_uuid,
                     Task.assigned_agent_id == uuid.UUID(str(agent_id)),
                     Task.status == "failed",
                 )
@@ -76,6 +78,7 @@ async def _handle_task_failure(
                 # Check if a recent proposal already exists
                 existing = await db.execute(
                     select(func.count(EvolutionProposal.id)).where(
+                        EvolutionProposal.company_id == company_uuid,
                         EvolutionProposal.proposed_by_agent_id == uuid.UUID(str(agent_id)),
                         EvolutionProposal.status == "proposed",
                     )

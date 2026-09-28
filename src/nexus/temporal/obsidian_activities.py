@@ -91,11 +91,11 @@ async def list_pending_obsidian_documents_activity(
     retry budget remains. The selection itself lives in ``VaultIndexer`` so this
     cannot drift from what the synchronous path would pick.
     """
-    from nexus.database import async_session_factory
+    from nexus.database import tenant_session
     from nexus.obsidian.indexer import VaultIndexer
 
     company_id = uuid.UUID(input.company_id)
-    async with async_session_factory() as db:
+    async with tenant_session(company_id) as db:
         indexer = VaultIndexer(db, company_id)
         ids = await indexer.pending_document_ids(limit=input.limit)
     return PendingDocumentsOutput(nexus_ids=[str(i) for i in ids])
@@ -114,14 +114,14 @@ async def index_obsidian_document_activity(
     ``attempt_count`` authoritative, so the bounded retry from Phase 1B-3C still
     governs whether a later pass tries again.
     """
-    from nexus.database import async_session_factory
+    from nexus.database import tenant_session
     from nexus.obsidian.indexer import VaultIndexer
     from nexus.obsidian.security import safe_reason
 
     company_id = uuid.UUID(input.company_id)
     nexus_id = uuid.UUID(input.nexus_id)
 
-    async with async_session_factory() as db:
+    async with tenant_session(company_id) as db:
         indexer = VaultIndexer(db, company_id)
         try:
             result = await indexer.index_document(nexus_id)
@@ -274,11 +274,11 @@ async def _record_isolated_failure(
     bookkeeping problem. The activity's return value still reports the failure, so
     it is never silent.
     """
-    from nexus.database import async_session_factory
+    from nexus.database import tenant_session
     from nexus.obsidian.indexer import VaultIndexer
 
     try:
-        async with async_session_factory() as db:
+        async with tenant_session(company_id) as db:
             await VaultIndexer(db, company_id).record_failure(nexus_id, exc)
             await db.commit()
     except Exception:  # noqa: BLE001 - bookkeeping must not abort the batch
