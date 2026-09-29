@@ -36,8 +36,12 @@ def _refuse(code: str, message: str, http: int) -> HTTPException:
 
 
 @router.get("/api/v1/voice/status")
-async def voice_status(principal: CurrentPrincipal) -> dict:
+async def voice_status(
+    principal: CurrentPrincipal, db: DbSession, company_id: CurrentCompanyId
+) -> dict:
+    ceo = await ceo_service.current_ceo(db, company_id) if settings.voice_enabled else None
     return {
+        "ceo_id": str(ceo.id) if ceo else None,
         "enabled": settings.voice_enabled,
         "protocol": protocol.VERSION,
         "modes": list(protocol.MODES),

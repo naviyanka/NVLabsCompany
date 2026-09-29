@@ -7,9 +7,11 @@
  */
 
 import { useEffect, useRef, useState } from 'react';
-import { Bot as BotIcon, Loader2, MessageSquare, Minus, RotateCcw, Send, User as UserIcon, X } from 'lucide-react';
+import { Bot as BotIcon, Loader2, MessageSquare, Mic, Minus, RotateCcw, Send, User as UserIcon, X } from 'lucide-react';
 import { apiClient } from '@/api/client';
 import { getActiveCompanyId } from '@/config';
+import { VoicePanel } from '@/components/voice/VoicePanel';
+import { fetchVoiceStatus } from '@/lib/voice/voiceClient';
 import { useChatManager, type ChatManager, type Conversation } from '@/contexts/ChatManagerContext';
 
 const SLASH_COMMANDS = [
@@ -122,7 +124,20 @@ export function ConversationView({ conv, className = '' }: { conv: Conversation;
   const { loadHistory } = manager;
   const bottomRef = useRef<HTMLDivElement>(null);
   const [now, setNow] = useState(() => Date.now());
+  const [voiceOpen, setVoiceOpen] = useState(false);
+  const [voiceCeo, setVoiceCeo] = useState(false);
   const pending = conv.pendingRequests;
+
+  // Voice is offered only in the designated CEO's chat, and only when the server enables it.
+  useEffect(() => {
+    let live = true;
+    fetchVoiceStatus()
+      .then((s) => live && setVoiceCeo(s.enabled && s.ceo_id === conv.agent.id))
+      .catch(() => live && setVoiceCeo(false));
+    return () => {
+      live = false;
+    };
+  }, [conv.agent.id]);
 
   useEffect(() => loadHistory(conv.key), [loadHistory, conv.key]);
 
@@ -150,7 +165,12 @@ export function ConversationView({ conv, className = '' }: { conv: Conversation;
       <div className="px-3 py-1.5 border-b border-white/[0.06] text-[10px] font-mono text-[#6B6B6E] flex items-center gap-2">
         <span className="truncate">{conv.agent.title || conv.agent.role}</span>
         <span className="px-1.5 py-0.5 rounded bg-white/[0.06] text-[#A8A8AB]">{backendBadge(conv)}</span>
-        <span className="ml-auto" aria-label="Chat status">{statusOf(conv)}</span>
+        {voiceCeo && (
+          <button type="button" aria-label="Toggle voice" aria-pressed={voiceOpen} onClick={() => setVoiceOpen((v) => !v)} className="ml-auto p-0.5 text-[#FFB020]">
+            <Mic size={12} />
+          </button>
+        )}
+        <span className={voiceCeo ? '' : 'ml-auto'} aria-label="Chat status">{statusOf(conv)}</span>
       </div>
       <ol aria-label={`Transcript with ${conv.agent.name}`} className="flex-1 overflow-y-auto space-y-3 p-3">
         {conv.messages.length === 0 && !pending.length && (
@@ -208,6 +228,7 @@ export function ConversationView({ conv, className = '' }: { conv: Conversation;
           ))}
         </div>
       )}
+      {voiceCeo && voiceOpen && <VoicePanel onTextFallback={() => setVoiceOpen(false)} />}
       <form
         className="flex items-center gap-2 p-3 border-t border-white/[0.08]"
         onSubmit={(e) => {
