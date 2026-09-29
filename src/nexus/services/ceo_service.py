@@ -39,6 +39,7 @@ from sqlalchemy import or_, select, text, update
 from sqlalchemy.exc import IntegrityError
 
 from nexus.config import settings
+from nexus.memory.safety import MemoryRejected, render_memory_data, sanitize_value
 from nexus.models.agent import Agent
 from nexus.models.memory import MemoryRecord
 from nexus.services import manager_service as ms
@@ -484,6 +485,14 @@ async def remember(
     if ceo is None:
         raise ms._error(409, "NO_CEO", "Executive memory belongs to a CEO; appoint one first")
     content, redacted = redact(entry.content)
+    try:
+        source_meta, source_hit = sanitize_value(
+            {k: str(v) for k, v in (source or {}).items() if v is not None}
+        )
+        refs_meta, refs_hit = sanitize_value({k: str(v) for k, v in sorted(entry.refs.items())})
+    except MemoryRejected as exc:
+        raise ms._error(422, exc.code, str(exc)) from exc
+    redacted = redacted or source_hit or refs_hit
     now = _now()
     record = MemoryRecord(
         id=uuid.uuid4(),
@@ -501,8 +510,8 @@ async def remember(
             "ceo_id": str(ceo.id),
             "recorded_by": recorded_by,
             "origin": origin,
-            "source": {k: str(v) for k, v in (source or {}).items() if v is not None},
-            "refs": {k: str(v) for k, v in sorted(entry.refs.items())},
+            "source": source_meta,
+            "refs": refs_meta,
             "supersedes": entry.supersedes and str(entry.supersedes),
             "resolves": entry.resolves and str(entry.resolves),
             "content_sha256": hashlib.sha256(content.encode()).hexdigest(),
@@ -624,21 +633,33 @@ def render_context(snap: dict[str, Any], memory: list[MemoryRecord]) -> str:
             ))
     facts = _snapshot_facts(payload) if payload else {}
     lines.append(
-        "Executive memory (what was directed, decided or promised; NOT status — "
+        "Executive memory (what was directed, decided or promised; NOT status; "
         "where it disagrees with the snapshot, the snapshot wins):"
     )
-    if not memory:
-        lines.append("- none")
+    items: list[dict[str, Any]] = []
     for r in memory[:CONTEXT_MEMORY]:
         meta = r.record_metadata or {}
         now_facts = sorted(
             f"{k}={facts[v]}" for k, v in (meta.get("refs") or {}).items() if v in facts
         )
-        note = f" [snapshot v{snap['version']}: {', '.join(now_facts)}]" if now_facts else ""
-        lines.append(_line(
-            f"- {ms._iso(r.created_at)} {meta.get('type')} {r.id}: {r.content}"
-        ) + note)
-    text = "\n".join(lines)
+        item = {
+            "id": str(r.id),
+            "type": meta.get("type"),
+            "created_at": ms._iso(r.created_at),
+            "origin": meta.get("origin"),
+            "content": " ".join(str(r.content).split()),
+        }
+        if now_facts:
+            item["snapshot_now"] = f"snapshot v{snap['version']}: {', '.join(now_facts)}"
+        items.append(item)
+    # Recalled memory is data, not instructions: escaped JSON inside a fixed envelope.
+    # Drop the oldest entries until the whole context, envelope included, fits.
+    while True:
+        block = render_memory_data(items, item_max=CONTEXT_LINE_MAX) if items else "- none"
+        text = "\n".join([*lines, block])
+        if len(text) <= CONTEXT_MAX_CHARS or not items:
+            break
+        items.pop()
     if len(text) > CONTEXT_MAX_CHARS:
         text = text[: CONTEXT_MAX_CHARS - len(TRUNCATED)] + TRUNCATED
     return text

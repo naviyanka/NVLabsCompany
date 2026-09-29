@@ -62,7 +62,6 @@ ALLOWED: dict[str, tuple[str, str]] = {
         "default for trigger execution records, which are not tenant-scoped",
     ),
     "auth/bootstrap.py::_main": (BOOTSTRAP, "first-admin CLI, before any tenant exists"),
-    "ceo_knowledge_seed.py::seed_ceo_knowledge": (BOOTSTRAP, "dev seed of non-RLS memory_records"),
     "demo/seed.py::_main": (BOOTSTRAP, "dev seed CLI, run as the database owner"),
     "adapters/hermes_provider.py::_secret": (
         SYSTEM,

@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from sqlalchemy import select, update, delete, func
 
 from nexus.api.deps import CurrentCompanyId, DbSession
+from nexus.memory.safety import MemoryRejected, sanitize_text
 from nexus.models.memory import MemoryRecord
 
 router = APIRouter(tags=["memory"])
@@ -71,6 +72,14 @@ async def update_memory(memory_id: uuid.UUID, body: MemoryUpdate, db: DbSession,
     updates = body.model_dump(exclude_unset=True)
     if not updates:
         raise HTTPException(status_code=400, detail="No fields to update")
+    if updates.get("content") is not None:
+        # An edit is ingestion too: redact and bound it like a new memory.
+        try:
+            updates["content"], _ = sanitize_text(updates["content"], max_len=4000)
+        except MemoryRejected as exc:
+            raise HTTPException(
+                status_code=422, detail={"code": exc.code, "message": str(exc)}
+            ) from exc
     updates["updated_at"] = datetime.now(timezone.utc)
     # Executive memory is append-only: it changes only through ceo_service.
     stmt = update(MemoryRecord).where(MemoryRecord.id == memory_id, MemoryRecord.company_id == company_id, MemoryRecord.scope != "executive").values(**updates)

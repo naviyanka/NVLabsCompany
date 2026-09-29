@@ -5,13 +5,22 @@ from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 
-from nexus.api.deps import CurrentCompanyId, DbSession
+from nexus.api.deps import CurrentCompanyId, CurrentPrincipal, DbSession
+from nexus.memory.safety import MemoryRejected, sanitize_metadata, sanitize_text
 from nexus.models.memory import MemoryRecord
 
 router = APIRouter(tags=["memory"])
+
+# Scopes a caller may write here. All belong to the agent in the URL, so scope_id
+# must be that agent. Executive memory goes through the CEO route; l2_agent and
+# l3_shared are written only by the layered store.
+WRITABLE_SCOPES = frozenset(
+    {"agent", "task_context", "long_term", "guidelines", "episodic_reflection", "system_rule"}
+)
+CONTENT_MAX = 4000
 
 
 class MemoryCreate(BaseModel):
@@ -21,7 +30,7 @@ class MemoryCreate(BaseModel):
     scope_id: uuid.UUID | None = None
     content: str
     metadata: dict[str, Any] | None = None
-    importance: float = 0.5
+    importance: float = Field(default=0.5, ge=0.0, le=1.0)
 
 
 class MemorySearchQuery(BaseModel):
@@ -61,18 +70,42 @@ class MemorySearchResult(BaseModel):
     response_model=MemoryResponse,
 )
 async def store_memory(
-    agent_id: uuid.UUID, body: MemoryCreate, db: DbSession, company_id: CurrentCompanyId
+    agent_id: uuid.UUID,
+    body: MemoryCreate,
+    db: DbSession,
+    company_id: CurrentCompanyId,
+    principal: CurrentPrincipal,
 ) -> Any:
-    """Store a memory for an agent."""
-    # Verify agent belongs to company
+    """Store a memory for an agent.
+
+    Company and actor come from the principal. The caller supplies scope, text,
+    importance and free-form metadata; the metadata may not set identity,
+    provenance, trust or lifecycle keys, which the server owns.
+    """
     from nexus.models.agent import Agent
+    from nexus.services import manager_service as ms
     from nexus.services.ceo_service import EXECUTIVE_SCOPE
 
-    if body.scope == EXECUTIVE_SCOPE:
-        raise HTTPException(
+    def refuse(code: str, message: str) -> HTTPException:
+        return HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Executive memory is recorded through /api/v1/organization/ceo/memory",
+            detail={"code": code, "message": message},
         )
+
+    if body.scope == EXECUTIVE_SCOPE:
+        raise refuse(
+            "MEMORY_SCOPE_NOT_WRITABLE",
+            "Executive memory is recorded through /api/v1/organization/ceo/memory",
+        )
+    if body.scope not in WRITABLE_SCOPES:
+        raise refuse("MEMORY_SCOPE_NOT_WRITABLE", "This memory scope cannot be written here")
+    if body.scope_id is not None and body.scope_id != agent_id:
+        raise refuse("MEMORY_SCOPE_MISMATCH", "scope_id must be the agent the memory belongs to")
+    try:
+        content, hit = sanitize_text(body.content, max_len=CONTENT_MAX)
+        user_meta, meta_hit = sanitize_metadata(body.metadata)
+    except MemoryRejected as exc:
+        raise refuse(exc.code, str(exc)) from exc
 
     agent_stmt = select(Agent).where(Agent.id == agent_id, Agent.company_id == company_id)
     agent_result = await db.execute(agent_stmt)
@@ -83,19 +116,50 @@ async def store_memory(
             detail=f"Agent {agent_id} not found",
         )
 
+    if principal.user_id:
+        actor = f"user:{principal.user_id}"
+    elif principal.run_id:
+        actor = f"run:{principal.run_id}"
+    else:
+        actor = f"service:{principal.api_key_id or principal.label or 'unknown'}"
+    redacted = hit or meta_hit
     record = MemoryRecord(
         company_id=company_id,
         agent_id=agent_id,
         scope=body.scope,
-        scope_id=body.scope_id or agent_id,
-        content=body.content,
-        record_metadata=body.metadata,
+        scope_id=agent_id,
+        content=content,
+        record_metadata={
+            **user_meta,
+            "origin": "api",
+            "recorded_by": actor,
+            "trust": "operator_supplied",
+            "redacted": redacted,
+        },
         importance=body.importance,
         tier="warm",
     )
     db.add(record)
     await db.flush()
-    return record
+    await ms.audit(
+        db, company_id, "memory.recorded", actor, "memory", record.id,
+        agent_id=agent_id, scope=body.scope, redacted=redacted,
+    )
+    # Built by hand: a SQLModel row's `.metadata` is the table registry, not the JSON column.
+    return MemoryResponse(
+        id=record.id,
+        company_id=record.company_id,
+        agent_id=record.agent_id,
+        scope=record.scope,
+        scope_id=record.scope_id,
+        content=record.content,
+        metadata=record.record_metadata,
+        importance=record.importance,
+        access_count=record.access_count or 0,
+        tier=record.tier,
+        created_at=record.created_at,
+        updated_at=record.updated_at,
+    )
 
 
 @router.get(

@@ -19,6 +19,8 @@ from nexus.memory.retriever import (
 )
 from nexus.memory.store import MemoryStore, MemoryEntry
 
+CID = uuid.uuid4()  # company for the MemoryStore tests
+
 
 # ============================================================
 # BM25 Retriever Tests (pure logic, no mocks needed)
@@ -265,11 +267,12 @@ class TestMemoryStoreHotCache:
             scope_id=scope_id,
             content="Test memory content",
             importance=0.8,
+            company_id=CID,
         )
 
         assert memory_id is not None
         # Verify it is in the hot cache
-        key = store._cache_key(scope, scope_id)
+        key = store._cache_key(CID, scope, scope_id)
         assert key in store._hot
         assert len(store._hot[key]) == 1
         assert store._hot[key][0].content == "Test memory content"
@@ -284,6 +287,7 @@ class TestMemoryStoreHotCache:
             scope="company",
             scope_id=uuid.uuid4(),
             content="Persistent memory",
+            company_id=CID,
         )
 
         mock_db_session.add.assert_called_once()
@@ -298,7 +302,7 @@ class TestMemoryStoreHotCache:
 
         # Store a memory (goes to hot cache)
         await store.store(
-            scope=scope, scope_id=scope_id, content="Hot memory"
+            scope=scope, scope_id=scope_id, content="Hot memory", company_id=CID
         )
 
         # Mock execute to return empty (simulating no warm records needed)
@@ -308,7 +312,7 @@ class TestMemoryStoreHotCache:
         mock_result.scalars.return_value = mock_scalars
         mock_db_session.execute.return_value = mock_result
 
-        results = await store.retrieve(scope=scope, scope_id=scope_id)
+        results = await store.retrieve(scope=scope, scope_id=scope_id, company_id=CID)
 
         assert len(results) >= 1
         assert results[0].content == "Hot memory"
@@ -329,6 +333,7 @@ class TestMemoryStorePromoteDemote:
         # Mock: memory exists in warm tier
         mock_record = MagicMock(spec=MemoryRecord)
         mock_record.id = memory_id
+        mock_record.company_id = CID
         mock_record.scope = "agent"
         mock_record.scope_id = uuid.uuid4()
         mock_record.content = "Warm memory content"
@@ -342,11 +347,11 @@ class TestMemoryStorePromoteDemote:
         mock_result.scalar_one_or_none.return_value = mock_record
         mock_db_session.execute.return_value = mock_result
 
-        new_tier = await store.promote(memory_id)
+        new_tier = await store.promote(memory_id, CID)
 
         assert new_tier == "hot"
         # Verify it was added to hot cache
-        key = store._cache_key(mock_record.scope, mock_record.scope_id)
+        key = store._cache_key(mock_record.company_id, mock_record.scope, mock_record.scope_id)
         assert key in store._hot
         assert any(e.id == memory_id for e in store._hot[key])
 
@@ -359,16 +364,16 @@ class TestMemoryStorePromoteDemote:
 
         # First store to hot cache
         memory_id_str = await store.store(
-            scope=scope, scope_id=scope_id, content="Hot content"
+            scope=scope, scope_id=scope_id, content="Hot content", company_id=CID
         )
         memory_id = uuid.UUID(memory_id_str)
 
         # Verify it is in hot cache
-        key = store._cache_key(scope, scope_id)
+        key = store._cache_key(CID, scope, scope_id)
         assert len(store._hot[key]) == 1
 
         # Demote it
-        new_tier = await store.demote(memory_id)
+        new_tier = await store.demote(memory_id, CID)
 
         assert new_tier == "warm"
         # Hot cache should be empty for this key now
@@ -385,12 +390,14 @@ class TestMemoryStoreScopeFiltering:
         scope_id_1 = uuid.uuid4()
         scope_id_2 = uuid.uuid4()
 
-        await store.store(scope="agent", scope_id=scope_id_1, content="Agent memory 1")
-        await store.store(scope="team", scope_id=scope_id_2, content="Team memory")
+        await store.store(
+            scope="agent", scope_id=scope_id_1, content="Agent memory 1", company_id=CID
+        )
+        await store.store(scope="team", scope_id=scope_id_2, content="Team memory", company_id=CID)
 
         # Hot cache keys should be different
-        key1 = store._cache_key("agent", scope_id_1)
-        key2 = store._cache_key("team", scope_id_2)
+        key1 = store._cache_key(CID, "agent", scope_id_1)
+        key2 = store._cache_key(CID, "team", scope_id_2)
         assert key1 != key2
         assert len(store._hot[key1]) == 1
         assert len(store._hot[key2]) == 1

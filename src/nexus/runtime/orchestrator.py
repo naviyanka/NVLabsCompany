@@ -351,11 +351,15 @@ async def _tick(session_factory: async_sessionmaker[AsyncSession] | None = None)
                             logger.error("Orchestrator: goal %s processing failed: %s", goal.id, e)
                             break
 
-            for maintenance in (_auto_evaluate_proposals, _memory_maintenance, _agent_heartbeat_wakeup):
+            for name, maintenance in (
+                ("_auto_evaluate_proposals", _auto_evaluate_proposals(db)),
+                ("_memory_maintenance", _memory_maintenance(db, company_id)),
+                ("_agent_heartbeat_wakeup", _agent_heartbeat_wakeup(db)),
+            ):
                 try:
-                    await maintenance(db)
+                    await maintenance
                 except Exception as e:
-                    logger.debug("%s error: %s", maintenance.__name__, e)
+                    logger.debug("%s error: %s", name, e)
 
             await db.commit()
 
@@ -1080,45 +1084,36 @@ async def _agent_heartbeat_wakeup(db: AsyncSession) -> None:
     await db.flush()
 
 
-async def _memory_maintenance(db: AsyncSession) -> None:
-    """Periodic memory maintenance: decay old memories and promote high-value ones.
+async def _memory_maintenance(db: AsyncSession, company_id: uuid.UUID) -> None:
+    """Periodic memory maintenance for ONE company: decay old memories.
 
-    - Decay: reduce importance of memories not accessed in 7+ days by 5%
-    - L3 Promotion: memories with importance >= 0.9 and scope='agent' get promoted to scope='company'
+    Every statement is filtered by ``company_id``; the tick runs once per company,
+    so an unfiltered statement would mutate every tenant on every tick.
+
+    Decay reduces importance by 5% (floor 0.1) for memories not accessed in 7+
+    days. Known limitation: nothing updates ``last_accessed_at`` on read, so the
+    decay still compounds on every tick for the same rows.
+
+    Promotion (agent -> company scope) was removed: it moved private agent memory
+    into shared scope with no verification. Verified promotion will be implemented
+    separately; until then this function never changes scope or tier.
     """
     from nexus.models.memory import MemoryRecord
     from sqlalchemy import update as sa_update
 
-    now = datetime.now(timezone.utc)
-    decay_cutoff = now - timedelta(days=7)
+    # last_accessed_at is a naive TIMESTAMP column; asyncpg rejects an aware bind.
+    decay_cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=7)
 
-    # Decay old memories (reduce importance by 5%, minimum 0.1)
     await db.execute(
         sa_update(MemoryRecord)
         .where(
+            MemoryRecord.company_id == company_id,
             MemoryRecord.last_accessed_at != None,  # noqa: E711
             MemoryRecord.last_accessed_at < decay_cutoff,
             MemoryRecord.importance > 0.1,
         )
         .values(importance=MemoryRecord.importance * 0.95)
     )
-
-    # L3 Promotion: high-importance agent memories → company scope
-    high_value_stmt = (
-        select(MemoryRecord)
-        .where(
-            MemoryRecord.scope == "agent",
-            MemoryRecord.importance >= 0.9,
-            MemoryRecord.tier == "warm",
-        )
-        .limit(5)
-    )
-    result = await db.execute(high_value_stmt)
-    for mem in result.scalars().all():
-        mem.scope = "company"
-        mem.tier = "hot"
-        db.add(mem)
-
     await db.flush()
 
 

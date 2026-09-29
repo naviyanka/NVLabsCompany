@@ -163,12 +163,13 @@ API_KNOWLEDGE = [
 
 async def seed_ceo_knowledge():
     """Seed CEO agent memories with API knowledge."""
-    from nexus.database import async_session_factory
+    from nexus.database import tenant_session
     from nexus.models.memory import MemoryRecord
     from nexus.models._time import utcnow
     from sqlalchemy import select, func
 
-    async with async_session_factory() as db:
+    # memory_records is under row-level security: the seed writes one company's rows.
+    async with tenant_session(COMPANY_ID) as db:
         # Check if already seeded
         count_result = await db.execute(
             select(func.count(MemoryRecord.id)).where(

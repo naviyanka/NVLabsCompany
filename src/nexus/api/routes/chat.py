@@ -32,6 +32,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+FACT_MAX_CHARS = 2000  # longest chat-extracted fact stored as memory
+
 router = APIRouter(tags=["chat"])
 
 
@@ -418,6 +420,8 @@ async def _fetch_agent_memories(
             "scope": r.scope,
             "importance": r.importance,
             "tier": r.tier,
+            "trust": (r.record_metadata or {}).get("trust", "unspecified"),
+            "origin": (r.record_metadata or {}).get("origin", "unspecified"),
             "created_at": r.created_at.isoformat() if r.created_at else "",
         }
         for r in records
@@ -462,12 +466,16 @@ async def _fetch_shared_knowledge(
                 # when the persona layer trims to its memory budget.
                 "importance": 0.9,
                 "tier": "warm",
+                "trust": (fact.metadata or {}).get("trust", "unspecified"),
+                "origin": (fact.metadata or {}).get("origin", "unspecified"),
                 "created_at": fact.created_at.isoformat(),
             }
             for fact in await memory.get_shared_knowledge(limit=limit)
         ]
     except Exception as exc:  # noqa: BLE001 - missing shared context must not break chat
-        logger.warning("Shared knowledge lookup failed for %s: %s", company_id, exc)
+        logger.warning(
+            "Shared knowledge lookup failed for %s: %s", company_id, type(exc).__name__
+        )
         return []
 
 
@@ -492,6 +500,12 @@ async def _remember_response(agent: Agent, response_text: str) -> int:
         from nexus.database import tenant_session_factory
         from nexus.memory.extract import FactExtractor
         from nexus.memory.layered_persistent import PersistentLayeredMemory
+        from nexus.memory.safety import (
+            UNTRUSTED,
+            MemoryRejected,
+            sanitize_metadata,
+            sanitize_text,
+        )
 
         facts = FactExtractor().extract_facts(response_text, agent.id)
         if not facts:
@@ -503,11 +517,28 @@ async def _remember_response(agent: Agent, response_text: str) -> int:
         )
         stored = 0
         for fact in facts:
-            if await memory.store_fact(agent.id, fact.content, metadata=fact.metadata):
+            try:
+                content, hit = sanitize_text(fact.content, max_len=FACT_MAX_CHARS)
+                # Server-owned: model output is an unverified candidate, never a trusted fact.
+                metadata, _ = sanitize_metadata(
+                    {
+                        **(fact.metadata or {}),
+                        "trust": UNTRUSTED,
+                        "origin": "chat_extraction",
+                        "source": {"type": "chat_reply"},
+                        "recorded_by": f"agent:{agent.id}",
+                        "redacted": hit,
+                    },
+                    allow_reserved=True,
+                )
+            except MemoryRejected:
+                continue  # an oversized or malformed fact is dropped, not stored
+            if await memory.store_fact(agent.id, content, metadata=metadata):
                 stored += 1
         return stored
     except Exception as exc:  # noqa: BLE001 - remembering must not break chat
-        logger.warning("Could not store memory for agent %s: %s", agent.id, exc)
+        # Class name only: the message can carry the rejected text.
+        logger.warning("Could not store memory for agent %s: %s", agent.id, type(exc).__name__)
         return 0
 
 
@@ -593,10 +624,26 @@ def _build_system_prompt(agent: Agent, memories: list[dict[str, Any]] | None = N
     # ceo_service.chat_context, which _build_chat_prompt adds per turn.
 
     if working_ctx.recent_memories:
-        mem_lines = [
-            f"- {m.get('content', str(m))}" for m in working_ctx.recent_memories
-        ]
-        prompt += f"\n\n--- Relevant Agent Memories ---\n" + "\n".join(mem_lines)
+        # Recalled memory is reference data: escaped JSON in a fixed envelope, with
+        # its trust label, so a stored string cannot pose as an instruction.
+        from nexus.memory.safety import render_memory_data
+
+        items = []
+        for m in working_ctx.recent_memories:
+            m = m if isinstance(m, dict) else {"content": m}  # a malformed entry is still data
+            if m.get("content") is None:
+                continue
+            items.append(
+                {
+                    "content": str(m["content"]),
+                    "scope": m.get("scope"),
+                    "trust": m.get("trust", "unspecified"),
+                    "origin": m.get("origin", "unspecified"),
+                    "created_at": m.get("created_at"),
+                }
+            )
+        if items:
+            prompt += "\n\n" + render_memory_data(items)
 
     return prompt
 
