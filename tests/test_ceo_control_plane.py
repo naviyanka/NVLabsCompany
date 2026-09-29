@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import dataclasses
 import hashlib
+import json
 import uuid
 
 import httpx
@@ -389,6 +390,12 @@ class TestHierarchy:
 # --- executive context ------------------------------------------------------------
 
 
+def _memory_entries(text: str) -> list[dict]:
+    """The executive-memory entries from the context's escaped-JSON data block."""
+    block = text.split("<memory-data>\n", 1)[1].split("\n</memory-data>", 1)[0]
+    return json.loads(block)
+
+
 async def _context(db, c, agent=None):  # noqa: F811
     async with db() as s:
         return await ceo_service.chat_context(s, c["acme"], agent or c["chief"])
@@ -421,9 +428,9 @@ class TestExecutiveContext:
         assert len(first) <= len(ceo_service.CHAT_DIRECTIVE) + 2 + ceo_service.CONTEXT_MAX_CHARS
         assert f"Organization snapshot v{generated['version']} hash " in first
         assert "freshness FRESH" in first and "WARNING" not in first
-        memory_lines = [ln for ln in first.splitlines() if " decision " in ln]
-        assert len(memory_lines) == ceo_service.CONTEXT_MEMORY
-        assert all(len(ln) <= ceo_service.CONTEXT_LINE_MAX for ln in memory_lines)
+        entries = _memory_entries(first)
+        assert len(entries) == ceo_service.CONTEXT_MEMORY
+        assert all(len(e["content"]) <= ceo_service.CONTEXT_LINE_MAX for e in entries)
 
     async def test_missing_stale_and_failed_snapshots_are_labelled(self, db, c):  # noqa: F811
         await _appoint(c, c["chief"])
@@ -461,8 +468,8 @@ class TestExecutiveContext:
         generated = await snap.generate(c["acme"])
         text = await _context(db, c)
         assert "the snapshot wins" in text
-        line = next(ln for ln in text.splitlines() if "Second is finished" in ln)
-        assert f"[snapshot v{generated['version']}: task_id=task " in line
+        entry = next(e for e in _memory_entries(text) if e["content"] == "Second is finished")
+        assert entry["snapshot_now"].startswith(f"snapshot v{generated['version']}: task_id=task ")
 
 
 # --- executive memory ----------------------------------------------------------------
