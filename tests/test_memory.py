@@ -347,7 +347,7 @@ class TestMemoryStorePromoteDemote:
         mock_result.scalar_one_or_none.return_value = mock_record
         mock_db_session.execute.return_value = mock_result
 
-        new_tier = await store.promote(memory_id)
+        new_tier = await store.promote(memory_id, CID)
 
         assert new_tier == "hot"
         # Verify it was added to hot cache
@@ -373,7 +373,7 @@ class TestMemoryStorePromoteDemote:
         assert len(store._hot[key]) == 1
 
         # Demote it
-        new_tier = await store.demote(memory_id)
+        new_tier = await store.demote(memory_id, CID)
 
         assert new_tier == "warm"
         # Hot cache should be empty for this key now

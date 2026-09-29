@@ -10,6 +10,7 @@ from typing import Any
 from sqlalchemy import select, update, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from nexus.memory.safety import redact_text, sanitize_value
 from nexus.models.memory import MemoryRecord
 
 
@@ -205,29 +206,52 @@ class MemoryStore:
 
         return results[:limit]
 
-    async def promote(self, memory_id: uuid.UUID) -> str:
-        """Promote a memory to a hotter tier: cold -> warm -> hot.
+    @staticmethod
+    def _require_company(company_id: uuid.UUID | None) -> uuid.UUID:
+        if company_id is None:
+            raise ValueError("company_id is required")
+        return company_id if isinstance(company_id, uuid.UUID) else uuid.UUID(str(company_id))
 
-        Args:
-            memory_id: The memory to promote.
+    def _cold_file(self, company_id: uuid.UUID, memory_id: uuid.UUID) -> Path:
+        """The cold file for a memory: ``<cold>/<company>/<memory>.json``.
 
-        Returns:
-            The new tier name after promotion.
+        Both ids are parsed as UUIDs, so neither can carry a separator or ``..``; the
+        resolved path is still checked to sit inside the company's own directory.
         """
-        # Check if already in hot cache
-        for entries in self._hot.values():
-            for entry in entries:
-                if entry.id == memory_id:
-                    return "hot"  # Already at hottest tier
+        company_id = self._require_company(company_id)
+        memory_id = memory_id if isinstance(memory_id, uuid.UUID) else uuid.UUID(str(memory_id))
+        company_dir = (self._cold_path / str(company_id)).resolve()
+        path = (company_dir / f"{memory_id}.json").resolve()
+        if not path.is_relative_to(company_dir):
+            raise ValueError("cold path escapes the company directory")
+        return path
 
-        # Check warm tier
-        stmt = select(MemoryRecord).where(MemoryRecord.id == memory_id)
-        result = await self._db.execute(stmt)
-        record = result.scalar_one_or_none()
+    async def _owned_record(
+        self, company_id: uuid.UUID, memory_id: uuid.UUID, tier: str | None = None
+    ) -> MemoryRecord | None:
+        """The memory if it belongs to ``company_id``; another company's id reads as absent."""
+        stmt = select(MemoryRecord).where(
+            MemoryRecord.id == memory_id, MemoryRecord.company_id == company_id
+        )
+        if tier is not None:
+            stmt = stmt.where(MemoryRecord.tier == tier)
+        return (await self._db.execute(stmt)).scalar_one_or_none()
 
+    async def promote(self, memory_id: uuid.UUID, company_id: uuid.UUID | None = None) -> str:
+        """Promote one of ``company_id``'s memories to a hotter tier: cold -> warm -> hot.
+
+        Raises:
+            ValueError: If ``company_id`` is missing, or the memory is not that company's.
+        """
+        company_id = self._require_company(company_id)
+        prefix = f"{company_id}:"
+        for key, entries in self._hot.items():
+            if key.startswith(prefix) and any(e.id == memory_id for e in entries):
+                return "hot"  # Already at hottest tier
+
+        record = await self._owned_record(company_id, memory_id)
         if record is not None:
             if record.tier == "warm":
-                # Promote warm -> hot
                 entry = MemoryEntry(
                     id=record.id,
                     scope=record.scope,
@@ -239,161 +263,135 @@ class MemoryStore:
                     tier="hot",
                     created_at=record.created_at,
                 )
-                key = self._cache_key(record.company_id, record.scope, record.scope_id)
-                if key not in self._hot:
-                    self._hot[key] = []
-                self._hot[key].append(entry)
+                key = self._cache_key(company_id, record.scope, record.scope_id)
+                self._hot.setdefault(key, []).append(entry)
                 return "hot"
-            elif record.tier == "cold":
-                # Promote cold -> warm
-                update_stmt = (
+            if record.tier == "cold":
+                await self._db.execute(
                     update(MemoryRecord)
-                    .where(MemoryRecord.id == memory_id)
+                    .where(MemoryRecord.id == memory_id, MemoryRecord.company_id == company_id)
                     .values(tier="warm", updated_at=datetime.now(timezone.utc))
                 )
-                await self._db.execute(update_stmt)
                 return "warm"
+            raise ValueError(f"Memory {memory_id} not found in any tier")
 
-        # Try cold storage (JSON files)
-        cold_record = await self._load_from_cold(memory_id)
+        # A file exists only for a memory that was archived from this company's rows.
+        cold_record = await self._load_from_cold(memory_id, company_id)
         if cold_record:
-            # Promote cold -> warm by inserting into database
-            new_record = MemoryRecord(
-                id=cold_record["id"],
-                company_id=uuid.UUID(cold_record["company_id"]),
-                scope=cold_record["scope"],
-                scope_id=(
-                    uuid.UUID(cold_record["scope_id"])
-                    if cold_record.get("scope_id")
-                    else None
-                ),
-                content=cold_record["content"],
-                metadata=cold_record.get("metadata"),
-                importance=cold_record.get("importance", 0.5),
-                tier="warm",
+            self._db.add(
+                MemoryRecord(
+                    id=cold_record["id"],
+                    company_id=company_id,
+                    scope=cold_record["scope"],
+                    scope_id=(
+                        uuid.UUID(cold_record["scope_id"]) if cold_record.get("scope_id") else None
+                    ),
+                    content=cold_record["content"],
+                    record_metadata=cold_record.get("metadata"),
+                    importance=cold_record.get("importance", 0.5),
+                    tier="warm",
+                )
             )
-            self._db.add(new_record)
             await self._db.flush()
             return "warm"
 
         raise ValueError(f"Memory {memory_id} not found in any tier")
 
-    async def demote(self, memory_id: uuid.UUID) -> str:
-        """Demote a memory to a colder tier: hot -> warm -> cold.
+    async def demote(self, memory_id: uuid.UUID, company_id: uuid.UUID | None = None) -> str:
+        """Demote one of ``company_id``'s memories to a colder tier: hot -> warm -> cold.
 
-        Args:
-            memory_id: The memory to demote.
-
-        Returns:
-            The new tier name after demotion.
+        Raises:
+            ValueError: If ``company_id`` is missing, or the memory is not that company's.
         """
-        # Check hot tier
-        for key, entries in self._hot.items():
+        company_id = self._require_company(company_id)
+        prefix = f"{company_id}:"
+        for key, entries in list(self._hot.items()):
+            if not key.startswith(prefix):
+                continue
             for i, entry in enumerate(entries):
                 if entry.id == memory_id:
-                    # Demote hot -> warm (remove from hot cache)
                     entries.pop(i)
                     if not entries:
                         del self._hot[key]
                     return "warm"
 
-        # Check warm tier
-        stmt = select(MemoryRecord).where(
-            MemoryRecord.id == memory_id,
-            MemoryRecord.tier == "warm",
+        record = await self._owned_record(company_id, memory_id, tier="warm")
+        if record is None:
+            raise ValueError(f"Memory {memory_id} not found or already at coldest tier")
+        await self._save_to_cold(record)
+        await self._db.execute(
+            update(MemoryRecord)
+            .where(MemoryRecord.id == memory_id, MemoryRecord.company_id == company_id)
+            .values(tier="cold", updated_at=datetime.now(timezone.utc))
         )
-        result = await self._db.execute(stmt)
-        record = result.scalar_one_or_none()
+        return "cold"
 
-        if record is not None:
-            # Demote warm -> cold (archive to JSON, update tier)
-            await self._save_to_cold(record)
-            update_stmt = (
-                update(MemoryRecord)
-                .where(MemoryRecord.id == memory_id)
-                .values(tier="cold", updated_at=datetime.now(timezone.utc))
-            )
-            await self._db.execute(update_stmt)
-            return "cold"
+    async def archive_old(
+        self, threshold_days: int = 30, company_id: uuid.UUID | None = None
+    ) -> int:
+        """Bulk demote ``company_id``'s old warm memories to cold. Returns how many.
 
-        raise ValueError(f"Memory {memory_id} not found or already at coldest tier")
-
-    async def archive_old(self, threshold_days: int = 30) -> int:
-        """Bulk demote old warm memories to cold tier.
-
-        Args:
-            threshold_days: Memories older than this many days get archived.
-
-        Returns:
-            Number of memories archived.
+        Raises:
+            ValueError: If ``company_id`` is missing.
         """
         from datetime import timedelta
 
+        company_id = self._require_company(company_id)
         cutoff = datetime.now(timezone.utc) - timedelta(days=threshold_days)
-
-        # Find old warm memories
-        stmt = select(MemoryRecord).where(
-            MemoryRecord.tier == "warm",
-            MemoryRecord.created_at < cutoff,
+        result = await self._db.execute(
+            select(MemoryRecord).where(
+                MemoryRecord.company_id == company_id,
+                MemoryRecord.tier == "warm",
+                MemoryRecord.created_at < cutoff,
+            )
         )
-        result = await self._db.execute(stmt)
         old_records = result.scalars().all()
-
-        archived_count = 0
         for record in old_records:
             await self._save_to_cold(record)
-            archived_count += 1
-
-        # Bulk update tier
         if old_records:
-            update_stmt = (
+            await self._db.execute(
                 update(MemoryRecord)
                 .where(
-                    MemoryRecord.tier == "warm",
-                    MemoryRecord.created_at < cutoff,
+                    MemoryRecord.company_id == company_id,
+                    MemoryRecord.id.in_([r.id for r in old_records]),
                 )
                 .values(tier="cold", updated_at=datetime.now(timezone.utc))
             )
-            await self._db.execute(update_stmt)
-
-        return archived_count
+        return len(old_records)
 
     async def _save_to_cold(self, record: MemoryRecord) -> None:
-        """Save a memory record to cold JSON storage.
-
-        Args:
-            record: The MemoryRecord to archive.
-        """
-        self._cold_path.mkdir(parents=True, exist_ok=True)
-        file_path = self._cold_path / f"{record.id}.json"
-
+        """Write a memory to its company's cold directory, redacted first."""
+        path = self._cold_file(record.company_id, record.id)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        metadata, _ = sanitize_value(record.record_metadata or {})
         data = {
             "id": str(record.id),
             "company_id": str(record.company_id),
             "agent_id": str(record.agent_id) if record.agent_id else None,
             "scope": record.scope,
             "scope_id": str(record.scope_id) if record.scope_id else None,
-            "content": record.content,
-            "metadata": record.record_metadata,
+            "content": redact_text(record.content)[0],
+            "metadata": metadata,
             "importance": record.importance,
             "access_count": record.access_count,
             "tier": "cold",
             "created_at": record.created_at.isoformat(),
         }
-        file_path.write_text(json.dumps(data, indent=2))
+        path.write_text(json.dumps(data, indent=2))
 
-    async def _load_from_cold(self, memory_id: uuid.UUID) -> dict[str, Any] | None:
-        """Load a memory from cold JSON storage.
+    async def _load_from_cold(
+        self, memory_id: uuid.UUID, company_id: uuid.UUID | None = None
+    ) -> dict[str, Any] | None:
+        """Load a memory from ``company_id``'s cold directory, or None.
 
-        Args:
-            memory_id: The memory to load.
-
-        Returns:
-            Dictionary with memory data, or None if not found.
+        A file whose recorded company differs from the directory it sits in is ignored.
         """
-        file_path = self._cold_path / f"{memory_id}.json"
-        if file_path.exists():
-            data = json.loads(file_path.read_text())
-            data["id"] = uuid.UUID(data["id"])
-            return data
-        return None
+        company_id = self._require_company(company_id)
+        path = self._cold_file(company_id, memory_id)
+        if not path.exists():
+            return None
+        data = json.loads(path.read_text())
+        if data.get("company_id") != str(company_id):
+            return None
+        data["id"] = uuid.UUID(data["id"])
+        return data
