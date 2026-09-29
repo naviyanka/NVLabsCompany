@@ -91,6 +91,14 @@ def voice_info(settings: Settings, *, full: bool = False) -> list[dict[str, Any]
     ]
 
 
+def vad_installed() -> bool:
+    import importlib.util
+
+    spec = importlib.util.find_spec("faster_whisper")
+    root = Path(spec.origin).parent if spec and spec.origin else None
+    return bool(root and (root / "assets" / "silero_vad_v6.onnx").is_file())
+
+
 def stt_dir(settings: Settings) -> Path:
     return settings.model_dir / "stt" / manifest()["stt"]["id"]
 

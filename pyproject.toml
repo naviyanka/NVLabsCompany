@@ -53,6 +53,9 @@ dependencies = [
     "prometheus-client>=0.20.0",
 ]
 
+[project.scripts]
+nexus = "nexus.cli:main"
+
 [project.optional-dependencies]
 # Distributed tracing. Optional on purpose: observability/tracing.py degrades
 # to no-op spans when these are absent, so the base install stays lean.

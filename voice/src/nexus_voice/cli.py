@@ -12,7 +12,11 @@ from nexus_voice.config import Settings
 def diagnose(settings: Settings, *, full: bool = False, load_stt: bool = True) -> dict:
     from nexus_voice import audio, devices, models
 
-    report: dict = {"gpu": devices.gpu_name(), "ffmpeg": audio.ffmpeg_version()}
+    report: dict = {
+        "python": sys.version.split()[0],
+        "gpu": devices.gpu_name(),
+        "ffmpeg": audio.ffmpeg_version(),
+    }
     report["gpu_detected"] = report["gpu"] is not None
     report["ctranslate2_cuda"] = devices.cuda_available()
     device, compute = devices.choose(settings.device)
@@ -30,6 +34,9 @@ def diagnose(settings: Settings, *, full: bool = False, load_stt: bool = True) -
             models.voice_available(settings, v, full=full)
             for v in models.voices_for(lang, settings)
         )
+    stt = models.manifest()["stt"]
+    report["stt_model"] = {k: stt.get(k) for k in ("id", "revision", "license", "commercial")}
+    report["vad_model"] = {**models.manifest()["vad"], "installed": models.vad_installed()}
     report["allow_noncommercial_models"] = settings.allow_noncommercial
     report["voices"] = models.voice_info(settings, full=full)
     # No commercially licensed Hindi voice ships: it stays a live check until one is supplied.
