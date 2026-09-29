@@ -94,6 +94,17 @@ PROVIDERS: dict[str, dict[str, Any]] = {
             "nousresearch/hermes-3-llama-3.1-405b",
         ],
     },
+    # Hermes over an OpenAI-compatible API with native, server-governed tool calls.
+    # Endpoint and key come from operator settings and the secret backend.
+    "hermes-native": {
+        "registry_key": "hermes_native",
+        "env_key": None,
+        # The operator configures the model (settings.hermes_native_model); none is guessed.
+        "default_model": "",
+        "supports_streaming": True,
+        "supports_tools": True,
+        "models": [],
+    },
     # Claude Code dedicated subprocess adapter
     "claude_code": {
         "registry_key": "claude_code",

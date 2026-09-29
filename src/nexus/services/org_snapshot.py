@@ -688,18 +688,30 @@ async def agent_scope(db: Any, company_id: uuid.UUID, agent_id: uuid.UUID) -> st
 
 
 async def read_as_agent(
-    db: Any, company_id: uuid.UUID, agent_id: uuid.UUID, actor: str
+    db: Any, company_id: uuid.UUID, agent_id: uuid.UUID, actor: str, ctx: Any = None
 ) -> dict[str, Any]:
-    """An agent's read: its :func:`agent_scope`, audited; 403 for anyone else."""
+    """An agent's read: its :func:`agent_scope`, audited; 403 for anyone else.
+
+    ``ctx`` is the server's ExecutionContext for a governed tool read; its identity
+    (never model arguments) is recorded so the read traces to a turn and execution.
+    REST reads pass none and leave those fields out.
+    """
     scope = await agent_scope(db, company_id, agent_id)
     if scope is None:
         raise ms._error(
             403, "SNAPSHOT_FORBIDDEN", "Only managers may read the organization snapshot"
         )
     result = await read(db, company_id, scope, agent_id)
+    trace: dict[str, Any] = {}
+    if ctx is not None:
+        principal = str(ctx.principal_id or "")
+        trace = {
+            "agent_id": ctx.agent_id, "session_id": ctx.session_id, "turn_id": ctx.turn_id,
+            "execution_id": principal[4:] if principal.startswith("run:") else None,
+        }
     await ms.audit(
         db, company_id, "organization.snapshot_read", actor, "organization_snapshot", company_id,
-        scope=scope, version=result["version"],
+        scope=scope, version=result["version"], payload_hash=result.get("payload_hash"), **trace,
     )
     await db.commit()
     return result

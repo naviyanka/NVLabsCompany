@@ -226,8 +226,9 @@ export function EditAgentModal({ agent, isOpen, onClose, onSuccess }: EditAgentM
             >
               <option value="openai">OpenAI</option>
               <option value="anthropic">Anthropic</option>
-              <option value="hermes">Hermes 3 (local)</option>
-              <option value="hermes-cli">Hermes Agent CLI</option>
+              <option value="hermes">Hermes 3 (local, advisory chat only)</option>
+              <option value="hermes-cli">Hermes Agent CLI (advisory chat only)</option>
+              <option value="hermes-native">Hermes native API (governed tools, operator-gated)</option>
               <option value="claude">Claude Code</option>
               <option value="codex">Codex</option>
               <option value="antigravity">Antigravity</option>

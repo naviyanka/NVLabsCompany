@@ -153,7 +153,7 @@ MANAGER_TOOLS: dict[str, ManagerTool] = {
     org_snapshot.TOOL: ManagerTool(
         "The latest precomputed organization snapshot and its freshness: your team's "
         "projection, or the whole organization when a policy explicitly allows you "
-        "org-wide reporting. Read-only.",
+        "org-wide reporting. Read-only. Takes no arguments: call it with an empty object.",
         "read",
         (),
         _org_snapshot,
@@ -204,6 +204,10 @@ async def call(ctx: Any, name: str, arguments: dict[str, Any]) -> Any:
     if name not in MANAGER_TOOLS:
         return await run_ceo_tool(ctx, name, args)
     async with tenant_session(ctx.company_id) as db:
+        if name == org_snapshot.TOOL:
+            return await org_snapshot.read_as_agent(
+                db, ctx.company_id, ctx.agent_id, f"agent:{ctx.agent_id}", ctx
+            )
         return await tool.run(db, ctx.company_id, ctx.agent_id, args, f"agent:{ctx.agent_id}")
 
 

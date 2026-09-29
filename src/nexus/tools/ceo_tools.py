@@ -77,7 +77,7 @@ def _source(ctx: Any) -> dict[str, Any]:
 
 
 async def _snapshot(db, company_id, ceo_id, args, actor, ctx):
-    return await org_snapshot.read_as_agent(db, company_id, ceo_id, actor)
+    return await org_snapshot.read_as_agent(db, company_id, ceo_id, actor, ctx)
 
 
 async def _managers(db, company_id, ceo_id, args, actor, ctx):
@@ -189,7 +189,8 @@ async def _hire(db, company_id, ceo_id, args, actor, ctx):
 
 CEO_TOOLS: dict[str, ManagerTool] = {
     "ceo_get_organization_snapshot": ManagerTool(
-        "The latest precomputed organization snapshot, its version, hash and freshness.",
+        "The latest precomputed organization snapshot, its version, hash and freshness. "
+        "Takes no arguments: call it with an empty object.",
         "read", (), _snapshot,
     ),
     "ceo_list_managers": ManagerTool(

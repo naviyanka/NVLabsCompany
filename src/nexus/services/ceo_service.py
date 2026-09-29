@@ -367,6 +367,11 @@ def tool_support(agent: Agent) -> tuple[bool, str | None]:
     from nexus.adapters.cli_registry import get_cli_registry
 
     backend = org_snapshot._backend(agent)
+    if agent.adapter_type == "hermes-native":
+        from nexus.adapters import hermes_provider
+
+        reason = hermes_provider.unavailable_reason()
+        return (True, None) if reason is None else (False, f"CEO_TOOLS_UNSUPPORTED: {reason}")
     if agent.adapter_type == "cli":
         registry = get_cli_registry()
         info = registry.get_backend(registry.resolve_backend_id(backend))
@@ -384,11 +389,17 @@ async def status(db: Any, company_id: uuid.UUID) -> dict[str, Any]:
     snap = await org_snapshot.read(db, company_id)
     payload = snap["snapshot"] or {}
     available, reason = tool_support(ceo) if ceo else (False, None)
+    native = None
+    if ceo is not None and ceo.adapter_type == "hermes-native":
+        from nexus.adapters import hermes_provider
+
+        native = hermes_provider.status()
     return {
         "company_id": str(company_id),
         "ceo": ceo and {**ms.agent_ref(ceo), "backend": org_snapshot._backend(ceo)},
         "ceo_tools_available": available,
         "ceo_tools_unavailable_reason": reason,
+        "hermes_native": native,
         "snapshot": {k: snap[k] for k in (
             "version", "generated_at", "payload_hash", "freshness", "last_refresh_error")},
         "pending_approvals": (payload.get("approvals") or {}).get("items", []),

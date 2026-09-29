@@ -30,6 +30,7 @@ from nexus.api.routes.chat import _build_chat_prompt as build_chat_prompt
 from nexus.auth.principal import Principal
 from nexus.config import settings
 from nexus.models.agent import Agent
+from nexus.models.agent_session import AgentSessionRecord
 from nexus.models.governance import Approval, AuditLog
 from nexus.models.memory import MemoryRecord
 from nexus.models.notification import Notification
@@ -656,6 +657,58 @@ class TestTools:
 
 
 # --- Hermes -----------------------------------------------------------------------------------
+
+
+class TestSnapshotReadAudit:
+    async def _reads(self, db):  # noqa: F811
+        return await _rows(db, AuditLog, AuditLog.action == "organization.snapshot_read")
+
+    async def test_tool_read_traces_the_server_identity(self, db, c):  # noqa: F811
+        await _staffed(c)
+        await _appoint(c, c["chief"])
+        await snap.generate(c["acme"])
+        execution, turn = uuid.uuid4(), uuid.uuid4()
+        async with db() as s:
+            record = AgentSessionRecord(company_id=c["acme"], agent_id=c["chief"])
+            s.add(record)
+            await s.commit()
+            session = record.id
+        ctx = dataclasses.replace(_ctx(c["acme"], c["chief"]), principal_id=f"run:{execution}",
+                                  turn_id=turn, session_id=session)
+        out = await MCPServer(ctx).call_tool("ceo_get_organization_snapshot", {})
+        assert not out.get("isError"), out
+        (row,) = await self._reads(db)
+        d = row.details
+        assert d["turn_id"] == str(turn) and d["execution_id"] == str(execution)
+        assert d["session_id"] == str(session) and d["agent_id"] == str(c["chief"])
+        assert d["version"] and d["payload_hash"]
+        assert set(d) <= {"scope", "version", "payload_hash", "agent_id", "session_id",
+                          "turn_id", "execution_id"}
+
+    async def test_model_arguments_cannot_set_identity(self, db, c):  # noqa: F811
+        await _appoint(c, c["chief"])
+        ctx = _ctx(c["acme"], c["chief"])
+        forged = {"turn_id": str(uuid.uuid4()), "execution_id": str(uuid.uuid4()),
+                  "agent_id": str(c["deputy"]), "reason": "x"}
+        before = len(await self._reads(db))
+        assert "unexpected arguments" in _error(
+            await MCPServer(ctx).call_tool("ceo_get_organization_snapshot", forged))
+        assert len(await self._reads(db)) == before  # nothing ran, nothing audited
+
+    async def test_the_schema_says_no_arguments(self, db, c):  # noqa: F811
+        await _appoint(c, c["chief"])
+        tools = {t["name"]: t for t in await MCPServer(_ctx(c["acme"], c["chief"])).list_tools()}
+        tool = tools["ceo_get_organization_snapshot"]
+        assert "no arguments" in tool["description"]
+        assert tool["inputSchema"]["additionalProperties"] is False
+        assert not tool["inputSchema"].get("properties")
+
+    async def test_rest_read_stays_valid_without_trace(self, db, c):  # noqa: F811
+        await _staffed(c)
+        async with db() as s:
+            await snap.read_as_agent(s, c["acme"], c["lead"], f"agent:{c['lead']}")
+        (row,) = await self._reads(db)
+        assert row.details["scope"] == "manager" and "turn_id" not in row.details
 
 
 class TestHermes:
