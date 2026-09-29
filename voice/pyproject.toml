@@ -4,16 +4,16 @@ version = "0.1.0"
 description = "Local multilingual voice worker for the NEXUS CEO voice gateway (loopback only)."
 requires-python = "==3.11.*"
 dependencies = [
-    "faster-whisper",
-    "piper-tts",
-    "onnxruntime",
-    "numpy",
-    "fastapi",
-    "uvicorn",
-    "websockets",
-    "PyJWT",
-    "nvidia-cublas-cu12",
-    "nvidia-cudnn-cu12",
+    "faster-whisper==1.2.1",
+    "piper-tts==1.8.0",
+    "onnxruntime==1.30.0",
+    "numpy==2.4.6",
+    "fastapi==0.141.1",
+    "uvicorn==0.54.0",
+    "websockets==17.1",
+    "PyJWT==2.15.1",
+    "nvidia-cublas-cu12==12.9.2.10",
+    "nvidia-cudnn-cu12==9.26.0.51",
 ]
 
 [dependency-groups]

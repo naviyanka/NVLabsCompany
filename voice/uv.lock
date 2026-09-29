@@ -268,16 +268,16 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "fastapi" },
-    { name = "faster-whisper" },
-    { name = "numpy" },
-    { name = "nvidia-cublas-cu12" },
-    { name = "nvidia-cudnn-cu12" },
-    { name = "onnxruntime" },
-    { name = "piper-tts" },
-    { name = "pyjwt" },
-    { name = "uvicorn" },
-    { name = "websockets" },
+    { name = "fastapi", specifier = "==0.141.1" },
+    { name = "faster-whisper", specifier = "==1.2.1" },
+    { name = "numpy", specifier = "==2.4.6" },
+    { name = "nvidia-cublas-cu12", specifier = "==12.9.2.10" },
+    { name = "nvidia-cudnn-cu12", specifier = "==9.26.0.51" },
+    { name = "onnxruntime", specifier = "==1.30.0" },
+    { name = "piper-tts", specifier = "==1.8.0" },
+    { name = "pyjwt", specifier = "==2.15.1" },
+    { name = "uvicorn", specifier = "==0.54.0" },
+    { name = "websockets", specifier = "==17.1" },
 ]
 
 [package.metadata.requires-dev]
