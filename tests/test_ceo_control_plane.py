@@ -719,6 +719,7 @@ class TestHermes:
 
 class TestServicePrincipals:
     async def test_keys_are_not_operators_by_default(self, db, c, monkeypatch):  # noqa: F811
+        monkeypatch.setattr(settings, "auth_enabled", True)
         await _appoint(c, c["chief"])
         for path in ("/api/v1/organization/snapshot", CEO, f"{CEO}/memory"):
             refused = await c["call"]("GET", path, who="viewer_key")
