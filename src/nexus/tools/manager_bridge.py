@@ -43,6 +43,7 @@ import jwt
 from nexus.auth.run_tokens import ALGORITHM
 from nexus.config import settings
 from nexus.models._time import utcnow
+from nexus.adapters.hermes_acp import tool_wire_name
 from nexus.tools import manager_tools
 from nexus.tools.ceo_tools import CEO_TOOLS
 from nexus.tools.context import INBOUND_MCP, ExecutionContext
@@ -71,10 +72,15 @@ class Bridge:
     args: list[str] = field(default_factory=list)
     env: dict[str, str] = field(default_factory=dict)
     config_path: str | None = None
+    # ACP transport: the ``mcpServers`` entries for ``session/new`` (the only
+    # place the credential goes), the tools offered, and the credential itself.
+    acp_servers: list[dict[str, Any]] = field(default_factory=list)
+    tool_names: frozenset[str] = frozenset()
+    token: str = ""
 
     def redact(self, text: str | None) -> str | None:
         """``text`` with the credential removed, for anything that outlives the run."""
-        token = self.env.get(TOKEN_ENV)
+        token = self.token or self.env.get(TOKEN_ENV)
         return text.replace(token, REDACTED) if text and token else text
 
     def close(self) -> None:
@@ -122,7 +128,8 @@ async def open_bridge(
                 "with direct reports or an explicit manager-tool policy."
             )
         return None
-    if not backend.mcp_config_flag:
+    acp = bool(backend.acp_args) and settings.hermes_acp_tools_enabled
+    if not backend.mcp_config_flag and not acp:
         if required and set(tools) & set(CEO_TOOLS):
             raise BridgeUnavailableError(
                 f"CEO_TOOLS_UNSUPPORTED: {backend.name} cannot load an execution-scoped "
@@ -149,6 +156,15 @@ async def open_bridge(
         settings.secret_key,
         algorithm=ALGORITHM,
     )
+    if not backend.mcp_config_flag:
+        wire = {tool_wire_name(SERVER_NAME, name) for name in tools}
+        server = {
+            "type": "http",
+            "name": SERVER_NAME,
+            "url": bridge_url(),
+            "headers": [{"name": "Authorization", "value": f"Bearer {token}"}],
+        }
+        return Bridge(True, acp_servers=[server], tool_names=frozenset(wire), token=token)
     config = {
         "mcpServers": {
             SERVER_NAME: {

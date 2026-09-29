@@ -67,6 +67,9 @@ class CLIBackendInfo:
     # manager tools (see nexus.tools.manager_bridge).
     mcp_config_flag: str = ""
     mcp_bridge_args: tuple[str, ...] = ()
+    # ACP alternative: argv that starts the CLI's ACP server, which takes MCP
+    # servers per session in memory (see nexus.adapters.hermes_acp).
+    acp_args: tuple[str, ...] = ()
     version_args: tuple[str, ...] = ("--version",)
     # stdout | stderr | either
     version_stream: str = "either"
@@ -358,6 +361,7 @@ _DEFAULT_BACKENDS: list[CLIBackendInfo] = [
         model_flag="-m",
         supports_resume=True,
         resume_flag="--resume",
+        acp_args=("acp",),
         version_stream="stdout",
         docs_url="https://github.com/NousResearch/hermes-agent",
         notes=(

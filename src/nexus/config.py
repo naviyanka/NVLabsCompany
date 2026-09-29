@@ -62,6 +62,10 @@ class Settings(BaseSettings):
     # Where a CLI manager's MCP client reaches this API's manager bridge.
     # Empty: http://127.0.0.1:{server_port}/api/v1/mcp/manager.
     manager_bridge_url: str = ""
+    # Let a Hermes CEO/manager chat with governed tools over `hermes acp`. Off:
+    # Hermes always enables its own shell/file/browser tools in an ACP session,
+    # which Nexus can only detect, not prevent (docs/adr/0004-hermes-acp-tools.md).
+    hermes_acp_tools_enabled: bool = False
 
     # Data directory for JSON-persisted runtime state (control registry, etc.)
     data_dir: str = "./data"

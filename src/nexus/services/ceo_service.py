@@ -361,8 +361,9 @@ def tool_support(agent: Agent) -> tuple[bool, str | None]:
     """Whether the CEO's backend can run with its governed tools, and why not.
 
     Only a CLI backend with an execution-scoped MCP config flag can. The Hermes
-    CLI has none: it reads MCP servers only from its persistent config, which
-    Nexus never writes.
+    CLI has none (it reads MCP servers only from its persistent config, which
+    Nexus never writes); it can only over ACP, and only when the operator
+    enables ``hermes_acp_tools_enabled``.
     """
     from nexus.adapters.cli_registry import get_cli_registry
 
@@ -370,7 +371,9 @@ def tool_support(agent: Agent) -> tuple[bool, str | None]:
     if agent.adapter_type == "cli":
         registry = get_cli_registry()
         info = registry.get_backend(registry.resolve_backend_id(backend))
-        if info is not None and info.mcp_config_flag:
+        if info is not None and (
+            info.mcp_config_flag or (info.acp_args and settings.hermes_acp_tools_enabled)
+        ):
             return True, None
     return False, (
         f"CEO_TOOLS_UNSUPPORTED: {backend} cannot load an execution-scoped MCP server; "

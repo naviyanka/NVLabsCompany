@@ -486,6 +486,11 @@ class CLIAdapter(BaseAdapter):
         env = _filter_env(env, [*(backend.allow_env or []), *operator_allow])
         if bridge is not None:
             env.update(bridge.env)
+        if bridge is not None and bridge.acp_servers:
+            return await self._run_acp(
+                session, task_id, backend, [executable, *backend.acp_args], workspace,
+                prompt, env, bridge, float(timeout), _meta,
+            )
 
         is_interactive = session.metadata.get("is_interactive", False)
         process: asyncio.subprocess.Process | None = None
@@ -650,6 +655,63 @@ class CLIAdapter(BaseAdapter):
             self._processes.pop(session.session_id, None)
             if process is not None:
                 _release_job(process)
+
+    async def _run_acp(
+        self,
+        session: AgentSession,
+        task_id: uuid.UUID,
+        backend: Any,
+        cmd: list[str],
+        workspace: str,
+        prompt: str,
+        env: dict[str, str],
+        bridge: Any,
+        timeout: float,
+        meta: Any,
+    ) -> TaskResult:
+        """One tool-enabled Hermes turn over its own ACP child (never retried)."""
+        from nexus.adapters.hermes_acp import ACPError, HermesACPTransport
+
+        transport = HermesACPTransport(
+            cmd,
+            cwd=workspace,
+            env=env,
+            mcp_servers=bridge.acp_servers,
+            allowed_tools=bridge.tool_names,
+            turn_timeout=timeout,
+            secrets=[bridge.token],
+        )
+        info = {**meta(None), "transport": "acp"}
+        try:
+            result = await transport.run(prompt)
+        except ACPError as exc:
+            info["acp_tool_calls"] = transport.result.tool_calls
+            info["acp_permissions"] = transport.result.permissions
+            return TaskResult(
+                task_id=task_id,
+                agent_id=session.agent_id,
+                success=False,
+                error=f"{exc} ({backend.name} tools were not completed; the turn was not retried)",
+                artifacts=[info],
+                logs=[f"Backend: {backend.id} (acp)", f"Workspace: {_redact_home(workspace)}"],
+            )
+        info["acp_tool_calls"] = result.tool_calls
+        info["acp_permissions"] = result.permissions
+        info["acp_stop_reason"] = result.stop_reason
+        artifacts: list[dict[str, Any]] = []
+        if result.text.strip():
+            artifacts.append({"type": "stdout", "content": result.text[:10000]})
+        artifacts.append(info)
+        ok = result.stop_reason == "end_turn"
+        return TaskResult(
+            task_id=task_id,
+            agent_id=session.agent_id,
+            success=ok,
+            output=result.text,
+            error=None if ok else f"ACP_STOPPED: the turn ended with {result.stop_reason or 'no stop reason'}",
+            artifacts=artifacts,
+            logs=[f"Backend: {backend.id} (acp)", f"Workspace: {_redact_home(workspace)}"],
+        )
 
     async def send_message(self, session_id: str, message: str) -> str:
         """Send a message to the stdin of a running interactive process.
