@@ -59,10 +59,16 @@ def _endpoint() -> str:
         raise ProviderError("HERMES_NATIVE_ENDPOINT_INVALID: https or loopback only") from None
 
 
-def _api_key() -> str:
+def _secret() -> str | None:
+    """The key from the configured backend; a Fernet backend reads the ``secrets`` table."""
+    from nexus.database import async_session_factory
     from nexus.governance.secret_backend import make_secret_backend
 
-    key = make_secret_backend().decrypt(settings.hermes_native_secret_ref)
+    return make_secret_backend(async_session_factory).decrypt(settings.hermes_native_secret_ref)
+
+
+def _api_key() -> str:
+    key = _secret()
     if not key:
         raise ProviderError("HERMES_NATIVE_KEY_MISSING: no API key in the secret backend")
     return key
@@ -104,8 +110,6 @@ def unavailable_reason() -> str | None:
 
 def status() -> dict[str, Any]:
     """Non-secret configuration state; makes no request."""
-    from nexus.governance.secret_backend import make_secret_backend
-
     try:
         _endpoint()
         endpoint = True
@@ -114,7 +118,7 @@ def status() -> dict[str, Any]:
     return {
         "enabled": settings.hermes_native_tools_enabled,
         "endpoint_configured": endpoint,
-        "secret_configured": bool(make_secret_backend().decrypt(settings.hermes_native_secret_ref)),
+        "secret_configured": bool(_secret()),
         "model_configured": bool(settings.hermes_native_model),
         "native_tools": "verified" if _verified_at else "unverified",
         "last_verified_at": _verified_at.isoformat() if _verified_at else None,
