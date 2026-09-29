@@ -1,7 +1,10 @@
 """Live acceptance: real worker (GPU/CPU STT + Piper TTS), real gateway, mocked CEO reply.
 
 Skipped unless NEXUS_VOICE_LIVE=1 and the worker models are installed. Fixtures are
-Piper-synthesised speech, not recordings of people. Writes timings to stdout (-s).
+synthetic speech, not recordings of people. English uses the public-domain ljspeech voice and
+is committed. Hindi and mixed audio come from a non-commercial voice, so it lives in the
+git-ignored voice/tests/local_fixtures/ and those cases skip when it is absent. No commercial
+Hindi voice exists, so a Hindi reply has no audio (a NO_VOICE notice). Timings go to stdout (-s).
 """
 
 from __future__ import annotations
@@ -67,12 +70,18 @@ def worker():
         proc.wait(timeout=20)
 
 
-@pytest.mark.parametrize("name,expect", [("en", "en"), ("hi", "hi"), ("mixed", None)])
-def test_live_turn(name, expect, worker, client, world, monkeypatch, tmp_path):  # noqa: F811
+@pytest.mark.parametrize(
+    "name,folder,expect",
+    [("en", "fixtures", "en"), ("en2", "fixtures", "en"), ("hi", "local_fixtures", "hi"), ("mixed", "local_fixtures", None)],
+)
+def test_live_turn(name, folder, expect, worker, client, world, monkeypatch, tmp_path):  # noqa: F811
     monkeypatch.setattr(settings, "voice_worker_url", f"ws://127.0.0.1:{PORT}")
     monkeypatch.setattr(settings, "voice_worker_secret", SECRET)
     del client.voice_app.state.voice_connect  # use the real loopback worker
-    pcm = to_16k(VOICE / "tests" / "fixtures" / f"{name}.wav")
+    wav = VOICE / "tests" / folder / f"{name}.wav"
+    if not wav.is_file():
+        pytest.skip(f"{wav.name} is a local-only fixture (non-commercial voice)")
+    pcm = to_16k(wav)
 
     ws = start(client)
     sent = time.perf_counter()
@@ -85,9 +94,12 @@ def test_live_turn(name, expect, worker, client, world, monkeypatch, tmp_path): 
 
     transcript = next(e for e in events if e["type"] == "transcript")
     frames = [e["bytes"] for e in events if e["type"] == "audio"]
-    assert transcript["text"].strip() and frames
+    assert transcript["text"].strip()
     if expect:
         assert transcript["language"] == expect
+    if folder != "fixtures":  # Hindi replies have no audio without a commercial Hindi voice
+        return print(f"LIVE {name}: lang={transcript['language']} text={transcript['text']!a}")
+    assert frames
     rate = struct.unpack("!BBHII", frames[0][:12])[4]
     out = tmp_path / f"{name}.wav"
     with wave.open(str(out), "wb") as w:
@@ -96,6 +108,6 @@ def test_live_turn(name, expect, worker, client, world, monkeypatch, tmp_path): 
     assert out.stat().st_size > 10_000
     print(
         f"LIVE {name}: lang={transcript['language']} p={transcript['language_probability']:.2f} "
-        f"text={transcript['text']!r} audio_s={len(pcm) / 32000:.1f} total_s={total:.2f} "
+        f"text={transcript['text']!a} audio_s={len(pcm) / 32000:.1f} total_s={total:.2f} "
         f"reply_audio_s={sum(len(f) - 12 for f in frames) / 2 / rate:.1f}"
     )
