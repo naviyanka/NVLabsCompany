@@ -204,3 +204,7 @@ class TestModels:
     def test_fixtures_are_valid_wavs(self):
         for f in FIX.glob("*.wav"):
             assert audio.validate_wav(f)
+
+
+def test_partials_are_off_by_default():
+    assert Settings.__dataclass_fields__["partials"].default is False

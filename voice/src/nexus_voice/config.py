@@ -30,4 +30,4 @@ class Settings:
     max_utterance_s: float = float(os.environ.get("NEXUS_VOICE_MAX_UTTERANCE_S", "30"))
     max_frame_bytes: int = 8192
     silence_ms: int = int(os.environ.get("NEXUS_VOICE_SILENCE_MS", "700"))
-    partials: bool = os.environ.get("NEXUS_VOICE_PARTIALS", "1") == "1"
+    partials: bool = os.environ.get("NEXUS_VOICE_PARTIALS", "0") == "1"

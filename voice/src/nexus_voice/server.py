@@ -7,6 +7,7 @@ never sees a company, user or CEO: only audio, text and a signed, single-use tok
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import threading
 import time
@@ -16,6 +17,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 
 from nexus_voice import audio
 from nexus_voice.config import Settings
+from nexus_voice.scheduler import ModelScheduler
 from nexus_voice.tokens import TokenError, TokenVerifier
 from nexus_voice.vad import SileroModel, UtteranceDetector
 
@@ -29,9 +31,17 @@ def create_app(
     settings: Settings, transcriber: Any = None, synthesizer: Any = None, vad_model: Any = None
 ) -> FastAPI:
     """``transcriber``, ``synthesizer`` and ``vad_model`` (a factory) are injectable for tests."""
-    app = FastAPI(title="nexus-voice", docs_url=None, redoc_url=None, openapi_url=None)
+
+    @contextlib.asynccontextmanager
+    async def lifespan(_app: FastAPI):
+        yield
+        await sched.close()
+
+    app = FastAPI(
+        title="nexus-voice", docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan
+    )
     verifier = TokenVerifier(settings.secret)
-    lock = asyncio.Lock()  # one model job at a time
+    sched = ModelScheduler()  # one model call at a time, finals first
     state: dict[str, Any] = {"stt": transcriber, "tts": synthesizer}
 
     def stt():
@@ -76,6 +86,7 @@ def create_app(
         mode = "auto"
         last_partial = 0
         partial: asyncio.Task | None = None
+        utterance = 0  # bumps on every final; a partial from an older one is dropped
         await ws.send_json(
             {
                 "type": "ready",
@@ -86,7 +97,7 @@ def create_app(
         )
 
         async def handle(events) -> None:
-            nonlocal last_partial, partial
+            nonlocal last_partial, partial, utterance
             for ev in events:
                 if ev.kind == "speech_started":
                     last_partial = 0
@@ -94,6 +105,7 @@ def create_app(
                 elif ev.kind == "noise":
                     await ws.send_json({"type": "empty", "reason": "noise"})
                 elif ev.kind == "utterance":
+                    utterance += 1
                     if partial:
                         partial.cancel()
                     await ws.send_json(
@@ -104,19 +116,19 @@ def create_app(
                         }
                     )
                     await ws.send_json({"type": "transcribing"})
-                    async with lock:
-                        result = await asyncio.to_thread(engine.transcribe, ev.audio, mode)
+                    result = await sched.final(
+                        ws, lambda a=ev.audio, m=mode: engine.transcribe(a, m)
+                    )
                     if result["text"]:
                         await ws.send_json({"type": "transcript", "final": True, **result})
                     else:
                         await ws.send_json({"type": "empty", "reason": "no_speech"})
 
-        async def send_partial(snapshot) -> None:
-            if lock.locked():  # never queue behind a final transcription
-                return
-            async with lock:
-                result = await asyncio.to_thread(engine.transcribe, snapshot, mode, partial=True)
-            if result["text"]:
+        async def send_partial(snapshot, generation: int) -> None:
+            result = await sched.partial(
+                ws, lambda: engine.transcribe(snapshot, mode, partial=True)
+            )
+            if result and result["text"] and generation == utterance:  # else superseded
                 await ws.send_json({"type": "partial", "final": False, "text": result["text"]})
 
         try:
@@ -138,7 +150,7 @@ def create_app(
                         and detector.buffered_ms - last_partial >= PARTIAL_EVERY_MS
                     ):
                         last_partial = detector.buffered_ms
-                        partial = asyncio.create_task(send_partial(detector.snapshot()))
+                        partial = asyncio.create_task(send_partial(detector.snapshot(), utterance))
                 elif msg.get("text") is not None:
                     try:
                         ctl = json.loads(msg["text"])
@@ -156,6 +168,7 @@ def create_app(
         finally:
             if partial:
                 partial.cancel()
+            sched.release(ws)
 
     @app.websocket("/v1/tts")
     async def tts_socket(ws: WebSocket) -> None:
