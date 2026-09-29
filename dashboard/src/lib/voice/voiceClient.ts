@@ -61,7 +61,7 @@ class Capture extends AudioWorkletProcessor {
 }
 registerProcessor('capture', Capture);`;
 
-function wsUrl(path: string): string {
+export function wsUrl(path: string): string {
   const url = new URL(apiUrl(path), window.location.href);
   url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
   return url.toString();

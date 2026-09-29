@@ -225,6 +225,17 @@ describe('VoicePanel', () => {
     expect(screen.getByText('Retry')).toBeInTheDocument();
   });
 
+  it('retry after an unreachable gateway mints a fresh session and ticket', async () => {
+    client.open.mockRejectedValueOnce(new Error('Could not reach the voice gateway'));
+    render(<VoicePanel ceoId="ceo1" />);
+    await screen.findByDisplayValue('en-free');
+    fireEvent.click(screen.getByText('Start voice'));
+    fireEvent.click(await screen.findByText('Retry'));
+    await waitFor(() => expect(client.open).toHaveBeenCalledTimes(2));
+    expect(create).toHaveBeenCalledTimes(2);
+    expect(client.open.mock.calls.map(([s]) => (s as { ticket: string }).ticket)).toEqual(['t1', 't2']);
+  });
+
   it('shows every state with words, not colour alone', async () => {
     await start();
     const say = async (ev: { type: string }, text: string) => {

@@ -6,6 +6,7 @@ import path from 'path';
 import { createServer as createViteServer } from 'vite';
 
 import { pipeBody } from './proxyBody';
+import { voiceSocketUpgrade } from './voiceSocketProxy';
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
@@ -5464,9 +5465,11 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
+  const server = app.listen(PORT, '0.0.0.0', () => {
     console.log(`NEXUS Mission Control server running at http://0.0.0.0:${PORT}`);
   });
+  // The voice socket is the one WebSocket the real API serves; Express cannot forward upgrades.
+  if (PROXY_ALL_API) server.on('upgrade', voiceSocketUpgrade(NEXUS_API_URL));
 }
 
 startServer().catch((err) => {

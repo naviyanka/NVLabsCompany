@@ -29,6 +29,7 @@ logger = logging.getLogger(__name__)
 VOICE_ID = re.compile(r"^[a-z]{2}_[A-Z]{2}-[a-z0-9_]+-(x_low|low|medium|high)$")
 STT_QUEUE = 64
 HELLO_TIMEOUT = 10
+HELLO_MAX_CHARS = 4096  # a signed ticket is a few hundred bytes
 SAMPLE_RATE_OUT = 22_050
 
 
@@ -510,7 +511,11 @@ async def serve(ws: WebSocket, principal: Principal) -> None:
     conn: VoiceConnection | None = None
     try:
         try:
-            hello = json.loads(await asyncio.wait_for(ws.receive_text(), HELLO_TIMEOUT))
+            first = await asyncio.wait_for(ws.receive(), HELLO_TIMEOUT)
+            text = first.get("text")  # one small text frame; audio before hello has no text
+            if not isinstance(text, str) or len(text) > HELLO_MAX_CHARS:
+                raise ValueError("hello")
+            hello = json.loads(text)
             sess, ticket_exp = read_ticket(str(hello.get("ticket", "")))
         except (TimeoutError, ValueError, TicketError, RuntimeError, AttributeError):
             raise SessionCloseError("BAD_TICKET", "Invalid voice ticket") from None

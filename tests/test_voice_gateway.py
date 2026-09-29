@@ -34,7 +34,7 @@ from nexus.voice import protocol
 from nexus.voice.chunker import SentenceChunker
 from nexus.voice.limits import RateLimiter
 from nexus.voice.shared_state import MemoryStore
-from nexus.voice.tokens import TICKET_AUDIENCE, WORKER_AUDIENCE, mint_worker_token
+from nexus.voice.tokens import TICKET_AUDIENCE, WORKER_AUDIENCE, VoiceSession, mint_worker_token
 
 pytestmark = pytest.mark.core_employee
 
@@ -710,3 +710,170 @@ class TestTokens:
     def test_rate_limiter_window(self):
         r = RateLimiter(2)
         assert [r.allow("k"), r.allow("k"), r.allow("k"), r.allow("j")] == [True, True, False, True]
+
+
+# --- WebSocket handshake ----------------------------------------------------
+
+
+class TestHello:
+    """The first frame is one small text hello; nothing else opens a worker link."""
+
+    def rejected(self, client, world, send):
+        with open_socket(client, "") as ws:
+            send(ws)
+            code = [e for e in read_until(ws, "error")][-1]["code"]
+        assert world.links == [], "no worker connection before a valid hello"
+        return code
+
+    def test_audio_before_hello(self, client, world):
+        assert self.rejected(client, world, lambda ws: ws.send_bytes(pcm(0))) == "BAD_TICKET"
+
+    def test_oversized_hello(self, client, world):
+        big = json.dumps({"type": "hello", "ticket": "x" * 100_000, "protocol": 1})
+        assert self.rejected(client, world, lambda ws: ws.send_text(big)) == "BAD_TICKET"
+
+    def test_not_json_hello(self, client, world):
+        assert self.rejected(client, world, lambda ws: ws.send_text("hello")) == "BAD_TICKET"
+
+    def test_silent_client_times_out(self, client, world, monkeypatch):
+        from nexus.voice import gateway
+
+        monkeypatch.setattr(gateway, "HELLO_TIMEOUT", 0.2)
+        assert self.rejected(client, world, lambda ws: None) == "BAD_TICKET"
+
+
+class TestBrowserHandshake:
+    """The real AuthenticationMiddleware: a browser socket carries the session cookie only."""
+
+    @pytest.fixture
+    def browser(self, world, monkeypatch):
+        import nexus.auth.middleware as mw
+        from nexus.auth.middleware import AuthenticationMiddleware
+        from nexus.auth.sessions import create_session
+        from nexus.auth.users import create_user
+        from nexus.voice.tokens import mint_ticket
+
+        monkeypatch.setattr(mw, "async_session_factory", world.factory)
+        monkeypatch.setattr(settings, "cors_origins", "http://localhost:3100")
+        app = FastAPI()
+        app.include_router(voice_routes.router)
+        app.state.voice_connect = lambda scope, sid: _linked(world, scope)
+        app.state.voice_store = MemoryStore()
+        app.add_middleware(AuthenticationMiddleware)
+
+        async def seed():
+            async with world.factory() as s:
+                user = await create_user(
+                    s,
+                    email="ada@acme.test",
+                    password="Correct-Horse-9!",
+                    company_id=world.ids["acme"],
+                    role="admin",
+                )
+                token, sess = await create_session(s, user_id=user.id, company_id=world.ids["acme"])
+                await s.commit()
+                return user.id, token, sess.id
+
+        user_id, token, sess_id = world.run(seed())
+
+        def ticket(sub=user_id):
+            return mint_ticket(
+                VoiceSession(
+                    id=uuid.uuid4().hex,
+                    user_id=sub,
+                    company_id=world.ids["acme"],
+                    ceo_id=world.ids["acme_ceo"],
+                    chat_session_id=uuid.uuid4(),
+                    mode="auto",
+                    voice_en="en_US-lessac-medium",
+                    voice_hi="",
+                    expires_at=time.time() + 60,
+                    jti=uuid.uuid4().hex,
+                ),
+                30,
+            )
+
+        class Browser:
+            cookie = {"cookie": f"{settings.session_cookie_name}={token}"}
+
+            def open(self, headers=None, sub=user_id):
+                with TestClient(app) as c:
+                    t = ticket(sub)
+                    try:
+                        with c.websocket_connect(
+                            "/api/v1/voice/ws", headers=headers or self.cookie
+                        ) as ws:
+                            hello(ws, t)
+                            return read_until(ws, "listening")
+                    except Exception as exc:  # WebSocketDisconnect before accept
+                        return [{"type": "refused", "code": getattr(exc, "code", None)}]
+
+            def change(self, fn):
+                async def go():
+                    async with world.factory() as s:
+                        await fn(s)
+                        await s.commit()
+
+                world.run(go())
+
+        b = Browser()
+        b.user_id, b.sess_id = user_id, sess_id
+        return b
+
+    def test_cookie_only_handshake_reaches_listening(self, browser):
+        events = browser.open()  # no Authorization header, no token in the URL
+        assert events[-1]["type"] == "listening"
+
+    def test_no_credentials_is_refused_before_accept(self, browser):
+        assert browser.open(headers={"x-nothing": "1"})[-1] == {"type": "refused", "code": 1008}
+
+    def test_foreign_origin_is_refused(self, browser):
+        evil = {**browser.cookie, "origin": "http://evil.example"}
+        assert browser.open(headers=evil)[-1] == {"type": "refused", "code": 1008}
+        good = {**browser.cookie, "origin": "http://localhost:3100"}
+        assert browser.open(headers=good)[-1]["type"] == "listening"
+
+    def test_inactive_user_is_refused(self, browser):
+        from nexus.models.user_profile import UserProfile
+
+        async def off(s):
+            (await s.get(UserProfile, browser.user_id)).is_active = False
+
+        browser.change(off)
+        assert browser.open()[-1]["type"] == "refused"
+
+    def test_removed_membership_is_refused(self, browser, world):
+        from nexus.models.company import CompanyMembership
+
+        async def drop(s):
+            for m in (
+                await s.execute(
+                    select(CompanyMembership).where(CompanyMembership.user_id == browser.user_id)
+                )
+            ).scalars():
+                await s.delete(m)
+
+        browser.change(drop)
+        assert browser.open()[-1]["type"] == "refused"
+
+    def test_logged_out_session_is_refused(self, browser):
+        from nexus.models._time import utcnow
+        from nexus.models.user_profile import UserSession
+
+        async def out(s):
+            (await s.get(UserSession, browser.sess_id)).revoked_at = utcnow()
+
+        browser.change(out)
+        assert browser.open()[-1]["type"] == "refused"
+
+    def test_a_ticket_for_someone_else_is_rejected(self, browser):
+        assert "BAD_TICKET" in [e.get("code") for e in browser.open(sub=uuid.uuid4())]
+
+
+def _linked(world, scope):
+    async def go():
+        link = Link(scope, lambda s, m: world.script(s, m))
+        world.links.append(link)
+        return link
+
+    return go()
