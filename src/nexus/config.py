@@ -92,6 +92,12 @@ class Settings(BaseSettings):
     # (read-only, values come from NEXUS_SECRET_<REF> environment variables).
     secret_backend: str = "fernet"
 
+    # Hermes native tool-calling provider (adapter_type "hermes_native"): an
+    # OpenAI-compatible endpoint and the secret-backend ref of its API key. Operator-only,
+    # never from agent config, so an agent cannot aim the key at another host.
+    hermes_native_base_url: str = "https://inference-api.nousresearch.com/v1"
+    hermes_native_secret_ref: str = "hermes_native_api_key"
+
     # API Keys
     openai_api_key: str = ""
     anthropic_api_key: str = ""

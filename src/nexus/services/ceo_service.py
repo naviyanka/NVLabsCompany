@@ -367,6 +367,8 @@ def tool_support(agent: Agent) -> tuple[bool, str | None]:
     from nexus.adapters.cli_registry import get_cli_registry
 
     backend = org_snapshot._backend(agent)
+    if agent.adapter_type == "hermes-native":
+        return True, None  # native tool calls, run by the server (adapters/hermes_provider.py)
     if agent.adapter_type == "cli":
         registry = get_cli_registry()
         info = registry.get_backend(registry.resolve_backend_id(backend))
