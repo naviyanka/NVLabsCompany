@@ -4,9 +4,14 @@
 index). Only a human administrator appoints, replaces or removes the CEO;
 role, title, adapter configuration and prompt text never grant it. Every check
 reads the column when it runs, so a replaced CEO loses its executive context
-and its tools on its next turn or tool call. The CEO is the root of the
-hierarchy: appointing it detaches it from any manager and attaches every other
-root to it.
+and its tools on its next turn or tool call.
+
+**Hierarchy.** While a company has a CEO it is the only root: appointing it
+attaches every other root to it, every agent-creation path and every manager
+change goes through :func:`resolve_manager` (an explicit valid manager is kept,
+otherwise the CEO), and a replacement moves the former CEO and its direct
+reports under the new one. Removal makes the removed CEO's reports roots.
+Designation changes and placements are serialized per company.
 
 **Executive context.** A bounded, deterministic text block for each CEO chat
 turn, built from the latest stored organization snapshot (two indexed
@@ -30,7 +35,8 @@ from datetime import UTC, datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import select
+from sqlalchemy import or_, select, text, update
+from sqlalchemy.exc import IntegrityError
 
 from nexus.config import settings
 from nexus.models.agent import Agent
@@ -145,48 +151,149 @@ async def require_ceo(db: Any, company_id: uuid.UUID, agent_id: uuid.UUID | None
         raise ms._error(403, "NOT_CEO", "Only the company's current CEO may do this")
 
 
-async def appoint(db: Any, company_id: uuid.UUID, agent_id: uuid.UUID, principal: Any) -> dict:
-    """Make ``agent_id`` the CEO, replacing any other. Idempotent. Commits.
+async def lock_hierarchy(db: Any, company_id: uuid.UUID) -> None:
+    """Serialize this company's CEO changes and agent placements until the transaction ends.
 
-    The CEO stops reporting to anyone, and every other root agent starts
-    reporting to it; each reporting change is audited like a manual one.
+    On SQLite the no-op write takes the database write lock.
+    """
+    from nexus.models.company import Company
+
+    if db.get_bind().dialect.name == "postgresql":
+        await db.execute(
+            text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
+            {"key": f"org-hierarchy:{company_id}"},
+        )
+    else:
+        await db.execute(
+            update(Company).where(Company.id == company_id).values(updated_at=Company.updated_at)
+        )
+
+
+async def resolve_manager(
+    db: Any, company_id: uuid.UUID, agent_id: uuid.UUID | None, manager_id: uuid.UUID | None
+) -> uuid.UUID | None:
+    """The manager ``agent_id`` gets when ``manager_id`` is requested (None: none named).
+
+    ``agent_id`` is None for an agent not created yet.
+
+    An explicit manager must be another agent of the same company that does not
+    report, directly or not, to ``agent_id``. With none named, the CEO while
+    there is one, since it is then the only root. The CEO itself reports to no
+    one. Takes the hierarchy lock; call it before adding a new agent.
+    """
+    await lock_hierarchy(db, company_id)
+    ceo = await current_ceo(db, company_id)
+    if ceo is not None and ceo.id == agent_id:
+        if manager_id is not None:
+            raise ms._error(409, "CEO_IS_ROOT", "The CEO reports to no one")
+        return None
+    if manager_id is None:
+        return ceo.id if ceo else None
+    if manager_id == agent_id:
+        raise ms._error(409, "MANAGER_CYCLE", "An agent cannot report to itself")
+    found = (
+        await db.execute(
+            select(Agent.id).where(Agent.id == manager_id, Agent.company_id == company_id)
+        )
+    ).scalar_one_or_none()
+    if found is None:
+        raise ms._error(404, "MANAGER_NOT_FOUND", "Manager not found")
+    # Walk up from the manager: meeting the agent means a cycle.
+    cursor: uuid.UUID | None = manager_id
+    seen: set[uuid.UUID] = set()
+    while cursor is not None and cursor not in seen:
+        if cursor == agent_id:
+            raise ms._error(409, "MANAGER_CYCLE",
+                            "An agent cannot report to itself or to one of its reports")
+        seen.add(cursor)
+        cursor = (
+            await db.execute(
+                select(Agent.manager_id).where(Agent.id == cursor, Agent.company_id == company_id)
+            )
+        ).scalar_one_or_none()
+    return manager_id
+
+
+async def release_reports(db: Any, company_id: uuid.UUID, agent_id: uuid.UUID) -> None:
+    """Before ``agent_id`` is deleted: its reports go to the CEO, or become roots."""
+    await lock_hierarchy(db, company_id)
+    ceo = await current_ceo(db, company_id)
+    target = ceo.id if ceo is not None and ceo.id != agent_id else None
+    await db.execute(
+        update(Agent)
+        .where(Agent.company_id == company_id, Agent.manager_id == agent_id)
+        .values(manager_id=target)
+    )
+
+
+def _conflict() -> Exception:
+    return ms._error(409, "CEO_CONFLICT",
+                     "The company's CEO changed meanwhile; reload and retry")
+
+
+async def appoint(
+    db: Any, company_id: uuid.UUID, agent_id: uuid.UUID, principal: Any,
+    replaces: uuid.UUID | None = None,
+) -> dict:
+    """Make ``agent_id`` the CEO. Idempotent. Commits.
+
+    ``replaces`` must name the current CEO (None when there is none), so of two
+    racing appointments the loser gets a deterministic ``CEO_CONFLICT``. The
+    CEO stops reporting to anyone; every other live root, the former CEO and
+    its direct reports start reporting to it, so the former CEO keeps no
+    reports and with them no manager tools. Each move is audited like a manual
+    one.
     """
     from nexus.realtime.publish import TOPOLOGY_CHANNEL, publish_event
 
     require_owner(principal)
     actor = principal.display_name
+    await lock_hierarchy(db, company_id)
     agent = await ms.get_agent(db, company_id, agent_id)
     if agent.status == "terminated":
         raise ms._error(409, "AGENT_NOT_ACTIVE", "A terminated agent cannot be the CEO")
     previous = await current_ceo(db, company_id)
     if previous is not None and previous.id == agent.id:
         return await status(db, company_id)
+    if (previous.id if previous else None) != replaces:
+        raise _conflict()
     now = _now()
-    if previous is not None:
-        previous.is_ceo = False
-        previous.updated_at = now
-        await db.flush()  # free the company's one CEO slot first
     changes: list[dict[str, Any]] = []
-    if agent.manager_id is not None:
-        changes.append({"agent_id": str(agent.id), "previous_manager_id": str(agent.manager_id),
-                        "manager_id": None})
-        agent.manager_id = None
-    agent.is_ceo = True
-    agent.updated_at = now
-    await db.flush()
-    roots = (
+
+    def move(target: Agent, manager_id: uuid.UUID | None) -> None:
+        changes.append({"agent_id": str(target.id),
+                        "previous_manager_id": target.manager_id and str(target.manager_id),
+                        "manager_id": manager_id and str(manager_id)})
+        target.manager_id = manager_id
+        target.updated_at = now
+
+    try:
+        if previous is not None:
+            previous.is_ceo = False
+            previous.updated_at = now
+            await db.flush()  # free the company's one CEO slot first
+        if agent.manager_id is not None:
+            move(agent, None)
+        agent.is_ceo = True
+        agent.updated_at = now
+        await db.flush()
+    except IntegrityError:
+        # Only without the lock (it serializes this): the index still holds one CEO.
+        await db.rollback()
+        raise _conflict() from None
+    # Every other live root, and everyone who reported to the former CEO.
+    live_root = Agent.manager_id.is_(None) & (Agent.status != "terminated")
+    joining = live_root if previous is None else or_(live_root, Agent.manager_id == previous.id)
+    rows = (
         await db.execute(
             select(Agent)
-            .where(Agent.company_id == company_id, Agent.manager_id.is_(None),
-                   Agent.id != agent.id, Agent.status != "terminated")
+            .where(Agent.company_id == company_id, Agent.id != agent.id, joining)
             .order_by(Agent.name, Agent.id)
         )
     ).scalars().all()
-    for root in roots:
-        root.manager_id = agent.id
-        root.updated_at = now
-        changes.append({"agent_id": str(root.id), "previous_manager_id": None,
-                        "manager_id": str(agent.id)})
+    former_reports = sum(1 for r in rows if previous is not None and r.manager_id == previous.id)
+    for row in rows:
+        move(row, agent.id)
     await db.flush()
     for change in changes:
         await ms.audit(db, company_id, "agent.manager_changed", actor, "agent",
@@ -196,6 +303,7 @@ async def appoint(db: Any, company_id: uuid.UUID, agent_id: uuid.UUID, principal
         "organization.ceo_replaced" if previous else "organization.ceo_appointed",
         actor, "agent", agent.id,
         ceo_id=agent.id, previous_ceo_id=previous.id if previous else None,
+        reparented=len(rows), former_ceo_reports=former_reports,
     )
     await db.commit()
     for change in changes:
@@ -207,18 +315,42 @@ async def appoint(db: Any, company_id: uuid.UUID, agent_id: uuid.UUID, principal
 
 
 async def remove(db: Any, company_id: uuid.UUID, principal: Any) -> dict:
-    """Clear the designation; the hierarchy stays as it is. Commits."""
+    """Clear the designation; the removed CEO's direct reports become roots. Commits.
+
+    Agents, work and executive memory are kept.
+    """
     from nexus.realtime.publish import TOPOLOGY_CHANNEL, publish_event
 
     require_owner(principal)
+    actor = principal.display_name
+    await lock_hierarchy(db, company_id)
     ceo = await current_ceo(db, company_id)
     if ceo is None:
         raise ms._error(404, "NO_CEO", "The company has no CEO")
+    now = _now()
     ceo.is_ceo = False
-    ceo.updated_at = _now()
-    await ms.audit(db, company_id, "organization.ceo_removed", principal.display_name,
-                   "agent", ceo.id, previous_ceo_id=ceo.id)
+    ceo.updated_at = now
+    reports = (
+        await db.execute(
+            select(Agent)
+            .where(Agent.company_id == company_id, Agent.manager_id == ceo.id)
+            .order_by(Agent.name, Agent.id)
+        )
+    ).scalars().all()
+    changes = [{"agent_id": str(r.id), "previous_manager_id": str(ceo.id), "manager_id": None}
+               for r in reports]
+    for report in reports:
+        report.manager_id = None
+        report.updated_at = now
+    await db.flush()
+    for change in changes:
+        await ms.audit(db, company_id, "agent.manager_changed", actor, "agent",
+                       uuid.UUID(change["agent_id"]), **change, reason="ceo_removed")
+    await ms.audit(db, company_id, "organization.ceo_removed", actor, "agent", ceo.id,
+                   previous_ceo_id=ceo.id, released_roots=len(reports))
     await db.commit()
+    for change in changes:
+        await publish_event(TOPOLOGY_CHANNEL, "agent.manager_changed", company_id, change)
     await publish_event(TOPOLOGY_CHANNEL, "organization.ceo_changed", company_id, {
         "ceo_id": None, "previous_ceo_id": str(ceo.id),
     })

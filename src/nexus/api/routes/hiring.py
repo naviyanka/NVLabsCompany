@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 from nexus.api.deps import DbSession
 from nexus.api.routes.agents import normalize_cli_employee
 from nexus.models.agent import Agent
+from nexus.services import ceo_service
 from nexus.templates.archetypes import ArchetypeRegistry
 from nexus.templates.hire_manifest import validate_hire_manifest
 
@@ -109,6 +110,7 @@ async def hire_team(
     On any validation failure, no agents are created (atomic operation).
     """
     created_agents: list[dict[str, Any]] = []
+    manager_id = await ceo_service.resolve_manager(db, company_id, None, body.manager_id)
 
     # Validate every CLI spec before creating anything, so a bad one aborts
     # the whole batch.
@@ -147,7 +149,7 @@ async def hire_team(
             title=spec.title,
             department_id=body.department_id,
             team_id=None,  # Team association can be done post-creation
-            manager_id=body.manager_id,
+            manager_id=manager_id,
             adapter_type=spec.adapter_type,
             adapter_config=adapter_config,
             model=(spec.model or "").strip() if spec.adapter_type == "cli" else spec.model,
@@ -231,7 +233,7 @@ async def hire_from_manifest(
         title=manifest.description or f"{manifest.name} Specialist",
         department_id=body.department_id,
         team_id=body.team_id,
-        manager_id=body.manager_id,
+        manager_id=await ceo_service.resolve_manager(db, company_id, None, body.manager_id),
         adapter_type=adapter_type,
         # ``isolate`` stays readable in manifests but is not stored: worktrees
         # come only from WorktreeService, never from agent config.

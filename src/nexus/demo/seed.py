@@ -120,7 +120,7 @@ def get_seed_agents() -> list[dict]:
             "status": "active",
             "adapter_type": "hermes",
             "model": "hermes3:8b",
-            "adapter_config": {"is_ceo": True, "ollama_host": "http://localhost:11434"},
+            "adapter_config": {"ollama_host": "http://localhost:11434"},
             "capabilities": [
                 "strategic_planning", "delegation", "decision_making",
                 "task_decomposition", "tool_calling", "autonomous_reasoning",

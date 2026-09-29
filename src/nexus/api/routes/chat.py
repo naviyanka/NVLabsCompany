@@ -273,13 +273,13 @@ async def _load_history_from_db(
 
 
 async def _fetch_live_platform_context(
-    db: "AsyncSession", company_id: uuid.UUID, user_prompt: str, is_ceo: bool = False, current_agent_id: uuid.UUID | None = None
+    db: "AsyncSession", company_id: uuid.UUID, user_prompt: str
 ) -> str:
     """Fetch live platform data relevant to the user's question from the database.
 
-    Queries the real database to provide accurate, real-time answers about
-    agents, tasks, pipelines, goals, etc. Always includes agent workforce roster
-    for CEO/manager agents or when task/agent management is referenced.
+    Read-only: queries the real database to provide accurate, real-time answers
+    about agents, tasks, goals and budget. Prompt text never creates or assigns
+    work; that goes through governed tools.
     """
     from nexus.models.task import Task, Goal
 
@@ -293,65 +293,9 @@ async def _fetch_live_platform_context(
     active = [a for a in agents if a.status in ("active", "ready", "idle")]
 
     agent_by_name = {a.name.lower(): a for a in agents}
-    # For delegation target matching, exclude the current agent (e.g. CEO Navi) if other agents exist
-    other_agents = [a for a in agents if str(a.id) != str(current_agent_id)] if current_agent_id else agents
-    target_by_name = {a.name.lower(): a for a in (other_agents or agents)}
 
-    # If prompt asks to assign a task to a named agent (e.g. Punni), auto-create task in DB
-    if "assign" in prompt_lower:
-        for name, target_agent in target_by_name.items():
-            if name in prompt_lower:
-                # Extract clean task title from prompt
-                task_title = user_prompt
-                if ":" in user_prompt:
-                    task_title = user_prompt.split(":", 1)[1].strip()
-                elif "assign" in user_prompt.lower():
-                    task_title = user_prompt.replace("As CEO Navi,", "").strip()
-
-                title_clean = task_title[:150]
-                
-                from nexus.database import tenant_session
-                async with tenant_session(company_id) as task_db:
-                    existing_stmt = select(Task).where(
-                        Task.company_id == company_id,
-                        Task.assigned_agent_id == target_agent.id,
-                        Task.title == title_clean,
-                    ).limit(1)
-                    ex_res = await task_db.execute(existing_stmt)
-                    existing_task = ex_res.scalar_one_or_none()
-                    if not existing_task:
-                        new_task = Task(
-                            company_id=company_id,
-                            title=title_clean,
-                            description=user_prompt,
-                            priority=1,
-                            assigned_agent_id=target_agent.id,
-                            status="pending",
-                        )
-                        task_db.add(new_task)
-                        await task_db.commit()
-                        await task_db.refresh(new_task)
-                        task_record = new_task
-                    else:
-                        task_record = existing_task
-
-                assigned_task_info = (
-                    f"  - Task ID: {task_record.id}\n"
-                    f"  - Title: {task_record.title}\n"
-                    f"  - Assigned Agent: {target_agent.name} [{target_agent.role}]\n"
-                    f"  - Status: {task_record.status.upper()}\n"
-                    f"INSTRUCTION FOR CEO NAVI: The user requested you to assign this task to {target_agent.name}. "
-                    f"The task has ALREADY been created and assigned to {target_agent.name} (Task ID: {task_record.id}) in the database. "
-                    f"Authoritatively confirm to the user that the task '{task_record.title}' (ID: {task_record.id}) has been assigned to {target_agent.name}. "
-                    f"If the user explicitly asked NOT to answer the calculation or question directly (e.g. 'Only assign it. Do not answer'), "
-                    f"respect their request: ONLY confirm the task assignment to {target_agent.name} and DO NOT answer the calculation yourself."
-                )
-
-                context_parts.append(f"[LIVE TASK ASSIGNMENT CONFIRMED]\n{assigned_task_info}")
-                break
-
-    # Always include workforce roster for CEO or when agents/tasks are mentioned
-    include_agents = is_ceo or any(
+    # Include the workforce roster when agents/tasks are mentioned
+    include_agents = any(
         kw in prompt_lower
         for kw in ["agent", "workforce", "team", "hired", "who", "assign", "task", "member"]
     ) or any(name in prompt_lower for name in agent_by_name)
@@ -364,8 +308,8 @@ async def _fetch_live_platform_context(
             f"[LIVE WORKFORCE DATA] Company has {len(agents)} registered agents ({len(active)} active/ready):\n{agent_lines}"
         )
 
-    # Task-related queries or CEO context
-    include_tasks = is_ceo or any(
+    # Task-related queries
+    include_tasks = any(
         kw in prompt_lower for kw in ["task", "pending", "progress", "work", "assigned", "assign", "do"]
     )
     if include_tasks:
@@ -382,7 +326,7 @@ async def _fetch_live_platform_context(
             )
 
     # Goal-related queries
-    if is_ceo or any(kw in prompt_lower for kw in ["goal", "objective", "okr", "strategy"]):
+    if any(kw in prompt_lower for kw in ["goal", "objective", "okr", "strategy"]):
         stmt = select(Goal).where(Goal.company_id == company_id).limit(10)
         result = await db.execute(stmt)
         goals = list(result.scalars().all())
@@ -395,7 +339,7 @@ async def _fetch_live_platform_context(
             )
 
     # Budget-related queries
-    if is_ceo or any(kw in prompt_lower for kw in ["budget", "spend", "cost", "money"]):
+    if any(kw in prompt_lower for kw in ["budget", "spend", "cost", "money"]):
         from nexus.models.company import Company
         stmt = select(Company).where(Company.id == company_id)
         result = await db.execute(stmt)
@@ -1058,8 +1002,10 @@ async def _call_llm(
         adapter = adapter_registry.create_adapter(registry_key)
 
         # Hermes tool calls use same DB-backed ToolAccess, autonomy, approval,
-        # vault-grant, and writer path as every other governed tool.
-        if hasattr(adapter, "register_tool"):
+        # vault-grant, and writer path as every other governed tool. The
+        # designated CEO gets none: its authority is only the MCP CEO tools,
+        # so free-form <tool_call> text from a CEO turn executes nothing.
+        if hasattr(adapter, "register_tool") and not agent.is_ceo:
             from nexus.database import tenant_session, tenant_session_factory
             from nexus.tools import (
                 OBSIDIAN_NOTE_REPLACE_NAME,
@@ -1300,7 +1246,7 @@ async def _build_chat_prompt(db: "AsyncSession", agent: Agent, company_id: uuid.
         return f"{system_prompt}\n\n{executive}"
 
     # Inject live platform context (workforce roster, active tasks, goals, live assignment) directly from DB
-    live_platform_context = await _fetch_live_platform_context(db, company_id, prompt, current_agent_id=agent.id)
+    live_platform_context = await _fetch_live_platform_context(db, company_id, prompt)
     if live_platform_context:
         system_prompt += (
             f"\n\n--- LIVE PLATFORM WORKFORCE & TASK DATA ---\n"

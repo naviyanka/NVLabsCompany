@@ -18,13 +18,18 @@
 - A role, title or prompt that says "CEO" grants nothing.
 
 **Hierarchy**
-- The CEO is the root of the hierarchy.
-- On appointment, every other root reports to the CEO.
-- The CEO cannot be given a manager (`CEO_IS_ROOT`).
-- The existing cycle check still applies.
+- `agents.is_ceo` is the only source of CEO authority. A role, title, prompt or `adapter_config` value grants nothing.
+- The CEO is the company's only root. On appointment, every other live root reports to it.
+- The CEO cannot be given a manager (`CEO_IS_ROOT`). The existing cycle check still applies.
+- Every agent-creation path (agents API, clone, hire-team, hiring, company sim, lifecycle, `agent_service`) resolves its manager through `ceo_service.resolve_manager`. An explicit valid manager is kept; otherwise the agent reports to the CEO.
+- `ceo_service.lock_hierarchy` serializes appointments and placements per company (a PostgreSQL advisory lock; on SQLite the write lock).
+- `appoint` takes `replaces`, the current CEO's id (or none). Of two racing appointments the loser gets `CEO_CONFLICT` (409); the unique index is the backstop. This is tested on PostgreSQL.
+- Every reporting-line move is audited as `agent.manager_changed` (`reason: ceo_root`).
 
 **Replacement and removal**
 - Replacing or removing the CEO revokes it immediately.
+- On replacement, the former CEO and its direct reports report to the new CEO. The former CEO keeps no direct reports, so it loses its manager tools, and the new CEO is the only root.
+- On removal without a replacement, the removed CEO's direct reports become roots (`released_roots` in the audit).
 - Every CEO tool call re-reads the designation in its own transaction.
 - A tool that is no longer offered is refused with `TOOL_NOT_OFFERED`.
 

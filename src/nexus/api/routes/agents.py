@@ -11,6 +11,7 @@ from sqlalchemy import select, update
 from nexus.api.deps import CurrentCompanyId, CurrentPrincipal, DbSession, require_permission
 from nexus.models.agent import Agent
 from nexus.realtime.publish import TOPOLOGY_CHANNEL, publish_event
+from nexus.services import ceo_service
 
 router = APIRouter(tags=["agents"])
 
@@ -162,6 +163,7 @@ async def create_agent(
     )
     if status_override:
         agent.status = status_override
+    agent.manager_id = await ceo_service.resolve_manager(db, company_id, None, None)
     db.add(agent)
     await db.flush()
 
@@ -448,7 +450,7 @@ async def delete_agent(agent_id: uuid.UUID, db: DbSession, company_id: CurrentCo
         )
 
     # Nullify references from other tables
-    await db.execute(sa_update(Agent).where(Agent.manager_id == agent_id).values(manager_id=None))
+    await ceo_service.release_reports(db, company_id, agent_id)
     await db.execute(sa_update(Task).where(Task.assigned_agent_id == agent_id).values(assigned_agent_id=None))
     await db.execute(sa_update(Goal).where(Goal.owner_agent_id == agent_id).values(owner_agent_id=None))
 
@@ -490,13 +492,18 @@ async def clone_agent(agent_id: uuid.UUID, db: DbSession, company_id: CurrentCom
         soul_description=source.soul_description,
         budget_monthly_cents=source.budget_monthly_cents,
     )
+    clone.manager_id = await ceo_service.resolve_manager(db, company_id, None, None)
     db.add(clone)
     await db.flush()
     return clone
 
 
 class ManagerUpdate(BaseModel):
-    """Request body for setting who an agent reports to; ``null`` clears it."""
+    """Request body for setting who an agent reports to.
+
+    ``null`` means the CEO while the company has one (it is then the only
+    root), otherwise no manager.
+    """
 
     manager_id: uuid.UUID | None = None
 
@@ -515,8 +522,9 @@ async def set_agent_manager(
 ) -> Any:
     """Set or clear the agent's manager (the reporting line the org chart draws).
 
-    Both agents must be in the caller's company, and the new line may not make
-    the agent report to itself, directly or through anyone below it.
+    Validated by :func:`ceo_service.resolve_manager`: both agents in the
+    caller's company, no line back to the agent itself, the CEO reports to no
+    one, and ``null`` is the CEO while there is one.
     """
     agent = (
         await db.execute(select(Agent).where(Agent.id == agent_id, Agent.company_id == company_id))
@@ -525,40 +533,11 @@ async def set_agent_manager(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail=f"Agent {agent_id} not found"
         )
-    if agent.is_ceo and body.manager_id is not None:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={"code": "CEO_IS_ROOT", "message": "The CEO reports to no one"},
-        )
-    if body.manager_id is not None:
-        exists = (
-            await db.execute(
-                select(Agent.id).where(Agent.id == body.manager_id, Agent.company_id == company_id)
-            )
-        ).scalar_one_or_none()
-        if exists is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Manager not found")
-        # Walk up from the new manager: meeting this agent means a cycle.
-        cursor: uuid.UUID | None = body.manager_id
-        seen: set[uuid.UUID] = set()
-        while cursor is not None and cursor not in seen:
-            if cursor == agent_id:
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail="An agent cannot report to itself or to one of its reports",
-                )
-            seen.add(cursor)
-            cursor = (
-                await db.execute(
-                    select(Agent.manager_id).where(
-                        Agent.id == cursor, Agent.company_id == company_id
-                    )
-                )
-            ).scalar_one_or_none()
+    target = await ceo_service.resolve_manager(db, company_id, agent_id, body.manager_id)
     previous = agent.manager_id
-    if previous == body.manager_id:
+    if previous == target:
         return agent
-    agent.manager_id = body.manager_id
+    agent.manager_id = target
     agent.updated_at = datetime.now(timezone.utc)
     await db.flush()
 
@@ -567,7 +546,7 @@ async def set_agent_manager(
     change = {
         "agent_id": str(agent_id),
         "previous_manager_id": previous and str(previous),
-        "manager_id": body.manager_id and str(body.manager_id),
+        "manager_id": target and str(target),
     }
     await record_audit(
         company_id, "agent.manager_changed",

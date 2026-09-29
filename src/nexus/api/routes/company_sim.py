@@ -12,6 +12,7 @@ from nexus.api.deps import CurrentPrincipal, DbSession, PathCompanyId, require_p
 from nexus.models.agent import Agent
 from nexus.models.company import Department, Team
 from nexus.realtime.publish import TOPOLOGY_CHANNEL, publish_event
+from nexus.services import ceo_service
 
 router = APIRouter(tags=["company"])
 
@@ -430,6 +431,7 @@ async def create_agent_from_template(
         name=f"{body.role_template} Agent",
         role=body.role_template,
         status="idle",
+        manager_id=await ceo_service.resolve_manager(db, company_id, None, None),
     )
     db.add(agent)
     await db.flush()

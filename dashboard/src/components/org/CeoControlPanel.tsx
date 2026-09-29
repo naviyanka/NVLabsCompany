@@ -90,7 +90,7 @@ export function CeoControlPanel({ agents }: { agents: Agent[] }) {
             size="sm"
             variant="secondary"
             disabled={busy || !choice}
-            onClick={() => void run(() => apiClient.put(PATH, { agent_id: choice }))}
+            onClick={() => void run(() => apiClient.put(PATH, { agent_id: choice, replaces: ceo?.id ?? null }))}
           >
             {ceo ? 'Replace CEO' : 'Appoint CEO'}
           </Button>

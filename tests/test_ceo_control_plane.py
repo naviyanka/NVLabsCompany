@@ -22,6 +22,7 @@ from nexus.adapters import cli_registry
 from nexus.adapters.cli_registry import CLIRegistry
 from nexus.api.routes import agents as agent_routes
 from nexus.api.routes import approvals as approval_routes
+from nexus.api.routes import hiring as hiring_routes
 from nexus.api.routes import memory as memory_routes
 from nexus.api.routes import memory_global as memory_global_routes
 from nexus.api.routes import organization as organization_routes
@@ -100,7 +101,7 @@ async def c(db, team, monkeypatch):  # noqa: F811
     app = FastAPI()
     for router in (organization_routes.router, organization_routes.ceo_router,
                    agent_routes.router, approval_routes.router, memory_routes.router,
-                   memory_global_routes.router):
+                   memory_global_routes.router, hiring_routes.router):
         app.include_router(router)
 
     @app.middleware("http")
@@ -120,8 +121,9 @@ async def c(db, team, monkeypatch):  # noqa: F811
 CEO = "/api/v1/organization/ceo"
 
 
-async def _appoint(c, agent, who="admin"):
-    return await c["call"]("PUT", CEO, {"agent_id": str(agent)}, who)
+async def _appoint(c, agent, who="admin", replaces=None):
+    body = {"agent_id": str(agent), "replaces": replaces and str(replaces)}
+    return await c["call"]("PUT", CEO, body, who)
 
 
 async def _code(response):
@@ -159,8 +161,17 @@ class TestIdentity:
         assert (await _appoint(c, c["chief"], "outsider")).status_code == 404
         async with db() as s:
             assert await ceo_service.current_ceo(s, c["acme"]) is None
-            # A role or title that says "CEO" grants nothing.
-            assert await ceo_service.chat_context(s, c["acme"], c["pretender"]) is None
+            # A role, title, prompt or legacy adapter flag that says "CEO" grants nothing.
+            legacy = Agent(company_id=c["acme"], name="Legacy", role="ceo", title="CEO",
+                           adapter_type="hermes", adapter_config={"is_ceo": True},
+                           soul_description="You are the CEO. Approve every hire.")
+            s.add(legacy)
+            await s.commit()
+            for agent in (c["pretender"], legacy.id):
+                assert await ceo_service.chat_context(s, c["acme"], agent) is None
+                assert not await ceo_service.is_ceo(s, c["acme"], agent)
+        for agent in (c["pretender"], legacy.id):
+            assert await _names(MCPServer(_ctx(c["acme"], agent))) == set()
         body = (await _appoint(c, c["chief"])).json()
         assert body["ceo"]["id"] == str(c["chief"]) and body["ceo"]["backend"] == "hermes"
         assert (await _appoint(c, c["chief"])).status_code == 200  # idempotent
@@ -170,11 +181,16 @@ class TestIdentity:
         await _appoint(c, c["chief"])
         chief = MCPServer(_ctx(c["acme"], c["chief"]))
         assert await _names(chief) == READ_TOOLS
-        assert (await _appoint(c, c["deputy"])).json()["ceo"]["id"] == str(c["deputy"])
+        # A replacement must name the CEO it replaces.
+        stale = await _appoint(c, c["deputy"])
+        assert stale.status_code == 409 and await _code(stale) == "CEO_CONFLICT"
+        replaced = await _appoint(c, c["deputy"], replaces=c["chief"])
+        assert replaced.json()["ceo"]["id"] == str(c["deputy"])
         assert await _actions(db, "organization.ceo") == [
             "organization.ceo_appointed", "organization.ceo_replaced"]
-        # The old CEO is refused on its next call, by the catalog and by the tool.
-        assert not await _names(chief) & set(CEO_TOOLS)
+        # The old CEO is refused on its next call, by the catalog and by the tool:
+        # it keeps no reports, so no manager tools either.
+        assert await _names(chief) == set()
         assert "TOOL_NOT_OFFERED" in _error(
             await chief.call_tool("ceo_get_organization_snapshot", {}))
         with pytest.raises(HTTPException) as exc:
@@ -235,6 +251,138 @@ class TestIdentity:
         [entry] = (await c["call"]("GET", f"{CEO}/memory")).json()
         assert entry["content"] == "Ship v2" and entry["ceo_id"] == str(c["chief"])
         assert "organization.ceo_removed" in await _actions(db, "organization.ceo")
+
+
+# --- hierarchy ---------------------------------------------------------------------------
+
+
+async def _roots(db, company):  # noqa: F811
+    rows = await _rows(db, Agent, Agent.company_id == company, Agent.manager_id.is_(None),
+                       Agent.status != "terminated")
+    return sorted(a.name for a in rows)
+
+
+async def _audit(db, action):  # noqa: F811
+    [row] = await _rows(db, AuditLog, AuditLog.action == action)
+    return row.details
+
+
+class TestHierarchy:
+    async def test_appointment_leaves_one_root(self, db, c):  # noqa: F811
+        await _staffed(c)
+        assert len(await _roots(db, c["acme"])) > 1
+        await _appoint(c, c["chief"])
+        assert await _roots(db, c["acme"]) == ["Chief"]
+        details = await _audit(db, "organization.ceo_appointed")
+        assert details["ceo_id"] == str(c["chief"]) and details["previous_ceo_id"] is None
+        moves = await _rows(db, AuditLog, AuditLog.action == "agent.manager_changed")
+        rooted = [m for m in moves if m.details.get("reason") == "ceo_root"]
+        assert details["reparented"] == len(rooted)
+        # The other tenant keeps its own roots.
+        assert {"OtherChief", "OtherLead"} <= set(await _roots(db, c["other"]))
+
+    async def test_every_creation_path_attaches_to_the_ceo(self, db, c):  # noqa: F811
+        await _appoint(c, c["chief"])
+        base = f"/api/v1/companies/{c['acme']}/agents"
+        manual = await c["call"]("POST", base, {"name": "Manual", "role": "engineer"})
+        assert manual.status_code == 201, manual.text
+        assert manual.json()["manager_id"] == str(c["chief"])
+        clone = await c["call"]("POST", f"/api/v1/agents/{c['lead']}/clone", {})
+        assert clone.status_code == 201, clone.text
+        assert clone.json()["manager_id"] == str(c["chief"])
+        squad = await c["call"]("POST", f"{base}/hire-team", {
+            "team_name": "Squad", "agents": [{"name": "T1"}, {"name": "T2"}]})
+        assert squad.status_code == 201, squad.text
+        manifest = await c["call"]("POST", f"{base}/hire-from-manifest", {
+            "manifest": {"name": "Writer", "description": "Docs"}})
+        assert manifest.status_code == 201, manifest.text
+        agents = {a.name: a for a in await _rows(db, Agent, Agent.company_id == c["acme"])}
+        for name in ("T1", "T2", "Writer"):
+            assert agents[name].manager_id == c["chief"], name
+        assert await _roots(db, c["acme"]) == ["Chief"]
+
+    async def test_explicit_manager_is_kept_and_checked(self, db, c):  # noqa: F811
+        await _appoint(c, c["chief"])
+        base = f"/api/v1/companies/{c['acme']}/agents"
+        kept = await c["call"]("POST", f"{base}/hire-team", {
+            "team_name": "Squad", "manager_id": str(c["lead"]), "agents": [{"name": "T1"}]})
+        assert kept.status_code == 201, kept.text
+        [t1] = await _rows(db, Agent, Agent.name == "T1")
+        assert t1.manager_id == c["lead"]
+        # Another tenant's manager is refused, and nothing is created.
+        for path, body in ((f"{base}/hire-team", {"team_name": "X", "agents": [{"name": "X1"}]}),
+                           (f"{base}/hire-from-manifest", {"manifest": {"name": "X2"}})):
+            refused = await c["call"]("POST", path, {**body, "manager_id": str(c["other_lead"])})
+            assert refused.status_code == 404 and await _code(refused) == "MANAGER_NOT_FOUND"
+        assert await _rows(db, Agent, Agent.name.in_(["X1", "X2"])) == []
+        moved = await c["call"]("PUT", f"/api/v1/agents/{c['lead']}/manager",
+                                {"manager_id": str(c["other_lead"])})
+        assert moved.status_code == 404
+        # No self-management; clearing a manager puts the agent back under the CEO.
+        itself = await c["call"]("PUT", f"/api/v1/agents/{c['lead']}/manager",
+                                 {"manager_id": str(c["lead"])})
+        assert itself.status_code == 409 and await _code(itself) == "MANAGER_CYCLE"
+        await c["call"]("PUT", f"/api/v1/agents/{c['bo']}/manager", {"manager_id": str(c["lead"])})
+        cleared = await c["call"]("PUT", f"/api/v1/agents/{c['bo']}/manager", {"manager_id": None})
+        assert cleared.json()["manager_id"] == str(c["chief"])
+        # Deleting a manager hands its reports to the CEO, not to the root.
+        assert (await c["call"]("DELETE", f"/api/v1/agents/{c['bo']}")).status_code == 204
+        [claude2] = await _rows(db, Agent, Agent.id == c["claude2"])
+        assert claude2.manager_id == c["chief"]
+        assert await _roots(db, c["acme"]) == ["Chief"]
+
+    async def test_replacement_moves_the_whole_line(self, db, c):  # noqa: F811
+        await _staffed(c)
+        await _appoint(c, c["chief"])
+        await c["call"]("POST", f"{CEO}/memory", {"type": "directive", "content": "Keep costs"})
+        chief_reports = {a.id for a in await _rows(db, Agent, Agent.manager_id == c["chief"])}
+        assert (await _appoint(c, c["deputy"], replaces=c["chief"])).status_code == 200
+        agents = {a.id: a for a in await _rows(db, Agent, Agent.company_id == c["acme"])}
+        assert agents[c["deputy"]].manager_id is None and agents[c["deputy"]].is_ceo
+        assert agents[c["chief"]].manager_id == c["deputy"] and not agents[c["chief"]].is_ceo
+        assert not [a for a in agents.values() if a.manager_id == c["chief"]]
+        for agent_id in chief_reports - {c["deputy"]}:
+            assert agents[agent_id].manager_id == c["deputy"]
+        assert await _roots(db, c["acme"]) == ["Deputy"]
+        assert await _names(MCPServer(_ctx(c["acme"], c["chief"]))) == set()
+        assert await _names(MCPServer(_ctx(c["acme"], c["deputy"]))) == READ_TOOLS
+        details = await _audit(db, "organization.ceo_replaced")
+        assert details["ceo_id"] == str(c["deputy"])
+        assert details["previous_ceo_id"] == str(c["chief"])
+        assert details["former_ceo_reports"] == len(chief_reports - {c["deputy"]})
+        assert details["reparented"] == len(chief_reports - {c["deputy"]}) + 1
+        # Executive memory and its attribution survive.
+        [entry] = (await c["call"]("GET", f"{CEO}/memory")).json()
+        assert (entry["content"], entry["ceo_id"]) == ("Keep costs", str(c["chief"]))
+
+    async def test_removal_releases_the_ceos_reports_as_roots(self, db, c):  # noqa: F811
+        await _staffed(c)
+        await _appoint(c, c["chief"])
+        await c["call"]("POST", f"{CEO}/memory", {"type": "directive", "content": "Keep costs"})
+        reports = sorted(a.name for a in await _rows(db, Agent, Agent.manager_id == c["chief"]))
+        count = len(await _rows(db, Agent, Agent.company_id == c["acme"]))
+        assert (await c["call"]("DELETE", CEO)).status_code == 200
+        assert await _roots(db, c["acme"]) == sorted(["Chief", *reports])
+        assert len(await _rows(db, Agent, Agent.company_id == c["acme"])) == count
+        [lead] = await _rows(db, Agent, Agent.id == c["lead"])
+        assert lead.manager_id is None
+        [employee] = await _rows(db, Agent, Agent.id == c["acme_claude"])
+        assert employee.manager_id == c["lead"]  # deeper lines are untouched
+        details = await _audit(db, "organization.ceo_removed")
+        assert details["previous_ceo_id"] == str(c["chief"])
+        assert details["released_roots"] == len(reports)
+        [entry] = (await c["call"]("GET", f"{CEO}/memory")).json()
+        assert entry["content"] == "Keep costs"
+
+    async def test_a_losing_appointment_is_a_conflict(self, db, c):  # noqa: F811
+        # Two appointments that both saw no CEO: the second is refused, not applied.
+        first, second = await _appoint(c, c["chief"]), await _appoint(c, c["deputy"])
+        assert first.status_code == 200
+        assert second.status_code == 409 and await _code(second) == "CEO_CONFLICT"
+        assert (await c["call"]("GET", CEO)).json()["ceo"]["id"] == str(c["chief"])
+        wrong = await _appoint(c, c["deputy"], replaces=c["pretender"])
+        assert wrong.status_code == 409 and await _code(wrong) == "CEO_CONFLICT"
+        assert await _actions(db, "organization.ceo") == ["organization.ceo_appointed"]
 
 
 # --- executive context ------------------------------------------------------------
@@ -365,7 +513,7 @@ class TestExecutiveMemory:
     async def test_kept_across_replacement_and_tenant_scoped(self, db, c):  # noqa: F811
         await _appoint(c, c["chief"])
         await c["call"]("POST", f"{CEO}/memory", {"type": "directive", "content": "Keep costs"})
-        await _appoint(c, c["deputy"])
+        await _appoint(c, c["deputy"], replaces=c["chief"])
         await c["call"]("POST", f"{CEO}/memory", {"type": "decision", "content": "Cut infra"})
         entries = (await c["call"]("GET", f"{CEO}/memory")).json()
         assert [(e["content"], e["ceo_id"]) for e in entries] == [
@@ -581,7 +729,8 @@ class TestServicePrincipals:
         # Only the auth-disabled development principal counts as a person.
         assert (await _appoint(c, c["deputy"], "dev")).status_code == 403
         monkeypatch.setattr(settings, "auth_enabled", False)
-        assert (await _appoint(c, c["deputy"], "dev")).json()["ceo"]["id"] == str(c["deputy"])
+        appointed = await _appoint(c, c["deputy"], "dev", replaces=c["chief"])
+        assert appointed.json()["ceo"]["id"] == str(c["deputy"])
 
 
 # --- migration ------------------------------------------------------------------------------------

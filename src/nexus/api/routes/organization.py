@@ -102,6 +102,8 @@ async def refresh(
 
 class AppointCEO(BaseModel):
     agent_id: uuid.UUID
+    # The CEO this replaces, as the caller last saw it; None when there was none.
+    replaces: uuid.UUID | None = None
 
 
 @ceo_router.get("", dependencies=READ)
@@ -118,7 +120,7 @@ async def appoint_ceo(
     body: AppointCEO, db: DbSession, company_id: CurrentCompanyId, principal: CurrentPrincipal
 ) -> dict[str, Any]:
     """Appoint the CEO, or replace the current one. A human administrator only."""
-    return await ceo_service.appoint(db, company_id, body.agent_id, principal)
+    return await ceo_service.appoint(db, company_id, body.agent_id, principal, body.replaces)
 
 
 @ceo_router.delete("")

@@ -64,7 +64,7 @@ describe('CeoControlPanel', () => {
 
     fireEvent.change(screen.getByLabelText('CEO agent'), { target: { value: 'a2' } });
     fireEvent.click(screen.getByRole('button', { name: 'Replace CEO' }));
-    await waitFor(() => expect(body).toEqual({ agent_id: 'a2' }));
+    await waitFor(() => expect(body).toEqual({ agent_id: 'a2', replaces: 'a1' }));
     expect(await screen.findByText('CEO · Bo')).toBeInTheDocument();
   });
 

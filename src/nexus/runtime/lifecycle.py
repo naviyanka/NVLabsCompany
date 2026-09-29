@@ -94,6 +94,13 @@ class AgentLifecycleManager:
         Returns:
             The newly created Agent instance.
         """
+        if "is_ceo" in kwargs:
+            raise ValueError("The CEO is designated only through ceo_service")
+        from nexus.services import ceo_service
+
+        kwargs["manager_id"] = await ceo_service.resolve_manager(
+            self._db, company_id, None, kwargs.get("manager_id")
+        )
         agent = Agent(
             company_id=company_id,
             name=name,
