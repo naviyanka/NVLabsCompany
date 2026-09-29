@@ -175,12 +175,6 @@ async def authenticate(token: str) -> ExecutionContext:
             is not running this execution for this agent and company any more.
             One error for all, as in ``verify_run_token``.
     """
-    from sqlalchemy import select
-
-    from nexus.auth.principal import Principal
-    from nexus.database import tenant_session
-    from nexus.models.chat_turn import ChatTurn
-
     try:
         claims = jwt.decode(
             token,
@@ -194,6 +188,24 @@ async def authenticate(token: str) -> ExecutionContext:
         execution_id = uuid.UUID(claims["execution_id"])
     except (jwt.PyJWTError, KeyError, ValueError, TypeError) as exc:
         raise BridgeDeniedError("invalid bridge credential") from exc
+
+    return await bind(company_id, agent_id, execution_id)
+
+
+async def bind(
+    company_id: uuid.UUID, agent_id: uuid.UUID, execution_id: uuid.UUID
+) -> ExecutionContext:
+    """The context of a chat turn that is still running this execution.
+
+    Raises:
+        BridgeDeniedError: The turn is gone, cancelled, superseded by a recovered
+            execution, or its lease has lapsed.
+    """
+    from sqlalchemy import select
+
+    from nexus.auth.principal import Principal
+    from nexus.database import tenant_session
+    from nexus.models.chat_turn import ChatTurn
 
     async with tenant_session(company_id) as db:
         turn = (
