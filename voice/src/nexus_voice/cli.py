@@ -25,11 +25,16 @@ def diagnose(settings: Settings, *, full: bool = False, load_stt: bool = True) -
     report.update(selected_device=device, selected_compute_type=compute, fallback_reason=reason)
     report["ffmpeg_available"] = report["ffmpeg"] is not None
     report["stt_model_available"] = models.stt_available(settings, full=full)
-    report["english_voice_available"] = any(
-        models.voice_available(settings, v, full=full) for v in models.voices_for("en")
-    )
-    report["hindi_voice_available"] = any(
-        models.voice_available(settings, v, full=full) for v in models.voices_for("hi")
+    for lang, name in (("en", "english"), ("hi", "hindi")):
+        report[f"{name}_voice_available"] = any(
+            models.voice_available(settings, v, full=full)
+            for v in models.voices_for(lang, settings)
+        )
+    report["allow_noncommercial_models"] = settings.allow_noncommercial
+    report["voices"] = models.voice_info(settings, full=full)
+    # No commercially licensed Hindi voice ships: it stays a live check until one is supplied.
+    report["hindi_tts_status"] = (
+        "PASS" if report["hindi_voice_available"] else "LIVE_CHECK_REQUIRED"
     )
     return report
 
@@ -43,11 +48,20 @@ def main(argv: list[str] | None = None) -> int:
     s = sub.add_parser("setup")
     s.add_argument("--pin", action="store_true")
     s.add_argument("only", nargs="*")
+    sub.add_parser("voices", help="list TTS voices with licence and commercial-use status")
     sub.add_parser("serve")
     args = ap.parse_args(argv)
     settings = Settings()
     if args.cmd == "diagnose":
         print(json.dumps(diagnose(settings, full=args.full, load_stt=not args.no_load), indent=2))
+    elif args.cmd == "voices":
+        from nexus_voice import models
+
+        for v in models.voice_info(settings):
+            tag = "NON-COMMERCIAL/UNVERIFIED" if v["restricted"] else "commercial-ok"
+            use = "selectable" if v["selectable"] else "blocked (opt-in off)"
+            got = "installed" if v["installed"] else "not installed"
+            print(f"{v['id']:28} [{tag}] {use}, {got} - {v['license']}")
     elif args.cmd == "setup":
         from nexus_voice import models
 

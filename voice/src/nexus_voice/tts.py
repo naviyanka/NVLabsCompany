@@ -33,6 +33,8 @@ class Synthesizer:
         if voice_id not in self._voices:
             from piper import PiperVoice
 
+            if not models.selectable(self.settings, voice_id):
+                raise LookupError(f"voice {voice_id} is restricted (non-commercial or unknown)")
             if not models.voice_available(self.settings, voice_id):
                 raise LookupError(f"voice {voice_id} is not installed")
             path = models.voice_path(self.settings, voice_id)

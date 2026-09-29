@@ -23,20 +23,45 @@
         "size": 459861,
         "sha256": "34ce3fe1c5041027b3f8d42912270993f986dbc4bb34cf27f951e34a1e453913"
       }
-    }
+    },
+    "commercial": true,
+    "attribution": "OpenAI Whisper (MIT) converted by SYSTRAN faster-whisper (MIT)"
   },
   "vad": {
     "id": "silero-vad-v6-onnx",
     "source": "bundled with faster-whisper (faster_whisper/assets/silero_vad_v6.onnx)",
-    "license": "MIT"
+    "license": "MIT",
+    "commercial": true
   },
   "voices": {
+    "en_US-ljspeech-medium": {
+      "language": "en",
+      "locale": "en_US",
+      "quality": "medium",
+      "sample_rate": 22050,
+      "license": "Public domain (LJ Speech dataset, https://keithito.com/LJ-Speech-Dataset/)",
+      "commercial": true,
+      "attribution": "LJ Speech dataset (public domain); Piper model trained from scratch by Bryce Beattie",
+      "revision": "c10ece1aade47bb51c153c893d14e5bf8e5b7117",
+      "source": "https://huggingface.co/rhasspy/piper-voices/tree/c10ece1aade47bb51c153c893d14e5bf8e5b7117/en/en_US/ljspeech/medium",
+      "url_base": "https://huggingface.co/rhasspy/piper-voices/resolve/c10ece1aade47bb51c153c893d14e5bf8e5b7117/en/en_US/ljspeech/medium",
+      "files": {
+        "en_US-ljspeech-medium.onnx": {
+          "size": 63531379,
+          "sha256": "6f52a751e2349abe7a76735eb09dc1875298c77ea2342ffd2fef79ff81b87f22"
+        },
+        "en_US-ljspeech-medium.onnx.json": {
+          "size": 4972,
+          "sha256": "141d612cc0a95ed7efc1ca936b845c2364967f2e9217c5dbfcf69fc4d6c65860"
+        }
+      }
+    },
     "en_US-lessac-medium": {
       "language": "en",
       "locale": "en_US",
       "quality": "medium",
       "sample_rate": 22050,
-      "license": "Blizzard 2013 Lessac dataset license (https://www.cstr.ed.ac.uk/projects/blizzard/2013/lessac_blizzard2013/license.html)",
+      "license": "Blizzard 2013 Lessac research licence: forbids commercial use incl. voice-synthesis products",
       "source": "https://huggingface.co/rhasspy/piper-voices/tree/c10ece1aade47bb51c153c893d14e5bf8e5b7117/en/en_US/lessac/medium",
       "url_base": "https://huggingface.co/rhasspy/piper-voices/resolve/c10ece1aade47bb51c153c893d14e5bf8e5b7117/en/en_US/lessac/medium",
       "files": {
@@ -48,7 +73,10 @@
           "size": 4885,
           "sha256": "efe19c417bed055f2d69908248c6ba650fa135bc868b0e6abb3da181dab690a0"
         }
-      }
+      },
+      "commercial": false,
+      "attribution": "Lessac Technologies / Voice Factory (Blizzard 2013 dataset)",
+      "revision": "c10ece1aade47bb51c153c893d14e5bf8e5b7117"
     },
     "en_US-ryan-medium": {
       "language": "en",
@@ -67,7 +95,10 @@
           "size": 4883,
           "sha256": "44034c056cb15681b2ad494307c7f3f2e4499d1253c700c711fa0a4607ffe78d"
         }
-      }
+      },
+      "commercial": false,
+      "attribution": "Ryan voice dataset, CC BY-NC-SA 4.0",
+      "revision": "c10ece1aade47bb51c153c893d14e5bf8e5b7117"
     },
     "hi_IN-pratham-medium": {
       "language": "hi",
@@ -86,7 +117,10 @@
           "size": 4970,
           "sha256": "b68edd2cd7950dd436314013b7cd12e9699e5a3f6fe5af5af94294cf6aa7b9fd"
         }
-      }
+      },
+      "commercial": false,
+      "attribution": "PravalX / AI4Bharat indicnlp_corpus, CC BY-NC-SA 4.0",
+      "revision": "c10ece1aade47bb51c153c893d14e5bf8e5b7117"
     },
     "hi_IN-priyamvada-medium": {
       "language": "hi",
@@ -105,7 +139,10 @@
           "size": 4973,
           "sha256": "5efc0ccf7529f3528996d46e0fac1f969f681d44a8e55bfa6236ff8841b5d52d"
         }
-      }
+      },
+      "commercial": false,
+      "attribution": "PravalX / AI4Bharat indicnlp_corpus, CC BY-NC-SA 4.0",
+      "revision": "c10ece1aade47bb51c153c893d14e5bf8e5b7117"
     }
   }
 }

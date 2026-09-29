@@ -184,7 +184,7 @@ class TestSegments:
 class TestModels:
     def test_manifest_pins_every_file(self):
         m = models.manifest()
-        assert m["stt"]["license"] and len(m["voices"]) == 4
+        assert m["stt"]["license"] and len(m["voices"]) == 5
         for v in m["voices"].values():
             assert v["sample_rate"] == 22050 and v["license"] and v["source"]
             assert all(f["sha256"] for f in v["files"].values())
@@ -208,3 +208,78 @@ class TestModels:
 
 def test_partials_are_off_by_default():
     assert Settings.__dataclass_fields__["partials"].default is False
+
+
+class TestLicensing:
+    def s(self, tmp_path, **kw):
+        return Settings(model_dir=tmp_path, **kw)
+
+    def test_default_voice_is_commercial_and_restricted_are_blocked(self, tmp_path):
+        s = self.s(tmp_path)
+        assert models.voices_for("en", s) == ["en_US-ljspeech-medium"]
+        assert models.voices_for("hi", s) == []
+        for vid in ("en_US-lessac-medium", "hi_IN-pratham-medium", "en_US-ryan-medium"):
+            assert not models.selectable(s, vid)
+
+    def test_standard_setup_never_downloads_restricted(self, tmp_path, monkeypatch):
+        fetched = []
+        monkeypatch.setattr(
+            models.urllib.request, "urlretrieve", lambda url, dst: fetched.append(url)
+        )
+        s = self.s(tmp_path)
+        names = {p.parent.name for _, p, _, _ in models._entries(s)}
+        assert names <= {"faster-whisper-medium", "en_US-ljspeech-medium"}
+        with pytest.raises(RuntimeError, match="NON_?COMMERCIAL|not licensed"):
+            models.setup(s, only=["hi_IN-pratham-medium"])
+        assert fetched == []
+
+    def test_optin_makes_noncommercial_selectable(self, tmp_path):
+        s = self.s(tmp_path, allow_noncommercial=True)
+        assert "hi_IN-pratham-medium" in models.voices_for("hi", s)
+        assert {p.parent.name for _, p, _, _ in models._entries(s)} >= {"hi_IN-pratham-medium"}
+
+    def test_every_bundled_voice_records_licence_and_provenance(self):
+        for vid, v in models.manifest()["voices"].items():
+            assert v["license"] and v["source"] and v["revision"] and "commercial" in v, vid
+            assert all(f["sha256"] for f in v["files"].values()), vid
+
+    def test_synth_refuses_restricted_voice(self, tmp_path):
+        from nexus_voice.tts import Synthesizer
+
+        with pytest.raises(LookupError, match="restricted"):
+            Synthesizer(self.s(tmp_path)).voice("hi_IN-pratham-medium")
+
+    def test_user_manifest_voice_is_listed_never_downloaded(self, tmp_path):
+        import json
+
+        (tmp_path / "user_voices.json").write_text(
+            json.dumps(
+                {
+                    "voices": {
+                        "hi_IN-mine-medium": {
+                            "language": "hi",
+                            "license": "own recording",
+                            "commercial": True,
+                            "files": {"a.onnx": {"size": 1, "sha256": "0" * 64}},
+                        },
+                        "hi_IN-bad-medium": {"language": "hi", "license": "x", "files": {}},
+                    }
+                }
+            )
+        )
+        s = self.s(tmp_path)
+        assert models.voices_for("hi", s) == ["hi_IN-mine-medium"]
+        assert not models.voice_available(s, "hi_IN-mine-medium")  # file absent
+        assert models.voice_info(s)[-1]["origin"] == "user"
+        assert not any(p.parent.name == "hi_IN-mine-medium" for _, p, _, _ in models._entries(s))
+
+    def test_voices_endpoint_reports_labels(self, tmp_path):
+        client = TestClient(create_app(self.s(tmp_path, secret=SECRET)))
+        body = client.get("/v1/voices").json()
+        assert body["allow_noncommercial"] is False
+        by = {v["id"]: v for v in body["voices"]}
+        assert (
+            by["hi_IN-pratham-medium"]["restricted"]
+            and not by["hi_IN-pratham-medium"]["selectable"]
+        )
+        assert not by["en_US-ljspeech-medium"]["restricted"]

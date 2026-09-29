@@ -69,6 +69,15 @@ def create_app(
         await ws.accept()
         return True
 
+    @app.get("/v1/voices")
+    async def voices() -> dict:
+        from nexus_voice import models
+
+        return {
+            "allow_noncommercial": settings.allow_noncommercial,
+            "voices": models.voice_info(settings),
+        }
+
     @app.get("/health")
     async def health() -> dict:
         return {"ok": True, "protocol": PROTOCOL}

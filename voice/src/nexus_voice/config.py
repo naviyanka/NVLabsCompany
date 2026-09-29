@@ -30,4 +30,8 @@ class Settings:
     max_utterance_s: float = float(os.environ.get("NEXUS_VOICE_MAX_UTTERANCE_S", "30"))
     max_frame_bytes: int = 8192
     silence_ms: int = int(os.environ.get("NEXUS_VOICE_SILENCE_MS", "700"))
+    # Non-commercial voices are listed but never selected or downloaded unless this is true.
+    allow_noncommercial: bool = os.environ.get(
+        "NEXUS_VOICE_ALLOW_NONCOMMERCIAL_MODELS", "false"
+    ).lower() in ("1", "true", "yes")
     partials: bool = os.environ.get("NEXUS_VOICE_PARTIALS", "0") == "1"
