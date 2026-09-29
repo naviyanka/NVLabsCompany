@@ -61,6 +61,7 @@ if SCENARIO == "grandchild":
     child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(600)"])
     record(grandchild=child.pid)
 
+SEEN_HEADER = ""
 while (msg := read()) is not None:
     method, mid = msg.get("method"), msg.get("id")
     if method == "initialize":
@@ -81,6 +82,8 @@ while (msg := read()) is not None:
     elif method == "session/new":
         params = msg["params"]
         record(method=method, cwd=params["cwd"], servers=params["mcpServers"])
+        if params["mcpServers"]:
+            SEEN_HEADER = params["mcpServers"][0]["headers"][0]["value"]
         if SCENARIO == "setup_error":
             send({"jsonrpc": "2.0", "id": mid, "error": {"code": -32000, "message": "SECRET-TEXT"}})
         else:
@@ -113,8 +116,10 @@ while (msg := read()) is not None:
         elif SCENARIO == "big_output":
             for _ in range(50):
                 chunk("y" * 100)
-        elif SCENARIO == "echo_secret":
-            chunk("token is " + msg["params"]["prompt"][0]["text"])
+        elif SCENARIO == "echo_token":
+            chunk("leak " + SEEN_HEADER)
+            sys.stderr.write("stderr " + SEEN_HEADER + "\n")
+            sys.stderr.flush()
         else:
             chunk("hello ")
             chunk("world")
