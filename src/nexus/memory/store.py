@@ -60,9 +60,11 @@ class MemoryStore:
         self._hot: dict[str, list[MemoryEntry]] = {}
         self._cold_path = cold_storage_path or Path("data/cold_memory")
 
-    def _cache_key(self, scope: str, scope_id: uuid.UUID | None) -> str:
-        """Generate a cache key for the hot tier."""
-        return f"{scope}:{scope_id or 'global'}"
+    def _cache_key(
+        self, company_id: uuid.UUID, scope: str, scope_id: uuid.UUID | None
+    ) -> str:
+        """Generate a cache key for the hot tier; the company keeps tenants apart."""
+        return f"{company_id}:{scope}:{scope_id or 'global'}"
 
     async def store(
         self,
@@ -81,13 +83,18 @@ class MemoryStore:
             scope_id: The ID of the scope entity.
             content: The memory content text.
             metadata: Optional metadata dictionary.
-            company_id: The company for tenant isolation.
+            company_id: The company that owns the memory. Required.
             agent_id: The agent that owns this memory.
             importance: Importance score (0.0 to 1.0).
 
         Returns:
             The UUID string of the stored memory.
+
+        Raises:
+            ValueError: If ``company_id`` is missing or the scope is executive.
         """
+        if company_id is None:
+            raise ValueError("company_id is required to store a memory")
         if scope == "executive":
             # Executive memory is written only by nexus.services.ceo_service.
             raise ValueError("executive memory is recorded through the CEO service")
@@ -96,7 +103,7 @@ class MemoryStore:
         # Store in warm tier (database)
         record = MemoryRecord(
             id=memory_id,
-            company_id=company_id or uuid.UUID(int=0),
+            company_id=company_id,
             agent_id=agent_id,
             scope=scope,
             scope_id=scope_id,
@@ -118,7 +125,7 @@ class MemoryStore:
             importance=importance,
             tier="hot",
         )
-        key = self._cache_key(scope, scope_id)
+        key = self._cache_key(company_id, scope, scope_id)
         if key not in self._hot:
             self._hot[key] = []
         self._hot[key].append(entry)
@@ -131,6 +138,7 @@ class MemoryStore:
         scope_id: uuid.UUID | None,
         query: str | None = None,
         limit: int = 10,
+        company_id: uuid.UUID | None = None,
     ) -> list[MemoryRecord]:
         """Retrieve memories from all tiers, starting with hot.
 
@@ -142,20 +150,26 @@ class MemoryStore:
             scope_id: The ID of the scope entity.
             query: Optional text query for filtering.
             limit: Maximum number of results.
+            company_id: The company whose memories to read. Required.
 
         Returns:
             List of MemoryRecord instances.
+
+        Raises:
+            ValueError: If ``company_id`` is missing.
         """
+        if company_id is None:
+            raise ValueError("company_id is required to retrieve memories")
         results: list[MemoryRecord] = []
 
         # Check hot tier first
-        key = self._cache_key(scope, scope_id)
+        key = self._cache_key(company_id, scope, scope_id)
         hot_entries = self._hot.get(key, [])
         if hot_entries:
             for entry in hot_entries[:limit]:
                 record = MemoryRecord(
                     id=entry.id,
-                    company_id=uuid.UUID(int=0),
+                    company_id=company_id,
                     scope=entry.scope,
                     scope_id=entry.scope_id,
                     content=entry.content,
@@ -174,6 +188,7 @@ class MemoryStore:
 
             stmt = (
                 select(MemoryRecord)
+                .where(MemoryRecord.company_id == company_id)
                 .where(MemoryRecord.scope == scope)
                 .where(MemoryRecord.tier == "warm")
             )
@@ -224,7 +239,7 @@ class MemoryStore:
                     tier="hot",
                     created_at=record.created_at,
                 )
-                key = self._cache_key(record.scope, record.scope_id)
+                key = self._cache_key(record.company_id, record.scope, record.scope_id)
                 if key not in self._hot:
                     self._hot[key] = []
                 self._hot[key].append(entry)
