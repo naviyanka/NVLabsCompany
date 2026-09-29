@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import inspect
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
@@ -19,7 +19,7 @@ import nexus.models  # noqa: F401 -- registers every table on SQLModel.metadata
 from nexus.models.memory import MemoryRecord
 from nexus.runtime import orchestrator
 
-STALE = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=30)
+STALE = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=30)
 
 
 @pytest.fixture

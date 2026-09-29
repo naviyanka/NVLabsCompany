@@ -3,10 +3,11 @@
 Migration ``e7a1c2d3f407``. Runs against a disposable PostgreSQL (testcontainers,
 or ``TEST_DATABASE_URL``); skipped when neither is available.
 """
+# ruff: noqa: F811 -- pytest fixtures imported from test_postgres_integration
 
 import asyncio
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import alembic.command
 import alembic.config
@@ -87,7 +88,7 @@ async def test_rows_are_isolated_between_tenants_on_a_pooled_connection(
                     company_id=cid,
                     vault_path=f"notes/{cid}.md",
                     content_hash="0" * 64,
-                    mtime=datetime.now(timezone.utc).replace(tzinfo=None),
+                    mtime=datetime.now(UTC).replace(tzinfo=None),
                 )
                 db.add_all([mem, doc])
                 await db.commit()
@@ -163,7 +164,7 @@ async def test_force_rls_binds_the_table_owner(migrated_postgres_url):
             # The owner sees nothing without a tenant, and then only its own rows.
             count = "SELECT count(*) FROM memory_records WHERE company_id = :c"
             assert (await db.execute(sa.text(count), {"c": cid})).scalar_one() == 0
-            await db.execute(sa.text("SELECT set_config('nexus.company_id', :c, true)"), {"c": str(cid)})
+            await db.execute(sa.text("SELECT set_config('nexus.company_id', :c, true)"), {"c": str(cid)})  # noqa: E501
             assert (await db.execute(sa.text(count), {"c": cid})).scalar_one() == 1
 
             await db.rollback()
@@ -274,7 +275,7 @@ async def test_memory_maintenance_only_touches_its_own_tenant(app_role):
     from nexus.database import tenant_session
     from nexus.runtime import orchestrator
 
-    stale = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=30)
+    stale = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=30)
     a, b = await _companies(app_role, 2)
     for cid in (a, b):
         async with tenant_session(cid) as db:
