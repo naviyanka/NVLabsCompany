@@ -434,10 +434,13 @@ class VoiceConnection:
                     "type": "speak",
                     "id": f"{gen}:{k}",
                     "text": sentence,
-                    "voices": {"en": self.voice_en, "hi": self.voice_hi},
+                    "voices": self.voices(),
                 }
             )
         )
+
+    def voices(self) -> dict[str, str]:
+        return {k: v for k, v in (("en", self.voice_en), ("hi", self.voice_hi)) if v}
 
     async def tts_read(self, gen: int, link: Any) -> None:
         try:
@@ -459,7 +462,10 @@ class VoiceConnection:
                         self.pending = max(0, self.pending - 1)
                         if not self.pending:
                             self.drained.set()
-                        if ev["type"] == "error":
+                        if ev["type"] == "error" and ev.get("code") == "NO_VOICE":
+                            # No usable voice for this language: the reply stays as text.
+                            await self.emit("notice", code="NO_VOICE", message=ev.get("message"))
+                        elif ev["type"] == "error":
                             await self.fail("TTS_ERROR", "Speech synthesis failed")
         except Exception as exc:
             logger.warning("voice tts ended: %s", type(exc).__name__)

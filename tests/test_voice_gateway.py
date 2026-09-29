@@ -345,6 +345,24 @@ class TestSession:
             is False
         )
 
+    def test_defaults_are_commercially_licensed_and_hindi_is_unset(self, client):
+        body = client.get("/api/v1/voice/status", headers={"x-who": "acme"}).json()
+        assert body["default_voices"] == {"en": "en_US-ljspeech-medium", "hi": ""}
+        assert "lessac" not in body["default_voices"]["en"]
+        assert body["voices"] == [] and body["worker_reachable"] is False
+
+    def test_status_lists_worker_voice_labels(self, client, monkeypatch):
+        async def catalog(path):
+            return {
+                "allow_noncommercial": False,
+                "voices": [{"id": "hi_IN-pratham-medium", "restricted": True, "selectable": False}],
+            }
+
+        monkeypatch.setattr(voice_routes.worker_client, "worker_get", catalog)
+        body = client.get("/api/v1/voice/status", headers={"x-who": "acme"}).json()
+        assert body["voices"][0]["restricted"] and body["allow_noncommercial_models"] is False
+        assert new_session(client).json()["voices"]["hi"] == ""
+
 
 # --- WebSocket auth ---------------------------------------------------------
 
@@ -553,6 +571,28 @@ class TestTurn:
         assert read_until(ws, "error")[-1]["code"] == "RATE_LIMITED"
         ws.__exit__(None, None, None)
         assert len(world.rows(ChatTurn)) == 1
+
+    def test_missing_voice_is_a_notice_not_a_failure(self, client, world):
+        base = heard("namaste", "hi")
+
+        def script(scope, msg):
+            if scope == "tts" and msg.get("type") == "speak":
+                assert msg["voices"] == {"en": "en_US-ljspeech-medium"}  # unset Hindi not sent
+                return [
+                    json.dumps(
+                        {"type": "error", "id": msg["id"], "code": "NO_VOICE", "message": "no hi"}
+                    )
+                ]
+            return base(scope, msg)
+
+        world.script = script
+        ws = start(client)
+        ws.send_bytes(pcm(0))
+        ws.send_text(json.dumps({"type": "ptt_end"}))
+        events = read_until(ws, "completed")
+        assert any(e["type"] == "notice" and e["code"] == "NO_VOICE" for e in events)
+        assert not any(e["type"] == "error" for e in events)
+        ws.__exit__(None, None, None)
 
     def test_ceo_replaced_mid_session_blocks_the_next_turn(self, client, world):
         ws = start(client)

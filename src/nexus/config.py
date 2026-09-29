@@ -34,8 +34,10 @@ class Settings(BaseSettings):
     voice_idle_timeout_seconds: int = 60
     voice_utterances_per_minute: int = 12
     voice_sessions_per_minute: int = 10
-    voice_default_en: str = "en_US-lessac-medium"
-    voice_default_hi: str = "hi_IN-pratham-medium"
+    voice_default_en: str = "en_US-ljspeech-medium"  # public domain; see docs/VOICE_GATEWAY.md
+    voice_default_hi: str = (
+        ""  # no commercially licensed Hindi voice ships; set to a user-supplied one
+    )
 
     # CORS
     cors_origins: str = "http://localhost:3000,http://localhost:5173"

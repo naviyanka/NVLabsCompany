@@ -23,6 +23,21 @@ def worker_url(path: str) -> str:
     return f"ws://{base.netloc}{path}"
 
 
+async def worker_get(path: str) -> dict | None:
+    """GET a loopback worker JSON endpoint (no credentials involved); None if unreachable."""
+    import httpx
+
+    base = urlparse(settings.voice_worker_url)
+    if base.hostname not in LOOPBACK:
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=2, trust_env=False) as http:
+            resp = await http.get(f"http://{base.netloc}{path}")
+        return resp.json() if resp.status_code == 200 else None
+    except (httpx.HTTPError, ValueError):
+        return None
+
+
 async def connect(scope: str, voice_session_id: str):
     """Open ``/v1/<scope>`` with a fresh single-use token; returns a websockets connection."""
     from websockets.asyncio.client import connect as ws_connect

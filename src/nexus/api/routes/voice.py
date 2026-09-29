@@ -19,7 +19,7 @@ from nexus.config import settings
 from nexus.governance.audit_service import record_audit
 from nexus.services import ceo_service
 from nexus.services.session_service import get_or_create_default_session
-from nexus.voice import gateway, protocol
+from nexus.voice import gateway, protocol, worker_client
 from nexus.voice.tokens import VoiceSession, mint_ticket
 
 router = APIRouter(tags=["voice"])
@@ -40,7 +40,12 @@ async def voice_status(
     principal: CurrentPrincipal, db: DbSession, company_id: CurrentCompanyId
 ) -> dict:
     ceo = await ceo_service.current_ceo(db, company_id) if settings.voice_enabled else None
+    # Voice catalogue (licence, commercial-use flag, installed) comes from the worker itself.
+    catalog = await worker_client.worker_get("/v1/voices") if settings.voice_enabled else None
     return {
+        "voices": (catalog or {}).get("voices", []),
+        "allow_noncommercial_models": (catalog or {}).get("allow_noncommercial", False),
+        "worker_reachable": catalog is not None,
         "ceo_id": str(ceo.id) if ceo else None,
         "enabled": settings.voice_enabled,
         "protocol": protocol.VERSION,
