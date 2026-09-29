@@ -94,7 +94,6 @@ tenant session.
 | `tools/registry.py::ToolRegistry.__init__` | system | Default for the global tools catalogue; tenant callers pass `tenant_session_factory` |
 | `triggers/executor.py::TriggerExecutor._factory` | system | Default for trigger execution records, which are not tenant-scoped |
 | `auth/bootstrap.py::_main` | bootstrap | First-admin CLI, run before any tenant exists |
-| `ceo_knowledge_seed.py::seed_ceo_knowledge` | bootstrap | Development seed of non-RLS `memory_records` |
 | `demo/seed.py::_main` | bootstrap | Development seed CLI, run as the database owner |
 | `main.py::lifespan` | bootstrap | Default-company seed and budget flush (`companies`), kill switch and circuit breaker (global tables), secret backend (`stored_secrets`); none is tenant-scoped |
 
