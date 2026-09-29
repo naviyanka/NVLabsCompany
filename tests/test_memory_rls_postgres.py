@@ -304,3 +304,21 @@ async def test_memory_maintenance_only_touches_its_own_tenant(app_role):
             row = (await db.execute(sa.select(MemoryRecord))).scalar_one()
             assert row.importance == pytest.approx(expected)
             assert (row.scope, row.tier) == ("agent", "warm")
+
+
+async def test_unbound_or_blank_tenant_reads_nothing_and_never_raises_a_cast_error(app_role):
+    from nexus.database import tenant_session
+
+    (a,) = await _companies(app_role, 1)
+    async with tenant_session(a) as db:
+        db.add(MemoryRecord(company_id=a, scope="agent", content="visible only to A"))
+        await db.commit()
+
+    async with app_role() as db:  # the setting was never set on this connection
+        for table in TABLES:
+            assert (await db.execute(sa.text(f"SELECT count(*) FROM {table}"))).scalar_one() == 0
+        # A blank setting (what a released transaction-local value reads as) is the same.
+        await db.execute(sa.text("SELECT set_config('nexus.company_id', '', true)"))
+        for table in TABLES:
+            assert (await db.execute(sa.text(f"SELECT count(*) FROM {table}"))).scalar_one() == 0
+        await db.rollback()

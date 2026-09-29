@@ -473,7 +473,9 @@ async def _fetch_shared_knowledge(
             for fact in await memory.get_shared_knowledge(limit=limit)
         ]
     except Exception as exc:  # noqa: BLE001 - missing shared context must not break chat
-        logger.warning("Shared knowledge lookup failed for %s: %s", company_id, exc)
+        logger.warning(
+            "Shared knowledge lookup failed for %s: %s", company_id, type(exc).__name__
+        )
         return []
 
 
@@ -626,18 +628,22 @@ def _build_system_prompt(agent: Agent, memories: list[dict[str, Any]] | None = N
         # its trust label, so a stored string cannot pose as an instruction.
         from nexus.memory.safety import render_memory_data
 
-        prompt += "\n\n" + render_memory_data(
-            [
+        items = []
+        for m in working_ctx.recent_memories:
+            m = m if isinstance(m, dict) else {"content": m}  # a malformed entry is still data
+            if m.get("content") is None:
+                continue
+            items.append(
                 {
-                    "content": str(m.get("content", m)),
+                    "content": str(m["content"]),
                     "scope": m.get("scope"),
                     "trust": m.get("trust", "unspecified"),
                     "origin": m.get("origin", "unspecified"),
                     "created_at": m.get("created_at"),
                 }
-                for m in working_ctx.recent_memories
-            ]
-        )
+            )
+        if items:
+            prompt += "\n\n" + render_memory_data(items)
 
     return prompt
 
