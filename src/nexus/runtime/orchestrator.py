@@ -1101,7 +1101,8 @@ async def _memory_maintenance(db: AsyncSession, company_id: uuid.UUID) -> None:
     from nexus.models.memory import MemoryRecord
     from sqlalchemy import update as sa_update
 
-    decay_cutoff = datetime.now(timezone.utc) - timedelta(days=7)
+    # last_accessed_at is a naive TIMESTAMP column; asyncpg rejects an aware bind.
+    decay_cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=7)
 
     await db.execute(
         sa_update(MemoryRecord)
