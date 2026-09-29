@@ -708,7 +708,9 @@ class CLIAdapter(BaseAdapter):
             agent_id=session.agent_id,
             success=ok,
             output=result.text,
-            error=None if ok else f"ACP_STOPPED: the turn ended with {result.stop_reason or 'no stop reason'}",
+            error=None
+            if ok
+            else f"ACP_STOPPED: the turn ended with {result.stop_reason or 'no stop reason'}",
             artifacts=artifacts,
             logs=[f"Backend: {backend.id} (acp)", f"Workspace: {_redact_home(workspace)}"],
         )

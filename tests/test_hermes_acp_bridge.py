@@ -1,3 +1,4 @@
+# ruff: noqa: F811
 """Hermes tool turns over ACP: catalogs, credential binding, adapter wiring.
 
 The transport itself is covered in test_hermes_acp.py; here the bridge, the CLI

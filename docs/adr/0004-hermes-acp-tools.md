@@ -1,7 +1,10 @@
 # ADR 0004 — Hermes governed tools over an execution-scoped ACP session
 
-**Status:** Proposed (gate `HERMES_ACP_TOOLS_ENABLED` defaults to off)
+**Status:** Experimental, unsafe (gate `HERMES_ACP_TOOLS_ENABLED` defaults to off)
 **Date:** 2026-09-29
+
+> **UNSAFE TO ENABLE WITHOUT PREVENTIVE SANDBOXING: Hermes built-in tools can execute before ACP permission denial.**
+> This ACP path is an experimental prototype. Do not enable `hermes_acp_tools_enabled`.
 
 ## 1. Problem
 

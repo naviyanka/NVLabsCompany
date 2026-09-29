@@ -40,10 +40,10 @@ from typing import Any
 
 import jwt
 
+from nexus.adapters.hermes_acp import tool_wire_name
 from nexus.auth.run_tokens import ALGORITHM
 from nexus.config import settings
 from nexus.models._time import utcnow
-from nexus.adapters.hermes_acp import tool_wire_name
 from nexus.tools import manager_tools
 from nexus.tools.ceo_tools import CEO_TOOLS
 from nexus.tools.context import INBOUND_MCP, ExecutionContext
