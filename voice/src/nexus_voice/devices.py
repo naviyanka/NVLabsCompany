@@ -34,7 +34,9 @@ def gpu_name() -> str | None:
     try:
         out = subprocess.run(
             [exe, "--query-gpu=name,driver_version,memory.total", "--format=csv,noheader"],
-            capture_output=True, text=True, timeout=10,
+            capture_output=True,
+            text=True,
+            timeout=10,
         ).stdout.strip()
     except (OSError, subprocess.SubprocessError):
         return None

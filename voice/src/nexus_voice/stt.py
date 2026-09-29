@@ -41,7 +41,9 @@ class Transcriber:
         # CUDA errors (missing cuDNN, out of memory) surface on first use, not on load.
         list(self.model.transcribe(np.zeros(16_000, dtype=np.float32), beam_size=1)[0])
 
-    def transcribe(self, audio: np.ndarray, mode: str = "auto", *, partial: bool = False) -> dict[str, Any]:
+    def transcribe(
+        self, audio: np.ndarray, mode: str = "auto", *, partial: bool = False
+    ) -> dict[str, Any]:
         start = time.perf_counter()
         segments, info = self.model.transcribe(
             audio,

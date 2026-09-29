@@ -16,8 +16,11 @@ def _default_model_dir() -> Path:
 
 @dataclass(frozen=True)
 class Settings:
-    model_dir: Path = field(default_factory=lambda: Path(
-        os.environ.get("NEXUS_VOICE_MODEL_DIR") or _default_model_dir()))
+    model_dir: Path = field(
+        default_factory=lambda: Path(
+            os.environ.get("NEXUS_VOICE_MODEL_DIR") or _default_model_dir()
+        )
+    )
     stt_model: str = os.environ.get("NEXUS_VOICE_STT_MODEL", "faster-whisper-medium")
     device: str = os.environ.get("NEXUS_VOICE_DEVICE", "auto")  # auto | cuda | cpu
     host: str = "127.0.0.1"  # loopback only; not configurable

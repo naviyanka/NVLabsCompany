@@ -31,7 +31,8 @@ def to_pcm16k(path: str | Path) -> bytes:
         raise RuntimeError("ffmpeg is not on PATH")
     run = subprocess.run(
         [exe, "-v", "error", "-i", str(path), "-ar", str(RATE), "-ac", "1", "-f", "s16le", "-"],
-        capture_output=True, timeout=120,
+        capture_output=True,
+        timeout=120,
     )
     if run.returncode:
         raise ValueError("ffmpeg could not decode the audio")

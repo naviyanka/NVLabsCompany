@@ -97,7 +97,11 @@ def create_app(
                     if partial:
                         partial.cancel()
                     await ws.send_json(
-                        {"type": "speech_ended", "reason": ev.reason, "duration_ms": len(ev.audio) // 16}
+                        {
+                            "type": "speech_ended",
+                            "reason": ev.reason,
+                            "duration_ms": len(ev.audio) // 16,
+                        }
                     )
                     await ws.send_json({"type": "transcribing"})
                     async with lock:
@@ -158,7 +162,9 @@ def create_app(
         if not await authenticate(ws, "tts"):
             return
         synth = await asyncio.to_thread(tts)
-        await ws.send_json({"type": "ready", "protocol": PROTOCOL, "sample_rate": 22050, "format": "s16le"})
+        await ws.send_json(
+            {"type": "ready", "protocol": PROTOCOL, "sample_rate": 22050, "format": "s16le"}
+        )
         cancel = threading.Event()
         jobs: asyncio.Queue = asyncio.Queue(maxsize=8)
 
@@ -200,7 +206,12 @@ def create_app(
                         await ws.send_bytes(chunk)
                 except LookupError as exc:
                     await ws.send_json(
-                        {"type": "error", "id": job.get("id"), "code": "NO_VOICE", "message": str(exc)}
+                        {
+                            "type": "error",
+                            "id": job.get("id"),
+                            "code": "NO_VOICE",
+                            "message": str(exc),
+                        }
                     )
                     continue
                 await ws.send_json(

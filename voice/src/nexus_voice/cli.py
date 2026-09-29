@@ -26,9 +26,11 @@ def diagnose(settings: Settings, *, full: bool = False, load_stt: bool = True) -
     report["ffmpeg_available"] = report["ffmpeg"] is not None
     report["stt_model_available"] = models.stt_available(settings, full=full)
     report["english_voice_available"] = any(
-        models.voice_available(settings, v, full=full) for v in models.voices_for("en"))
+        models.voice_available(settings, v, full=full) for v in models.voices_for("en")
+    )
     report["hindi_voice_available"] = any(
-        models.voice_available(settings, v, full=full) for v in models.voices_for("hi"))
+        models.voice_available(settings, v, full=full) for v in models.voices_for("hi")
+    )
     return report
 
 

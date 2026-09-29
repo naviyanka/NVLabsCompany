@@ -1,18 +1,16 @@
 import time
-import wave
 from pathlib import Path
 
 import jwt
 import numpy as np
 import pytest
 from fastapi.testclient import TestClient
-from starlette.websockets import WebSocketDisconnect
-
 from nexus_voice import audio, devices, models, segment
 from nexus_voice.config import Settings
 from nexus_voice.server import create_app
 from nexus_voice.tokens import AUDIENCE, TokenError, TokenVerifier
 from nexus_voice.vad import FRAME, UtteranceDetector
+from starlette.websockets import WebSocketDisconnect
 
 SECRET = "s" * 40
 FIX = Path(__file__).parent / "fixtures"
@@ -21,9 +19,17 @@ FIX = Path(__file__).parent / "fixtures"
 def token(scope="stt", ttl=60, secret=SECRET, jti=None):
     now = int(time.time())
     return jwt.encode(
-        {"aud": AUDIENCE, "sid": "v1", "scope": scope, "iat": now, "exp": now + ttl,
-         "jti": jti or f"j{time.monotonic_ns()}"},
-        secret, algorithm="HS256")
+        {
+            "aud": AUDIENCE,
+            "sid": "v1",
+            "scope": scope,
+            "iat": now,
+            "exp": now + ttl,
+            "jti": jti or f"j{time.monotonic_ns()}",
+        },
+        secret,
+        algorithm="HS256",
+    )
 
 
 class FakeStt:
@@ -34,8 +40,15 @@ class FakeStt:
 
     def transcribe(self, a, mode="auto", *, partial=False):
         self.calls.append((len(a), mode, partial))
-        return {"text": "hello world", "language": "en", "language_probability": 0.99,
-                "duration_ms": len(a) // 16, "stt_ms": 1, "model": "fake", "device": "cpu"}
+        return {
+            "text": "hello world",
+            "language": "en",
+            "language_probability": 0.99,
+            "duration_ms": len(a) // 16,
+            "stt_ms": 1,
+            "model": "fake",
+            "device": "cpu",
+        }
 
 
 class FakeTts:
@@ -54,8 +67,11 @@ def loud_model(frames):  # first 20 frames speech, then silence
 
 
 def app(stt=None, vad=None):
-    return TestClient(create_app(Settings(secret=SECRET), stt or FakeStt(), FakeTts(),
-                                 vad or (lambda: loud_model)))
+    return TestClient(
+        create_app(
+            Settings(secret=SECRET), stt or FakeStt(), FakeTts(), vad or (lambda: loud_model)
+        )
+    )
 
 
 def hdr(t):
@@ -115,8 +131,9 @@ class TestStt:
 
     def test_noise_makes_no_transcript(self):
         stt = FakeStt()
-        with app(stt, vad=lambda: (lambda f: np.zeros(len(f)))).websocket_connect(
-                "/v1/stt", headers=hdr(token())) as ws:
+        with app(stt, vad=lambda: lambda f: np.zeros(len(f))).websocket_connect(
+            "/v1/stt", headers=hdr(token())
+        ) as ws:
             ws.receive_json()
             ws.send_bytes(b"\x00" * 4096)
             ws.send_json({"type": "flush"})
@@ -144,8 +161,7 @@ class TestTts:
     def test_speak_streams_binary_then_done_and_missing_voice_errors(self):
         with app().websocket_connect("/v1/tts", headers=hdr(token("tts"))) as ws:
             assert ws.receive_json()["sample_rate"] == 22050
-            ws.send_json({"type": "speak", "id": "a", "text": "hello",
-                          "voices": {"en": "x"}})
+            ws.send_json({"type": "speak", "id": "a", "text": "hello", "voices": {"en": "x"}})
             assert len(ws.receive_bytes()) == 200
             assert ws.receive_json()["type"] == "done"
             ws.send_json({"type": "speak", "id": "b", "text": "नमस्ते", "voices": {"en": "x"}})
@@ -177,7 +193,9 @@ class TestModels:
     def test_hash_mismatch_detected(self, tmp_path):
         p = tmp_path / "f"
         p.write_bytes(b"abc")
-        assert models.sha256(p) == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        assert (
+            models.sha256(p) == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        )
 
     def test_cpu_fallback_choice(self, monkeypatch):
         monkeypatch.setattr(devices, "cuda_available", lambda: False)

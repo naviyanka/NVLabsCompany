@@ -7,8 +7,8 @@ at a time with the recurrent state carried between calls.
 from __future__ import annotations
 
 from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable
 
 import numpy as np
 
@@ -29,8 +29,12 @@ class SileroModel:
         opts = ort.SessionOptions()
         opts.inter_op_num_threads = opts.intra_op_num_threads = 1
         opts.log_severity_level = 4
-        path = os.path.join(os.path.dirname(faster_whisper.__file__), "assets", "silero_vad_v6.onnx")
-        self.session = ort.InferenceSession(path, providers=["CPUExecutionProvider"], sess_options=opts)
+        path = os.path.join(
+            os.path.dirname(faster_whisper.__file__), "assets", "silero_vad_v6.onnx"
+        )
+        self.session = ort.InferenceSession(
+            path, providers=["CPUExecutionProvider"], sess_options=opts
+        )
         self.reset()
 
     def reset(self) -> None:
