@@ -5,7 +5,7 @@ from datetime import timezone, datetime
 from typing import Any, Optional
 
 from sqlmodel import Column, Field, Index, SQLModel
-from sqlalchemy import JSON
+from sqlalchemy import JSON, text
 
 
 class Agent(SQLModel, table=True):
@@ -20,6 +20,14 @@ class Agent(SQLModel, table=True):
     __table_args__ = (
         Index("ix_agents_company_status", "company_id", "status"),
         Index("ix_agents_company_manager", "company_id", "manager_id"),
+        # At most one CEO per company; the database refuses a second one.
+        Index(
+            "uq_agents_one_ceo",
+            "company_id",
+            unique=True,
+            sqlite_where=text("is_ceo"),
+            postgresql_where=text("is_ceo"),
+        ),
     )
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
@@ -34,6 +42,9 @@ class Agent(SQLModel, table=True):
     manager_id: Optional[uuid.UUID] = Field(
         default=None, foreign_key="agents.id"
     )
+    # CEO designation. Set only through nexus.services.ceo_service by a human
+    # admin; role and title strings never grant it.
+    is_ceo: bool = Field(default=False, sa_column_kwargs={"server_default": text("false")})
 
     # Status and lifecycle
     status: str = Field(default="idle", max_length=50)

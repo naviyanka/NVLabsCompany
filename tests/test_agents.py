@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock, MagicMock, patch, PropertyMock
 import pytest
 
 from nexus.models.agent import Agent
+from nexus.services import ceo_service
 from nexus.services.agent_service import AgentService
 from nexus.runtime.lifecycle import (
     AgentLifecycleManager,
@@ -19,11 +20,18 @@ from nexus.runtime.lifecycle import (
 )
 
 
+@pytest.fixture(autouse=True)
+def resolve_manager():
+    """The mocked session cannot run the hierarchy queries; creation must still ask."""
+    with patch.object(ceo_service, "resolve_manager", AsyncMock(return_value=None)) as m:
+        yield m
+
+
 class TestAgentServiceCreate:
     """Tests for AgentService.create_agent."""
 
     @pytest.mark.asyncio
-    async def test_create_agent(self, mock_db_session, sample_company_id):
+    async def test_create_agent(self, mock_db_session, sample_company_id, resolve_manager):
         """AgentService creates an agent with correct fields."""
         service = AgentService(mock_db_session)
 
@@ -38,6 +46,7 @@ class TestAgentServiceCreate:
         assert result.role == "engineer"
         assert result.company_id == sample_company_id
         assert result.title == "Lead Engineer"
+        resolve_manager.assert_awaited_once_with(mock_db_session, sample_company_id, None, None)
         mock_db_session.add.assert_called_once()
         mock_db_session.flush.assert_awaited_once()
 
@@ -200,7 +209,9 @@ class TestLifecycleManager:
         manager._validate_transition(agent_id, "executing", "idle")
 
     @pytest.mark.asyncio
-    async def test_create_agent_sets_idle(self, mock_db_session, sample_company_id):
+    async def test_create_agent_sets_idle(
+        self, mock_db_session, sample_company_id, resolve_manager
+    ):
         """create_agent creates agent in idle state."""
         mock_adapter = AsyncMock()
         manager = AgentLifecycleManager(mock_db_session, mock_adapter)
@@ -213,6 +224,7 @@ class TestLifecycleManager:
 
         assert agent.status == "idle"
         assert agent.name == "NewAgent"
+        resolve_manager.assert_awaited_once_with(mock_db_session, sample_company_id, None, None)
         mock_db_session.add.assert_called_once()
 
     @pytest.mark.asyncio

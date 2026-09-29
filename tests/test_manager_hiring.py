@@ -24,7 +24,7 @@ from nexus.models.governance import Approval, ApprovalSignerKey, AuditLog
 from nexus.models.notification import Notification
 from nexus.models.policy import Policy
 from nexus.models.tool import ToolPolicy, ToolProfile, ToolProfileBinding
-from nexus.services import hiring_service
+from nexus.services import ceo_service, hiring_service
 from nexus.services.approval_service import ApprovalService
 from nexus.tools.mcp_server import MCPServer
 from tests.test_approval_signing import _keypair, _sign
@@ -167,6 +167,18 @@ class TestPolicy:
         # Above the auto-approval bound: a human decides.
         big = await _hire(h, key="big", estimated_monthly_cents=5001)
         assert big.json()["status"] == "approval_required"
+
+    async def test_under_a_ceo_the_hire_reports_to_its_manager(self, db, h):  # noqa: F811
+        async with db() as s:
+            await ceo_service.appoint(s, h["acme"], h["bo"], _me(h["acme"]))
+        await _allow(db, h)
+        await _policy(db, h, **AUTO)
+        assert (await _hire(h)).json()["status"] == "hired"
+        [agent] = await _employees(db, h)
+        assert agent.manager_id == h["lead"]
+        roots = await _rows(db, Agent, Agent.company_id == h["acme"], Agent.manager_id.is_(None),
+                            Agent.status != "terminated")
+        assert [a.id for a in roots] == [h["bo"]]
 
     @pytest.mark.parametrize(("rules", "body", "code"), [
         ({}, {"backend": "nope"}, "CLI_BACKEND_UNKNOWN"),

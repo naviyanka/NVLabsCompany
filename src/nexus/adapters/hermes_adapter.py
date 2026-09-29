@@ -3,7 +3,6 @@
 Extends the Ollama adapter with Hermes-specific features:
 - Structured <tool_call> parsing and execution
 - OpenRouter fallback when local Ollama isn't available
-- CEO/orchestrator system prompt injection
 - Function-calling schema enforcement
 - Plaza Knowledge Feed broadcasting hooks
 
@@ -53,50 +52,20 @@ TOOL_CALL_PATTERN = re.compile(
     re.DOTALL,
 )
 
-# CEO system prompt for orchestration mode
-CEO_SYSTEM_PROMPT = """You are Navi, the Chief Executive Officer and Principal System Orchestrator of NVLabsCompany. You are powered by Nous Research Hermes via the Nous Portal.
-
-## Your Identity
-You are Navi — the CEO of NVLabsCompany, an autonomous AI company platform. You have full operational authority over all agents, tasks, pipelines, and workflows.
-
-## Platform Knowledge (NEXUS)
-You manage the NEXUS platform which consists of:
-- **Backend**: Python FastAPI at localhost:8000, 44 route modules, 292 API endpoints
-- **Frontend**: React 18 + Vite + TailwindCSS dashboard at localhost:3000, 26 pages
-- **Database**: PostgreSQL (production) / SQLite (dev), managed via Alembic migrations
-- **Agent Workforce**: 8 specialized agents (CTO Nova, engineers Bolt/Pixel, QA Shield, DevOps Forge, PM Compass, Researcher Sage)
-- **Node Library**: 164 executable workflow nodes across 26 categories (AI, DevOps, HTTP, Database, etc.)
-- **Adapters**: 11 LLM adapters (OpenAI, Anthropic, Hermes, Ollama, Bedrock, Azure, Google, MCP, CLI, HTTP, ClaudeCode)
-- **Governance**: Redis-backed rate limiting, budget enforcement, kill switches, circuit breakers, audit logging
-- **Orchestration**: Autonomous orchestrator running every 2 minutes, goal decomposition, task routing, SmartRetry
-- **Memory**: 3-temperature system (hot/warm/cold), BM25 + vector search, knowledge base with RAG
-- **Communication**: Inter-agent messaging, Slack/Discord/Webhook channels, Plaza Knowledge Feed
-
-## Your Capabilities
-- Decompose complex goals into subtasks and delegate to the right agent
-- Monitor budgets and governance policies
-- Execute workflows and pipelines
-- Wake/pause/fire agents
-- Access and manage the memory graph
-- Broadcast discoveries to the Plaza Knowledge Feed
-
-## Your Tools
-When you need to perform an action, emit a tool call:
-<tool_call>
-{"name": "tool_name", "arguments": {"param": "value"}}
-</tool_call>
-
-Available tools: task_create, task_delegate, pipeline_run, agent_wake, agent_pause, memory_store, plaza_broadcast, budget_check
-
-Always verify task completion before declaring success. Be direct and precise."""
+# Tool names of the governed control plane (CEO, manager, organization). They
+# run only through the inbound MCP server, where the catalog and the CEO
+# designation (``agents.is_ceo``) are checked on every call, so this adapter's
+# free-form ``<tool_call>`` loop never registers or executes them.
+GOVERNED_TOOL_PREFIXES = ("ceo_", "manager_", "organization_")
 
 
 class HermesAdapter(BaseAdapter):
     """Agent adapter for Nous Research Hermes 3 models.
 
     Supports both local execution (Ollama) and cloud fallback (OpenRouter).
-    Handles Hermes's native <tool_call> format for function calling.
-    Can operate in CEO/orchestrator mode with full system authority.
+    Handles Hermes's native <tool_call> format for the tools the server
+    registered, each through ``guarded_call``. It grants no authority itself:
+    no CEO mode, and no control-plane tools (``GOVERNED_TOOL_PREFIXES``).
     """
 
     adapter_type: str = "hermes"
@@ -132,7 +101,12 @@ class HermesAdapter(BaseAdapter):
             name: Tool name (matches what Hermes emits in <tool_call>).
             handler: Async callable to execute when tool is invoked.
             schema: Optional JSON schema for the tool's parameters.
+
+        Raises:
+            ValueError: For a governed control-plane tool name.
         """
+        if name.startswith(GOVERNED_TOOL_PREFIXES):
+            raise ValueError(f"'{name}' is a governed tool; it runs only through the MCP server")
         self._tool_registry[name] = {
             "handler": handler,
             "schema": schema,
@@ -146,7 +120,6 @@ class HermesAdapter(BaseAdapter):
         Args:
             session: The newly created session.
         """
-        is_ceo = session.config.get("is_ceo", False)
         host = session.config.get("ollama_host", DEFAULT_OLLAMA_HOST)
         openrouter_key = session.config.get("openrouter_api_key", "")
         model = session.config.get("model", "")
@@ -190,18 +163,14 @@ class HermesAdapter(BaseAdapter):
         session.metadata["host"] = host
         session.metadata["openrouter_key"] = openrouter_key
         session.metadata["nous_token"] = nous_token
-        session.metadata["is_ceo"] = is_ceo
         session.metadata["tool_calls_made"] = 0
 
-        # Set system prompt
-        if is_ceo:
-            session.metadata["system_prompt"] = CEO_SYSTEM_PROMPT
-        else:
-            session.metadata["system_prompt"] = session.config.get(
-                "system_prompt",
-                "You are Hermes, an autonomous agent powered by Nous Research Hermes 3. "
-                "You excel at tool calling, function execution, and complex problem solving.",
-            )
+        # The server-built prompt only; adapter config never selects a role.
+        session.metadata["system_prompt"] = session.config.get(
+            "system_prompt",
+            "You are Hermes, an autonomous agent powered by Nous Research Hermes 3. "
+            "You excel at tool calling, function execution, and complex problem solving.",
+        )
 
     async def _do_execute(
         self, session: AgentSession, task_id: uuid.UUID, payload: dict[str, Any]
@@ -269,8 +238,9 @@ class HermesAdapter(BaseAdapter):
             total_output_tokens += result.get("output_tokens", 0)
             total_cost_cents += result.get("cost_cents", 0)
 
-            # Parse tool calls from response
-            tool_calls = self._parse_tool_calls(response_text)
+            # Parse tool calls only when the server registered tools: with none,
+            # <tool_call> text is plain text and executes nothing.
+            tool_calls = self._parse_tool_calls(response_text) if self._tool_registry else []
 
             if not tool_calls:
                 # No tool calls — this is the final answer

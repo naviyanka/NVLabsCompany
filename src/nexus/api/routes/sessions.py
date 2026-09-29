@@ -92,8 +92,9 @@ class SessionMessageRequest(BaseModel):
     prompt: str = Field(..., min_length=1, max_length=10000)
     # Idempotency key (the Idempotency-Key header wins); see chat.ChatRequest.
     request_id: str | None = Field(default=None, min_length=1, max_length=255)
-    # See chat.ChatRequest.require_manager_tools.
+    # See chat.ChatRequest.require_manager_tools and record_directive.
     require_manager_tools: bool = False
+    record_directive: bool = False
 
 
 class SessionOut(BaseModel):
@@ -494,6 +495,7 @@ async def _queue_turn(
         db, record, agent, body.prompt, principal=principal,
         idempotency_key=idempotency_key or body.request_id, stream=stream,
         require_manager_tools=body.require_manager_tools,
+        record_directive=body.record_directive,
     )
     return queued.turn
 

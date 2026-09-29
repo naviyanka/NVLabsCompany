@@ -40,7 +40,7 @@ export interface SnapshotEnvelope {
   last_refresh_error: { message: string; at: string | null } | null;
 }
 
-const FRESHNESS_BADGE: Record<SnapshotEnvelope['freshness']['status'], BadgeVariant> = {
+export const FRESHNESS_BADGE: Record<SnapshotEnvelope['freshness']['status'], BadgeVariant> = {
   fresh: 'completed',
   stale: 'warning',
   rebuilding: 'in_progress',

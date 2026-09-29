@@ -1245,3 +1245,65 @@ async def test_organization_snapshot_race_and_rls(
     finally:
         await app_engine.dispose()
         await sys_engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_postgres_ceo_designation_schema(migrated_postgres_url):
+    """The migration leaves ``agents.is_ceo`` and a partial unique index: one CEO per company."""
+    engine = create_async_engine(migrated_postgres_url)
+    async with engine.connect() as conn:
+        column = (await conn.execute(sa.text(
+            "SELECT 1 FROM information_schema.columns "
+            "WHERE table_name = 'agents' AND column_name = 'is_ceo'"))).scalar()
+        index = (await conn.execute(sa.text(
+            "SELECT indexdef FROM pg_indexes WHERE indexname = 'uq_agents_one_ceo'"))).scalar()
+    await engine.dispose()
+    assert column == 1
+    assert "UNIQUE" in index and "is_ceo" in index
+
+
+@pytest.mark.asyncio
+async def test_postgres_concurrent_ceo_appointments_have_one_winner(migrated_postgres_url):
+    """Two appointments that both saw no CEO race: one wins, the other gets CEO_CONFLICT."""
+    import asyncio
+
+    from fastapi import HTTPException
+
+    from nexus.auth.principal import Principal
+    from nexus.models.agent import Agent
+    from nexus.services import ceo_service
+
+    engine = create_async_engine(migrated_postgres_url)
+    session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    company_id = uuid.uuid4()
+    async with session_factory() as session:
+        session.add(Company(id=company_id, name="CEO Race Corp"))
+        await session.flush()
+        candidates = [Agent(company_id=company_id, name=n, role="exec") for n in ("Ada", "Bo")]
+        session.add_all(candidates)
+        await session.commit()
+    admin = Principal(kind="user", company_id=company_id, role="admin", user_id=uuid.uuid4(),
+                      email="owner@example.test")
+
+    async def appoint(agent):
+        async with session_factory() as session:
+            await session.execute(
+                sa.text("SELECT set_config('nexus.company_id', :cid, false)"),
+                {"cid": str(company_id)})
+            try:
+                return await ceo_service.appoint(session, company_id, agent.id, admin)
+            except HTTPException as exc:
+                return exc
+
+    results = await asyncio.gather(*(appoint(a) for a in candidates))
+    losers = [r for r in results if isinstance(r, HTTPException)]
+    assert len(losers) == 1 and losers[0].status_code == 409
+    assert "CEO_CONFLICT" in str(losers[0].detail)
+
+    async with session_factory() as session:
+        agents = (await session.execute(
+            sa.select(Agent).where(Agent.company_id == company_id))).scalars().all()
+    await engine.dispose()
+    ceos = [a for a in agents if a.is_ceo]
+    assert len(ceos) == 1
+    assert [a.id for a in agents if a.manager_id is None] == [ceos[0].id]

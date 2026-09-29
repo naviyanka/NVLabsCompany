@@ -189,15 +189,20 @@ async def create_turn(
     stream: bool = False,
     work_mode: str | None = None,
     require_manager_tools: bool = False,
+    record_directive: bool = False,
 ) -> Enqueued:
     """Store the user's prompt and its queued turn in one transaction, then commit.
 
     A key already used in this company and session returns the existing turn:
     nothing is stored twice and nothing runs twice. Refusals (ended session,
     unusable pin, agent needing configuration, unresolvable adapter, principal
-    of another company) are raised before anything is stored.
+    of another company, a CEO whose backend cannot have the tools the caller
+    requires, a directive not from a human to the CEO) are raised before
+    anything is stored. ``record_directive`` stores the prompt, in the same
+    transaction, as a human directive in the CEO's executive memory.
     """
     from nexus.api.routes import chat
+    from nexus.services import ceo_service
     from nexus.services.session_service import begin_session_turn
     from nexus.tools.context import ExecutionContext
 
@@ -227,6 +232,29 @@ async def create_turn(
         context = dataclasses.replace(context, work_mode=work_mode)
     if require_manager_tools:
         context = dataclasses.replace(context, manager_tools_required=True)
+    is_ceo = (require_manager_tools or record_directive) and await ceo_service.is_ceo(
+        db, company_id, pinned.id
+    )
+    if require_manager_tools and is_ceo:
+        supported, reason = ceo_service.tool_support(pinned)
+        if not supported:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={"code": "CEO_TOOLS_UNSUPPORTED", "message": reason},
+            )
+    if record_directive:
+        # No principal means autonomous work, which is not a person.
+        if principal is None or not ceo_service.is_human(principal):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={"code": "HUMAN_DECISION_REQUIRED",
+                        "message": "Only a human records a directive"},
+            )
+        if not is_ceo:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={"code": "NOT_CEO", "message": "Directives go to the company's CEO"},
+            )
 
     message = await chat._persist_message_to_db(
         db, pinned.id, company_id, "user", prompt, session_id=record.id
@@ -259,6 +287,13 @@ async def create_turn(
             raise
         _count("duplicate_suppressed")
         return Enqueued(existing, True)
+    if record_directive:
+        await ceo_service.remember(
+            db, company_id,
+            ceo_service.MemoryEntry(type="directive", content=prompt[: ceo_service.CONTENT_MAX]),
+            recorded_by=context.principal_id, origin="human",
+            source={"session_id": record.id, "message_id": message.id, "turn_id": turn.id},
+        )
     await _audit(db, turn, "chat.turn_queued", actor_type="user", principal=context.principal_id)
     await db.commit()
     _count("queued")

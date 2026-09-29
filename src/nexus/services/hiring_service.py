@@ -484,7 +484,12 @@ async def materialize(db: Any, approval: Approval, actor: str) -> Agent:
     if existing is not None:
         return existing
     req = HireRequest(**approval.payload["request"])
+    from nexus.services import ceo_service
+
     try:
+        manager_id = await ceo_service.resolve_manager(
+            db, company_id, None, approval.requested_by_agent_id
+        )
         config, override = normalize_cli_employee(
             "cli", {"backend": req.backend}, req.model, req.allow_configuration_required
         )
@@ -494,7 +499,7 @@ async def materialize(db: Any, approval: Approval, actor: str) -> Agent:
             name=req.title,
             role=req.role,
             title=req.title,
-            manager_id=approval.requested_by_agent_id,
+            manager_id=manager_id,
             adapter_type="cli",
             adapter_config=config,
             model=(req.model or "").strip(),

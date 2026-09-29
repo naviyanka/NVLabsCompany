@@ -1,7 +1,7 @@
 """Agent Service - CRUD and management operations for agents."""
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import select, update, delete
@@ -38,6 +38,13 @@ class AgentService:
         Returns:
             The newly created Agent instance.
         """
+        if "is_ceo" in kwargs:
+            raise ValueError("The CEO is designated only through ceo_service")
+        from nexus.services import ceo_service
+
+        kwargs["manager_id"] = await ceo_service.resolve_manager(
+            self._db, company_id, None, kwargs.get("manager_id")
+        )
         agent = Agent(
             company_id=company_id,
             name=name,
@@ -108,7 +115,10 @@ class AgentService:
         Returns:
             The updated Agent instance, or None if not found.
         """
-        updates["updated_at"] = datetime.now(timezone.utc)
+        if {"is_ceo", "manager_id", "company_id"} & updates.keys():
+            raise ValueError(
+                "Designation, reporting line and tenant change only through ceo_service")
+        updates["updated_at"] = datetime.now(UTC)
         stmt = update(Agent).where(Agent.id == agent_id).values(**updates)
         await self._db.execute(stmt)
         return await self.get_agent(agent_id)
@@ -122,6 +132,12 @@ class AgentService:
         Returns:
             True if the agent was deleted, False if not found.
         """
+        agent = await self.get_agent(agent_id)
+        if agent is None:
+            return False
+        from nexus.services import ceo_service
+
+        await ceo_service.release_reports(self._db, agent.company_id, agent_id)
         stmt = delete(Agent).where(Agent.id == agent_id)
         result = await self._db.execute(stmt)
         return result.rowcount > 0  # type: ignore[union-attr]
@@ -152,4 +168,16 @@ class AgentService:
         Returns:
             The updated Agent instance.
         """
-        return await self.update_agent(agent_id, manager_id=manager_id)
+        agent = await self.get_agent(agent_id)
+        if agent is None:
+            return None
+        from nexus.services import ceo_service
+
+        target = await ceo_service.resolve_manager(
+            self._db, agent.company_id, agent_id, manager_id
+        )
+        await self._db.execute(
+            update(Agent).where(Agent.id == agent_id)
+            .values(manager_id=target, updated_at=datetime.now(UTC))
+        )
+        return await self.get_agent(agent_id)

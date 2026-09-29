@@ -66,6 +66,13 @@ async def store_memory(
     """Store a memory for an agent."""
     # Verify agent belongs to company
     from nexus.models.agent import Agent
+    from nexus.services.ceo_service import EXECUTIVE_SCOPE
+
+    if body.scope == EXECUTIVE_SCOPE:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Executive memory is recorded through /api/v1/organization/ceo/memory",
+        )
 
     agent_stmt = select(Agent).where(Agent.id == agent_id, Agent.company_id == company_id)
     agent_result = await db.execute(agent_stmt)

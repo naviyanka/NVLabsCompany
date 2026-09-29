@@ -72,7 +72,8 @@ async def update_memory(memory_id: uuid.UUID, body: MemoryUpdate, db: DbSession,
     if not updates:
         raise HTTPException(status_code=400, detail="No fields to update")
     updates["updated_at"] = datetime.now(timezone.utc)
-    stmt = update(MemoryRecord).where(MemoryRecord.id == memory_id, MemoryRecord.company_id == company_id).values(**updates)
+    # Executive memory is append-only: it changes only through ceo_service.
+    stmt = update(MemoryRecord).where(MemoryRecord.id == memory_id, MemoryRecord.company_id == company_id, MemoryRecord.scope != "executive").values(**updates)
     result = await db.execute(stmt)
     if result.rowcount == 0:
         raise HTTPException(status_code=404, detail="Memory not found")
@@ -82,14 +83,14 @@ async def update_memory(memory_id: uuid.UUID, body: MemoryUpdate, db: DbSession,
 @router.delete("/api/v1/memory/{memory_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_memory(memory_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId) -> None:
     """Delete a memory record."""
-    stmt = delete(MemoryRecord).where(MemoryRecord.id == memory_id, MemoryRecord.company_id == company_id)
+    stmt = delete(MemoryRecord).where(MemoryRecord.id == memory_id, MemoryRecord.company_id == company_id, MemoryRecord.scope != "executive")
     await db.execute(stmt)
 
 
 @router.post("/api/v1/memory/{memory_id}/archive")
 async def archive_memory(memory_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId) -> dict:
     """Archive memory (move to cold tier)."""
-    stmt = update(MemoryRecord).where(MemoryRecord.id == memory_id, MemoryRecord.company_id == company_id).values(tier="cold", updated_at=datetime.now(timezone.utc))
+    stmt = update(MemoryRecord).where(MemoryRecord.id == memory_id, MemoryRecord.company_id == company_id, MemoryRecord.scope != "executive").values(tier="cold", updated_at=datetime.now(timezone.utc))
     result = await db.execute(stmt)
     if result.rowcount == 0:
         raise HTTPException(status_code=404, detail="Memory not found")

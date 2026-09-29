@@ -22,6 +22,7 @@ import { AddSquadModal } from '@/components/org/AddSquadModal';
 import { OrgTreeGraph } from '@/components/org/OrgTreeGraph';
 import { DepartmentDetailDrawer } from '@/components/org/DepartmentDetailDrawer';
 import { OrganizationSnapshotPanel } from '@/components/org/OrganizationSnapshotPanel';
+import { CeoControlPanel } from '@/components/org/CeoControlPanel';
 
 export function Organization() {
   const navigate = useNavigate();
@@ -127,6 +128,8 @@ export function Organization() {
       </div>
 
       <OrganizationSnapshotPanel />
+
+      <CeoControlPanel agents={agents} />
 
       {/* Top Analytics Metrics */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
