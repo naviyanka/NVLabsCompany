@@ -72,7 +72,12 @@ def worker():
 
 @pytest.mark.parametrize(
     "name,folder,expect",
-    [("en", "fixtures", "en"), ("en2", "fixtures", "en"), ("hi", "local_fixtures", "hi"), ("mixed", "local_fixtures", None)],
+    [
+        ("en", "fixtures", "en"),
+        ("en2", "fixtures", "en"),
+        ("hi", "local_fixtures", "hi"),
+        ("mixed", "local_fixtures", None),
+    ],
 )
 def test_live_turn(name, folder, expect, worker, client, world, monkeypatch, tmp_path):  # noqa: F811
     monkeypatch.setattr(settings, "voice_worker_url", f"ws://127.0.0.1:{PORT}")

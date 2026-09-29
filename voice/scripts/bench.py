@@ -20,16 +20,27 @@ import wave
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-MODELS = Path(os.environ.get("NEXUS_VOICE_MODEL_DIR") or Path(os.environ["LOCALAPPDATA"]) / "nexus-voice" / "models")
+MODELS = Path(
+    os.environ.get("NEXUS_VOICE_MODEL_DIR")
+    or Path(os.environ["LOCALAPPDATA"]) / "nexus-voice" / "models"
+)
 CASES = {  # name -> (expected text, explicit language, folder)
-    "en": ("Please summarise the quarterly hiring plan for the engineering team.", "en", "fixtures"),
+    "en": (
+        "Please summarise the quarterly hiring plan for the engineering team.",
+        "en",
+        "fixtures",
+    ),
     "en2": ("The deployment finished without errors and the report is ready.", "en", "fixtures"),
     "hi": ("कृपया इंजीनियरिंग टीम की तिमाही भर्ती योजना का सारांश दीजिए।", "hi", "local_fixtures"),
     "mixed": ("मुझे TASK-142 का status बताइए और deployment की report भेजिए।", "hi", "local_fixtures"),
 }
 CANDIDATES = {  # name -> (model dir, device, compute type)
     "medium-cuda-int8_float16": (MODELS / "stt" / "faster-whisper-medium", "cuda", "int8_float16"),
-    "large-v3-turbo-cuda-int8_float16": (MODELS / "bench" / "large-v3-turbo", "cuda", "int8_float16"),
+    "large-v3-turbo-cuda-int8_float16": (
+        MODELS / "bench" / "large-v3-turbo",
+        "cuda",
+        "int8_float16",
+    ),
     "medium-cpu-int8": (MODELS / "stt" / "faster-whisper-medium", "cpu", "int8"),
 }
 
@@ -63,12 +74,18 @@ def norm(text: str) -> str:
 
 def error_rate(expected: str, got: str) -> dict:
     e, g = norm(expected), norm(got)
-    return {"wer": round(edit_distance(e.split(), g.split()) / len(e.split()), 2),
-            "cer": round(edit_distance(list(e), list(g)) / len(e), 2)}
+    return {
+        "wer": round(edit_distance(e.split(), g.split()) / len(e.split()), 2),
+        "cer": round(edit_distance(list(e), list(g)) / len(e), 2),
+    }
 
 
 def gpu_used_mib() -> int:
-    out = subprocess.run(["nvidia-smi", "--query-gpu=memory.used", "--format=csv,noheader,nounits"], capture_output=True, text=True)
+    out = subprocess.run(
+        ["nvidia-smi", "--query-gpu=memory.used", "--format=csv,noheader,nounits"],
+        capture_output=True,
+        text=True,
+    )
     return int(out.stdout.split()[0])
 
 
@@ -98,7 +115,14 @@ def run_one(name: str) -> dict:
 
     def transcribe(x, lang):
         t0 = time.perf_counter()
-        segs, info = model.transcribe(x, language=lang, task="transcribe", beam_size=5, vad_filter=False, condition_on_previous_text=False)
+        segs, info = model.transcribe(
+            x,
+            language=lang,
+            task="transcribe",
+            beam_size=5,
+            vad_filter=False,
+            condition_on_previous_text=False,
+        )
         text = " ".join(s.text.strip() for s in segs).strip()
         return text, info, (time.perf_counter() - t0) * 1000
 
@@ -113,12 +137,22 @@ def run_one(name: str) -> dict:
             runs = [transcribe(x, hint) for _ in range(3)]
             text, info, _ = runs[0]
             rows[f"{case}/{label}"] = {
-                "audio_s": round(len(x) / 16000, 1), "lang": info.language, "p": round(info.language_probability, 2),
-                "ms_median": int(statistics.median(r[2] for r in runs)), "got": text, **error_rate(expected, text),
+                "audio_s": round(len(x) / 16000, 1),
+                "lang": info.language,
+                "p": round(info.language_probability, 2),
+                "ms_median": int(statistics.median(r[2] for r in runs)),
+                "got": text,
+                **error_rate(expected, text),
             }
     stop.set()
-    return {"candidate": name, "load_cold_s": round(load_cold, 1), "load_warm_s": round(load_warm, 1),
-            "gpu_baseline_mib": base, "gpu_peak_delta_mib": max(peak) - base, "cases": rows}
+    return {
+        "candidate": name,
+        "load_cold_s": round(load_cold, 1),
+        "load_warm_s": round(load_warm, 1),
+        "gpu_baseline_mib": base,
+        "gpu_peak_delta_mib": max(peak) - base,
+        "cases": rows,
+    }
 
 
 if __name__ == "__main__":
@@ -127,7 +161,13 @@ if __name__ == "__main__":
         fixtures()
     elif cmd == "all":
         for name in CANDIDATES:
-            out = subprocess.run([sys.executable, __file__, "one", name], capture_output=True, text=True, encoding="utf-8", env={**os.environ, "PYTHONIOENCODING": "utf-8"})
+            out = subprocess.run(
+                [sys.executable, __file__, "one", name],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+            )
             print(out.stdout or out.stderr[-600:])
     else:
         print(json.dumps(run_one(sys.argv[2]), ensure_ascii=False, indent=1))
