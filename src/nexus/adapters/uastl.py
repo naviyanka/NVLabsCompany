@@ -99,10 +99,11 @@ PROVIDERS: dict[str, dict[str, Any]] = {
     "hermes-native": {
         "registry_key": "hermes_native",
         "env_key": None,
-        "default_model": "nousresearch/hermes-4-70b",
+        # The operator configures the model (settings.hermes_native_model); none is guessed.
+        "default_model": "",
         "supports_streaming": True,
         "supports_tools": True,
-        "models": ["nousresearch/hermes-4-405b", "nousresearch/hermes-4-70b"],
+        "models": [],
     },
     # Claude Code dedicated subprocess adapter
     "claude_code": {

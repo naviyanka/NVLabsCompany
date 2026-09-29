@@ -95,8 +95,14 @@ class Settings(BaseSettings):
     # Hermes native tool-calling provider (adapter_type "hermes_native"): an
     # OpenAI-compatible endpoint and the secret-backend ref of its API key. Operator-only,
     # never from agent config, so an agent cannot aim the key at another host.
-    hermes_native_base_url: str = "https://inference-api.nousresearch.com/v1"
+    # Production gate for governed tool turns; off unless the operator enables it.
+    hermes_native_tools_enabled: bool = False
+    # Empty until configured: no endpoint, model or key is assumed.
+    hermes_native_base_url: str = ""
     hermes_native_secret_ref: str = "hermes_native_api_key"
+    # Default model ID, and the comma-separated IDs an agent's own model may select.
+    hermes_native_model: str = ""
+    hermes_native_models: str = ""
 
     # API Keys
     openai_api_key: str = ""

@@ -344,7 +344,7 @@ export function AgentDetailPage() {
                     }}
                     className="bg-[#101012] border border-white/[0.1] rounded-[4px] px-2 py-1 text-[#F2F1EE] text-xs focus:outline-none focus:border-[#FFB020] cursor-pointer"
                   >
-                    {['hermes', 'hermes-cli', 'anthropic', 'openai', 'claude', 'codex', 'kiro-cli', 'antigravity', 'aider', 'opencode', 'ollama', 'langchain'].map((p) => (
+                    {['hermes', 'hermes-cli', 'hermes-native', 'anthropic', 'openai', 'claude', 'codex', 'kiro-cli', 'antigravity', 'aider', 'opencode', 'ollama', 'langchain'].map((p) => (
                       <option key={p} value={p}>{p}</option>
                     ))}
                   </select>

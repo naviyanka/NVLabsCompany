@@ -16,8 +16,8 @@ import asyncio
 import json
 import re
 import uuid
+from datetime import UTC, datetime
 from typing import Any
-from urllib.parse import urlparse
 
 import httpx
 
@@ -37,19 +37,26 @@ READ_TIMEOUT_SECONDS = 60.0
 REDACTED = "[REDACTED]"
 # Text that looks like a tool call is never executed; a response carrying it fails.
 TOOL_TEXT = re.compile(r"<\s*/?\s*tool_call|<\s*function_call|\"tool_calls\"\s*:", re.IGNORECASE)
-LOOPBACK = {"localhost", "127.0.0.1", "::1"}
 
 
 class ProviderError(Exception):
     """A turn that must fail; the message carries a stable code and no secret."""
 
 
+_verified_at: datetime | None = None
+
+
 def _endpoint() -> str:
+    """The operator's endpoint: https or loopback http, no literal private IP."""
+    from nexus.governance.ssrf_protection import guard_url
+
     url = settings.hermes_native_base_url.rstrip("/")
-    parts = urlparse(url)
-    if parts.scheme != "https" and not (parts.scheme == "http" and parts.hostname in LOOPBACK):
-        raise ProviderError("HERMES_NATIVE_ENDPOINT_INVALID: https is required")
-    return url
+    if not url:
+        raise ProviderError("HERMES_NATIVE_ENDPOINT_MISSING: no endpoint configured")
+    try:
+        return guard_url(url, "hermes_native_base_url")
+    except ValueError:
+        raise ProviderError("HERMES_NATIVE_ENDPOINT_INVALID: https or loopback only") from None
 
 
 def _api_key() -> str:
@@ -59,6 +66,78 @@ def _api_key() -> str:
     if not key:
         raise ProviderError("HERMES_NATIVE_KEY_MISSING: no API key in the secret backend")
     return key
+
+
+def _model(requested: Any) -> str:
+    """The configured default, or an agent's choice only if the operator approved it."""
+    approved = {m.strip() for m in settings.hermes_native_models.split(",") if m.strip()}
+    if requested and requested in approved | {settings.hermes_native_model}:
+        return str(requested)
+    if requested:
+        raise ProviderError("HERMES_NATIVE_MODEL_NOT_APPROVED: not an operator-approved model")
+    if not settings.hermes_native_model:
+        raise ProviderError("HERMES_NATIVE_MODEL_MISSING: no model configured")
+    return settings.hermes_native_model
+
+
+def _mark_verified() -> None:
+    global _verified_at
+    _verified_at = datetime.now(UTC)
+
+
+def _tools_disabled() -> ProviderError:
+    return ProviderError("HERMES_NATIVE_TOOLS_DISABLED: governed tools are off (operator setting)")
+
+
+def unavailable_reason() -> str | None:
+    """Why governed native tool turns cannot run now, or None. Makes no request."""
+    if not settings.hermes_native_tools_enabled:
+        return str(_tools_disabled())
+    try:
+        _endpoint()
+        _api_key()
+        _model("")
+    except ProviderError as exc:
+        return str(exc)
+    return None
+
+
+def status() -> dict[str, Any]:
+    """Non-secret configuration state; makes no request."""
+    from nexus.governance.secret_backend import make_secret_backend
+
+    try:
+        _endpoint()
+        endpoint = True
+    except ProviderError:
+        endpoint = False
+    return {
+        "enabled": settings.hermes_native_tools_enabled,
+        "endpoint_configured": endpoint,
+        "secret_configured": bool(make_secret_backend().decrypt(settings.hermes_native_secret_ref)),
+        "model_configured": bool(settings.hermes_native_model),
+        "native_tools": "verified" if _verified_at else "unverified",
+        "last_verified_at": _verified_at.isoformat() if _verified_at else None,
+    }
+
+
+async def probe() -> dict[str, Any]:
+    """``status`` plus reachability: one GET of the configured endpoint, no model call.
+
+    The key goes only to the validated operator endpoint, never to a redirect target.
+    """
+    out = {**status(), "reachable": False}
+    if not (out["endpoint_configured"] and out["secret_configured"]):
+        return out
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(10.0), follow_redirects=False) as client:
+            resp = await client.get(
+                f"{_endpoint()}/models", headers={"Authorization": f"Bearer {_api_key()}"}
+            )
+        out["reachable"] = resp.status_code < 500
+    except (httpx.HTTPError, ProviderError):
+        pass
+    return out
 
 
 class _Assembler:
@@ -114,20 +193,23 @@ class HermesProviderAdapter(BaseAdapter):
 
     adapter_type: str = "hermes_native"
 
-    def validate_config(self, config: dict[str, Any]) -> None:
-        if "model" not in config:
-            raise ValueError("hermes_native adapter requires 'model' in config")
-
     async def _do_create_session(self, session: AgentSession) -> None:
         prompt = session.config.get("system_prompt", "")
         if prompt:
             self._conversation_history[session.session_id] = [{"role": "system", "content": prompt}]
+
+    def validate_config(self, config: dict[str, Any]) -> None:
+        """Nothing to validate: endpoint, model list and secret are operator settings."""
 
     async def _do_execute(
         self, session: AgentSession, task_id: uuid.UUID, payload: dict[str, Any]
     ) -> TaskResult:
         key = ""
         try:
+            if getattr(session.context, "manager_tools_required", False) and not (
+                settings.hermes_native_tools_enabled
+            ):
+                raise _tools_disabled()
             key = _api_key()
             async with asyncio.timeout(TOTAL_TIMEOUT_SECONDS):
                 output, artifacts, usage = await self._run(session, task_id, payload, key)
@@ -171,6 +253,8 @@ class HermesProviderAdapter(BaseAdapter):
         server = MCPServer(ctx, node_tools=False)
         offered = await server.list_tools()
         names = {t["name"] for t in offered}
+        if offered and not settings.hermes_native_tools_enabled:
+            raise _tools_disabled()
         tools = [
             {
                 "type": "function",
@@ -185,6 +269,7 @@ class HermesProviderAdapter(BaseAdapter):
         messages = list(self._conversation_history.get(session.session_id, []))
         messages.append({"role": "user", "content": payload.get("prompt", "")})
         url = f"{_endpoint()}/chat/completions"
+        model = _model(session.config.get("model"))
         headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
         seen: set[str] = set()
         artifacts: list[dict[str, Any]] = []
@@ -193,7 +278,7 @@ class HermesProviderAdapter(BaseAdapter):
         async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as client:
             for _ in range(MAX_ITERATIONS):
                 body: dict[str, Any] = {
-                    "model": session.config["model"],
+                    "model": model,
                     "messages": messages,
                     "max_tokens": MAX_TOKENS,
                     "stream": True,
@@ -249,6 +334,7 @@ class HermesProviderAdapter(BaseAdapter):
                         raise ProviderError("HERMES_NATIVE_CANCELLED: turn ended") from None
                     result = await server.call_tool(call["name"], call["arguments"])
                     text_out = "".join(p.get("text", "") for p in result["content"])
+                    _mark_verified()
                     artifacts.append(
                         {"type": "tool_call", "tool_call_id": call["id"], "name": call["name"],
                          "is_error": bool(result["isError"])}

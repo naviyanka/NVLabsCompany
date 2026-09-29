@@ -38,6 +38,7 @@ from tests.test_manager_core import _staffed, team  # noqa: F401 -- fixtures
 pytestmark = pytest.mark.employee_work
 
 KEY = "sk-test-not-a-real-key-123"
+MODEL = "test-hermes-model"
 
 
 def chunk(delta=None, finish=None, usage=None):
@@ -81,6 +82,8 @@ class Fake:
                 step = fake.script.pop(0) if fake.script else text_response("done")
                 if isinstance(step, int):
                     self.send_response(step)
+                    if 300 <= step < 400:
+                        self.send_header("Location", "http://127.0.0.1:1/elsewhere")
                     self.end_headers()
                     return
                 self.send_response(200)
@@ -89,6 +92,11 @@ class Fake:
                 for part in step:
                     self.wfile.write(f"data: {json.dumps(part)}\n\n".encode())
                 self.wfile.write(b"data: [DONE]\n\n")
+
+            def do_GET(self):
+                fake.requests.append({"path": self.path, "auth": self.headers.get("Authorization")})
+                self.send_response(200)
+                self.end_headers()
 
             def log_message(self, *a):
                 pass
@@ -112,18 +120,21 @@ def provider(monkeypatch):
         return fake
 
     monkeypatch.setattr(settings, "secret_backend", "env")
+    monkeypatch.setattr(settings, "hermes_native_tools_enabled", True)
+    monkeypatch.setattr(settings, "hermes_native_model", MODEL)
+    monkeypatch.setattr(hp, "_verified_at", None)
     monkeypatch.setenv("NEXUS_SECRET_HERMES_NATIVE_API_KEY", KEY)
     yield start
     for fake in servers:
         fake.server.shutdown()
 
 
-async def run(db, agent, ctx_agent=None, *, turn=None, **ctx_kw):  # noqa: F811
+async def run(db, agent, ctx_agent=None, *, turn=None, config=None, **ctx_kw):  # noqa: F811
     """One Hermes turn of ``agent`` on a running durable turn; returns (result, turn)."""
     turn = turn or await _turn(db, agent)
     ctx = _chat_ctx(turn.company_id, agent, **ctx_kw)
     adapter = HermesProviderAdapter()
-    session = await adapter.create_session(agent, {"model": "nousresearch/hermes-4-70b"})
+    session = await adapter.create_session(agent, config or {})
     session.context = ctx
     result = await adapter.execute_task(session, uuid.UUID(turn.execution_id), {"prompt": "status?"})
     return result, turn
@@ -340,7 +351,7 @@ class TestSecretsAndWiring:
 
     async def test_an_error_carrying_the_key_is_redacted(self, provider, db, c):  # noqa: F811
         adapter = HermesProviderAdapter()
-        session = await adapter.create_session(c["acme_agy"], {"model": "m"})
+        session = await adapter.create_session(c["acme_agy"], {})
         failed = adapter._fail(session, uuid.uuid4(), f"boom {KEY}", KEY)
         assert KEY not in failed.error and hp.REDACTED in failed.error
 
@@ -357,13 +368,106 @@ class TestSecretsAndWiring:
 
     def test_registration_and_no_register_tool(self):
         key, config = resolve_provider("hermes-native")
-        assert key == "hermes_native" and config["model"]
+        assert key == "hermes_native" and config["model"] == ""
         adapter = AdapterRegistry().create_adapter(key)
         assert isinstance(adapter, HermesProviderAdapter) and not hasattr(adapter, "register_tool")
 
-    async def test_ceo_tool_support(self, db, c):  # noqa: F811
+
+
+class TestGateAndConfiguration:
+    async def test_gate_off_fails_a_tool_turn_before_any_request(self, provider, db, c, monkeypatch):  # noqa: F811
+        await _appoint(c, c["chief"])
+        fake = provider([text_response("x")])
+        monkeypatch.setattr(settings, "hermes_native_tools_enabled", False)
+        result, _ = await run(db, c["chief"], manager_tools_required=True)
+        assert "HERMES_NATIVE_TOOLS_DISABLED" in result.error and fake.requests == []
+
+    async def test_the_gate_cannot_come_from_agent_config(self, provider, db, c, monkeypatch):  # noqa: F811
+        await _appoint(c, c["chief"])
+        fake = provider([text_response("x")])
+        monkeypatch.setattr(settings, "hermes_native_tools_enabled", False)
+        forged = {"hermes_native_tools_enabled": True, "enabled": True, "base_url": "http://evil"}
+        result, _ = await run(db, c["chief"], config=forged, manager_tools_required=True)
+        assert "HERMES_NATIVE_TOOLS_DISABLED" in result.error and fake.requests == []
+
+    async def test_a_gate_off_employee_chat_without_tools_still_answers(self, provider, db, c, monkeypatch):  # noqa: F811
+        provider([text_response("hi")])
+        monkeypatch.setattr(settings, "hermes_native_tools_enabled", False)
+        result, _ = await run(db, c["acme_agy"])
+        assert result.success
+
+    async def test_tool_support_needs_gate_endpoint_secret_and_model(self, provider, db, c, monkeypatch):  # noqa: F811
+        provider([])
         async with db() as s:
             agent = await s.get(Agent, c["chief"])
-            assert ceo_service.tool_support(agent)[0] is False
             agent.adapter_type = "hermes-native"
             assert ceo_service.tool_support(agent) == (True, None)
+            for name, value, code in [
+                ("hermes_native_tools_enabled", False, "HERMES_NATIVE_TOOLS_DISABLED"),
+                ("hermes_native_base_url", "", "HERMES_NATIVE_ENDPOINT_MISSING"),
+                ("hermes_native_model", "", "HERMES_NATIVE_MODEL_MISSING"),
+                ("hermes_native_secret_ref", "absent-ref", "HERMES_NATIVE_KEY_MISSING"),
+            ]:
+                with monkeypatch.context() as m:
+                    m.setattr(settings, name, value)
+                    ok, reason = ceo_service.tool_support(agent)
+                    assert not ok and reason.startswith("CEO_TOOLS_UNSUPPORTED") and code in reason
+
+    async def test_legacy_hermes_never_satisfies_ceo_tools(self, provider, db, c):  # noqa: F811
+        provider([])  # the native gate is fully on: legacy hermes still gets no fallback
+        async with db() as s:
+            agent = await s.get(Agent, c["chief"])  # cli backend hermes
+            assert ceo_service.tool_support(agent)[1].startswith("CEO_TOOLS_UNSUPPORTED")
+            for legacy in ("hermes", "hermes-cli"):
+                agent.adapter_type = legacy
+                ok, reason = ceo_service.tool_support(agent)
+                assert not ok and reason.startswith("CEO_TOOLS_UNSUPPORTED")
+
+    async def test_only_an_approved_model_is_used(self, provider, db, c, monkeypatch):  # noqa: F811
+        fake = provider([text_response("a"), text_response("b")])
+        monkeypatch.setattr(settings, "hermes_native_models", "alias-two")
+        ok, _ = await run(db, c["acme_agy"], config={"model": "alias-two"})
+        assert ok.success and fake.requests[0]["body"]["model"] == "alias-two"
+        bad, _ = await run(db, c["acme_agy"], config={"model": "https://evil/x"})
+        assert "HERMES_NATIVE_MODEL_NOT_APPROVED" in bad.error and len(fake.requests) == 1
+
+    async def test_a_redirect_is_not_followed(self, provider, db, c):  # noqa: F811
+        fake = provider([302])
+        result, _ = await run(db, c["acme_agy"])
+        assert "HERMES_NATIVE_HTTP_302" in result.error and len(fake.requests) == 1
+
+    async def test_private_literal_and_plain_remote_endpoints_are_refused(self, provider, db, c, monkeypatch):  # noqa: F811
+        fake = provider([text_response("x")])
+        for url in ("https://10.0.0.5/v1", "http://example.com/v1", "ftp://x/v1"):
+            monkeypatch.setattr(settings, "hermes_native_base_url", url)
+            result, _ = await run(db, c["acme_agy"])
+            assert "HERMES_NATIVE_ENDPOINT_INVALID" in result.error
+        assert fake.requests == []
+
+    async def test_no_endpoint_configured_fails_before_any_request(self, provider, db, c, monkeypatch):  # noqa: F811
+        provider([])
+        monkeypatch.setattr(settings, "hermes_native_base_url", "")
+        result, _ = await run(db, c["acme_agy"])
+        assert "HERMES_NATIVE_ENDPOINT_MISSING" in result.error
+
+    async def test_status_and_probe_reveal_no_secret_and_send_the_key_only_to_the_endpoint(self, provider):  # noqa: F811
+        fake = provider([])
+        before = hp.status()
+        assert before == {"enabled": True, "endpoint_configured": True, "secret_configured": True,
+                          "model_configured": True, "native_tools": "unverified",
+                          "last_verified_at": None}
+        assert KEY not in json.dumps(before)
+        probed = await hp.probe()
+        assert probed["reachable"] is True and KEY not in json.dumps(probed)
+        assert fake.requests == [{"path": "/v1/models", "auth": f"Bearer {KEY}"}]
+
+    async def test_probe_without_a_secret_makes_no_request(self, provider, monkeypatch):  # noqa: F811
+        fake = provider([])
+        monkeypatch.delenv("NEXUS_SECRET_HERMES_NATIVE_API_KEY")
+        assert (await hp.probe())["reachable"] is False and fake.requests == []
+
+    async def test_a_native_tool_call_marks_the_provider_verified(self, provider, db, c):  # noqa: F811
+        await _appoint(c, c["chief"])
+        provider([tool_response(("a", "ceo_list_managers", {})), text_response("x")])
+        await run(db, c["chief"], manager_tools_required=True)
+        assert hp.status()["native_tools"] == "verified" and hp.status()["last_verified_at"]
