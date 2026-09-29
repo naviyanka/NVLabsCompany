@@ -34,8 +34,11 @@ def _files():
 
 
 def test_production_never_adds_or_removes_hermes_mcp_servers():
-    bad = [str(p.relative_to(SRC)) for p in _files()
-           if any(MCP_MUTATION.search(s) for s in _constants(p))]
+    bad = [
+        str(p.relative_to(SRC))
+        for p in _files()
+        if any(MCP_MUTATION.search(s) for s in _constants(p))
+    ]
     assert bad == []
 
 

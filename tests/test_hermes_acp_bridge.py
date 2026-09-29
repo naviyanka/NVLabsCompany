@@ -52,8 +52,14 @@ async def _open(db, company, agent, backend=HERMES, **kw):  # noqa: F811
 
 async def _allow(db, company, agent, tool):  # noqa: F811
     async with db() as s:
-        s.add(ToolPolicy(company_id=company, name=f"allow-{tool}", effect="allow",
-                         conditions={"tool_name": [tool], "agent_id": [str(agent)]}))
+        s.add(
+            ToolPolicy(
+                company_id=company,
+                name=f"allow-{tool}",
+                effect="allow",
+                conditions={"tool_name": [tool], "agent_id": [str(agent)]},
+            )
+        )
         await s.commit()
 
 
@@ -75,10 +81,14 @@ class TestCatalogsAndCredential:
         assert bridge.args == [] and bridge.env == {} and bridge.config_path is None
         (server,) = bridge.acp_servers
         assert server["headers"] == [{"name": "Authorization", "value": f"Bearer {bridge.token}"}]
-        claims = jwt.decode(bridge.token, settings.secret_key, algorithms=["HS256"],
-                            audience=mb.AUDIENCE)
+        claims = jwt.decode(
+            bridge.token, settings.secret_key, algorithms=["HS256"], audience=mb.AUDIENCE
+        )
         assert (claims["sub"], claims["company_id"], claims["execution_id"]) == (
-            str(c["chief"]), str(c["acme"]), turn.execution_id)
+            str(c["chief"]),
+            str(c["acme"]),
+            turn.execution_id,
+        )
         assert claims["exp"] - claims["iat"] == mb.MAX_TTL_SECONDS
         assert (await mb.authenticate(bridge.token)).turn_id == turn.id
 
@@ -104,8 +114,11 @@ class TestCatalogsAndCredential:
         turn, bridge = await _open(db, c["acme"], c["lead"])
         await mb.authenticate(bridge.token)
         async with db() as s:  # recovery claims the turn under a new execution ID
-            await s.execute(update(ChatTurn).where(ChatTurn.id == turn.id)
-                            .values(execution_id=str(uuid.uuid4())))
+            await s.execute(
+                update(ChatTurn)
+                .where(ChatTurn.id == turn.id)
+                .values(execution_id=str(uuid.uuid4()))
+            )
             await s.commit()
         with pytest.raises(mb.BridgeDeniedError):
             await mb.authenticate(bridge.token)
@@ -124,17 +137,25 @@ async def _run(tmp_path, ctx, scenario, monkeypatch, extra_env=None):
         return real([sys.executable, FAKE], **kw)
 
     adapter = CLIAdapter()
-    session = await adapter.create_session(ctx.agent_id, {"backend": "hermes",
-                                                          "workspace": str(tmp_path)})
+    session = await adapter.create_session(
+        ctx.agent_id, {"backend": "hermes", "workspace": str(tmp_path)}
+    )
     session.context = ctx
-    with patch("nexus.adapters.cli_adapter.get_cli_registry", return_value=REGISTRY), \
-            patch("nexus.adapters.hermes_acp.HermesACPTransport", side_effect=fake):
+    with (
+        patch("nexus.adapters.cli_adapter.get_cli_registry", return_value=REGISTRY),
+        patch("nexus.adapters.hermes_acp.HermesACPTransport", side_effect=fake),
+    ):
         return await adapter.execute_task(session, uuid.uuid4(), {"prompt": "status?"}), rec
 
 
 class TestAdapter:
     async def test_tool_turn_runs_over_acp_and_the_token_never_leaks(
-        self, acp_on, db, c, tmp_path, monkeypatch  # noqa: F811
+        self,
+        acp_on,
+        db,
+        c,
+        tmp_path,
+        monkeypatch,  # noqa: F811
     ):
         await _appoint(c, c["chief"])
         ctx = _chat_ctx(c["acme"], c["chief"], manager_tools_required=True)
@@ -142,14 +163,20 @@ class TestAdapter:
         (new,) = [r for r in records(rec) if r.get("method") == "session/new"]
         token = new["servers"][0]["headers"][0]["value"].removeprefix("Bearer ")
         assert new["cwd"] == str(tmp_path) and result.success
-        dumped = json.dumps([result.output, result.error, result.logs, result.artifacts],
-                            default=str)
+        dumped = json.dumps(
+            [result.output, result.error, result.logs, result.artifacts], default=str
+        )
         assert token not in dumped and mb.REDACTED in dumped
         meta = next(a for a in result.artifacts if a.get("type") == "cli_execution")
         assert meta["transport"] == "acp" and meta["manager_tools_available"] is True
 
     async def test_a_forbidden_tool_fails_the_turn_without_fallback(
-        self, acp_on, db, c, tmp_path, monkeypatch  # noqa: F811
+        self,
+        acp_on,
+        db,
+        c,
+        tmp_path,
+        monkeypatch,  # noqa: F811
     ):
         await _appoint(c, c["chief"])
         ctx = _chat_ctx(c["acme"], c["chief"], manager_tools_required=True)
@@ -159,7 +186,12 @@ class TestAdapter:
         assert [r.get("method") for r in records(rec)].count("session/prompt") == 1
 
     async def test_free_form_tool_text_executes_nothing(
-        self, acp_on, db, c, tmp_path, monkeypatch  # noqa: F811
+        self,
+        acp_on,
+        db,
+        c,
+        tmp_path,
+        monkeypatch,  # noqa: F811
     ):
         await _appoint(c, c["chief"])
         ctx = _chat_ctx(c["acme"], c["chief"], manager_tools_required=True)
@@ -173,7 +205,12 @@ class TestAdapter:
         assert mb.TOKEN_ENV not in seen["env"]
 
     async def test_global_hermes_files_are_untouched(
-        self, acp_on, db, c, tmp_path, monkeypatch  # noqa: F811
+        self,
+        acp_on,
+        db,
+        c,
+        tmp_path,
+        monkeypatch,  # noqa: F811
     ):
         await _appoint(c, c["chief"])
         home = tmp_path / "hermes-home"

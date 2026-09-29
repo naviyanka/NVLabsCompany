@@ -123,7 +123,9 @@ class HermesACPTransport:
                 start_new_session=os.name != "nt",
             )
         except OSError as exc:
-            raise ACPError("ACP_SETUP_FAILED", f"cannot start Hermes ({type(exc).__name__})") from None
+            raise ACPError(
+                "ACP_SETUP_FAILED", f"cannot start Hermes ({type(exc).__name__})"
+            ) from None
         _contain(self._proc)
         tasks = [
             asyncio.create_task(self._read_loop(self._proc)),
@@ -166,14 +168,24 @@ class HermesACPTransport:
         proc = self._proc
         try:
             if proc is not None and proc.returncode is None:
-                if self._session_id and proc.stdin is not None and not self._done and self._fatal is None:
+                if (
+                    self._session_id
+                    and proc.stdin is not None
+                    and not self._done
+                    and self._fatal is None
+                ):
                     try:
-                        self._write({"jsonrpc": "2.0", "method": "session/cancel",
-                                     "params": {"sessionId": self._session_id}})
+                        self._write(
+                            {
+                                "jsonrpc": "2.0",
+                                "method": "session/cancel",
+                                "params": {"sessionId": self._session_id},
+                            }
+                        )
                         await asyncio.wait_for(proc.stdin.drain(), CANCEL_GRACE_SECONDS)
                         # Let Hermes stop on its own; the tree is ended either way.
                         await asyncio.wait_for(proc.wait(), CANCEL_GRACE_SECONDS)
-                    except (OSError, asyncio.TimeoutError, ConnectionError):
+                    except (TimeoutError, OSError, ConnectionError):
                         pass
                 await asyncio.shield(asyncio.ensure_future(_terminate_tree(proc)))
         finally:
@@ -199,10 +211,8 @@ class HermesACPTransport:
             assert self._proc is not None and self._proc.stdin is not None
             await self._proc.stdin.drain()
             return await asyncio.wait_for(fut, timeout)
-        except asyncio.TimeoutError:
-            raise ACPError(
-                "ACP_TIMEOUT", f"{method} timed out after {timeout:g}s"
-            ) from None
+        except TimeoutError:
+            raise ACPError("ACP_TIMEOUT", f"{method} timed out after {timeout:g}s") from None
         except (BrokenPipeError, ConnectionError):
             raise self._fatal or ACPError("ACP_CHILD_EXIT", "Hermes closed its input") from None
         finally:
@@ -228,7 +238,9 @@ class HermesACPTransport:
             try:
                 line = await proc.stdout.readline()
             except ValueError:  # a frame over the stream limit
-                self._fail(ACPError("ACP_FRAME_TOO_LARGE", f"a message exceeded {self._max_frame} bytes"))
+                self._fail(
+                    ACPError("ACP_FRAME_TOO_LARGE", f"a message exceeded {self._max_frame} bytes")
+                )
                 return
             if not line:
                 self._fail(ACPError("ACP_CHILD_EXIT", "Hermes exited before the turn finished"))
@@ -254,8 +266,14 @@ class HermesACPTransport:
             if fut is None or fut.done():
                 return  # unknown or duplicate id: ignored, never replayed
             if "error" in message:
-                code = (message["error"] or {}).get("code") if isinstance(message["error"], dict) else None
-                fut.set_exception(ACPError("ACP_REQUEST_FAILED", f"Hermes rejected the request (code {code})"))
+                code = (
+                    (message["error"] or {}).get("code")
+                    if isinstance(message["error"], dict)
+                    else None
+                )
+                fut.set_exception(
+                    ACPError("ACP_REQUEST_FAILED", f"Hermes rejected the request (code {code})")
+                )
             else:
                 fut.set_result(message.get("result"))
         elif method == "session/update" and mid is None:
@@ -265,8 +283,13 @@ class HermesACPTransport:
             assert self._proc is not None and self._proc.stdin is not None
             await self._proc.stdin.drain()
         elif mid is not None:  # fs/*, terminal/* or anything else: not offered
-            self._write({"jsonrpc": "2.0", "id": mid,
-                         "error": {"code": -32601, "message": "method not supported"}})
+            self._write(
+                {
+                    "jsonrpc": "2.0",
+                    "id": mid,
+                    "error": {"code": -32601, "message": "method not supported"},
+                }
+            )
 
     def _on_update(self, update: dict[str, Any]) -> None:
         kind = update.get("sessionUpdate")
@@ -276,7 +299,9 @@ class HermesACPTransport:
             if isinstance(text, str):
                 self._size += len(text)
                 if self._size > self._max_output:
-                    raise ACPError("ACP_OUTPUT_LIMIT", f"output exceeded {self._max_output} characters")
+                    raise ACPError(
+                        "ACP_OUTPUT_LIMIT", f"output exceeded {self._max_output} characters"
+                    )
                 self._chunks.append(text)
         elif kind == "tool_call":
             name = str(update.get("title") or "")
@@ -286,7 +311,9 @@ class HermesACPTransport:
                 # Detective: Hermes runs its own tools without asking, so the
                 # turn ends here. The name is safe to record; arguments are not.
                 self.result.tool_calls.append("[denied]")
-                raise ACPError("ACP_POLICY_VIOLATION", "Hermes used a tool that is not an offered Nexus tool")
+                raise ACPError(
+                    "ACP_POLICY_VIOLATION", "Hermes used a tool that is not an offered Nexus tool"
+                )
 
     def _on_permission(self, mid: Any, params: dict[str, Any]) -> None:
         """Deny by default; allow only an offered Nexus tool with an allow-once option."""

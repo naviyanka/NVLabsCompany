@@ -27,15 +27,37 @@ def send(obj):
 
 
 def chunk(text):
-    send({"jsonrpc": "2.0", "method": "session/update", "params": {
-        "sessionId": "s1", "update": {"sessionUpdate": "agent_message_chunk",
-                                      "content": {"type": "text", "text": text}}}})
+    send(
+        {
+            "jsonrpc": "2.0",
+            "method": "session/update",
+            "params": {
+                "sessionId": "s1",
+                "update": {
+                    "sessionUpdate": "agent_message_chunk",
+                    "content": {"type": "text", "text": text},
+                },
+            },
+        }
+    )
 
 
 def tool_call(title):
-    send({"jsonrpc": "2.0", "method": "session/update", "params": {
-        "sessionId": "s1", "update": {"sessionUpdate": "tool_call", "toolCallId": "tc1",
-                                      "title": title, "kind": "other"}}})
+    send(
+        {
+            "jsonrpc": "2.0",
+            "method": "session/update",
+            "params": {
+                "sessionId": "s1",
+                "update": {
+                    "sessionUpdate": "tool_call",
+                    "toolCallId": "tc1",
+                    "title": title,
+                    "kind": "other",
+                },
+            },
+        }
+    )
 
 
 def read():
@@ -44,10 +66,21 @@ def read():
 
 
 def ask_permission(rid, title, kind):
-    send({"jsonrpc": "2.0", "id": rid, "method": "session/request_permission", "params": {
-        "sessionId": "s1", "toolCall": {"toolCallId": "tc1", "title": title, "kind": kind},
-        "options": [{"optionId": "allow_once", "kind": "allow_once", "name": "Allow"},
-                    {"optionId": "deny", "kind": "reject_once", "name": "Deny"}]}})
+    send(
+        {
+            "jsonrpc": "2.0",
+            "id": rid,
+            "method": "session/request_permission",
+            "params": {
+                "sessionId": "s1",
+                "toolCall": {"toolCallId": "tc1", "title": title, "kind": kind},
+                "options": [
+                    {"optionId": "allow_once", "kind": "allow_once", "name": "Allow"},
+                    {"optionId": "deny", "kind": "reject_once", "name": "Deny"},
+                ],
+            },
+        }
+    )
     while (reply := read()) is not None:
         if reply.get("id") == rid:
             record(permission_reply=reply["result"]["outcome"])
@@ -108,8 +141,9 @@ while (msg := read()) is not None:
             ask_permission(54, "something new", "teleport")
             chunk("ok")
         elif SCENARIO == "client_requests":
-            send({"jsonrpc": "2.0", "id": 60, "method": "fs/read_text_file",
-                  "params": {"path": "x"}})
+            send(
+                {"jsonrpc": "2.0", "id": 60, "method": "fs/read_text_file", "params": {"path": "x"}}
+            )
             reply = read()
             record(fs_reply=reply)
             chunk("ok")
@@ -123,7 +157,12 @@ while (msg := read()) is not None:
         else:
             chunk("hello ")
             chunk("world")
-        send({"jsonrpc": "2.0", "id": mid, "result": {
-            "stopReason": "cancelled" if SCENARIO == "cancelled" else "end_turn"}})
+        send(
+            {
+                "jsonrpc": "2.0",
+                "id": mid,
+                "result": {"stopReason": "cancelled" if SCENARIO == "cancelled" else "end_turn"},
+            }
+        )
     elif method == "session/cancel":
         record(method=method)

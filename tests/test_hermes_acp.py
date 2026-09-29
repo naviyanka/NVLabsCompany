@@ -16,15 +16,20 @@ from nexus.adapters.hermes_acp import ACPError, HermesACPTransport, redact, tool
 
 FAKE = str(Path(__file__).parent / "fake_hermes_acp.py")
 TOKEN = "tok-SECRET-123"
-SERVER = {"type": "http", "name": "nexus", "url": "http://127.0.0.1:1/mcp",
-          "headers": [{"name": "Authorization", "value": f"Bearer {TOKEN}"}]}
+SERVER = {
+    "type": "http",
+    "name": "nexus",
+    "url": "http://127.0.0.1:1/mcp",
+    "headers": [{"name": "Authorization", "value": f"Bearer {TOKEN}"}],
+}
 OFFERED = tool_wire_name("nexus", "manager_list_reports")
 
 
 def alive(pid: int) -> bool:
     if os.name == "nt":
-        out = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/NH"],
-                             capture_output=True, text=True).stdout
+        out = subprocess.run(
+            ["tasklist", "/FI", f"PID eq {pid}", "/NH"], capture_output=True, text=True
+        ).stdout
         return str(pid) in out
     try:
         os.kill(pid, 0)
@@ -40,8 +45,15 @@ def records(path: Path) -> list[dict]:
 def transport(tmp_path, scenario, **kw):
     rec = tmp_path / "rec.jsonl"
     env = {**os.environ, "FAKE_ACP_SCENARIO": scenario, "FAKE_ACP_RECORD": str(rec)}
-    args = dict(cwd=str(tmp_path), env=env, mcp_servers=[SERVER], allowed_tools=[OFFERED],
-                turn_timeout=10, startup_timeout=10, secrets=[TOKEN])
+    args = dict(
+        cwd=str(tmp_path),
+        env=env,
+        mcp_servers=[SERVER],
+        allowed_tools=[OFFERED],
+        turn_timeout=10,
+        startup_timeout=10,
+        secrets=[TOKEN],
+    )
     args.update(kw)
     return HermesACPTransport([sys.executable, FAKE], **args), rec
 
@@ -136,7 +148,9 @@ class TestBounds:
     async def test_task_cancellation_ends_the_child_and_never_replays(self, tmp_path):
         t, rec = transport(tmp_path, "hang_prompt", turn_timeout=60)
         task = asyncio.create_task(t.run("x"))
-        assert await eventually(lambda: any(r.get("method") == "session/prompt" for r in records(rec)))
+        assert await eventually(
+            lambda: any(r.get("method") == "session/prompt" for r in records(rec))
+        )
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await task
@@ -154,7 +168,8 @@ class TestPermissions:
         assert [p["decision"] for p in result.permissions] == ["allow"] + ["deny"] * 4
         # Safe metadata only: no titles, commands or paths.
         assert "rm -rf" not in json.dumps(result.permissions) and "passwd" not in json.dumps(
-            result.permissions)
+            result.permissions
+        )
 
     async def test_offered_tool_call_is_recorded_and_others_end_the_turn(self, tmp_path):
         ok, _ = transport(tmp_path, "tool_ok")
@@ -169,7 +184,8 @@ class TestPermissions:
 class TestRedaction:
     def test_redact_removes_the_secret(self):
         assert redact(f"Authorization: Bearer {TOKEN}", [TOKEN]) == (
-            "Authorization: Bearer [REDACTED]")
+            "Authorization: Bearer [REDACTED]"
+        )
 
     async def test_stderr_tail_is_redacted_and_nothing_persists(self, tmp_path):
         t, _ = transport(tmp_path, "ok")
