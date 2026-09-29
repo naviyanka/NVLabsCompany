@@ -1,0 +1,34 @@
+[project]
+name = "nexus-voice"
+version = "0.1.0"
+description = "Local multilingual voice worker for the NEXUS CEO voice gateway (loopback only)."
+requires-python = "==3.11.*"
+dependencies = [
+    "faster-whisper",
+    "piper-tts",
+    "onnxruntime",
+    "numpy",
+    "fastapi",
+    "uvicorn",
+    "websockets",
+    "PyJWT",
+    "nvidia-cublas-cu12",
+    "nvidia-cudnn-cu12",
+]
+
+[dependency-groups]
+dev = ["pytest", "pytest-asyncio", "httpx"]
+
+[project.scripts]
+nexus-voice = "nexus_voice.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/nexus_voice"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
