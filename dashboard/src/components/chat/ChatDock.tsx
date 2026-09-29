@@ -137,7 +137,7 @@ export function ConversationView({ conv, className = '' }: { conv: Conversation;
     return () => {
       live = false;
     };
-  }, [conv.agent.id]);
+  }, [conv.agent.id, voiceOpen]); // re-check when the panel opens: the CEO may have changed
 
   useEffect(() => loadHistory(conv.key), [loadHistory, conv.key]);
 
@@ -228,7 +228,7 @@ export function ConversationView({ conv, className = '' }: { conv: Conversation;
           ))}
         </div>
       )}
-      {voiceCeo && voiceOpen && <VoicePanel onTextFallback={() => setVoiceOpen(false)} />}
+      {voiceCeo && voiceOpen && <VoicePanel ceoId={conv.agent.id} onTextFallback={() => setVoiceOpen(false)} />}
       <form
         className="flex items-center gap-2 p-3 border-t border-white/[0.08]"
         onSubmit={(e) => {

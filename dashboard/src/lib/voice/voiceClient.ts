@@ -8,13 +8,29 @@ import { apiClient, apiUrl } from '@/api/client';
 import { floatToPcm16, packUp, parseDown, VOICE_PROTOCOL } from './protocol';
 import type { VoiceEvent, VoiceMode } from './voiceState';
 
+export interface VoiceInfo {
+  id: string;
+  language: 'en' | 'hi';
+  license: string | null;
+  commercial: boolean | null;
+  attribution: string | null;
+  restricted: boolean;
+  selectable: boolean;
+  installed: boolean;
+}
+
 export interface VoiceStatus {
   enabled: boolean;
   ceo_id: string | null;
   default_voices: { en: string; hi: string };
+  voices: VoiceInfo[];
+  allow_noncommercial_models: boolean;
+  worker_reachable: boolean;
 }
 
 export interface VoiceSessionInfo {
+  voice_session_id: string;
+  ceo?: { id: string; name: string };
   ticket: string;
   ws_path: string;
   mode: VoiceMode;
@@ -23,10 +39,14 @@ export interface VoiceSessionInfo {
 
 export const fetchVoiceStatus = () => apiClient.get<VoiceStatus>('/api/v1/voice/status');
 
+/** Empty voice ids are omitted: the server then uses its own defaults (Hindi may have none). */
 export const createVoiceSession = (mode: VoiceMode, voice_en: string, voice_hi: string) =>
-  apiClient.post<VoiceSessionInfo>('/api/v1/voice/sessions', { mode, voice_en, voice_hi });
+  apiClient.post<VoiceSessionInfo>('/api/v1/voice/sessions', { mode, voice_en: voice_en || undefined, voice_hi: voice_hi || undefined });
 
-const WORKLET = `
+/** Revoke a session for every API worker. Best effort: it also expires on its own. */
+export const endVoiceSession = (id: string) => apiClient.delete(`/api/v1/voice/sessions/${id}`);
+
+export const CAPTURE_WORKLET = `
 class Capture extends AudioWorkletProcessor {
   buf = new Float32Array(512); n = 0;
   process(inputs) {
@@ -74,15 +94,19 @@ export class VoiceClient {
     ws.send(JSON.stringify({ type: 'hello', ticket: session.ticket, protocol: VOICE_PROTOCOL }));
   }
 
-  /** Ask for the microphone. Call only from a click or key press. */
-  async enableMic(): Promise<void> {
+  get micOn(): boolean {
+    return this.stream !== null;
+  }
+
+  /** Ask for the microphone. Call only from a click or key press (or hands-free, opted in). */
+  async enableMic(deviceId = ''): Promise<void> {
     if (this.stream) return;
     if (!navigator.mediaDevices?.getUserMedia) throw new Error('This browser cannot capture audio');
     this.stream = await navigator.mediaDevices.getUserMedia({
-      audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true },
+      audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, ...(deviceId ? { deviceId: { exact: deviceId } } : {}) },
     });
     this.ctx = new AudioContext({ sampleRate: 16000 });
-    const url = URL.createObjectURL(new Blob([WORKLET], { type: 'text/javascript' }));
+    const url = URL.createObjectURL(new Blob([CAPTURE_WORKLET], { type: 'text/javascript' }));
     await this.ctx.audioWorklet.addModule(url);
     URL.revokeObjectURL(url);
     const node = new AudioWorkletNode(this.ctx, 'capture');

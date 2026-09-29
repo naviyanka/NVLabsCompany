@@ -1,23 +1,29 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { floatToPcm16, packUp, parseDown } from '@/lib/voice/protocol';
-import { initialVoiceState, reduceVoice, type VoiceUiState } from '@/lib/voice/voiceState';
+import { autoReconnect, backoffMs, initialVoiceState, reduceVoice, type VoiceUiState } from '@/lib/voice/voiceState';
 
 const client = vi.hoisted(() => ({
-  open: vi.fn(async () => {}),
-  enableMic: vi.fn(async () => {}),
+  open: vi.fn(async (_session?: unknown) => {}),
+  enableMic: vi.fn(async (_device?: string) => {}),
   startTalking: vi.fn(),
   stopTalking: vi.fn(),
   stop: vi.fn(),
   configure: vi.fn(),
   setOpenMic: vi.fn(),
   close: vi.fn(),
-  emit: null as null | ((ev: { type: string }) => void),
+  micOn: true,
+  emit: null as null | ((ev: { type: string; [k: string]: unknown }) => void),
 }));
 const create = vi.hoisted(() => vi.fn());
+const status = vi.hoisted(() => vi.fn());
+const endSession = vi.hoisted(() => vi.fn(async (_id?: string) => {}));
 
 vi.mock('@/lib/voice/voiceClient', () => ({
   createVoiceSession: create,
+  fetchVoiceStatus: status,
+  endVoiceSession: endSession,
+  CAPTURE_WORKLET: '',
   VoiceClient: class {
     constructor(onEvent: (ev: { type: string }) => void) {
       client.emit = onEvent;
@@ -27,6 +33,21 @@ vi.mock('@/lib/voice/voiceClient', () => ({
 }));
 
 import { VoicePanel } from './../VoicePanel';
+
+const voice = (id: string, language: 'en' | 'hi', extra: object = {}) => ({
+  id, language, license: 'MIT', commercial: true, attribution: null,
+  restricted: false, selectable: true, installed: true, ...extra,
+});
+const CATALOG = {
+  enabled: true, ceo_id: 'ceo1', worker_reachable: true, allow_noncommercial_models: false,
+  default_voices: { en: 'en-free', hi: '' },
+  voices: [
+    voice('en-free', 'en'),
+    voice('en-nc', 'en', { license: 'CC BY-NC-SA 4.0', commercial: false, restricted: true, selectable: false }),
+    voice('hi-nc', 'hi', { license: 'CC BY-NC-SA 4.0', commercial: false, restricted: true, selectable: false }),
+  ],
+};
+let ticket = 0;
 
 describe('voice protocol', () => {
   it('packs the 8-byte header and PCM', () => {
@@ -65,12 +86,16 @@ describe('voice state', () => {
   const run = (...types: string[]) => types.reduce<VoiceUiState>((s, type) => reduceVoice(s, { type }), initialVoiceState);
 
   it('walks a full turn', () => {
+    expect(initialVoiceState.phase).toBe('offline');
     expect(run('ready').phase).toBe('listening');
     expect(run('ready', 'speech_started').phase).toBe('hearing');
     expect(run('ready', 'speech_started', 'speech_ended', 'transcribing').phase).toBe('transcribing');
     expect(run('ready', 'thinking').phase).toBe('thinking');
     expect(run('ready', 'thinking', 'speaking').phase).toBe('speaking');
-    expect(run('ready', 'thinking', 'speaking', 'interrupted').phase).toBe('listening');
+    expect(run('ready', 'thinking', 'speaking', 'interrupted').phase).toBe('interrupted');
+    expect(run('ready', 'thinking', 'speaking', 'interrupted', 'listening').phase).toBe('listening');
+    expect(run('ready', 'closed').phase).toBe('offline');
+    expect(reduceVoice(initialVoiceState, { type: 'error', code: 'X', message: 'm' })).toMatchObject({ phase: 'error', errorCode: 'X' });
   });
 
   it('keeps partials separate from the final transcript and shows the language', () => {
@@ -86,16 +111,42 @@ describe('voice state', () => {
     expect(s.reply).toBe('All good');
     expect(reduceVoice(s, { type: 'error', message: 'nope' }).error).toBe('nope');
   });
+
+  it('bounds reconnects and refuses final closes', () => {
+    expect([0, 1, 2, 3, 4, 5].map(backoffMs)).toEqual([1000, 2000, 4000, 8000, 8000, 8000]);
+    expect(autoReconnect(null, 0)).toBe(true);
+    expect(autoReconnect('WORKER_UNAVAILABLE', 3)).toBe(true);
+    expect(autoReconnect(null, 4)).toBe(false);
+    for (const code of ['CEO_CHANGED', 'SESSION_REVOKED', 'BAD_PROTOCOL', 'IDLE_TIMEOUT', 'RATE_LIMITED']) {
+      expect(autoReconnect(code, 0)).toBe(false);
+    }
+  });
 });
 
 describe('VoicePanel', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     localStorage.clear();
-    create.mockResolvedValue({ ticket: 't', ws_path: '/api/v1/voice/ws', mode: 'auto', voices: { en: 'a', hi: 'b' } });
+    ticket = 0;
+    client.micOn = true;
+    status.mockResolvedValue(CATALOG);
+    create.mockImplementation(async () => ({
+      voice_session_id: `s${++ticket}`, ticket: `t${ticket}`, ws_path: '/api/v1/voice/ws', mode: 'auto',
+      voices: { en: 'en-free', hi: '' }, ceo: { id: 'ceo1', name: 'CEO' },
+    }));
   });
+  afterEach(() => vi.useRealTimers());
 
-  it('does not open the microphone until the user starts voice', () => {
+  const start = async () => {
+    render(<VoicePanel ceoId="ceo1" />);
+    await screen.findByDisplayValue('en-free');
+    fireEvent.click(screen.getByText('Start voice'));
+    await waitFor(() => expect(client.enableMic).toHaveBeenCalled());
+  };
+  const emit = (ev: { type: string; [k: string]: unknown }) => act(() => client.emit!(ev));
+  const later = (ms: number) => act(() => vi.advanceTimersByTimeAsync(ms));
+
+  it('does not open the microphone or create a session until the user starts voice', () => {
     render(<VoicePanel />);
     expect(client.enableMic).not.toHaveBeenCalled();
     expect(create).not.toHaveBeenCalled();
@@ -103,16 +154,25 @@ describe('VoicePanel', () => {
     expect(screen.getByLabelText('Language mode')).toHaveValue('auto');
     expect(screen.getByLabelText('English voice')).toBeInTheDocument();
     expect(screen.getByLabelText('Hindi voice')).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('Offline');
+  });
+
+  it('labels non-commercial voices, disables them, and reports missing Hindi', async () => {
+    render(<VoicePanel />);
+    await screen.findByDisplayValue('en-free');
+    expect(screen.getByRole('option', { name: /en-nc.*non-commercial.*CC BY-NC-SA 4.0/ })).toBeDisabled();
+    expect(screen.getByRole('option', { name: /hi-nc.*non-commercial/ })).toBeDisabled();
+    expect(screen.getByLabelText('Hindi voice')).toHaveValue('');
+    expect(screen.getByText(/Hindi speech is not set up.*live check required/)).toBeInTheDocument();
+    expect(screen.getByText(/Non-commercial voices are disabled/)).toBeInTheDocument();
   });
 
   it('defaults to push-to-talk and never streams before a press', async () => {
-    render(<VoicePanel />);
+    await start();
     expect(screen.getByLabelText('Hands-free')).not.toBeChecked();
-    fireEvent.click(screen.getByText('Start voice'));
-    await waitFor(() => expect(client.enableMic).toHaveBeenCalledTimes(1));
-    expect(create).toHaveBeenCalledWith('auto', expect.any(String), expect.any(String));
+    expect(create).toHaveBeenCalledWith('auto', 'en-free', '');
     expect(client.setOpenMic).not.toHaveBeenCalled();
-    client.emit!({ type: 'listening' });
+    await emit({ type: 'listening' });
     const talk = await screen.findByLabelText('Hold to talk');
     fireEvent.pointerDown(talk);
     fireEvent.pointerUp(talk);
@@ -122,44 +182,165 @@ describe('VoicePanel', () => {
     expect(client.stop).toHaveBeenCalled();
   });
 
+  it('push-to-talk works from the keyboard (Space and Enter)', async () => {
+    await start();
+    await emit({ type: 'listening' });
+    const talk = await screen.findByLabelText('Hold to talk');
+    for (const key of [' ', 'Enter']) {
+      client.startTalking.mockClear();
+      client.stopTalking.mockClear();
+      fireEvent.keyDown(talk, { key });
+      fireEvent.keyDown(talk, { key, repeat: true });
+      expect(client.startTalking).toHaveBeenCalledTimes(1);
+      fireEvent.keyUp(talk, { key });
+      expect(client.stopTalking).toHaveBeenCalledTimes(1);
+    }
+  });
+
   it('opts in to hands-free and remembers it', async () => {
     render(<VoicePanel />);
+    await screen.findByDisplayValue('en-free');
     fireEvent.click(screen.getByLabelText('Hands-free'));
     expect(localStorage.getItem('nexus.voice.handsFree')).toBe('1');
     fireEvent.click(screen.getByText('Start voice'));
     await waitFor(() => expect(client.setOpenMic).toHaveBeenCalledWith(true));
   });
 
-  it('pushes mode and voice changes to a live session', async () => {
-    render(<VoicePanel />);
-    fireEvent.click(screen.getByText('Start voice'));
-    await waitFor(() => expect(client.enableMic).toHaveBeenCalled());
+  it('pushes mode changes to a live session', async () => {
+    await start();
     fireEvent.change(screen.getByLabelText('Language mode'), { target: { value: 'hi' } });
-    expect(client.configure).toHaveBeenCalledWith('hi', 'en_US-lessac-medium', 'hi_IN-pratham-medium');
+    expect(client.configure).toHaveBeenCalledWith('hi', 'en-free', '');
   });
 
-  it('shows a permission error with a text fallback', async () => {
+  it('shows a permission error with a text fallback and Retry', async () => {
     client.enableMic.mockRejectedValueOnce(new DOMException('no', 'NotAllowedError'));
     const fallback = vi.fn();
     render(<VoicePanel onTextFallback={fallback} />);
+    await screen.findByDisplayValue('en-free');
     fireEvent.click(screen.getByText('Start voice'));
     expect(await screen.findByRole('alert')).toHaveTextContent(/permission was denied/i);
     fireEvent.click(screen.getByText('Type instead'));
     expect(fallback).toHaveBeenCalled();
     expect(client.close).toHaveBeenCalled();
+    expect(screen.getByText('Retry')).toBeInTheDocument();
   });
 
-  it('shows live status, partial and final transcript with language', async () => {
-    render(<VoicePanel />);
-    fireEvent.click(screen.getByText('Start voice'));
-    await waitFor(() => expect(client.enableMic).toHaveBeenCalled());
-    client.emit!({ type: 'listening' });
-    expect(await screen.findByRole('status')).toHaveTextContent('Listening');
-    client.emit!({ type: 'partial', text: 'give me' } as never);
-    expect(await screen.findByLabelText('Transcript')).toHaveTextContent('give me');
-    client.emit!({ type: 'transcript', text: 'give me the status', language: 'en' } as never);
-    await waitFor(() => expect(screen.getByLabelText('Transcript')).toHaveTextContent(/give me the status.*en/));
-    client.emit!({ type: 'thinking' });
-    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Thinking'));
+  it('shows every state with words, not colour alone', async () => {
+    await start();
+    const say = async (ev: { type: string }, text: string) => {
+      await emit(ev);
+      expect(screen.getByRole('status')).toHaveTextContent(text);
+    };
+    await say({ type: 'listening' }, 'Listening');
+    await say({ type: 'speech_started' }, 'Hearing');
+    await say({ type: 'transcribing' }, 'Transcribing');
+    await say({ type: 'thinking' }, 'Thinking');
+    await say({ type: 'speaking' }, 'Speaking');
+    await say({ type: 'interrupted' }, 'Interrupted');
+    await emit({ type: 'error', code: 'RATE_LIMITED', message: 'slow down' });
+    expect(screen.getByRole('alert')).toHaveTextContent('slow down');
+    expect(screen.getByRole('status')).toHaveTextContent('Error');
+  });
+
+  it('shows partial and final transcript with language, and non-fatal notices', async () => {
+    await start();
+    await emit({ type: 'listening' });
+    await emit({ type: 'partial', text: 'give me' });
+    expect(screen.getByLabelText('Transcript')).toHaveTextContent('give me');
+    await emit({ type: 'transcript', text: 'give me the status', language: 'en' });
+    expect(screen.getByLabelText('Transcript')).toHaveTextContent(/give me the status.*en/);
+    await emit({ type: 'notice', code: 'NO_VOICE', message: 'No Hindi voice: text only' });
+    expect(screen.getByText('No Hindi voice: text only')).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('Listening');
+  });
+
+  describe('recovery', () => {
+    it('reconnects with a fresh ticket and bounded backoff, leaving the mic closed', async () => {
+      await start();
+      await emit({ type: 'listening' });
+      vi.useFakeTimers();
+      client.enableMic.mockClear();
+      await emit({ type: 'closed' }); // abnormal drop
+      expect(screen.getByRole('status')).toHaveTextContent('Reconnecting (attempt 1 of 4)');
+      await later(1000);
+      expect(create).toHaveBeenCalledTimes(2); // a new session and ticket
+      expect(client.open).toHaveBeenLastCalledWith(expect.objectContaining({ ticket: 't2' }));
+      expect(client.enableMic).not.toHaveBeenCalled(); // no automatic mic
+      await emit({ type: 'closed' });
+      await later(1000);
+      expect(create).toHaveBeenCalledTimes(2); // second wait is 2 s
+      await later(1000);
+      expect(create).toHaveBeenCalledTimes(3);
+    });
+
+    it('gives up after the attempt bound and offers Retry', async () => {
+      await start();
+      await emit({ type: 'listening' });
+      vi.useFakeTimers();
+      for (let i = 0; i < 4; i++) {
+        await emit({ type: 'closed' });
+        await later(9000);
+      }
+      const calls = create.mock.calls.length;
+      await emit({ type: 'closed' });
+      await later(60000);
+      expect(create.mock.calls.length).toBe(calls);
+      expect(screen.getByText('Retry')).toBeInTheDocument();
+    });
+
+    it('reopens the mic on reconnect only when hands-free is on', async () => {
+      localStorage.setItem('nexus.voice.handsFree', '1');
+      render(<VoicePanel ceoId="ceo1" />);
+      await screen.findByDisplayValue('en-free');
+      fireEvent.click(screen.getByText('Start voice'));
+      await waitFor(() => expect(client.setOpenMic).toHaveBeenCalledWith(true));
+      await emit({ type: 'listening' });
+      vi.useFakeTimers();
+      client.enableMic.mockClear();
+      await emit({ type: 'closed' });
+      await later(1000);
+      expect(client.enableMic).toHaveBeenCalledTimes(1);
+    });
+
+    it('opens the mic from the press that follows a reconnect', async () => {
+      client.micOn = false;
+      await start();
+      client.enableMic.mockClear();
+      await emit({ type: 'listening' });
+      fireEvent.pointerDown(await screen.findByLabelText('Hold to talk'));
+      await waitFor(() => expect(client.startTalking).toHaveBeenCalled());
+      expect(client.enableMic).toHaveBeenCalledTimes(1);
+    });
+
+    it.each(['CEO_CHANGED', 'SESSION_REVOKED'])('does not reconnect or retry after %s', async (code) => {
+      await start();
+      await emit({ type: 'listening' });
+      vi.useFakeTimers();
+      await emit({ type: 'error', code, message: 'ended' });
+      await emit({ type: 'closed' });
+      await later(60000);
+      expect(create).toHaveBeenCalledTimes(1);
+      expect(screen.getByText('Start voice').closest('button')).toBeDisabled();
+    });
+
+    it('refuses a session that belongs to a different CEO than this chat', async () => {
+      create.mockResolvedValueOnce({ voice_session_id: 's9', ticket: 't9', ws_path: '/', ceo: { id: 'someone-else', name: 'New' } });
+      render(<VoicePanel ceoId="ceo1" />);
+      await screen.findByDisplayValue('en-free');
+      fireEvent.click(screen.getByText('Start voice'));
+      expect(await screen.findByRole('alert')).toHaveTextContent(/CEO changed/);
+      expect(client.open).not.toHaveBeenCalled();
+      expect(endSession).toHaveBeenCalledWith('s9');
+    });
+
+    it('ending voice revokes the session and does not reconnect', async () => {
+      await start();
+      await emit({ type: 'listening' });
+      vi.useFakeTimers();
+      fireEvent.click(screen.getByText('End voice'));
+      await later(20000);
+      expect(endSession).toHaveBeenCalledWith('s1');
+      expect(create).toHaveBeenCalledTimes(1);
+    });
   });
 });
