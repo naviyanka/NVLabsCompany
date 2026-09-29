@@ -21,7 +21,7 @@ from nexus.auth.principal import Principal
 from nexus.config import settings
 from nexus.voice import protocol, worker_client
 from nexus.voice.chunker import SentenceChunker
-from nexus.voice.limits import RateLimiter, TicketBook
+from nexus.voice.shared_state import SharedStateUnavailableError, get_store
 from nexus.voice.tokens import TicketError, VoiceSession, read_ticket
 
 logger = logging.getLogger(__name__)
@@ -62,7 +62,7 @@ class VoiceConnection:
         self.n = 0
         self.utterance_bytes = 0
         self.tasks: list[asyncio.Task] = []
-        self.limiter: RateLimiter = ws.app.state.voice_utterance_limits
+        self.store = ws.app.state.voice_store  # set by serve() before construction
         self.closed = asyncio.Event()
         self.drained = asyncio.Event()  # set while no synthesis is outstanding
         self.drained.set()
@@ -216,7 +216,13 @@ class VoiceConnection:
         from nexus.services import ceo_service
 
         text, redacted = ceo_service.redact(str(ev["text"]).strip()[:4000])
-        if not self.limiter.allow(f"{self.sess.company_id}:{self.sess.user_id}"):
+        try:
+            allowed = await self.store.allow("utterance", self.sess.company_id, self.sess.user_id)
+        except SharedStateUnavailableError:
+            await self.fail("SHARED_STATE_UNAVAILABLE", "Voice limits are unavailable; try again")
+            await self.emit("listening")
+            return
+        if not allowed:
             await self.fail("RATE_LIMITED", "Too many voice messages; wait a moment")
             await self.emit("listening")
             return
@@ -483,18 +489,16 @@ class VoiceConnection:
                 return
             if time.time() >= self.sess.expires_at:
                 raise SessionCloseError("SESSION_EXPIRED", "Voice session expired")
+            try:
+                revoked = await self.store.revoked(self.sess.company_id, self.sess.id)
+            except SharedStateUnavailableError:
+                raise SessionCloseError(
+                    "SHARED_STATE_UNAVAILABLE", "Voice state is unavailable"
+                ) from None
+            if revoked:
+                raise SessionCloseError("SESSION_REVOKED", "Voice session was ended")
             async with tenant_session(self.sess.company_id) as db:
                 await self.check_ceo(db)
-
-
-def ensure_state(app):
-    """Per-process ticket book and rate limiters, created once on ``app.state``."""
-    st = app.state
-    if not hasattr(st, "voice_tickets"):
-        st.voice_tickets = TicketBook()
-        st.voice_utterance_limits = RateLimiter(settings.voice_utterances_per_minute)
-        st.voice_session_limits = RateLimiter(settings.voice_sessions_per_minute)
-    return st
 
 
 async def serve(ws: WebSocket, principal: Principal) -> None:
@@ -502,7 +506,6 @@ async def serve(ws: WebSocket, principal: Principal) -> None:
     from nexus.database import tenant_session
     from nexus.services import ceo_service
 
-    state = ensure_state(ws.app)
     await ws.accept()
     conn: VoiceConnection | None = None
     try:
@@ -518,9 +521,18 @@ async def serve(ws: WebSocket, principal: Principal) -> None:
             or principal.user_id != sess.user_id
             or principal.company_id != sess.company_id
             or time.time() >= sess.expires_at
-            or not state.voice_tickets.redeem(sess.jti, ticket_exp)
         ):
             raise SessionCloseError("BAD_TICKET", "Invalid voice ticket")
+        try:
+            store = await get_store(ws.app)  # fails closed when shared state is required
+            if await store.revoked(sess.company_id, sess.id) or not await store.redeem(
+                sess.company_id, sess.jti, ticket_exp - time.time()
+            ):
+                raise SessionCloseError("BAD_TICKET", "Invalid voice ticket")
+        except SharedStateUnavailableError:
+            raise SessionCloseError(
+                "SHARED_STATE_UNAVAILABLE", "Voice state is unavailable; try again"
+            ) from None
         async with tenant_session(sess.company_id) as db:
             ceo = await ceo_service.current_ceo(db, sess.company_id)
         if ceo is None or ceo.id != sess.ceo_id:

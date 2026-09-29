@@ -20,6 +20,7 @@ from nexus.governance.audit_service import record_audit
 from nexus.services import ceo_service
 from nexus.services.session_service import get_or_create_default_session
 from nexus.voice import gateway, protocol, worker_client
+from nexus.voice.shared_state import SharedStateUnavailableError, get_store
 from nexus.voice.tokens import VoiceSession, mint_ticket
 
 router = APIRouter(tags=["voice"])
@@ -71,9 +72,13 @@ async def create_voice_session(
     for v in (body.voice_en, body.voice_hi):
         if v is not None and not gateway.valid_voice(v):
             raise _refuse("BAD_VOICE", "Unknown voice id", 422)
-    if not gateway.ensure_state(request.app).voice_session_limits.allow(
-        f"{company_id}:{principal.user_id}"
-    ):
+    try:
+        allowed = await (await get_store(request.app)).allow(
+            "session", company_id, principal.user_id
+        )
+    except SharedStateUnavailableError:
+        raise _refuse("SHARED_STATE_UNAVAILABLE", "Voice state is unavailable", 503) from None
+    if not allowed:
         raise _refuse("RATE_LIMITED", "Too many voice sessions; wait a moment", 429)
     ceo = await ceo_service.current_ceo(db, company_id)
     if ceo is None:
@@ -114,6 +119,22 @@ async def create_voice_session(
         "ceo": {"id": str(ceo.id), "name": ceo.name},
         "chat_session_id": str(chat.id),
     }
+
+
+@router.delete("/api/v1/voice/sessions/{voice_session_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def end_voice_session(
+    voice_session_id: str,
+    request: Request,
+    company_id: CurrentCompanyId,
+    principal: CurrentPrincipal,
+) -> None:
+    """Revoke a session for every worker; the id is unguessable and the key is per company."""
+    if principal.kind != "user" or principal.user_id is None:
+        raise _refuse("HUMAN_REQUIRED", "Voice needs a signed-in person", 403)
+    try:
+        await (await get_store(request.app)).revoke(company_id, voice_session_id)
+    except SharedStateUnavailableError:
+        raise _refuse("SHARED_STATE_UNAVAILABLE", "Voice state is unavailable", 503) from None
 
 
 @router.websocket("/api/v1/voice/ws")

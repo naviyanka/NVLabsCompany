@@ -33,6 +33,7 @@ from nexus.models.governance import AuditLog
 from nexus.voice import protocol
 from nexus.voice.chunker import SentenceChunker
 from nexus.voice.limits import RateLimiter
+from nexus.voice.shared_state import MemoryStore
 from nexus.voice.tokens import TICKET_AUDIENCE, WORKER_AUDIENCE, mint_worker_token
 
 pytestmark = pytest.mark.core_employee
@@ -256,6 +257,7 @@ def client(world):
         return go()
 
     app.state.voice_connect = connect
+    app.state.voice_store = MemoryStore()  # single process; shared state has its own tests
     with TestClient(AsPrincipal(app, world)) as c:
         c.world, c.voice_app = world, app
         yield c

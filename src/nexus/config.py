@@ -34,6 +34,10 @@ class Settings(BaseSettings):
     voice_idle_timeout_seconds: int = 60
     voice_utterances_per_minute: int = 12
     voice_sessions_per_minute: int = 10
+    voice_company_utterances_per_minute: int = 60
+    voice_company_sessions_per_minute: int = 30
+    # Development only: allow in-process ticket/limit state when Redis is unreachable.
+    voice_allow_local_state: bool = False
     voice_default_en: str = "en_US-ljspeech-medium"  # public domain; see docs/VOICE_GATEWAY.md
     voice_default_hi: str = (
         ""  # no commercially licensed Hindi voice ships; set to a user-supplied one
