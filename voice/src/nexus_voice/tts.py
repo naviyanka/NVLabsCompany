@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from nexus_voice import models, segment
+from nexus_voice import models, segment, winspeech
 from nexus_voice.config import Settings
 
 RATE = 22_050  # every configured Piper voice
@@ -54,6 +54,14 @@ class Synthesizer:
             if not first:
                 yield GAP.tobytes()
             first = False
+            if voice_id.startswith(winspeech.PREFIXES):
+                if not models.selectable(self.settings, voice_id):
+                    raise LookupError(f"voice {voice_id} is not available")
+                pcm = winspeech.synthesize(voice_id, seg.text, RATE)
+                if pcm:
+                    audio = np.frombuffer(pcm, dtype="<i2")
+                    yield _fade(audio, head=True, tail=True).tobytes()
+                continue
             held: np.ndarray | None = None
             head = True
             for chunk in self.voice(voice_id).synthesize(seg.text):

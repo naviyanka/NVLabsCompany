@@ -34,4 +34,10 @@ class Settings:
     allow_noncommercial: bool = os.environ.get(
         "NEXUS_VOICE_ALLOW_NONCOMMERCIAL_MODELS", "false"
     ).lower() in ("1", "true", "yes")
+    # Windows System.Speech voices (offline). Never a default; chosen explicitly.
+    windows_tts: bool = os.environ.get("NEXUS_VOICE_WINDOWS_TTS", "1").lower() in (
+        "1",
+        "true",
+        "yes",
+    )
     partials: bool = os.environ.get("NEXUS_VOICE_PARTIALS", "0") == "1"

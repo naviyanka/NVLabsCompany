@@ -12,6 +12,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
+from nexus_voice import winspeech
 from nexus_voice.config import MANIFEST, Settings
 
 
@@ -61,15 +62,21 @@ def user_voices(settings: Settings) -> dict[str, Any]:
 
 
 def catalog(settings: Settings) -> dict[str, Any]:
+    system = winspeech.catalog() if settings.windows_tts else {}
     return {
         **{k: {**v, "origin": "bundled"} for k, v in manifest()["voices"].items()},
         **user_voices(settings),
+        **system,
     }
 
 
 def restricted(voice: dict[str, Any]) -> bool:
-    """Anything not positively marked commercial-use is restricted (unknown counts)."""
-    return voice.get("commercial") is not True
+    """Anything not positively marked commercial-use is restricted (unknown counts).
+
+    OS-installed voices are not models NEXUS ships or downloads, so they are not gated; the
+    operator picks one explicitly and Windows' own terms apply.
+    """
+    return voice.get("origin") != "system" and voice.get("commercial") is not True
 
 
 def selectable(settings: Settings, voice_id: str) -> bool:
@@ -78,17 +85,33 @@ def selectable(settings: Settings, voice_id: str) -> bool:
 
 
 def voice_info(settings: Settings, *, full: bool = False) -> list[dict[str, Any]]:
-    keys = ("language", "license", "commercial", "attribution", "source", "revision", "origin")
+    keys = (
+        "language",
+        "license",
+        "commercial",
+        "attribution",
+        "source",
+        "revision",
+        "origin",
+        "locale",
+    )
     return [
         {
             "id": vid,
             **{k: v.get(k) for k in keys},
+            "provider": provider(vid),
             "restricted": restricted(v),
             "selectable": settings.allow_noncommercial or not restricted(v),
             "installed": voice_available(settings, vid, full=full),
         }
         for vid, v in catalog(settings).items()
     ]
+
+
+def provider(voice_id: str) -> str:
+    if voice_id.startswith(winspeech.ONECORE):
+        return "windows-onecore"
+    return "windows-sapi" if voice_id.startswith("win:") else "piper"
 
 
 def vad_installed() -> bool:
@@ -132,6 +155,8 @@ def stt_available(settings: Settings, *, full: bool = False) -> bool:
 
 def voice_available(settings: Settings, voice_id: str, *, full: bool = False) -> bool:
     v = catalog(settings).get(voice_id)
+    if v and v.get("origin") == "system":
+        return True  # listed only while Windows reports it installed
     return bool(v) and all(
         check(settings.model_dir / "voices" / voice_id / n, meta, full=full)
         for n, meta in v["files"].items()

@@ -106,7 +106,8 @@ export function VoicePanel({ onTextFallback, ceoId }: { onTextFallback?: () => v
 
   const connected = ui.open;
   const finalStop = FINAL_CODES.has(ui.errorCode ?? '');
-  const voices = catalog?.voices ?? [];
+  const hidden = catalog?.allow_noncommercial_models ? [] : (catalog?.voices ?? []).filter((v) => v.restricted);
+  const voices = (catalog?.voices ?? []).filter((v) => !hidden.includes(v)); // restricted IDs stay out of the UI until the operator opts in
 
   useEffect(() => {
     let live = true;
@@ -268,8 +269,8 @@ export function VoicePanel({ onTextFallback, ceoId }: { onTextFallback?: () => v
       {catalog && !voices.some((v) => v.language === 'hi' && usable(v)) && (
         <p>Hindi speech is not set up: no commercially licensed Hindi voice is installed (live check required). Hindi replies stay text-only.</p>
       )}
-      {catalog && voices.some((v) => v.restricted) && !catalog.allow_noncommercial_models && (
-        <p>Non-commercial voices are disabled. An operator can enable them with NEXUS_VOICE_ALLOW_NONCOMMERCIAL_MODELS.</p>
+      {catalog && hidden.length > 0 && (
+        <p>Non-commercial voices are hidden. An operator can enable them with NEXUS_VOICE_ALLOW_NONCOMMERCIAL_MODELS.</p>
       )}
 
       {!connected && <MicCheck deviceId={deviceId} onDevice={setDeviceId} />}

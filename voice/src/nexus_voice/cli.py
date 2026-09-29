@@ -39,6 +39,15 @@ def diagnose(settings: Settings, *, full: bool = False, load_stt: bool = True) -
     report["vad_model"] = {**models.manifest()["vad"], "installed": models.vad_installed()}
     report["allow_noncommercial_models"] = settings.allow_noncommercial
     report["voices"] = models.voice_info(settings, full=full)
+    for lang, name in (("en", "english"), ("hi", "hindi")):
+        ready = [
+            v
+            for v in report["voices"]
+            if v["language"] == lang and v["installed"] and v["selectable"]
+        ]
+        report[f"{name}_tts"] = [
+            {"provider": v["provider"], "voice": v["id"], "locale": v.get("locale")} for v in ready
+        ]
     # No commercially licensed Hindi voice ships: it stays a live check until one is supplied.
     report["hindi_tts_status"] = (
         "PASS" if report["hindi_voice_available"] else "LIVE_CHECK_REQUIRED"

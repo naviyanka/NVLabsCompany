@@ -157,14 +157,14 @@ describe('VoicePanel', () => {
     expect(screen.getByRole('status')).toHaveTextContent('Offline');
   });
 
-  it('labels non-commercial voices, disables them, and reports missing Hindi', async () => {
+  it('hides non-commercial voices by default and reports missing Hindi', async () => {
     render(<VoicePanel />);
     await screen.findByDisplayValue('en-free');
-    expect(screen.getByRole('option', { name: /en-nc.*non-commercial.*CC BY-NC-SA 4.0/ })).toBeDisabled();
-    expect(screen.getByRole('option', { name: /hi-nc.*non-commercial/ })).toBeDisabled();
+    expect(screen.queryByRole('option', { name: /en-nc/ })).toBeNull();
+    expect(screen.queryByRole('option', { name: /hi-nc/ })).toBeNull();
     expect(screen.getByLabelText('Hindi voice')).toHaveValue('');
     expect(screen.getByText(/Hindi speech is not set up.*live check required/)).toBeInTheDocument();
-    expect(screen.getByText(/Non-commercial voices are disabled/)).toBeInTheDocument();
+    expect(screen.getByText(/Non-commercial voices are hidden/)).toBeInTheDocument();
   });
 
   it('defaults to push-to-talk and never streams before a press', async () => {

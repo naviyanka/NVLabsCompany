@@ -64,7 +64,8 @@ def _tts_check(voices: list[dict[str, Any]], lang: str) -> dict[str, str]:
             return _check(
                 label,
                 LIVE,
-                "no commercially licensed Hindi voice installed; supply one via user_voices.json",
+                "no hi-IN voice installed: install the Windows Hindi voice (docs/VOICE_GATEWAY.md) "
+                "or supply one via user_voices.json",
             )
         return _check(label, FAIL, "no selectable English voice installed (nexus-voice setup)")
     only_restricted = all(v["restricted"] for v in ready)
