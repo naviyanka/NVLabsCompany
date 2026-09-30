@@ -1014,6 +1014,7 @@ class ChatTurnWorker:
                     context=context,
                     execution=execution,
                     on_chunk=lambda text: (partial.append(text), self._emit(turn.id, text)),
+                    turn_id=turn.id,
                 )
             else:
                 call = chat._call_llm(
@@ -1024,6 +1025,7 @@ class ChatTurnWorker:
                     session_id=turn.session_id,
                     context=context,
                     execution=execution,
+                    turn_id=turn.id,
                 )
             outcome, value = await self._supervise(turn, asyncio.ensure_future(call))
         except HTTPException as exc:

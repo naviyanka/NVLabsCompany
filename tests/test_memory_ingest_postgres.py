@@ -247,3 +247,26 @@ async def test_backfill_keeps_rls_forced_and_rows_intact(postgres_container, mig
         await asyncio.to_thread(alembic.command.upgrade, cfg, "head")
     finally:
         await engine.dispose()
+
+
+async def test_concurrent_chat_extraction_replay_yields_one_row_per_fact(app_role):
+    from nexus.api.routes import chat as chat_module
+
+    company_id, agent_id = await _tenant_with_agent(app_role)
+    agent = Agent(id=agent_id, company_id=company_id, name="a", role="engineer", model="m")
+    reply = (
+        "I learned that deploys go out on Tuesdays. "
+        "I learned that the cache key includes the tenant."
+    )
+    turn = uuid.uuid4()
+
+    stored = await asyncio.gather(
+        *(chat_module._remember_response(agent, reply, turn_id=turn) for _ in range(RACERS))
+    )
+    rows = await _rows(company_id)
+    assert len(rows) == 2 and sum(stored) == 2
+    assert {r.source_id for r in rows} == {str(turn)} and len({r.ingestion_key for r in rows}) == 2
+
+    # A later replay of the same turn, and the same reply on another turn, behave as specified.
+    assert await chat_module._remember_response(agent, reply, turn_id=turn) == 0
+    assert len(await _rows(company_id)) == 2

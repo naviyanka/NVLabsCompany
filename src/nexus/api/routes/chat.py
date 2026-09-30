@@ -8,6 +8,7 @@ capabilities, and conversation history.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import uuid
@@ -482,7 +483,9 @@ async def _fetch_shared_knowledge(
         return []
 
 
-async def _remember_response(agent: Agent, response_text: str) -> int:
+async def _remember_response(
+    agent: Agent, response_text: str, *, turn_id: uuid.UUID | None = None
+) -> int:
     """Extract durable facts from an agent's reply and store them in L2.
 
     Chat history is a transcript: it is replayed verbatim and trimmed to the last
@@ -495,6 +498,11 @@ async def _remember_response(agent: Agent, response_text: str) -> int:
     Args:
         agent: The agent that produced the reply.
         response_text: The reply text.
+        turn_id: The durable ChatTurn that produced the reply, set only by the turn
+            worker. It is the source identity, so replaying the turn returns the
+            facts it already stored. Without a turn (orchestrator, scheduler,
+            webhooks) the source is a digest of agent and reply text, so a retry
+            of the same reply still collapses.
 
     Returns:
         How many new facts were stored.
@@ -514,11 +522,17 @@ async def _remember_response(agent: Agent, response_text: str) -> int:
             session_factory=tenant_session_factory(agent.company_id),
             company_id=agent.company_id,
         )
-        # One source event per reply: its facts share the id and differ by ordinal. The
-        # assistant message row is written after this call, so there is no message id yet.
-        reply_id = f"evt:{uuid.uuid4()}"
+        # One stable source per reply, never a random id: a replay must derive the same
+        # ingestion keys. The reply message row is written after this call, so the turn
+        # (or, with no turn, the reply text) is the identity; facts differ by category
+        # and ordinal within it.
+        digest = hashlib.sha256(f"{agent.id}\n{response_text}".encode()).hexdigest()
+        reply_id = str(turn_id) if turn_id is not None else f"reply:{digest[:40]}"
+        ordinals: dict[str, int] = {}
         stored = 0
-        for ordinal, fact in enumerate(facts):
+        for fact in facts:
+            category = str(fact.metadata.get("fact_type", "fact"))
+            ordinal = ordinals[category] = ordinals.get(category, -1) + 1
             try:
                 # Origin, not the extractor's metadata, makes this an untrusted candidate.
                 wrote = await memory.store_fact(
@@ -529,7 +543,7 @@ async def _remember_response(agent: Agent, response_text: str) -> int:
                     source_type="chat_reply",
                     source_id=reply_id,
                     extractor_version=FACT_EXTRACTOR_VERSION,
-                    item_key=str(ordinal),
+                    item_key=f"{category}:{ordinal}",
                     max_chars=FACT_MAX_CHARS,
                 )
             except MemoryRejected:
@@ -900,6 +914,7 @@ async def _call_llm(
     source: str | None = None,
     context: ExecutionContext | None = None,
     execution: dict[str, Any] | None = None,
+    turn_id: uuid.UUID | None = None,
 ) -> tuple[str, str, int]:
     """Call the LLM adapter to get a real response.
 
@@ -925,6 +940,8 @@ async def _call_llm(
             agent's company and name no other agent.
         execution: Optional dict the caller passes to learn which adapter,
             CLI backend and execution ID produced the reply.
+        turn_id: The durable chat turn this call serves, set only by the turn
+            worker; it becomes the source of any memory extracted from the reply.
 
     Returns:
         Tuple of (response_text, model_used, tokens_used).
@@ -1204,7 +1221,7 @@ async def _call_llm(
                 # Durable memory. Sits here rather than in the route because
                 # every LLM dispatch in the app funnels through this function,
                 # so the orchestrator, pipelines and triggers remember too.
-                await _remember_response(agent, response_text)
+                await _remember_response(agent, response_text, turn_id=turn_id)
                 return response_text, model_used, tokens
             elif result.error:
                 record_llm_usage(
@@ -1354,6 +1371,7 @@ async def _stream_llm(
     context: ExecutionContext | None,
     execution: dict[str, Any],
     on_chunk: Any,
+    turn_id: uuid.UUID | None = None,
 ) -> tuple[str, str, int]:
     """One turn's model call, reporting text through ``on_chunk`` as it is generated.
 
@@ -1375,7 +1393,7 @@ async def _stream_llm(
     if adapter is None or not hasattr(adapter, "stream_execute"):
         return await _call_llm(
             agent, system_prompt, prompt, history, session_id=session_id, context=context,
-            execution=execution,
+            execution=execution, turn_id=turn_id,
         )
 
     execution.update(adapter=registry_key, backend=config.get("backend"))
