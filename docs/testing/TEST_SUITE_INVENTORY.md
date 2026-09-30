@@ -62,7 +62,7 @@ count. File names drop the `test_` prefix.
 | Marker | Applied to |
 |--------|-----------|
 | `core_employee` | `test_cli_employee_foundation`, `test_chat_adapter_resolution`, `test_cli_adapter`, `test_cli_adapter_interactive`, `test_concurrent_employee_chat` (module-level `pytestmark`) |
-| `postgres`, `integration` | `test_postgres_integration` |
+| `postgres`, `integration` | `test_postgres_integration`, `test_governance_postgres` |
 | `slow` | Registered, not yet applied (see "Slowest files") |
 | `real_cli` | Registered, no tests yet. Skipped unless `NEXUS_REAL_CLI=1`. The real-CLI checks live in `scripts/cli_employee_smoke.py` and `scripts/cli_employee_concurrency_smoke.py`. |
 
