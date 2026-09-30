@@ -15,6 +15,7 @@ is an immutable snapshot of that rule set taken when a draft is published or rol
 
 from __future__ import annotations
 
+import fnmatch
 import uuid
 from typing import Any
 
@@ -27,6 +28,7 @@ from nexus.models.governance_studio import GovernancePolicyDraft, GovernancePoli
 from nexus.models.tool import ToolPolicy
 from nexus.services.governance_studio import risk
 from nexus.services.governance_studio.audit import actor_of, audit, clip
+from nexus.services.governance_studio.catalog import build_catalog
 from nexus.services.governance_studio.errors import fail
 from nexus.services.governance_studio.rules import MAX_RULES, RuleBody, to_dict
 from nexus.tools import governance_overlay as overlay
@@ -40,6 +42,8 @@ class DraftBody(BaseModel):
     reason: str = Field(min_length=5, max_length=500)
     ticket_ref: str | None = Field(default=None, max_length=255)
     reviewers: list[str] = Field(default_factory=list, max_length=10)
+    # An edit: the ``updated_at`` the editor loaded. Another save since then is a 409.
+    expected_updated_at: str | None = Field(default=None, max_length=40)
 
     @field_validator("rules")
     @classmethod
@@ -52,6 +56,8 @@ class DraftBody(BaseModel):
 
 class PublishBody(BaseModel):
     reason: str | None = Field(default=None, max_length=500)
+    # The version the publisher was looking at. A different current version is a 409.
+    expected_version: int | None = Field(default=None, ge=0)
 
 
 class RollbackBody(BaseModel):
@@ -122,6 +128,34 @@ def is_loosening(d: dict[str, Any]) -> bool:
     )
 
 
+def affects(d: dict[str, Any]) -> dict[str, Any]:
+    """Which agents and capabilities a change touches, read from the rules' own conditions."""
+    touched = [*d["added"], *d["removed"], *(c["after"] for c in d["changed"]),
+               *(c["before"] for c in d["changed"])]
+    agents: set[str] = set()
+    everyone = False
+    patterns: list[str] | None = []
+    for rule in touched:
+        cond = rule["conditions"]
+        if "agent_id" in cond:
+            agents.update([cond["agent_id"]] if isinstance(cond["agent_id"], str)
+                          else cond["agent_id"])
+        else:
+            everyone = True
+        if "tool_name" in cond and patterns is not None:
+            names = cond["tool_name"]
+            patterns += [names] if isinstance(names, str) else names
+        else:
+            patterns = None  # a rule with no tool_name reaches every tool
+    caps = [
+        c["id"] for c in build_catalog()
+        if c["tool_name"] and (patterns is None or any(
+            fnmatch.fnmatch(c["tool_name"], p) for p in patterns))
+    ] if touched else []
+    return {"all_agents": everyone, "agent_ids": sorted(agents),
+            "capability_ids": caps}
+
+
 def _date(value: Any) -> str | None:
     return value.isoformat() if value else None
 
@@ -144,6 +178,7 @@ def draft_view(
         "created_at": _date(d.created_at),
         "updated_at": _date(d.updated_at),
         "diff": change,
+        "affects": affects(change),
         "loosens": is_loosening(change),
         "findings": risk.rule_findings(
             d.proposed_rules, author=d.created_by, reviewers=d.reviewers
@@ -245,8 +280,25 @@ async def get_version(db: Any, company_id: uuid.UUID, number: int) -> dict[str, 
         await _version(db, company_id, number - 1) if number > 1 else None
     )
     out = version_view(v, rules_too=True)
-    out["diff_from_previous"] = diff(previous.rules_snapshot if previous else [], v.rules_snapshot)
+    change = diff(previous.rules_snapshot if previous else [], v.rules_snapshot)
+    out["diff_from_previous"] = change
+    out["affects"] = affects(change)
     return out
+
+
+async def rollback_preview(db: Any, company_id: uuid.UUID, number: int) -> dict[str, Any]:
+    """The exact change a rollback would make to the live rules. Writes nothing."""
+    target = await _version(db, company_id, number)
+    change = diff(await live_rules(db, company_id), target.rules_snapshot)
+    return {
+        "target_version": number,
+        "current_version": await current_version(db, company_id),
+        "diff": change,
+        "affects": affects(change),
+        "loosens": is_loosening(change),
+        "applies_at_once": not is_loosening(change),
+        "findings": risk.rule_findings(target.rules_snapshot),
+    }
 
 
 # --- drafts --------------------------------------------------------------------------------
@@ -280,6 +332,8 @@ async def update_draft(
         fail(409, "DRAFT_NOT_OPEN", "Only an open draft can be edited")
     if draft.created_by != actor_of(principal):
         fail(403, "NOT_AUTHOR", "Only the author edits a draft; propose a new one instead")
+    if body.expected_updated_at is not None and body.expected_updated_at != _date(draft.updated_at):
+        fail(409, "STALE_EDIT", "This draft changed since you opened it; reload before saving")
     draft.proposed_rules = [to_dict(r) for r in body.rules]
     draft.reason = clip(body.reason)
     draft.ticket_ref, draft.reviewers = body.ticket_ref, body.reviewers
@@ -378,6 +432,8 @@ async def publish(
     if draft.status != "draft":
         fail(409, "DRAFT_NOT_OPEN", "This draft is already published or discarded")
     base = await current_version(db, company_id)
+    if body.expected_version is not None and body.expected_version != base:
+        fail(409, "STALE_BASE", f"The rules moved to version {base}; review it before publishing")
     if draft.base_version != base:
         fail(409, "STALE_BASE", f"The rules moved to version {base}; rebase this draft on it")
     live = await live_rules(db, company_id)

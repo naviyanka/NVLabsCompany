@@ -17,7 +17,7 @@ from pydantic import BaseModel, Field
 
 from nexus.models.agent import Agent
 from nexus.services.governance_studio import effective, risk, rules
-from nexus.services.governance_studio.catalog import build_catalog, catalog_by_id
+from nexus.services.governance_studio.catalog import UNSUPPORTED, build_catalog, catalog_by_id
 from nexus.services.governance_studio.errors import fail
 
 
@@ -31,6 +31,45 @@ class SimulateBody(BaseModel):
 def _summary(d: dict[str, Any]) -> dict[str, Any]:
     keys = ("state", "decision", "code", "explanation", "source", "approval", "validity")
     return {k: d[k] for k in keys}
+
+
+def trial(snap: effective.Snapshot, rule_dicts: list[dict[str, Any]], company_id: uuid.UUID):
+    """The same snapshot, deciding against ``rule_dicts`` instead of the live rules."""
+    converted = [rules.to_policy_rule(r, company_id) for r in rule_dicts]
+    return replace(snap, inputs=replace(snap.inputs, rules=converted))
+
+
+def capability_diff(before: effective.Snapshot, after: effective.Snapshot) -> dict[str, Any]:
+    """Every policy-controlled capability whose decision changes, and what policy cannot reach."""
+    changes, excluded = [], []
+    for cap in build_catalog():
+        if not (cap["support"] == "enforced" and cap["tool_name"]):
+            excluded.append({
+                "capability_id": cap["id"], "name": cap["name"], "support": cap["support"],
+                "label": "Not enforceable" if cap["support"] == UNSUPPORTED
+                else "Not controlled by policy",
+            })
+            continue
+        was, now = effective.decide(before, cap), effective.decide(after, cap)
+        if was["decision"] != now["decision"] or was["code"] != now["code"]:
+            changes.append({
+                "capability_id": cap["id"], "name": cap["name"], "risk": cap["risk"],
+                "before": was["decision"], "after": now["decision"], "code": now["code"],
+            })
+    return {"changes": changes, "excluded": excluded}
+
+
+async def impact(
+    db: Any, company_id: uuid.UUID, agent: Agent, proposed: list[dict[str, Any]]
+) -> dict[str, Any]:
+    """What publishing ``proposed`` would change for one agent. Writes nothing."""
+    snap = await effective.load_snapshot(db, company_id, agent, with_usage=False)
+    after = trial(snap, proposed, company_id)
+    return {
+        "agent_id": str(agent.id),
+        "capability_diff": capability_diff(snap, after),
+        "findings": _findings(after, proposed),
+    }
 
 
 def _findings(snap: effective.Snapshot, rule_dicts: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -63,12 +102,7 @@ async def simulate(
         out["findings"] = _findings(snap, live)
         return out
     proposed = [rules.to_dict(r) for r in body.proposed_rules]
-    trial = replace(
-        snap,
-        inputs=replace(
-            snap.inputs, rules=[rules.to_policy_rule(r, company_id) for r in proposed]
-        ),
-    )
-    out["proposed"] = _summary(effective.decide(trial, cap))
-    out["findings"] = _findings(trial, proposed)
+    after = trial(snap, proposed, company_id)
+    out["proposed"] = _summary(effective.decide(after, cap))
+    out["findings"] = _findings(after, proposed)
     return out

@@ -304,6 +304,21 @@ async def update_draft(
     return out
 
 
+@router.get("/drafts/{draft_id}/impact")
+async def draft_impact(
+    draft_id: uuid.UUID,
+    agent_id: uuid.UUID,
+    db: DbSession,
+    company_id: CurrentCompanyId,
+    principal: CurrentPrincipal,
+) -> dict[str, Any]:
+    """What publishing this draft changes for one agent, decided by the real engine."""
+    require_reader(principal)
+    agent = await _agent(db, company_id, agent_id)
+    draft = await policies.get_draft(db, company_id, draft_id)
+    return {"draft_id": draft["id"], **await simulate.impact(db, company_id, agent, draft["rules"])}
+
+
 @router.post("/drafts/{draft_id}/discard")
 async def discard_draft(
     draft_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId, principal: CurrentPrincipal
@@ -343,6 +358,14 @@ async def get_version(
 ) -> dict[str, Any]:
     require_reader(principal)
     return await policies.get_version(db, company_id, number)
+
+
+@router.get("/versions/{number}/rollback-preview")
+async def rollback_preview(
+    number: int, db: DbSession, company_id: CurrentCompanyId, principal: CurrentPrincipal
+) -> dict[str, Any]:
+    require_reader(principal)
+    return await policies.rollback_preview(db, company_id, number)
 
 
 @router.post("/versions/{number}/rollback")

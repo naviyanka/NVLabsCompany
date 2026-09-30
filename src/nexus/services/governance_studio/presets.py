@@ -18,7 +18,6 @@ human reads the exact change before anything applies.
 from __future__ import annotations
 
 import uuid
-from dataclasses import replace
 from datetime import date, timedelta
 from typing import Any
 
@@ -27,11 +26,11 @@ from sqlalchemy import func
 from sqlmodel import select
 
 from nexus.models.agent import Agent
-from nexus.services.governance_studio import effective, policies
+from nexus.services.governance_studio import effective, policies, simulate
 from nexus.services.governance_studio.audit import actor_of, audit
-from nexus.services.governance_studio.catalog import UNSUPPORTED, build_catalog
+from nexus.services.governance_studio.catalog import build_catalog
 from nexus.services.governance_studio.errors import fail
-from nexus.services.governance_studio.rules import RuleBody, to_policy_rule
+from nexus.services.governance_studio.rules import RuleBody
 
 MAX_PRIORITY = 100_000
 _STEP = 10
@@ -52,8 +51,6 @@ PRESETS: tuple[tuple[str, str, str], ...] = (
 )
 _LEVEL = {key: i for i, (key, _, _) in enumerate(PRESETS)}
 _LABEL = {key: label for key, label, _ in PRESETS}
-_NOT_POLICY = "Not controlled by policy"
-_NOT_ENFORCEABLE = "Not enforceable"
 
 
 class PresetDraftBody(BaseModel):
@@ -138,25 +135,6 @@ def _rules(
     return others + out, kept
 
 
-def _capability_diff(before: effective.Snapshot, after: effective.Snapshot) -> dict[str, Any]:
-    changes, excluded = [], []
-    for cap in build_catalog():
-        enforced = cap["support"] == "enforced" and cap["tool_name"]
-        if not enforced:
-            excluded.append({
-                "capability_id": cap["id"], "name": cap["name"], "support": cap["support"],
-                "label": _NOT_ENFORCEABLE if cap["support"] == UNSUPPORTED else _NOT_POLICY,
-            })
-            continue
-        was, now = effective.decide(before, cap), effective.decide(after, cap)
-        if was["decision"] != now["decision"] or was["code"] != now["code"]:
-            changes.append({
-                "capability_id": cap["id"], "name": cap["name"], "risk": cap["risk"],
-                "before": was["decision"], "after": now["decision"], "code": now["code"],
-            })
-    return {"changes": changes, "excluded": excluded}
-
-
 async def list_for(db: Any, company_id: uuid.UUID, agent: Agent) -> dict[str, Any]:
     manager = await _is_manager(db, company_id, agent)
     return {"items": [
@@ -178,10 +156,8 @@ async def _build(
     live = await policies.live_rules(db, company_id)
     rules, kept = _rules(key, agent, manager, live, owner, review_by)
     before = await effective.load_snapshot(db, company_id, agent, with_usage=False)
-    after = replace(before, inputs=replace(
-        before.inputs, rules=[to_policy_rule(r, company_id) for r in rules]
-    ))
-    diff = _capability_diff(before, after)
+    after = simulate.trial(before, rules, company_id)
+    diff = simulate.capability_diff(before, after)
     diff["blocked"] = _still_blocked(after, set(kept))
     return rules, diff, await policies.current_version(db, company_id)
 

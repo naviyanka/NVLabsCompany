@@ -206,3 +206,50 @@ class TestRollback:
         for who in ("viewer", "run", "key"):
             r = await api("POST", "/versions/1/rollback", undo, who=who)
             assert r.status_code == 403, who
+
+
+class TestStudioReads:
+    async def test_affects_names_the_agents_and_capabilities_a_change_touches(self, api, t):  # noqa: F811
+        scoped = {"name": "a only", "effect": "deny",
+                  "conditions": {"agent_id": [str(t["a"])], "tool_name": ["http-request", "ai-*"]}}
+        d = await draft(api, scoped)
+        assert d["affects"]["agent_ids"] == [str(t["a"])] and not d["affects"]["all_agents"]
+        assert "tool.http-request" in d["affects"]["capability_ids"]
+        assert "tool.ai-chat" in d["affects"]["capability_ids"]
+        assert "tool.msg-slack-send" not in d["affects"]["capability_ids"]
+        wide = await draft(api, DENY_WRITES)
+        assert wide["affects"]["all_agents"]
+
+    async def test_impact_is_the_real_decision_and_writes_nothing(self, api, factory, t):  # noqa: F811
+        d = await draft(api, DENY_WRITES)
+        r = await api("GET", f"/drafts/{d['id']}/impact?agent_id={t['a']}")
+        changes = {c["capability_id"]: c for c in r.json()["capability_diff"]["changes"]}
+        assert changes["tool.http-request"]["before"] == "allow"
+        assert changes["tool.http-request"]["after"] == "deny"
+        assert await writes_allowed(factory, t), "a preview changes nothing"
+        assert (await api("GET", f"/drafts/{d['id']}/impact?agent_id={t['b']}")).status_code == 200
+        assert (await api("GET", f"/drafts/{d['id']}/impact?agent_id={t['b']}",
+                          who="outsider")).status_code == 404
+
+    async def test_rollback_preview_shows_the_exact_change(self, api, t):  # noqa: F811
+        await publish(api, await draft(api, ALLOW_READ), who="second_admin")
+        await publish(api, await draft(api, ALLOW_READ, DENY_WRITES))
+        same = (await api("GET", "/versions/3/rollback-preview")).json()
+        assert (same["target_version"], same["current_version"]) == (3, 3)
+        assert same["diff"] == {"added": [], "removed": [], "changed": []}
+        back = (await api("GET", "/versions/2/rollback-preview")).json()
+        assert [r["name"] for r in back["diff"]["removed"]] == ["deny writes"]
+        assert back["loosens"] and not back["applies_at_once"]
+        assert (await api("GET", "/versions/99/rollback-preview")).status_code == 404
+
+    async def test_publish_and_edit_carry_an_optimistic_check(self, api, t):  # noqa: F811
+        d = await draft(api, DENY_WRITES)
+        stale = await api("POST", f"/drafts/{d['id']}/publish", {"expected_version": 4})
+        assert (stale.status_code, stale.json()["detail"]["code"]) == (409, "STALE_BASE")
+        edit = {**body(DENY_WRITES, reason="second thought"), "expected_updated_at": "1999-01-01"}
+        lost = await api("PUT", f"/drafts/{d['id']}", edit)
+        assert (lost.status_code, lost.json()["detail"]["code"]) == (409, "STALE_EDIT")
+        edit["expected_updated_at"] = d["updated_at"]
+        assert (await api("PUT", f"/drafts/{d['id']}", edit)).status_code == 200
+        ok = await api("POST", f"/drafts/{d['id']}/publish", {"expected_version": 0})
+        assert ok.status_code == 200
