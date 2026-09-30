@@ -37,7 +37,11 @@ _FROM = {
     "rejected": ("candidate",),
     "superseded": LIVE_STATUSES,
 }
-_ACTION = {"archived": "memory.archived", "rejected": "memory.rejected", "superseded": "memory.superseded"}
+_ACTION = {
+    "archived": "memory.archived",
+    "rejected": "memory.rejected",
+    "superseded": "memory.superseded",
+}
 
 
 def _refusal(current: MemoryRecord, target: str) -> MemoryOpError:
@@ -60,7 +64,10 @@ async def _transition(
     extra: dict[str, Any] | None = None,
     tier: str | None = None,
 ) -> tuple[MemoryRecord, bool]:
-    """Move one row to ``target``. Returns (row, changed); ``changed`` is False for an idempotent repeat."""
+    """Move one row to ``target``.
+
+    Returns (row, changed); ``changed`` is False for an idempotent repeat.
+    """
     record = await get_in_company(db, ctx.company_id, memory_id)
     if record is None:
         raise MemoryOpError("MEMORY_NOT_FOUND", "Memory not found", 404)

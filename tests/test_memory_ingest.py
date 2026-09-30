@@ -106,9 +106,7 @@ async def test_callers_cannot_smuggle_server_fields_through_metadata(env):
     async with factory() as s:
         for key in ("trust", "status", "content_hash", "origin", "recorded_by", "supersedes"):
             with pytest.raises(MemoryRejected):
-                await ingest_memory(
-                    s, _ctx(ids), _item(ids, metadata={key: "x"}), Origin.API
-                )
+                await ingest_memory(s, _ctx(ids), _item(ids, metadata={key: "x"}), Origin.API)
 
 
 # --- content and provenance -----------------------------------------------------------
@@ -142,7 +140,11 @@ async def test_audit_carries_no_content(env):
     async with factory() as s:
         await ingest_memory(s, _ctx(ids), _item(ids, content=f"private {SECRET} text"), Origin.API)
         await s.commit()
-        rows = (await s.execute(select(AuditLog).where(AuditLog.action == "memory.recorded"))).scalars().all()
+        rows = (
+            (await s.execute(select(AuditLog).where(AuditLog.action == "memory.recorded")))
+            .scalars()
+            .all()
+        )
     assert len(rows) == 1
     blob = str(rows[0].details)
     assert "private" not in blob and SECRET not in blob
@@ -170,14 +172,16 @@ async def test_source_reference_cannot_cross_tenants(env):
     factory, ids = env
     async with factory() as s:
         other = await ingest_memory(
-            s, _ctx(ids, "other"),
+            s,
+            _ctx(ids, "other"),
             MemoryInput(scope="company", content="theirs", scope_id=ids["other"]),
             Origin.API,
         )
         await s.commit()
         with pytest.raises(MemoryOpError) as err:
             await ingest_memory(
-                s, _ctx(ids),
+                s,
+                _ctx(ids),
                 _item(ids, source_type="memory_record", source_id=str(other.record.id)),
                 Origin.API,
             )
@@ -221,8 +225,10 @@ async def test_same_text_in_two_companies_is_two_rows(env):
             s, _ctx(ids), MemoryInput(content="x", scope_id=ids["acme"], **kw), Origin.API
         )
         b = await ingest_memory(
-            s, _ctx(ids, "other"),
-            MemoryInput(content="x", scope_id=ids["other"], **kw), Origin.API,
+            s,
+            _ctx(ids, "other"),
+            MemoryInput(content="x", scope_id=ids["other"], **kw),
+            Origin.API,
         )
         assert a.record.id != b.record.id
 
@@ -240,7 +246,10 @@ async def test_idempotency_key_reuse_with_different_payload_conflicts(env):
         assert same.record.id == first.record.id and not same.created
         with pytest.raises(MemoryOpError) as err:
             await ingest_memory(
-                s, _ctx(ids), _item(ids, content="something else", **kw), Origin.API,
+                s,
+                _ctx(ids),
+                _item(ids, content="something else", **kw),
+                Origin.API,
                 payload_conflict_409=True,
             )
         assert (err.value.code, err.value.status_code) == ("MEMORY_IDEMPOTENCY_CONFLICT", 409)
@@ -273,7 +282,9 @@ async def test_orm_cannot_rewrite_content_or_provenance(env):
         rec_id = (await ingest_memory(s, _ctx(ids), _item(ids), Origin.API)).record.id
         await s.commit()
     for field, value in (
-        ("content", "changed"), ("content_hash", "0" * 64), ("ingestion_key", "k"),
+        ("content", "changed"),
+        ("content_hash", "0" * 64),
+        ("ingestion_key", "k"),
         ("source_id", "other"),
     ):
         async with factory() as s:
@@ -297,8 +308,13 @@ async def test_archive_keeps_content_and_is_idempotent(env):
         second = await archive_memory(s, _ctx(ids), rec.id)
         assert second.status == "archived"
         assert await _count(s) == 1
-        n = (await s.execute(select(func.count()).select_from(AuditLog).where(
-            AuditLog.action == "memory.archived"))).scalar_one()
+        n = (
+            await s.execute(
+                select(func.count())
+                .select_from(AuditLog)
+                .where(AuditLog.action == "memory.archived")
+            )
+        ).scalar_one()
         assert n == 1  # the repeat is not a second event
 
 
@@ -369,10 +385,14 @@ async def test_supersede_links_and_preserves_the_old_row(env):
 async def test_supersede_rejects_cross_company_target(env):
     factory, ids = env
     async with factory() as s:
-        theirs = (await ingest_memory(
-            s, _ctx(ids, "other"),
-            MemoryInput(scope="company", content="theirs", scope_id=ids["other"]), Origin.API,
-        )).record
+        theirs = (
+            await ingest_memory(
+                s,
+                _ctx(ids, "other"),
+                MemoryInput(scope="company", content="theirs", scope_id=ids["other"]),
+                Origin.API,
+            )
+        ).record
         with pytest.raises(MemoryOpError) as err:
             await supersede_memory(s, _ctx(ids), theirs.id, _item(ids, content="mine"), Origin.API)
         assert err.value.code == "MEMORY_NOT_FOUND"

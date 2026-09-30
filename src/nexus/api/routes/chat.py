@@ -502,8 +502,8 @@ async def _remember_response(agent: Agent, response_text: str) -> int:
     try:
         from nexus.database import tenant_session_factory
         from nexus.memory.extract import FactExtractor
-        from nexus.memory.layered_persistent import PersistentLayeredMemory
         from nexus.memory.ingest import Origin
+        from nexus.memory.layered_persistent import PersistentLayeredMemory
         from nexus.memory.safety import MemoryRejected
 
         facts = FactExtractor().extract_facts(response_text, agent.id)

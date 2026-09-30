@@ -60,8 +60,11 @@ async def test_concurrent_identical_ingest_yields_one_row(app_role):
     async def one():
         async with tenant_session(company_id) as db:
             result = await ingest_memory(
-                db, ctx,
-                _item(agent_id, source_type="api_request", source_id="evt-1", extractor_version="t-v1"),
+                db,
+                ctx,
+                _item(
+                    agent_id, source_type="api_request", source_id="evt-1", extractor_version="t-v1"
+                ),
                 Origin.API,
             )
             await db.commit()
@@ -92,7 +95,9 @@ async def test_same_key_different_payload_conflicts_across_transactions(app_role
     ctx = MemoryContext(company_id, "user:tester")
     kw = {"source_type": "api_request", "source_id": "idem:1", "item_key": "k"}
     async with tenant_session(company_id) as db:
-        await ingest_memory(db, ctx, _item(agent_id, "first", **kw), Origin.API, payload_conflict_409=True)
+        await ingest_memory(
+            db, ctx, _item(agent_id, "first", **kw), Origin.API, payload_conflict_409=True
+        )
         await db.commit()
     async with tenant_session(company_id) as db:
         with pytest.raises(MemoryOpError) as err:
@@ -202,8 +207,9 @@ async def test_backfill_keeps_rls_forced_and_rows_intact(postgres_container, mig
             ):
                 await conn.execute(
                     sa.text(
-                        "INSERT INTO memory_records (id, company_id, scope, content, metadata, importance,"
-                        " access_count, tier, created_at, updated_at) VALUES (:i, :c, 'agent', :t,"
+                        "INSERT INTO memory_records (id, company_id, scope, content, metadata,"
+                        " importance, access_count, tier, created_at, updated_at)"
+                        " VALUES (:i, :c, 'agent', :t,"
                         " CAST(:m AS json), 0.5, 0, 'warm', now(), now())"
                     ),
                     {"i": rid, "c": company_id, "t": content, "m": meta},
@@ -216,7 +222,8 @@ async def test_backfill_keeps_rls_forced_and_rows_intact(postgres_container, mig
             flags = (
                 await conn.execute(
                     sa.text(
-                        "SELECT relrowsecurity, relforcerowsecurity FROM pg_class WHERE relname='memory_records'"
+                        "SELECT relrowsecurity, relforcerowsecurity FROM pg_class"
+                        " WHERE relname='memory_records'"
                     )
                 )
             ).one()
@@ -224,11 +231,16 @@ async def test_backfill_keeps_rls_forced_and_rows_intact(postgres_container, mig
             rows = {
                 r.id: r
                 for r in await conn.execute(
-                    sa.text("SELECT id, content, status, trust_state, ingestion_key FROM memory_records")
+                    sa.text(
+                        "SELECT id, content, status, trust_state, ingestion_key FROM memory_records"
+                    )
                 )
             }
         assert rows[legacy_id].content == "Old note"
-        assert (rows[legacy_id].status, rows[legacy_id].ingestion_key) == ("active", f"legacy:{legacy_id}")
+        assert (rows[legacy_id].status, rows[legacy_id].ingestion_key) == (
+            "active",
+            f"legacy:{legacy_id}",
+        )
         assert rows[candidate_id].status == "candidate"
 
         await asyncio.to_thread(alembic.command.downgrade, cfg, "e7a1c2d3f407")

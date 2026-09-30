@@ -44,7 +44,9 @@ class MemoryRecord(SQLModel, table=True):
         CheckConstraint(_in("status", MEMORY_STATUSES), name="ck_memory_records_status"),
         CheckConstraint(_in("trust_state", TRUST_STATES), name="ck_memory_records_trust_state"),
         CheckConstraint(_in("memory_type", MEMORY_TYPES), name="ck_memory_records_memory_type"),
-        Index("ix_memory_records_company_scope_status", "company_id", "scope", "status", "created_at"),
+        Index(
+        "ix_memory_records_company_scope_status", "company_id", "scope", "status", "created_at"
+    ),
         Index("ix_memory_records_company_source", "company_id", "source_type", "source_id"),
     )
 
@@ -70,17 +72,17 @@ class MemoryRecord(SQLModel, table=True):
     memory_type: str = Field(default="unknown", max_length=20)
     status: str = Field(default="active", max_length=20)
     trust_state: str = Field(default="untrusted", max_length=20)
-    source_type: Optional[str] = Field(default=None, max_length=40)
-    source_id: Optional[str] = Field(default=None, max_length=128)
-    source_created_at: Optional[datetime] = Field(default=None)
-    extractor_version: Optional[str] = Field(default=None, max_length=40)
+    source_type: str | None = Field(default=None, max_length=40)
+    source_id: str | None = Field(default=None, max_length=128)
+    source_created_at: datetime | None = Field(default=None)
+    extractor_version: str | None = Field(default=None, max_length=40)
     content_hash: str = Field(default="", max_length=64)
     ingestion_key: str = Field(default="", max_length=80)
-    supersedes_id: Optional[uuid.UUID] = Field(
+    supersedes_id: uuid.UUID | None = Field(
         default=None, foreign_key="memory_records.id", index=True
     )
-    lifecycle_changed_at: Optional[datetime] = Field(default=None)
-    lifecycle_changed_by: Optional[str] = Field(default=None, max_length=100)
+    lifecycle_changed_at: datetime | None = Field(default=None)
+    lifecycle_changed_by: str | None = Field(default=None, max_length=100)
 
 
 IMMUTABLE_FIELDS = (

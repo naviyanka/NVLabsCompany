@@ -11,7 +11,14 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from nexus.api.deps import CurrentCompanyId, CurrentPrincipal, DbSession
-from nexus.memory.ingest import MemoryContext, MemoryInput, MemoryOpError, Origin, http_error, ingest_memory
+from nexus.memory.ingest import (
+    MemoryContext,
+    MemoryInput,
+    MemoryOpError,
+    Origin,
+    http_error,
+    ingest_memory,
+)
 from nexus.memory.safety import MemoryRejected
 from nexus.models.memory import LIVE_STATUSES, MEMORY_STATUSES, MemoryRecord
 
@@ -249,7 +256,9 @@ async def list_agent_memories(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail={"code": "MEMORY_STATUS_INVALID", "message": "Unknown memory status"},
         )
-    stmt = select(MemoryRecord).where(MemoryRecord.agent_id == agent_id, MemoryRecord.company_id == company_id)
+    stmt = select(MemoryRecord).where(
+        MemoryRecord.agent_id == agent_id, MemoryRecord.company_id == company_id
+    )
     stmt = stmt.where(
         MemoryRecord.status == state if state else MemoryRecord.status.in_(LIVE_STATUSES)
     )

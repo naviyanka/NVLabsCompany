@@ -44,7 +44,11 @@ async def test_one_store_never_serves_another_companys_memory(db):
     scope_id = agent.id  # company B holds a row that names the same scope entity id
     store = MemoryStore(db)
     await store.store(scope="agent", scope_id=scope_id, content="A secret", company_id=a)
-    db.add(MemoryRecord(company_id=b, scope="agent", scope_id=scope_id, content="B secret", tier="warm"))
+    db.add(
+        MemoryRecord(
+            company_id=b, scope="agent", scope_id=scope_id, content="B secret", tier="warm"
+        )
+    )
     await db.flush()
 
     # Hot tier: the cache is keyed by company.

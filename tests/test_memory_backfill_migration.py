@@ -5,8 +5,9 @@ import uuid
 from datetime import datetime
 
 import sqlalchemy as sa
-from alembic import command
 from alembic.config import Config
+
+from alembic import command
 
 PREVIOUS = "e7a1c2d3f407"
 CURRENT = "f1b7c9d2a508"
@@ -47,10 +48,14 @@ def _row(scope, content, meta=None, **kw):
 
 
 def _legacy_rows():
-    parent = _row("executive", "Old plan", {"type": "decision", "status": "superseded", "origin": "human"})
+    parent = _row(
+        "executive", "Old plan", {"type": "decision", "status": "superseded", "origin": "human"}
+    )
     return {
         "plain": _row("agent", "Deploys go out on Tuesdays"),
-        "candidate": _row("l2_agent", "User likes tea", {"trust": "untrusted_candidate", "origin": "chat"}),
+        "candidate": _row(
+            "l2_agent", "User likes tea", {"trust": "untrusted_candidate", "origin": "chat"}
+        ),
         "api": _row("agent", "Operator note", {"origin": "api", "trust": "operator_supplied"}),
         "guideline": _row("guidelines", "Always review"),
         "chat_source": _row(
@@ -58,11 +63,18 @@ def _legacy_rows():
         ),
         "parent": parent,
         "successor": _row(
-            "executive", "New plan",
-            {"type": "decision", "status": "active", "origin": "human", "supersedes": str(parent["id"])},
+            "executive",
+            "New plan",
+            {
+                "type": "decision",
+                "status": "active",
+                "origin": "human",
+                "supersedes": str(parent["id"]),
+            },
         ),
         "foreign_link": _row(
-            "executive", "Points elsewhere",
+            "executive",
+            "Points elsewhere",
             {"type": "decision", "supersedes": str(uuid.uuid4())},
         ),
         "resolved": _row("executive", "Done thing", {"type": "commitment", "status": "resolved"}),
@@ -104,7 +116,10 @@ def test_backfill_is_deterministic_and_lossless(tmp_path):
     assert after("parent").memory_type == "decision"
 
     # Source only where the row itself names a real message or turn; never invented.
-    assert (after("chat_source").source_type, after("chat_source").source_id) == ("chat_message", "msg-9")
+    assert (after("chat_source").source_type, after("chat_source").source_id) == (
+        "chat_message",
+        "msg-9",
+    )
     assert after("plain").source_type is None and after("plain").source_id is None
     assert after("candidate").source_id is None
 
@@ -119,7 +134,9 @@ def test_backfill_is_deterministic_and_lossless(tmp_path):
     table = _table(engine)
     assert "status" not in table.c and "content_hash" not in table.c
     with engine.connect() as conn:
-        assert {r.content for r in conn.execute(table.select())} == {r["content"] for r in rows.values()}
+        assert {r.content for r in conn.execute(table.select())} == {
+            r["content"] for r in rows.values()
+        }
     engine.dispose()
 
 

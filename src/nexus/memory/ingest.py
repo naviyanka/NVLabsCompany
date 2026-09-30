@@ -50,7 +50,10 @@ SOURCE_TYPES = frozenset(
 
 
 class MemoryOpError(Exception):
-    """A refused memory operation. ``code`` and ``status_code`` are stable; the text never echoes content."""
+    """A refused memory operation.
+
+    ``code`` and ``status_code`` are stable; the text never echoes content.
+    """
 
     def __init__(self, code: str, message: str, status_code: int = 422) -> None:
         super().__init__(message)
@@ -167,7 +170,9 @@ def _now() -> datetime:
     return utcnow()
 
 
-async def get_in_company(db: Any, company_id: uuid.UUID, memory_id: uuid.UUID) -> MemoryRecord | None:
+async def get_in_company(
+    db: Any, company_id: uuid.UUID, memory_id: uuid.UUID
+) -> MemoryRecord | None:
     return (
         await db.execute(
             select(MemoryRecord)
@@ -207,7 +212,10 @@ async def _validate_refs(db: Any, ctx: MemoryContext, item: MemoryInput) -> None
 
 
 async def _validate_scope_owner(db: Any, ctx: MemoryContext, item: MemoryInput) -> None:
-    """An agent, team or department scope id must belong to the company; other scopes take only agent/company."""
+    """An agent, team or department scope id must belong to the company.
+
+    Other scopes take only agent/company.
+    """
     from nexus.models.agent import Agent
     from nexus.models.company import Department, Team
 

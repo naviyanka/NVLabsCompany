@@ -22,7 +22,13 @@ def _calls():
 
 
 def _name(node: ast.expr) -> str:
-    return node.id if isinstance(node, ast.Name) else node.attr if isinstance(node, ast.Attribute) else ""
+    return (
+        node.id
+        if isinstance(node, ast.Name)
+        else node.attr
+        if isinstance(node, ast.Attribute)
+        else ""
+    )
 
 
 def _mentions_memory_record(node: ast.Call) -> bool:
@@ -42,7 +48,9 @@ def test_memory_store_never_adds_rows_itself():
     adds = [
         node.lineno
         for rel, node in _calls()
-        if rel == TRANSIENT_VIEWS and isinstance(node.func, ast.Attribute) and node.func.attr == "add"
+        if rel == TRANSIENT_VIEWS
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "add"
     ]
     assert not adds, f"MemoryStore persists through ingest_memory only: lines {adds}"
 

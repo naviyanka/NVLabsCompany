@@ -40,8 +40,8 @@ from nexus.memory.ingest import (
 )
 from nexus.memory.layered import Fact, L1Summary, LayeredMemoryConfig, MemoryLayer
 from nexus.memory.lifecycle import archive_memory
-from nexus.memory.safety import MAX_STRING
 from nexus.memory.promotion import PromotionCriteria, PromotionEngine
+from nexus.memory.safety import MAX_STRING
 from nexus.models.memory import LIVE_STATUSES, MemoryRecord
 
 L2_SCOPE = MemoryLayer.L2_AGENT.value

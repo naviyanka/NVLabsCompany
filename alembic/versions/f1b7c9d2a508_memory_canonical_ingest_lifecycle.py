@@ -138,7 +138,12 @@ def _backfill(bind, is_pg: bool) -> None:
     last = None
     while True:
         query = sa.select(
-            t.c.id, t.c.company_id, t.c.scope, t.c.content, t.c.metadata.label("meta"), t.c.updated_at
+            t.c.id,
+            t.c.company_id,
+            t.c.scope,
+            t.c.content,
+            t.c.metadata.label("meta"),
+            t.c.updated_at,
         ).order_by(t.c.id).limit(_BATCH)
         if last is not None:
             query = query.where(t.c.id > last)

@@ -298,7 +298,9 @@ class MemoryStore:
                 MemoryInput(
                     scope=cold_record["scope"],
                     content=cold_record["content"],
-                    agent_id=uuid.UUID(cold_record["agent_id"]) if cold_record.get("agent_id") else None,
+                    agent_id=(
+                        uuid.UUID(cold_record["agent_id"]) if cold_record.get("agent_id") else None
+                    ),
                     scope_id=(
                         uuid.UUID(cold_record["scope_id"]) if cold_record.get("scope_id") else None
                     ),

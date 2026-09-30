@@ -23,7 +23,11 @@ async def factory(monkeypatch):
     async with make() as s:
         s.add(Company(id=seed.COMPANY_ID, name="acme"))
         await s.flush()
-        s.add(Agent(id=seed.CEO_AGENT_ID, company_id=seed.COMPANY_ID, name="ceo", role="ceo", model="m"))
+        s.add(
+            Agent(
+                id=seed.CEO_AGENT_ID, company_id=seed.COMPANY_ID, name="ceo", role="ceo", model="m"
+            )
+        )
         await s.commit()
 
     @asynccontextmanager
@@ -47,4 +51,6 @@ async def test_seed_writes_asserted_seed_rows_once(factory):
         assert len({r.source_id for r in rows}) == len(rows)
         assert {(r.status, r.trust_state) for r in rows} == {("active", "asserted")}
         assert all(r.content_hash and r.company_id == seed.COMPANY_ID for r in rows)
-        assert (await s.execute(select(func.count()).select_from(MemoryRecord))).scalar_one() == len(rows)
+        assert (
+            await s.execute(select(func.count()).select_from(MemoryRecord))
+        ).scalar_one() == len(rows)

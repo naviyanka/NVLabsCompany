@@ -288,10 +288,17 @@ async def test_candidate_memory_never_reaches_the_prompt(patched_db, company_and
     from sqlalchemy import update
 
     _, alpha, _ = company_and_agents
-    await chat_module._remember_response(alpha, "I learned that deploys go out on Tuesdays each week.")
+    await chat_module._remember_response(
+        alpha, "I learned that deploys go out on Tuesdays each week."
+    )
     async with patched_db() as s:
         assert await chat_module._fetch_agent_memories(s, alpha.id, alpha.company_id) == []
-        assert await chat_module._fetch_agent_memories(s, alpha.id, alpha.company_id, query="deploys") == []
+        assert (
+            await chat_module._fetch_agent_memories(
+                s, alpha.id, alpha.company_id, query="deploys"
+            )
+            == []
+        )
         # Once a person or a later phase activates it, recall serves it.
         await s.execute(update(MemoryRecord).values(status="active"))
         await s.commit()

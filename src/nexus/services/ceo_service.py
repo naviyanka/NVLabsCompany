@@ -554,7 +554,8 @@ async def remember(
     if result.created:
         await ms.audit(db, company_id, "ceo.memory_recorded", recorded_by, "memory", record.id,
                        type=entry.type, ceo_id=ceo.id, origin=origin,
-                       redacted=bool((record.record_metadata or {}).get("redacted")) or source_hit or refs_hit,
+                       redacted=bool((record.record_metadata or {}).get("redacted"))
+                       or source_hit or refs_hit,
                        supersedes=entry.supersedes, resolves=entry.resolves)
     return record
 
