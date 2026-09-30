@@ -192,7 +192,10 @@ async def test_backfill_keeps_rls_forced_and_rows_intact(postgres_container, mig
     await admin.dispose()
 
     url = f"{base}/{name}"
-    cfg = alembic.config.Config("alembic.ini")
+    # No ini file: alembic's env.py would call logging.config.fileConfig, which disables
+    # every existing logger and breaks log capture in tests that run after this one.
+    cfg = alembic.config.Config()
+    cfg.set_main_option("script_location", "alembic")
     cfg.set_main_option("sqlalchemy.url", url)
     engine = create_async_engine(url)
     try:

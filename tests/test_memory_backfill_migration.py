@@ -1,11 +1,9 @@
 """The canonical-ingest migration backfills legacy memory rows deterministically."""
 
 import hashlib
-import logging
 import uuid
 from datetime import datetime
 
-import pytest
 import sqlalchemy as sa
 from alembic.config import Config
 
@@ -17,23 +15,11 @@ COMPANY, OTHER = uuid.uuid4(), uuid.uuid4()
 NOW = datetime(2026, 1, 2, 3, 4, 5)
 
 
-@pytest.fixture(autouse=True)
-def _keep_logging():
-    """alembic's env.py calls logging.config.fileConfig, which disables every existing
-    logger and swaps the root handlers; put them back so later tests can log and capture."""
-    root = logging.getLogger()
-    handlers, level = list(root.handlers), root.level
-    loggers = list(logging.root.manager.loggerDict.values())
-    disabled = {id(lg): lg.disabled for lg in loggers if isinstance(lg, logging.Logger)}
-    yield
-    root.handlers[:], root.level = handlers, level
-    for lg in loggers:
-        if isinstance(lg, logging.Logger) and id(lg) in disabled:
-            lg.disabled = disabled[id(lg)]
-
-
 def _cfg(db_file) -> Config:
-    cfg = Config("alembic.ini")
+    # No ini file: alembic's env.py would call logging.config.fileConfig, which disables
+    # every existing logger and breaks log capture in tests that run after this one.
+    cfg = Config()
+    cfg.set_main_option("script_location", "alembic")
     cfg.set_main_option("sqlalchemy.url", f"sqlite+aiosqlite:///{db_file.as_posix()}")
     return cfg
 
