@@ -437,7 +437,7 @@ def entry_view(record: MemoryRecord) -> dict[str, Any]:
         "supersedes": meta.get("supersedes"),
         "superseded_by": meta.get("superseded_by"),
         "resolved_at": meta.get("resolved_at"),
-        "content_sha256": meta.get("content_sha256"),
+        "content_sha256": record.content_hash,
         "redacted": meta.get("redacted", False),
         "created_at": ms._iso(record.created_at),
     }
@@ -457,16 +457,6 @@ async def _entry(db: Any, company_id: uuid.UUID, entry_id: uuid.UUID) -> MemoryR
     return record
 
 
-def _close(record: MemoryRecord, state: str, now: datetime, by: uuid.UUID) -> None:
-    meta = dict(record.record_metadata or {})
-    meta["status"] = state
-    meta["superseded_by" if state == SUPERSEDED else "resolved_by"] = str(by)
-    if state == RESOLVED:
-        meta["resolved_at"] = ms._iso(now)
-    record.record_metadata = meta  # reassign: the JSON column is not mutation-tracked
-    record.updated_at = now
-
-
 async def remember(
     db: Any,
     company_id: uuid.UUID,
@@ -478,13 +468,25 @@ async def remember(
 ) -> MemoryRecord:
     """Store one entry for the company's current CEO. Flushes; the caller commits.
 
-    ``supersedes`` marks an earlier entry superseded, ``resolves`` marks one
-    resolved (a follow-up done). Neither deletes anything.
+    Goes through the canonical ingest path. ``supersedes`` appends the entry as the
+    successor of an earlier one and marks that one superseded; ``resolves`` marks one
+    resolved (a follow-up done), which archives it. Neither deletes anything, and the
+    same entry from the same turn is recorded once.
     """
+    from nexus.memory.ingest import (
+        MemoryContext,
+        MemoryInput,
+        MemoryOpError,
+        Origin,
+        executive_source,
+        http_error,
+        ingest_memory,
+    )
+    from nexus.memory.lifecycle import archive_memory, supersede_memory
+
     ceo = await current_ceo(db, company_id)
     if ceo is None:
         raise ms._error(409, "NO_CEO", "Executive memory belongs to a CEO; appoint one first")
-    content, redacted = redact(entry.content)
     try:
         source_meta, source_hit = sanitize_value(
             {k: str(v) for k, v in (source or {}).items() if v is not None}
@@ -492,45 +494,68 @@ async def remember(
         refs_meta, refs_hit = sanitize_value({k: str(v) for k, v in sorted(entry.refs.items())})
     except MemoryRejected as exc:
         raise ms._error(422, exc.code, str(exc)) from exc
-    redacted = redacted or source_hit or refs_hit
-    now = _now()
-    record = MemoryRecord(
-        id=uuid.uuid4(),
-        company_id=company_id,
-        agent_id=ceo.id,
+
+    for target in (entry.supersedes, entry.resolves):
+        if target is not None:
+            earlier = await _entry(db, company_id, target)
+            # Only a human may close what a human said.
+            if origin != "human" and (earlier.record_metadata or {}).get("origin") == "human":
+                raise ms._error(403, "HUMAN_ENTRY_PROTECTED",
+                                "Only a human may supersede or resolve a human entry")
+
+    source_type, source_id = executive_source(source_meta)
+    item = MemoryInput(
         scope=EXECUTIVE_SCOPE,
+        content=entry.content,
+        memory_type=entry.type,
+        agent_id=ceo.id,
         scope_id=company_id,
-        content=content,
         importance=1.0,
-        created_at=now,
-        updated_at=now,
-        record_metadata={
+        content_max=CONTENT_MAX,
+        source_type=source_type,
+        source_id=source_id,
+        extractor_version="ceo-memory-v1",
+        # The same turn saying the same thing about the same things is one entry.
+        item_key=hashlib.sha256(
+            repr((entry.type, sorted(refs_meta.items()), str(entry.supersedes),
+                  str(entry.resolves))).encode()
+        ).hexdigest()[:32],
+        server_metadata={
             "type": entry.type,
             "status": ACTIVE,
             "ceo_id": str(ceo.id),
-            "recorded_by": recorded_by,
-            "origin": origin,
             "source": source_meta,
             "refs": refs_meta,
             "supersedes": entry.supersedes and str(entry.supersedes),
             "resolves": entry.resolves and str(entry.resolves),
-            "content_sha256": hashlib.sha256(content.encode()).hexdigest(),
-            "redacted": redacted,
         },
     )
-    for target, state in ((entry.supersedes, SUPERSEDED), (entry.resolves, RESOLVED)):
-        if target is not None:
-            earlier = await _entry(db, company_id, target)
-            # Only a human may close what a human said.
-            if origin != "human" and earlier.record_metadata.get("origin") == "human":
-                raise ms._error(403, "HUMAN_ENTRY_PROTECTED",
-                                "Only a human may supersede or resolve a human entry")
-            _close(earlier, state, now, record.id)
-    db.add(record)
-    await db.flush()
-    await ms.audit(db, company_id, "ceo.memory_recorded", recorded_by, "memory", record.id,
-                   type=entry.type, ceo_id=ceo.id, origin=origin, redacted=redacted,
-                   supersedes=entry.supersedes, resolves=entry.resolves)
+    ctx = MemoryContext(company_id, recorded_by)
+    kind = Origin.HUMAN if origin == "human" else Origin.TOOL
+    try:
+        if entry.supersedes is not None:
+            result = await supersede_memory(
+                db, ctx, entry.supersedes, item, kind,
+                old_extra_metadata={"status": SUPERSEDED},
+            )
+        else:
+            result = await ingest_memory(db, ctx, item, kind)
+        record = result.record
+        if entry.resolves is not None:
+            await archive_memory(
+                db, ctx, entry.resolves, reason=f"resolved by {record.id}",
+                extra_metadata={
+                    "status": RESOLVED, "resolved_by": str(record.id),
+                    "resolved_at": ms._iso(_now()),
+                },
+            )
+    except (MemoryOpError, MemoryRejected) as exc:
+        raise http_error(exc) from exc
+    if result.created:
+        await ms.audit(db, company_id, "ceo.memory_recorded", recorded_by, "memory", record.id,
+                       type=entry.type, ceo_id=ceo.id, origin=origin,
+                       redacted=bool((record.record_metadata or {}).get("redacted")) or source_hit or refs_hit,
+                       supersedes=entry.supersedes, resolves=entry.resolves)
     return record
 
 

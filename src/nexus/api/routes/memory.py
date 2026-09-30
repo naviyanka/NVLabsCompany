@@ -1,16 +1,19 @@
 """Memory API endpoints - memory storage, search, and retrieval."""
 
+import hashlib
+import json
 import uuid
 from datetime import datetime
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Header, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from nexus.api.deps import CurrentCompanyId, CurrentPrincipal, DbSession
-from nexus.memory.safety import MemoryRejected, sanitize_metadata, sanitize_text
-from nexus.models.memory import MemoryRecord
+from nexus.memory.ingest import MemoryContext, MemoryInput, MemoryOpError, Origin, http_error, ingest_memory
+from nexus.memory.safety import MemoryRejected
+from nexus.models.memory import LIVE_STATUSES, MEMORY_STATUSES, MemoryRecord
 
 router = APIRouter(tags=["memory"])
 
@@ -55,6 +58,41 @@ class MemoryResponse(BaseModel):
     tier: str
     created_at: datetime
     updated_at: datetime
+    status: str | None = None
+    trust_state: str | None = None
+    memory_type: str | None = None
+    supersedes_id: uuid.UUID | None = None
+
+
+def principal_actor(principal: Any) -> str:
+    """The audit actor for an authenticated principal."""
+    if principal.user_id:
+        return f"user:{principal.user_id}"
+    if principal.run_id:
+        return f"run:{principal.run_id}"
+    return f"service:{principal.api_key_id or principal.label or 'unknown'}"
+
+
+def memory_response(record: MemoryRecord) -> MemoryResponse:
+    """Built by hand: a SQLModel row's `.metadata` is the table registry, not the JSON column."""
+    return MemoryResponse(
+        id=record.id,
+        company_id=record.company_id,
+        agent_id=record.agent_id,
+        scope=record.scope,
+        scope_id=record.scope_id,
+        content=record.content,
+        metadata=record.record_metadata,
+        importance=record.importance,
+        access_count=record.access_count or 0,
+        tier=record.tier,
+        created_at=record.created_at,
+        updated_at=record.updated_at,
+        status=record.status,
+        trust_state=record.trust_state,
+        memory_type=record.memory_type,
+        supersedes_id=record.supersedes_id,
+    )
 
 
 class MemorySearchResult(BaseModel):
@@ -75,15 +113,17 @@ async def store_memory(
     db: DbSession,
     company_id: CurrentCompanyId,
     principal: CurrentPrincipal,
+    idempotency_key: str | None = Header(default=None, max_length=200),
 ) -> Any:
     """Store a memory for an agent.
 
     Company and actor come from the principal. The caller supplies scope, text,
     importance and free-form metadata; the metadata may not set identity,
-    provenance, trust or lifecycle keys, which the server owns.
+    provenance, trust or lifecycle keys, which the server owns. An optional
+    ``Idempotency-Key`` header makes a retry return the first result; reusing the
+    key with a different body is a 409.
     """
     from nexus.models.agent import Agent
-    from nexus.services import manager_service as ms
     from nexus.services.ceo_service import EXECUTIVE_SCOPE
 
     def refuse(code: str, message: str) -> HTTPException:
@@ -101,11 +141,6 @@ async def store_memory(
         raise refuse("MEMORY_SCOPE_NOT_WRITABLE", "This memory scope cannot be written here")
     if body.scope_id is not None and body.scope_id != agent_id:
         raise refuse("MEMORY_SCOPE_MISMATCH", "scope_id must be the agent the memory belongs to")
-    try:
-        content, hit = sanitize_text(body.content, max_len=CONTENT_MAX)
-        user_meta, meta_hit = sanitize_metadata(body.metadata)
-    except MemoryRejected as exc:
-        raise refuse(exc.code, str(exc)) from exc
 
     agent_stmt = select(Agent).where(Agent.id == agent_id, Agent.company_id == company_id)
     agent_result = await db.execute(agent_stmt)
@@ -116,50 +151,34 @@ async def store_memory(
             detail=f"Agent {agent_id} not found",
         )
 
-    if principal.user_id:
-        actor = f"user:{principal.user_id}"
-    elif principal.run_id:
-        actor = f"run:{principal.run_id}"
-    else:
-        actor = f"service:{principal.api_key_id or principal.label or 'unknown'}"
-    redacted = hit or meta_hit
-    record = MemoryRecord(
-        company_id=company_id,
-        agent_id=agent_id,
+    actor = principal_actor(principal)
+
+    item = MemoryInput(
         scope=body.scope,
+        content=body.content,
+        agent_id=agent_id,
         scope_id=agent_id,
-        content=content,
-        record_metadata={
-            **user_meta,
-            "origin": "api",
-            "recorded_by": actor,
-            "trust": "operator_supplied",
-            "redacted": redacted,
-        },
         importance=body.importance,
-        tier="warm",
+        metadata=body.metadata,
+        content_max=CONTENT_MAX,
+        source_type="api_request",
+        extractor_version="api-v1",
     )
-    db.add(record)
-    await db.flush()
-    await ms.audit(
-        db, company_id, "memory.recorded", actor, "memory", record.id,
-        agent_id=agent_id, scope=body.scope, redacted=redacted,
-    )
-    # Built by hand: a SQLModel row's `.metadata` is the table registry, not the JSON column.
-    return MemoryResponse(
-        id=record.id,
-        company_id=record.company_id,
-        agent_id=record.agent_id,
-        scope=record.scope,
-        scope_id=record.scope_id,
-        content=record.content,
-        metadata=record.record_metadata,
-        importance=record.importance,
-        access_count=record.access_count or 0,
-        tier=record.tier,
-        created_at=record.created_at,
-        updated_at=record.updated_at,
-    )
+    if idempotency_key:
+        # Bound to the authenticated company and actor, so no one else's key can collide.
+        bound = json.dumps([str(company_id), actor, idempotency_key])
+        item.source_id = "idem:" + hashlib.sha256(bound.encode()).hexdigest()[:40]
+        item.item_key = hashlib.sha256(
+            json.dumps([body.metadata, body.importance], sort_keys=True, default=str).encode()
+        ).hexdigest()[:32]
+    try:
+        result = await ingest_memory(
+            db, MemoryContext(company_id, actor), item, Origin.API,
+            payload_conflict_409=bool(idempotency_key),
+        )
+    except (MemoryRejected, MemoryOpError) as exc:
+        raise http_error(exc) from exc
+    return memory_response(result.record)
 
 
 @router.get(
@@ -179,7 +198,11 @@ async def search_memory(
     # Fetch agent's accessible memories
     stmt = (
         select(MemoryRecord)
-        .where(MemoryRecord.agent_id == agent_id, MemoryRecord.company_id == company_id)
+        .where(
+            MemoryRecord.agent_id == agent_id,
+            MemoryRecord.company_id == company_id,
+            MemoryRecord.status.in_(LIVE_STATUSES),
+        )
         .order_by(MemoryRecord.importance.desc())
         .limit(1000)
     )
@@ -198,20 +221,7 @@ async def search_memory(
         memory = memories[idx]
         search_results.append(
             MemorySearchResult(
-                memory=MemoryResponse(
-                    id=memory.id,
-                    company_id=memory.company_id,
-                    agent_id=memory.agent_id,
-                    scope=memory.scope,
-                    scope_id=memory.scope_id,
-                    content=memory.content,
-                    metadata=memory.record_metadata,
-                    importance=memory.importance,
-                    access_count=memory.access_count,
-                    tier=memory.tier,
-                    created_at=memory.created_at,
-                    updated_at=memory.updated_at,
-                ),
+                memory=memory_response(memory),
                 score=score,
             )
         )
@@ -229,15 +239,24 @@ async def list_agent_memories(
     company_id: CurrentCompanyId,
     scope: str | None = None,
     tier: str | None = None,
+    state: str | None = Query(default=None, alias="status"),
     limit: int = 100,
     offset: int = 0,
 ) -> Any:
-    """List memories for an agent."""
+    """List memories for an agent. Live (candidate + active) unless ``status`` names one state."""
+    if state is not None and state not in MEMORY_STATUSES:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "MEMORY_STATUS_INVALID", "message": "Unknown memory status"},
+        )
     stmt = select(MemoryRecord).where(MemoryRecord.agent_id == agent_id, MemoryRecord.company_id == company_id)
+    stmt = stmt.where(
+        MemoryRecord.status == state if state else MemoryRecord.status.in_(LIVE_STATUSES)
+    )
     if scope:
         stmt = stmt.where(MemoryRecord.scope == scope)
     if tier:
         stmt = stmt.where(MemoryRecord.tier == tier)
     stmt = stmt.offset(offset).limit(limit).order_by(MemoryRecord.created_at.desc())
     result = await db.execute(stmt)
-    return list(result.scalars().all())
+    return [memory_response(m) for m in result.scalars().all()]

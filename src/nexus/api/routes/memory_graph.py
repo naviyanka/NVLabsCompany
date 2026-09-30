@@ -8,7 +8,7 @@ from fastapi import APIRouter
 from sqlalchemy import select
 
 from nexus.api.deps import DbSession, PathCompanyId
-from nexus.models.memory import MemoryRecord
+from nexus.models.memory import LIVE_STATUSES, MemoryRecord
 
 router = APIRouter(tags=["memory"])
 
@@ -30,7 +30,7 @@ async def get_memory_graph(
     Returns nodes (one per memory), edges (derived from shared agent/scope/proximity),
     clusters (grouped by scope), and computed metrics.
     """
-    stmt = select(MemoryRecord).where(MemoryRecord.company_id == company_id).order_by(MemoryRecord.created_at.desc())
+    stmt = select(MemoryRecord).where(MemoryRecord.company_id == company_id, MemoryRecord.status.in_(LIVE_STATUSES)).order_by(MemoryRecord.created_at.desc())
     result = await db.execute(stmt)
     memories = list(result.scalars().all())
 

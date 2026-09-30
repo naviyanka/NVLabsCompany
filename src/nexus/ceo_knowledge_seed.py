@@ -162,46 +162,36 @@ API_KNOWLEDGE = [
 
 
 async def seed_ceo_knowledge():
-    """Seed CEO agent memories with API knowledge."""
+    """Seed CEO agent memories with API knowledge, through the canonical ingest path."""
     from nexus.database import tenant_session
-    from nexus.models.memory import MemoryRecord
-    from nexus.models._time import utcnow
-    from sqlalchemy import select, func
+    from nexus.memory.ingest import MemoryContext, MemoryInput, Origin, ingest_memory
 
     # memory_records is under row-level security: the seed writes one company's rows.
     async with tenant_session(COMPANY_ID) as db:
-        # Check if already seeded
-        count_result = await db.execute(
-            select(func.count(MemoryRecord.id)).where(
-                MemoryRecord.agent_id == CEO_AGENT_ID,
-                MemoryRecord.scope == "api_reference",
-            )
-        )
-        existing = count_result.scalar() or 0
-        if existing >= 10:
-            print(f"CEO knowledge already seeded ({existing} records). Skipping.")
-            return
-
-        now = utcnow()
+        ctx = MemoryContext(COMPANY_ID, "system:ceo-knowledge-seed")
         seeded = 0
-        for entry in API_KNOWLEDGE:
-            record = MemoryRecord(
-                id=uuid.uuid4(),
-                company_id=COMPANY_ID,
-                agent_id=CEO_AGENT_ID,
-                content=entry["content"],
-                scope=entry["scope"],
-                importance=entry["importance"],
-                tier="hot",
-                tags=entry.get("tags", ""),
-                created_at=now,
-                updated_at=now,
+        for ordinal, entry in enumerate(API_KNOWLEDGE):
+            # A stable source per entry: rerunning the seed adds nothing that is already there.
+            result = await ingest_memory(
+                db,
+                ctx,
+                MemoryInput(
+                    scope=entry["scope"],
+                    content=entry["content"],
+                    memory_type="fact",
+                    agent_id=CEO_AGENT_ID,
+                    importance=entry["importance"],
+                    tier="hot",
+                    metadata={"tags": entry["tags"]} if entry.get("tags") else None,
+                    source_type="seed",
+                    source_id=f"ceo-knowledge:{ordinal}",
+                    extractor_version="ceo-knowledge-seed-v1",
+                ),
+                Origin.SEED,
             )
-            db.add(record)
-            seeded += 1
-
+            seeded += result.created
         await db.commit()
-        print(f"Seeded {seeded} knowledge records for CEO agent.")
+        print(f"Seeded {seeded} new knowledge records for CEO agent.")
 
 
 if __name__ == "__main__":

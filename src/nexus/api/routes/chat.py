@@ -33,6 +33,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 FACT_MAX_CHARS = 2000  # longest chat-extracted fact stored as memory
+FACT_EXTRACTOR_VERSION = "fact-extractor-v1"  # provenance stamp on chat-extracted memory
 
 router = APIRouter(tags=["chat"])
 
@@ -381,7 +382,8 @@ async def _fetch_agent_memories(
             select(MemoryRecord)
             # Executive memory reaches the CEO only through ceo_service.
             .where(MemoryRecord.agent_id == agent_id, MemoryRecord.company_id == company_id,
-                   MemoryRecord.scope != "executive")
+                   MemoryRecord.scope != "executive",
+                   MemoryRecord.status == "active")
             .order_by(MemoryRecord.importance.desc())
             .limit(100)  # Fetch larger pool for re-ranking
         )
@@ -407,7 +409,8 @@ async def _fetch_agent_memories(
         stmt = (
             select(MemoryRecord)
             .where(MemoryRecord.agent_id == agent_id, MemoryRecord.company_id == company_id,
-                   MemoryRecord.scope != "executive")
+                   MemoryRecord.scope != "executive",
+                   MemoryRecord.status == "active")
             .order_by(MemoryRecord.importance.desc(), MemoryRecord.created_at.desc())
             .limit(limit)
         )
@@ -500,12 +503,8 @@ async def _remember_response(agent: Agent, response_text: str) -> int:
         from nexus.database import tenant_session_factory
         from nexus.memory.extract import FactExtractor
         from nexus.memory.layered_persistent import PersistentLayeredMemory
-        from nexus.memory.safety import (
-            UNTRUSTED,
-            MemoryRejected,
-            sanitize_metadata,
-            sanitize_text,
-        )
+        from nexus.memory.ingest import Origin
+        from nexus.memory.safety import MemoryRejected
 
         facts = FactExtractor().extract_facts(response_text, agent.id)
         if not facts:
@@ -515,25 +514,27 @@ async def _remember_response(agent: Agent, response_text: str) -> int:
             session_factory=tenant_session_factory(agent.company_id),
             company_id=agent.company_id,
         )
+        # One source event per reply: its facts share the id and differ by ordinal. The
+        # assistant message row is written after this call, so there is no message id yet.
+        reply_id = f"evt:{uuid.uuid4()}"
         stored = 0
-        for fact in facts:
+        for ordinal, fact in enumerate(facts):
             try:
-                content, hit = sanitize_text(fact.content, max_len=FACT_MAX_CHARS)
-                # Server-owned: model output is an unverified candidate, never a trusted fact.
-                metadata, _ = sanitize_metadata(
-                    {
-                        **(fact.metadata or {}),
-                        "trust": UNTRUSTED,
-                        "origin": "chat_extraction",
-                        "source": {"type": "chat_reply"},
-                        "recorded_by": f"agent:{agent.id}",
-                        "redacted": hit,
-                    },
-                    allow_reserved=True,
+                # Origin, not the extractor's metadata, makes this an untrusted candidate.
+                wrote = await memory.store_fact(
+                    agent.id,
+                    fact.content,
+                    metadata=fact.metadata,
+                    origin=Origin.CHAT_EXTRACTION,
+                    source_type="chat_reply",
+                    source_id=reply_id,
+                    extractor_version=FACT_EXTRACTOR_VERSION,
+                    item_key=str(ordinal),
+                    max_chars=FACT_MAX_CHARS,
                 )
             except MemoryRejected:
                 continue  # an oversized or malformed fact is dropped, not stored
-            if await memory.store_fact(agent.id, content, metadata=metadata):
+            if wrote:
                 stored += 1
         return stored
     except Exception as exc:  # noqa: BLE001 - remembering must not break chat
