@@ -78,6 +78,7 @@ class Snapshot:
     secret_bindings: int = 0
     at: datetime = field(default_factory=overlay.now)
     role: str = AGENT_ROLE
+    session_id: uuid.UUID | None = None
 
 
 async def load_snapshot(
@@ -221,7 +222,8 @@ def decide(snap: Snapshot, cap: dict[str, Any]) -> dict[str, Any]:
 
     live = [
         g for g in snap.grants
-        if g.tool_name == name and g.session_id is None and _is_live(g, snap.at)
+        if g.tool_name == name and g.session_id in (None, snap.session_id)
+        and _is_live(g, snap.at)
     ]
     deny = next((g for g in live if g.effect == "deny"), None)
     if deny is not None:

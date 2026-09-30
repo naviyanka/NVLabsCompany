@@ -16,8 +16,9 @@ from sqlmodel import select
 
 from nexus.api.deps import CurrentCompanyId, CurrentPrincipal, DbSession
 from nexus.models.agent import Agent
+from nexus.models.agent_session import AgentSessionRecord
 from nexus.services.governance_studio import catalog as cat
-from nexus.services.governance_studio import effective, grants
+from nexus.services.governance_studio import effective, grants, simulate
 from nexus.services.governance_studio.audit import actor_of
 from nexus.services.governance_studio.errors import fail, require_admin_human, require_reader
 
@@ -179,3 +180,28 @@ async def approval_inbox(
             for g in pending["items"]
         ]
     }
+
+
+@router.post("/simulate")
+async def simulate_access(
+    body: simulate.SimulateBody,
+    db: DbSession,
+    company_id: CurrentCompanyId,
+    principal: CurrentPrincipal,
+) -> dict[str, Any]:
+    """Decide one capability for one agent, optionally against proposed rules. Writes nothing."""
+    require_reader(principal)
+    agent = await _agent(db, company_id, body.agent_id)
+    if body.session_id is not None:
+        found = (
+            await db.execute(
+                select(AgentSessionRecord.id).where(
+                    AgentSessionRecord.id == body.session_id,
+                    AgentSessionRecord.company_id == company_id,
+                    AgentSessionRecord.agent_id == agent.id,
+                )
+            )
+        ).first()
+        if found is None:
+            fail(404, "SESSION_NOT_FOUND", "No such session for this agent")
+    return await simulate.simulate(db, company_id, agent, body)
