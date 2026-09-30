@@ -74,6 +74,7 @@ EXPECTED_TABLES = {
     "meeting_participants",
     "meetings",
     "memory_records",
+    "governance_grant_uses",
     "governance_policy_drafts",
     "governance_policy_versions",
     "governance_restrictions",

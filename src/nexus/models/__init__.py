@@ -22,6 +22,7 @@ from nexus.models.evolution import (
     SkillVersion,
 )
 from nexus.models.governance_studio import (
+    GovernanceGrantUse,
     GovernancePolicyDraft,
     GovernancePolicyVersion,
     GovernanceRestriction,
@@ -78,6 +79,7 @@ __all__ = [
     "GovernancePolicyDraft",
     "GovernancePolicyVersion",
     "GovernanceRestriction",
+    "GovernanceGrantUse",
     "GovernanceTempAccess",
     # Company / Organization
     "Company",

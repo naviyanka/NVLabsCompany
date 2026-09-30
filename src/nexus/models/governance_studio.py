@@ -98,3 +98,16 @@ class GovernanceRestriction(SQLModel, table=True):
     released_by: str | None = Field(default=None, max_length=255)
     released_at: datetime | None = Field(default=None)
     created_at: datetime = Field(default_factory=_now)
+
+
+class GovernanceGrantUse(SQLModel, table=True):
+    """One spent use of a temporary grant, keyed by invocation so a replay is not charged twice."""
+
+    __tablename__ = "governance_grant_uses"
+    __table_args__ = (UniqueConstraint("grant_id", "invocation_key"),)
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    company_id: uuid.UUID = Field(foreign_key="companies.id", index=True)
+    grant_id: uuid.UUID = Field(foreign_key="governance_temp_access.id", index=True)
+    invocation_key: str = Field(max_length=64)
+    created_at: datetime = Field(default_factory=_now)

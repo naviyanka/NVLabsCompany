@@ -4,7 +4,7 @@ Revision ID: e7a1c2d3f408
 Revises: e7a1c2d3f407
 Create Date: 2026-09-30
 
-Four tenant tables, each with ``company_id`` and the same FORCE ``tenant_isolation``
+Five tenant tables, each with ``company_id`` and the same FORCE ``tenant_isolation``
 row-level security as the other tenant tables (PostgreSQL only; SQLite skips it).
 ``(company_id, version_number)`` is unique so concurrent publishes cannot both win.
 """
@@ -26,6 +26,7 @@ _TABLES = (
     "governance_policy_drafts",
     "governance_temp_access",
     "governance_restrictions",
+    "governance_grant_uses",
 )
 _TENANT_PREDICATE = "company_id = NULLIF(current_setting('nexus.company_id', true), '')::uuid"
 
@@ -112,6 +113,18 @@ def upgrade() -> None:
     )
     for col in ("company_id", "agent_id", "active"):
         op.create_index(f"ix_governance_restrictions_{col}", "governance_restrictions", [col])
+
+    op.create_table(
+        "governance_grant_uses",
+        sa.Column("id", uid, primary_key=True),
+        sa.Column("company_id", uid, sa.ForeignKey("companies.id"), nullable=False),
+        sa.Column("grant_id", uid, sa.ForeignKey("governance_temp_access.id"), nullable=False),
+        sa.Column("invocation_key", _s(64), nullable=False),
+        sa.Column("created_at", sa.DateTime(), nullable=False),
+        sa.UniqueConstraint("grant_id", "invocation_key"),
+    )
+    for col in ("company_id", "grant_id"):
+        op.create_index(f"ix_governance_grant_uses_{col}", "governance_grant_uses", [col])
 
     if op.get_bind().dialect.name != "postgresql":
         return

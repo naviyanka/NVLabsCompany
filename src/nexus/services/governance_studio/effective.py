@@ -173,9 +173,16 @@ def _validity(g: GovernanceTempAccess) -> dict[str, Any]:
     }
 
 
-def _is_live(g: GovernanceTempAccess, at: datetime) -> bool:
+def _is_live(g: GovernanceTempAccess, at: datetime, explicit: bool = False) -> bool:
+    """Mirror of ``governance_overlay.live_grant_filter`` plus the explicit-only rule."""
+    approved = (
+        g.effect == "deny"
+        or g.approved_by is not None
+        or (g.approval_id is None and g.risk_level in overlay.READ_RISKS and not explicit)
+    )
     return (
-        g.status == "active"
+        approved
+        and g.status == "active"
         and g.starts_at <= at < g.expires_at
         and (g.max_uses is None or g.used_count < g.max_uses)
     )
@@ -223,7 +230,7 @@ def decide(snap: Snapshot, cap: dict[str, Any]) -> dict[str, Any]:
     live = [
         g for g in snap.grants
         if g.tool_name == name and g.session_id in (None, snap.session_id)
-        and _is_live(g, snap.at)
+        and _is_live(g, snap.at, cap["explicit_allow_required"])
     ]
     deny = next((g for g in live if g.effect == "deny"), None)
     if deny is not None:
