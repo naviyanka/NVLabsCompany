@@ -219,7 +219,10 @@ def decide(snap: Snapshot, cap: dict[str, Any]) -> dict[str, Any]:
             f"{label} is active: {r.reason}", source=f"restriction:{r.id}",
         )
 
-    live = [g for g in snap.grants if g.tool_name == name and _is_live(g, snap.at)]
+    live = [
+        g for g in snap.grants
+        if g.tool_name == name and g.session_id is None and _is_live(g, snap.at)
+    ]
     deny = next((g for g in live if g.effect == "deny"), None)
     if deny is not None:
         return _result(

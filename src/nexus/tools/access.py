@@ -237,6 +237,7 @@ async def check_tool_access(
             decision.risk_level,
             policy,
             explicit_only=tool_name in EXPLICIT_ALLOW_ONLY,
+            session_id=decision.session_id,
         )
         for stage, reason, hard in overlay.problems:
             problem(stage, reason, hard=hard)

@@ -58,6 +58,14 @@ def live_grant_filter(company_id: uuid.UUID, at: datetime) -> list[Any]:
     ]
 
 
+def _session_scope(session_id: uuid.UUID | None) -> Any:
+    """A grant bound to a session only applies inside that session."""
+    unbound = GovernanceTempAccess.session_id.is_(None)
+    if session_id is None:
+        return unbound
+    return or_(unbound, GovernanceTempAccess.session_id == session_id)
+
+
 async def active_restrictions(
     db: Any, company_id: uuid.UUID, agent_id: uuid.UUID | None
 ) -> list[GovernanceRestriction]:
@@ -86,6 +94,7 @@ async def evaluate(
     policy: Any,
     *,
     explicit_only: bool = False,
+    session_id: uuid.UUID | None = None,
     at: datetime | None = None,
 ) -> Overlay:
     """The restriction and temp-access verdict for one call. Read only."""
@@ -107,6 +116,7 @@ async def evaluate(
                     *live_grant_filter(company_id, at),
                     GovernanceTempAccess.agent_id == agent_id,
                     GovernanceTempAccess.tool_name == tool_name,
+                    _session_scope(session_id),
                 )
                 .order_by(GovernanceTempAccess.expires_at, GovernanceTempAccess.id)
             )

@@ -72,7 +72,6 @@ class GovernanceTempAccess(SQLModel, table=True):
     expires_at: datetime
     max_uses: int | None = Field(default=None)
     used_count: int = Field(default=0)
-    task_id: uuid.UUID | None = Field(default=None)
     session_id: uuid.UUID | None = Field(default=None)
     reason: str = Field(default="")
     requested_by: str = Field(max_length=255)

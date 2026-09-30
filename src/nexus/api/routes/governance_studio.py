@@ -17,8 +17,9 @@ from sqlmodel import select
 from nexus.api.deps import CurrentCompanyId, CurrentPrincipal, DbSession
 from nexus.models.agent import Agent
 from nexus.services.governance_studio import catalog as cat
-from nexus.services.governance_studio import effective
-from nexus.services.governance_studio.errors import fail, require_reader
+from nexus.services.governance_studio import effective, grants
+from nexus.services.governance_studio.audit import actor_of
+from nexus.services.governance_studio.errors import fail, require_admin_human, require_reader
 
 router = APIRouter(prefix="/api/v1/governance", tags=["governance"])
 
@@ -91,3 +92,90 @@ async def effective_access(
     require_reader(principal)
     agent = await _agent(db, company_id, agent_id)
     return await effective.effective_access(db, company_id, agent)
+
+
+@router.post("/grants", status_code=201)
+async def create_grant(
+    body: grants.GrantBody, db: DbSession, company_id: CurrentCompanyId, principal: CurrentPrincipal
+) -> dict[str, Any]:
+    require_admin_human(principal)
+    out = await grants.create(db, company_id, principal, body)
+    await db.commit()
+    return out
+
+
+@router.get("/grants")
+async def list_grants(
+    db: DbSession,
+    company_id: CurrentCompanyId,
+    principal: CurrentPrincipal,
+    agent_id: uuid.UUID | None = None,
+    status: str | None = Query(default=None, max_length=30),
+    limit: int = Query(default=50, ge=1, le=PAGE_MAX),
+    offset: int = Query(default=0, ge=0),
+) -> dict[str, Any]:
+    require_reader(principal)
+    return await grants.list_grants(
+        db, company_id, agent_id=agent_id, status=status, limit=limit, offset=offset
+    )
+
+
+@router.post("/grants/{grant_id}/revoke")
+async def revoke_grant(
+    grant_id: uuid.UUID,
+    body: grants.Revoke,
+    db: DbSession,
+    company_id: CurrentCompanyId,
+    principal: CurrentPrincipal,
+) -> dict[str, Any]:
+    require_admin_human(principal)
+    out = await grants.revoke(db, company_id, principal, grant_id, body)
+    await db.commit()
+    return out
+
+
+@router.post("/grants/{grant_id}/approve")
+async def approve_grant(
+    grant_id: uuid.UUID,
+    body: grants.Decision,
+    db: DbSession,
+    company_id: CurrentCompanyId,
+    principal: CurrentPrincipal,
+) -> dict[str, Any]:
+    require_admin_human(principal)
+    out = await grants.approve(db, company_id, principal, grant_id, body)
+    await db.commit()
+    return out
+
+
+@router.post("/grants/{grant_id}/reject")
+async def reject_grant(
+    grant_id: uuid.UUID,
+    body: grants.Decision,
+    db: DbSession,
+    company_id: CurrentCompanyId,
+    principal: CurrentPrincipal,
+) -> dict[str, Any]:
+    require_admin_human(principal)
+    out = await grants.reject(db, company_id, principal, grant_id, body)
+    await db.commit()
+    return out
+
+
+@router.get("/approvals")
+async def approval_inbox(
+    db: DbSession, company_id: CurrentCompanyId, principal: CurrentPrincipal
+) -> dict[str, Any]:
+    """Grants waiting for a decision, and whether the caller may decide them."""
+    require_reader(principal)
+    pending = await grants.list_grants(
+        db, company_id, agent_id=None, status="pending_approval", limit=PAGE_MAX, offset=0
+    )
+    me = actor_of(principal)
+    can_decide = principal.role == "admin"
+    return {
+        "items": [
+            {**g, "can_decide": can_decide and g["requested_by"] != me}
+            for g in pending["items"]
+        ]
+    }

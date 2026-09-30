@@ -114,7 +114,8 @@ class TestEffectiveAccess:
             [dict(name="deny writes", effect="deny", conditions={"risk_level": ["write"]})],
             [dict(name="allow named", effect="allow",
                   conditions={"tool_name": ["ceo_request_hire", "manager_request_hire"]})],
-            [dict(name="deny one", effect="deny", priority=1, conditions={"tool_name": ["ai-chat"]}),
+            [dict(name="deny one", effect="deny", priority=1,
+                  conditions={"tool_name": ["ai-chat"]}),
              dict(name="allow all", effect="allow", priority=2, conditions={})],
         ],
     )
@@ -160,13 +161,14 @@ class TestEffectiveAccess:
 
 @pytest.fixture
 async def api(factory, t):  # noqa: F811
-    def user(company, role="admin"):
+    def user(company, role="admin", email="p@example.test"):
         return Principal(kind="user", company_id=company, role=role, user_id=uuid.uuid4(),
-                         email="p@example.test")
+                         email=email)
 
     principals = {
         "admin": user(t["acme"]),
-        "viewer": user(t["acme"], "viewer"),
+        "second_admin": user(t["acme"], email="q@example.test"),
+        "viewer": user(t["acme"], "viewer", "v@example.test"),
         "outsider": user(t["other"]),
         "run": Principal(kind="run", company_id=t["acme"], role="agent", run_id=uuid.uuid4(),
                          agent_id=t["a"]),

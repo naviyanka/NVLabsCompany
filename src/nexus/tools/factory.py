@@ -259,6 +259,8 @@ async def guarded_call(
             agent_id=decision.agent_id,
             company_id=decision.company_id,
         )
+        if refusal is None and decision.temp_grant_id is not None:
+            refusal = await _spend_temp_grant(decision)
 
     record = functools.partial(_record_invocation, decision, ctx, tool_name, arguments, source)
     if refusal is not None:
@@ -274,6 +276,27 @@ async def guarded_call(
     failed = bool(getattr(result, "is_error", False))
     await record("error" if failed else "success", started)
     return {"status": "success", "result": result}
+
+
+async def _spend_temp_grant(decision: Any) -> dict[str, Any] | None:
+    """Use up one use of the temporary allow this call relies on, or refuse the call.
+
+    One conditional UPDATE, so a revoke, an expiry or a parallel call that got there first
+    leaves this call denied. The grant is spent just before the tool runs, not at check time.
+    """
+    from nexus.tools import governance_overlay
+
+    async with _access_session(decision.company_id) as db:
+        spent = await governance_overlay.consume_temp_grant(
+            db, decision.company_id, decision.temp_grant_id
+        )
+        await db.commit()
+    if spent:
+        return None
+    return {
+        "error": "Denied by access policy: temporary access is no longer valid",
+        "status": "denied",
+    }
 
 
 def _access_session(company_id: uuid.UUID | None) -> Any:

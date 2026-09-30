@@ -85,7 +85,6 @@ def upgrade() -> None:
         sa.Column("expires_at", sa.DateTime(), nullable=False),
         sa.Column("max_uses", sa.Integer(), nullable=True),
         sa.Column("used_count", sa.Integer(), nullable=False),
-        sa.Column("task_id", uid, nullable=True),
         sa.Column("session_id", uid, nullable=True),
         sa.Column("reason", sa.String(), nullable=False),
         sa.Column("requested_by", _s(255), nullable=False),
