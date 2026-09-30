@@ -264,6 +264,39 @@ async def test_patch_redacts_edited_content(db, c):  # noqa: F811
     assert old.content == "before" and old.status == "superseded"
 
 
+async def _patch(c, memory_id, body, who="admin"):  # noqa: F811
+    return await c["call"]("PATCH", f"/api/v1/memory/{memory_id}", body, who)
+
+
+async def test_patch_retry_returns_the_same_replacement(db, c):  # noqa: F811
+    created = (await c["call"]("POST", _url(c), {"content": "before"})).json()
+    first = await _patch(c, created["id"], {"content": "after"})
+    retry = await _patch(c, created["id"], {"content": "after"})
+    assert first.status_code == retry.status_code == 200
+    assert retry.json() == first.json()
+    # One replacement, one link: the chain was not created twice.
+    rows = await _rows(db, MemoryRecord, MemoryRecord.supersedes_id == uuid.UUID(created["id"]))
+    assert [str(r.id) for r in rows] == [first.json()["id"]]
+
+
+async def test_patch_with_a_changed_payload_after_supersession_conflicts(db, c):  # noqa: F811
+    created = (await c["call"]("POST", _url(c), {"content": "before"})).json()
+    winner = await _patch(c, created["id"], {"content": "B"})
+    loser = await _patch(c, created["id"], {"content": "C"})  # A -> C after A -> B
+    assert winner.status_code == 200 and loser.status_code == 409
+    assert loser.json()["detail"]["code"] == "MEMORY_SUPERSESSION_CONFLICT"
+    rows = await _rows(db, MemoryRecord, MemoryRecord.supersedes_id == uuid.UUID(created["id"]))
+    assert [r.content for r in rows] == ["B"]  # C left no record behind
+
+
+async def test_patch_cannot_supersede_across_companies(db, c):  # noqa: F811
+    created = (await c["call"]("POST", _url(c), {"content": "before"})).json()
+    r = await _patch(c, created["id"], {"content": "hijack"}, who="outsider")
+    assert r.status_code == 404
+    rows = await _rows(db, MemoryRecord, MemoryRecord.supersedes_id == uuid.UUID(created["id"]))
+    assert rows == []
+
+
 # --- chat fact capture ------------------------------------------------------------------
 
 

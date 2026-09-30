@@ -80,3 +80,18 @@ def test_no_session_delete_of_a_memory_row():
             ):
                 offenders.append(f"{path.relative_to(SRC)}:{node.lineno}")
     assert not offenders, f"hard delete in a module that owns memory rows: {sorted(offenders)}"
+
+
+def test_no_raw_sql_delete_of_memory_records():
+    """Raw SQL bypasses the ORM checks above, so scan the string literals too."""
+    offenders = []
+    for path in SRC.rglob("*.py"):
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if (
+                isinstance(node, ast.Constant)
+                and isinstance(node.value, str)
+                and "memory_records" in node.value.lower()
+                and any(w in node.value.lower() for w in ("delete from", "truncate", "drop table"))
+            ):
+                offenders.append(f"{path.relative_to(SRC)}:{node.lineno}")
+    assert not offenders, f"raw SQL delete of memory_records: {sorted(offenders)}"
