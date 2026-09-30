@@ -18,7 +18,7 @@ from nexus.api.deps import CurrentCompanyId, CurrentPrincipal, DbSession
 from nexus.models.agent import Agent
 from nexus.models.agent_session import AgentSessionRecord
 from nexus.services.governance_studio import catalog as cat
-from nexus.services.governance_studio import effective, grants, simulate
+from nexus.services.governance_studio import effective, grants, policies, simulate
 from nexus.services.governance_studio.audit import actor_of
 from nexus.services.governance_studio.errors import fail, require_admin_human, require_reader
 
@@ -205,3 +205,106 @@ async def simulate_access(
         if found is None:
             fail(404, "SESSION_NOT_FOUND", "No such session for this agent")
     return await simulate.simulate(db, company_id, agent, body)
+
+
+@router.get("/policy")
+async def get_policy(
+    db: DbSession, company_id: CurrentCompanyId, principal: CurrentPrincipal
+) -> dict[str, Any]:
+    require_reader(principal)
+    return await policies.overview(db, company_id)
+
+
+@router.get("/drafts")
+async def list_drafts(
+    db: DbSession,
+    company_id: CurrentCompanyId,
+    principal: CurrentPrincipal,
+    status: str | None = Query(default=None, max_length=30),
+    limit: int = Query(default=50, ge=1, le=PAGE_MAX),
+    offset: int = Query(default=0, ge=0),
+) -> dict[str, Any]:
+    require_reader(principal)
+    return await policies.list_drafts(db, company_id, status=status, limit=limit, offset=offset)
+
+
+@router.post("/drafts", status_code=201)
+async def create_draft(
+    body: policies.DraftBody, db: DbSession, company_id: CurrentCompanyId,
+    principal: CurrentPrincipal,
+) -> dict[str, Any]:
+    require_admin_human(principal)
+    out = await policies.create_draft(db, company_id, principal, body)
+    await db.commit()
+    return out
+
+
+@router.get("/drafts/{draft_id}")
+async def get_draft(
+    draft_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId, principal: CurrentPrincipal
+) -> dict[str, Any]:
+    require_reader(principal)
+    return await policies.get_draft(db, company_id, draft_id)
+
+
+@router.put("/drafts/{draft_id}")
+async def update_draft(
+    draft_id: uuid.UUID, body: policies.DraftBody, db: DbSession, company_id: CurrentCompanyId,
+    principal: CurrentPrincipal,
+) -> dict[str, Any]:
+    require_admin_human(principal)
+    out = await policies.update_draft(db, company_id, principal, draft_id, body)
+    await db.commit()
+    return out
+
+
+@router.post("/drafts/{draft_id}/discard")
+async def discard_draft(
+    draft_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId, principal: CurrentPrincipal
+) -> dict[str, Any]:
+    require_admin_human(principal)
+    out = await policies.discard_draft(db, company_id, principal, draft_id)
+    await db.commit()
+    return out
+
+
+@router.post("/drafts/{draft_id}/publish")
+async def publish_draft(
+    draft_id: uuid.UUID, body: policies.PublishBody, db: DbSession, company_id: CurrentCompanyId,
+    principal: CurrentPrincipal,
+) -> dict[str, Any]:
+    require_admin_human(principal)
+    out = await policies.publish(db, company_id, principal, draft_id, body)
+    await db.commit()
+    return out
+
+
+@router.get("/versions")
+async def list_versions(
+    db: DbSession,
+    company_id: CurrentCompanyId,
+    principal: CurrentPrincipal,
+    limit: int = Query(default=50, ge=1, le=PAGE_MAX),
+    offset: int = Query(default=0, ge=0),
+) -> dict[str, Any]:
+    require_reader(principal)
+    return await policies.list_versions(db, company_id, limit=limit, offset=offset)
+
+
+@router.get("/versions/{number}")
+async def get_version(
+    number: int, db: DbSession, company_id: CurrentCompanyId, principal: CurrentPrincipal
+) -> dict[str, Any]:
+    require_reader(principal)
+    return await policies.get_version(db, company_id, number)
+
+
+@router.post("/versions/{number}/rollback")
+async def rollback_version(
+    number: int, body: policies.RollbackBody, db: DbSession, company_id: CurrentCompanyId,
+    principal: CurrentPrincipal,
+) -> dict[str, Any]:
+    require_admin_human(principal)
+    out = await policies.rollback(db, company_id, principal, number, body)
+    await db.commit()
+    return out
