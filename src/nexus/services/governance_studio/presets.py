@@ -26,6 +26,7 @@ from sqlalchemy import func
 from sqlmodel import select
 
 from nexus.models.agent import Agent
+from nexus.services import ceo_service
 from nexus.services.governance_studio import effective, policies, simulate
 from nexus.services.governance_studio.audit import actor_of, audit
 from nexus.services.governance_studio.catalog import build_catalog
@@ -86,20 +87,20 @@ async def _is_manager(db: Any, company_id: uuid.UUID, agent: Agent) -> bool:
     return bool(count)
 
 
-def _refusal(key: str, agent: Agent, manager: bool) -> str | None:
+def _refusal(key: str, ceo: bool, manager: bool) -> str | None:
     level = _LEVEL[key]
-    if level == 5 and not agent.is_ceo:
+    if level == 5 and not ceo:
         return "Only the company's CEO can hold this preset"
     if level in (3, 4) and not manager:
         return "Only an agent with at least one direct report can hold this preset"
     return None
 
 
-def _holds(cap: dict[str, Any], agent: Agent, manager: bool) -> bool:
+def _holds(cap: dict[str, Any], ceo: bool, manager: bool) -> bool:
     """Whether this agent's designation could ever use the tool."""
     name = cap["tool_name"]
     if name.startswith("ceo_"):
-        return agent.is_ceo
+        return ceo
     return manager if name.startswith("manager_") else True
 
 
@@ -108,11 +109,12 @@ def _chunks(names: list[str]) -> list[list[str]]:
 
 
 def _rules(
-    key: str, agent: Agent, manager: bool, live: list[dict[str, Any]], owner: str, review_by: str
+    key: str, agent: Agent, ceo: bool, manager: bool, live: list[dict[str, Any]],
+    owner: str, review_by: str
 ) -> tuple[list[dict[str, Any]], list[str]]:
     tools = [c for c in build_catalog() if c["support"] == "enforced" and c["tool_name"]]
     kept = sorted(
-        c["tool_name"] for c in tools if _level_of(c) <= _LEVEL[key] and _holds(c, agent, manager)
+        c["tool_name"] for c in tools if _level_of(c) <= _LEVEL[key] and _holds(c, ceo, manager)
     )
     left_out = sorted(c["tool_name"] for c in tools if c["tool_name"] not in kept)
     prefix = f"autonomy:{agent.id}:"
@@ -137,9 +139,10 @@ def _rules(
 
 async def list_for(db: Any, company_id: uuid.UUID, agent: Agent) -> dict[str, Any]:
     manager = await _is_manager(db, company_id, agent)
+    ceo = await ceo_service.is_ceo(db, company_id, agent.id)
     return {"items": [
         {"key": k, "label": label, "summary": summary,
-         "unavailable_reason": _refusal(k, agent, manager)}
+         "unavailable_reason": _refusal(k, ceo, manager)}
         for k, label, summary in PRESETS
     ]}
 
@@ -150,11 +153,12 @@ async def _build(
     if key not in _LEVEL:
         fail(404, "PRESET_NOT_FOUND", "No such autonomy preset")
     manager = await _is_manager(db, company_id, agent)
-    reason = _refusal(key, agent, manager)
+    ceo = await ceo_service.is_ceo(db, company_id, agent.id)
+    reason = _refusal(key, ceo, manager)
     if reason:
         fail(409, "PRESET_NOT_AVAILABLE", reason)
     live = await policies.live_rules(db, company_id)
-    rules, kept = _rules(key, agent, manager, live, owner, review_by)
+    rules, kept = _rules(key, agent, ceo, manager, live, owner, review_by)
     before = await effective.load_snapshot(db, company_id, agent, with_usage=False)
     after = simulate.trial(before, rules, company_id)
     diff = simulate.capability_diff(before, after)

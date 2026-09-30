@@ -80,8 +80,8 @@ async def list_agents(
         "items": [
             {
                 "id": str(a.id), "name": a.name, "role": a.role, "title": a.title,
-                "status": a.status, "is_ceo": a.is_ceo, "manager_id": str(a.manager_id)
-                if a.manager_id else None,
+                "status": a.status,
+                "manager_id": str(a.manager_id) if a.manager_id else None,
                 "adapter_type": a.adapter_type, "model": a.model,
                 "autonomy_policy": a.autonomy_policy or {},
                 "pause_reason": a.pause_reason,
