@@ -6,8 +6,12 @@ import { Button } from '@/components/common/Button';
 import { Badge, type BadgeVariant } from '@/components/common/Badge';
 import { Modal } from '@/components/common/Modal';
 import { apiClient } from '@/api/client';
+import { SimulatorPanel } from '@/components/governance/SimulatorPanel';
+import { PolicyDrafts } from '@/components/governance/PolicyDrafts';
+import { PolicyVersions } from '@/components/governance/PolicyVersions';
+import { PresetsPanel } from '@/components/governance/PresetsPanel';
+import { BASE, PAGE, ConfirmModal, Pager, StateLine, errorText, label } from '@/components/governance/shared';
 
-const BASE = '/api/v1/governance';
 export const LOCKDOWN_PHRASE = 'LOCKDOWN';
 export const RELEASE_PHRASE = 'RELEASE LOCKDOWN';
 
@@ -22,6 +26,7 @@ interface Capability {
   source?: string | null;
 }
 interface AgentRow { id: string; name: string; role: string }
+interface Confirm { title: string; text: string; path: string; body: unknown; action: string }
 interface Restriction { id: string; kind: string; agent_id: string | null; reason: string; created_by: string }
 interface Restrictions { lockdown: Restriction | null; isolated_agents: Restriction[] }
 interface Grant {
@@ -49,13 +54,11 @@ const SUPPORT_LABEL: Record<Capability['support'], string> = {
   unsupported: 'Not enforceable',
 };
 
-const label = (s: string) => s.replace(/_/g, ' ');
-
-function errorText(e: unknown): string {
-  return e instanceof Error ? e.message : 'Request failed';
-}
-
-type Tab = 'access' | 'runtime' | 'grants' | 'audit';
+type Tab = 'access' | 'simulator' | 'policy' | 'autonomy' | 'runtime' | 'grants' | 'audit';
+const TABS: [Tab, string][] = [
+  ['access', 'Effective access'], ['simulator', 'Simulator'], ['policy', 'Policy'],
+  ['autonomy', 'Autonomy presets'], ['runtime', 'Runtime'], ['grants', 'Grants'], ['audit', 'Audit'],
+];
 
 export function GovernanceAccess() {
   const qc = useQueryClient();
@@ -64,6 +67,10 @@ export function GovernanceAccess() {
   const [reason, setReason] = useState('');
   const [lockOpen, setLockOpen] = useState(false);
   const [phrase, setPhrase] = useState('');
+  const [policyView, setPolicyView] = useState<'drafts' | 'versions'>('drafts');
+  const [confirm, setConfirm] = useState<Confirm | null>(null);
+  const [grantOffset, setGrantOffset] = useState(0);
+  const [auditOffset, setAuditOffset] = useState(0);
 
   const agents = useQuery({
     queryKey: ['gov', 'agents'],
@@ -86,14 +93,14 @@ export function GovernanceAccess() {
     queryFn: () => apiClient.get<{ attempts: Attempt[]; turns: Turn[] }>(`${BASE}/runtime`),
   });
   const grants = useQuery({
-    queryKey: ['gov', 'grants'],
+    queryKey: ['gov', 'grants', grantOffset],
     enabled: tab === 'grants',
-    queryFn: () => apiClient.get<{ items: Grant[] }>(`${BASE}/grants`),
+    queryFn: () => apiClient.get<{ items: Grant[] }>(`${BASE}/grants`, { limit: PAGE, offset: grantOffset }),
   });
   const audit = useQuery({
-    queryKey: ['gov', 'audit'],
+    queryKey: ['gov', 'audit', auditOffset],
     enabled: tab === 'audit',
-    queryFn: () => apiClient.get<{ items: AuditItem[] }>(`${BASE}/audit`),
+    queryFn: () => apiClient.get<{ items: AuditItem[] }>(`${BASE}/audit`, { limit: PAGE, offset: auditOffset }),
   });
 
   const act = useMutation({
@@ -101,6 +108,7 @@ export function GovernanceAccess() {
       apiClient.post<unknown>(`${BASE}${path}`, body),
     onSuccess: () => {
       setLockOpen(false);
+      setConfirm(null);
       setPhrase('');
       setReason('');
       qc.invalidateQueries({ queryKey: ['gov'] });
@@ -150,10 +158,11 @@ export function GovernanceAccess() {
       )}
       {act.error && <div role="alert" className="text-sm text-[#EF4444]">{errorText(act.error)}</div>}
 
-      <nav className="flex gap-2" aria-label="Sections">
-        {(['access', 'runtime', 'grants', 'audit'] as Tab[]).map((t) => (
-          <Button key={t} size="sm" variant={tab === t ? 'primary' : 'ghost'} onClick={() => setTab(t)}>
-            {t === 'access' ? 'Effective access' : t.charAt(0).toUpperCase() + t.slice(1)}
+      <nav className="flex flex-wrap gap-2" aria-label="Sections">
+        {TABS.map(([t, text]) => (
+          <Button key={t} size="sm" variant={tab === t ? 'primary' : 'ghost'} aria-current={tab === t ? 'page' : undefined}
+            onClick={() => setTab(t)}>
+            {text}
           </Button>
         ))}
       </nav>
@@ -172,7 +181,11 @@ export function GovernanceAccess() {
                 <Badge variant="danger">Isolated: {isolated.reason}</Badge>
                 {reasonField}
                 <Button size="sm" variant="secondary" disabled={!reasonOk}
-                  onClick={() => act.mutate({ path: `/agents/${selected}/isolate/release`, body: { reason } })}>
+                  onClick={() => setConfirm({
+                    title: 'Release agent isolation', action: 'Release isolation',
+                    text: 'The agent can use write and external tools again.',
+                    path: `/agents/${selected}/isolate/release`, body: { reason },
+                  })}>
                   Release isolation
                 </Button>
               </>
@@ -181,7 +194,11 @@ export function GovernanceAccess() {
                 <>
                   {reasonField}
                   <Button size="sm" variant="danger" disabled={!reasonOk}
-                    onClick={() => act.mutate({ path: `/agents/${selected}/isolate`, body: { reason } })}>
+                    onClick={() => setConfirm({
+                      title: 'Isolate agent', action: 'Isolate agent',
+                      text: 'The agent loses write and external tools until a human administrator releases it.',
+                      path: `/agents/${selected}/isolate`, body: { reason },
+                    })}>
                     Isolate agent
                   </Button>
                 </>
@@ -191,10 +208,13 @@ export function GovernanceAccess() {
           {Object.entries(byCategory).map(([category, rows]) => (
             <section key={category} className="mb-6">
               <h2 className="mb-2 text-sm font-medium uppercase tracking-wide text-[#A8A8AB]">{label(category)}</h2>
+              <div className="overflow-x-auto">
               <table className="w-full text-sm">
+                <caption className="sr-only">{label(category)} capabilities</caption>
                 <thead>
                   <tr className="text-left text-[#A8A8AB]">
-                    <th className="py-1">Capability</th><th>Risk</th><th>Support</th><th>Now</th><th>Why</th>
+                    <th scope="col" className="py-1">Capability</th><th scope="col">Risk</th>
+                    <th scope="col">Support</th><th scope="col">Now</th><th scope="col">Why</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -209,11 +229,30 @@ export function GovernanceAccess() {
                   ))}
                 </tbody>
               </table>
+              </div>
             </section>
           ))}
-          {access.isError && <p role="alert" className="text-sm text-[#EF4444]">{errorText(access.error)}</p>}
+          <StateLine loading={access.isLoading} error={access.error} emptyText="" />
         </Card>
       )}
+
+      {tab === 'simulator' && <SimulatorPanel agents={agents.data?.items ?? []} defaultAgentId={selected} />}
+
+      {tab === 'policy' && (
+        <div className="space-y-4">
+          <nav className="flex gap-2" aria-label="Policy views">
+            {(['drafts', 'versions'] as const).map((v) => (
+              <Button key={v} size="sm" variant={policyView === v ? 'primary' : 'ghost'}
+                aria-current={policyView === v ? 'page' : undefined} onClick={() => setPolicyView(v)}>
+                {v === 'drafts' ? 'Drafts' : 'Versions'}
+              </Button>
+            ))}
+          </nav>
+          {policyView === 'drafts' ? <PolicyDrafts agents={agents.data?.items ?? []} /> : <PolicyVersions />}
+        </div>
+      )}
+
+      {tab === 'autonomy' && <PresetsPanel agents={agents.data?.items ?? []} defaultAgentId={selected} />}
 
       {tab === 'runtime' && (
         <Card>
@@ -229,9 +268,9 @@ export function GovernanceAccess() {
               </Button>
             </div>
           ))}
-          {runtime.data && !runtime.data.attempts.length && !runtime.data.turns.length && (
-            <p className="text-sm text-[#A8A8AB]">Nothing is running.</p>
-          )}
+          <StateLine loading={runtime.isLoading} error={runtime.error}
+            empty={!!runtime.data && !runtime.data.attempts.length && !runtime.data.turns.length}
+            emptyText="Nothing is running." />
         </Card>
       )}
 
@@ -254,16 +293,20 @@ export function GovernanceAccess() {
                 )}
                 {(g.status === 'active' || g.status === 'pending_approval') && (
                   <Button size="xs" variant="danger" disabled={!reasonOk}
-                    onClick={() => act.mutate({ path: `/grants/${g.id}/revoke`, body: { reason } })}>
+                    onClick={() => setConfirm({
+                      title: 'Revoke temporary grant', action: 'Revoke grant',
+                      text: `${g.effect} ${g.tool_name} stops applying at once.`,
+                      path: `/grants/${g.id}/revoke`, body: { reason },
+                    })}>
                     Revoke
                   </Button>
                 )}
               </span>
             </div>
           ))}
-          {grants.data && !grants.data.items.length && (
-            <p className="text-sm text-[#A8A8AB]">No temporary grants.</p>
-          )}
+          <StateLine loading={grants.isLoading} error={grants.error}
+            empty={!!grants.data && !grants.data.items.length} emptyText="No temporary grants." />
+          <Pager offset={grantOffset} count={grants.data?.items.length ?? 0} onChange={setGrantOffset} />
         </Card>
       )}
 
@@ -275,11 +318,19 @@ export function GovernanceAccess() {
               <span className="text-[#A8A8AB]">{i.actor} · {i.at?.slice(0, 19)}</span>
             </div>
           ))}
-          {audit.data && !audit.data.items.length && (
-            <p className="text-sm text-[#A8A8AB]">No governance changes yet.</p>
-          )}
+          <StateLine loading={audit.isLoading} error={audit.error}
+            empty={!!audit.data && !audit.data.items.length} emptyText="No governance changes yet." />
+          <Pager offset={auditOffset} count={audit.data?.items.length ?? 0} onChange={setAuditOffset} />
         </Card>
       )}
+
+      <ConfirmModal open={!!confirm} title={confirm?.title ?? ''} onClose={() => setConfirm(null)} danger
+        confirmLabel={confirm?.action ?? 'Confirm'} pending={act.isPending}
+        onConfirm={() => confirm && act.mutate({ path: confirm.path, body: confirm.body })}
+        error={act.error && errorText(act.error)}>
+        <p className="text-sm">{confirm?.text}</p>
+        <p className="text-sm text-[#A8A8AB]">Reason: {reason}</p>
+      </ConfirmModal>
 
       <Modal isOpen={lockOpen} onClose={() => setLockOpen(false)}
         title={locked ? 'Release company lockdown' : 'Lock down company'}>
