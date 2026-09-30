@@ -85,7 +85,7 @@ jobs:
           alembic downgrade base
           alembic upgrade head
       - name: Run Postgres Integration Tests
-        run: pytest tests/test_postgres_integration.py tests/test_memory_rls_postgres.py -v
+        run: pytest tests/test_postgres_integration.py tests/test_memory_rls_postgres.py tests/test_memory_ingest_postgres.py -v
         env:
           # The app's own engine (IdempotencyMiddleware) reads DATABASE_URL.
           DATABASE_URL: postgresql+asyncpg://postgres:postgrespassword@localhost:5432/test
