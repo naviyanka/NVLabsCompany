@@ -64,6 +64,7 @@ from nexus.api.routes.sso import router as sso_router
 from nexus.api.routes.tasks import router as tasks_router
 from nexus.api.routes.task_attempts import router as task_attempts_router
 from nexus.api.routes.managers import router as managers_router
+from nexus.api.routes.governance_studio import router as governance_studio_router
 from nexus.api.routes.organization import ceo_router as organization_ceo_router
 from nexus.api.routes.organization import router as organization_router
 from nexus.api.routes.telegram_bot import router as telegram_bot_router
@@ -565,3 +566,4 @@ app.include_router(sso_router)
 app.include_router(scim_router)
 app.include_router(telegram_bot_router)
 app.include_router(agent_profiling_router)
+app.include_router(governance_studio_router)
