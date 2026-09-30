@@ -28,9 +28,49 @@ class SimulateBody(BaseModel):
     proposed_rules: list[rules.RuleBody] | None = Field(default=None, max_length=rules.MAX_RULES)
 
 
+# The order the real engine asks its questions in. The first "no" (or the final answer) ends it.
+_STEPS = (
+    ("NOT_ENFORCEABLE", "Capability can be enforced"),
+    ("RBAC_DENIED", "Role may execute tools"),
+    ("RESTRICTION_ACTIVE", "Company lockdown and agent isolation"),
+    ("TEMP_DENY", "Temporary deny"),
+    ("POLICY_ALLOW", "Policy rules and profile allow it"),
+    ("POLICY_DENY", "Explicit deny rule"),
+    ("TEMP_ALLOW", "Temporary allow lifting a default deny"),
+    ("DEFAULT_DENY", "Default deny"),
+)
+_AS_STEP = {"DEFAULT_ALLOW": "POLICY_ALLOW", "GRANT_EXPIRED": "DEFAULT_DENY"}
+_INVARIANTS = (
+    "Tool-level rules (CEO only, direct reports only, hiring budgets, signature quorum) apply when "
+    "the tool really runs. A simulation does not evaluate them."
+)
+
+
+def _steps(code: str) -> list[dict[str, str]]:
+    deciding = _AS_STEP.get(code, code)
+    codes = [c for c, _ in _STEPS]
+    if deciding not in codes:
+        return [{"label": "Decided by the capability's support level", "result": "decided"}]
+    at = codes.index(deciding)
+    return [
+        {"label": text, "result": "checked" if i < at else "decided" if i == at else "not reached"}
+        for i, (_, text) in enumerate(_STEPS)
+    ]
+
+
+def _blockers(d: dict[str, Any]) -> list[str]:
+    out = []
+    if d["backend_support"] == UNSUPPORTED:
+        out.append("No preventive enforcement exists for this capability")
+    gate = d.get("gate") or {}
+    out += [f"Feature gate {k} is '{v}', not 'enforce'" for k, v in gate.items() if v != "enforce"]
+    return out
+
+
 def _summary(d: dict[str, Any]) -> dict[str, Any]:
-    keys = ("state", "decision", "code", "explanation", "source", "approval", "validity")
-    return {k: d[k] for k in keys}
+    keys = ("state", "decision", "code", "explanation", "source", "approval", "validity",
+            "backend_support")
+    return {**{k: d[k] for k in keys}, "steps": _steps(d["code"]), "blockers": _blockers(d)}
 
 
 def trial(snap: effective.Snapshot, rule_dicts: list[dict[str, Any]], company_id: uuid.UUID):
@@ -97,6 +137,7 @@ async def simulate(
         "agent_id": str(agent.id),
         "current": _summary(effective.decide(snap, cap)),
         "proposed": None,
+        "notes": [_INVARIANTS, "Nothing was called, spent or sent."],
     }
     if body.proposed_rules is None:
         out["findings"] = _findings(snap, live)

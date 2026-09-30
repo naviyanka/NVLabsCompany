@@ -283,3 +283,23 @@ class TestAttackPathsThroughTheApi:
                   "conditions": {"tool_name": ["http-request", "*-notify"]}}
         body = (await sim(api, t, proposed_rules=[no_net])).json()
         assert "SECRET_NETWORK_TERMINAL" not in codes(body)
+
+
+class TestOrderedExplanation:
+    async def test_the_deciding_step_is_marked_and_later_steps_are_not_reached(
+        self, api, t  # noqa: F811
+    ):
+        body = (await sim(api, t)).json()
+        steps = body["current"]["steps"]
+        assert [s["result"] for s in steps].count("decided") == 1
+        deciding = next(i for i, s in enumerate(steps) if s["result"] == "decided")
+        assert all(s["result"] == "checked" for s in steps[:deciding])
+        assert all(s["result"] == "not reached" for s in steps[deciding + 1:])
+        assert any("CEO" in n for n in body["notes"])
+        assert any("Nothing was called" in n for n in body["notes"])
+
+    async def test_an_unsupported_capability_reports_its_blocker(self, api, t):  # noqa: F811
+        body = (await sim(api, t, cap="computer.terminal")).json()
+        assert body["current"]["code"] == "NOT_ENFORCEABLE"
+        assert body["current"]["steps"][0]["result"] == "decided"
+        assert "No preventive enforcement" in body["current"]["blockers"][0]
