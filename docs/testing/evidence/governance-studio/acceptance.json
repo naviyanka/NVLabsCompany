@@ -1,0 +1,355 @@
+{
+  "database": "disposable PostgreSQL, all migrations applied, routes as a non-superuser",
+  "tools": "fake and internal only; no external call was made",
+  "passed": 30,
+  "total": 30,
+  "scenarios": [
+    {
+      "scenario": 1,
+      "title": "A viewer can inspect permitted read views but cannot edit.",
+      "result": "pass",
+      "observed": {
+        "reads": "200",
+        "writes": {
+          "grant": 403,
+          "draft": 403,
+          "lockdown": 403,
+          "simulate_publish": 403
+        }
+      }
+    },
+    {
+      "scenario": 2,
+      "title": "An admin creates a temporary read grant, and it really lets a denied read through.",
+      "result": "pass",
+      "observed": {
+        "before": "deny",
+        "grant_status": "active",
+        "after": "allow"
+      }
+    },
+    {
+      "scenario": 3,
+      "title": "An admin creates a one-use write grant; it waits for a second person.",
+      "result": "pass",
+      "observed": {
+        "created": "pending_approval",
+        "after_approval": "active",
+        "uses": 1
+      }
+    },
+    {
+      "scenario": 4,
+      "title": "A one-use grant works exactly once through the real guarded call.",
+      "result": "pass",
+      "observed": {
+        "first": "success",
+        "second": "blocked",
+        "tool_runs": 1,
+        "status": "used_up"
+      }
+    },
+    {
+      "scenario": 5,
+      "title": "Expiry removes access with no scheduler running.",
+      "result": "pass",
+      "observed": {
+        "before": "allow",
+        "after_expiry": "deny",
+        "listed_as": "expired"
+      }
+    },
+    {
+      "scenario": 6,
+      "title": "An explicit deny rule defeats a temporary allow.",
+      "result": "pass",
+      "observed": {
+        "grant": "active",
+        "decision": "deny",
+        "grant_used": false
+      }
+    },
+    {
+      "scenario": 7,
+      "title": "An unsupported backend stays unsupported and cannot be granted.",
+      "result": "pass",
+      "observed": {
+        "support": "unsupported",
+        "state": "unsupported",
+        "grant": "422 UNKNOWN_TOOL"
+      }
+    },
+    {
+      "scenario": 8,
+      "title": "A high-risk grant needs approval and grants nothing until then.",
+      "result": "pass",
+      "observed": {
+        "status": "pending_approval",
+        "approval_requested": true,
+        "access": "deny"
+      }
+    },
+    {
+      "scenario": 9,
+      "title": "A requester cannot approve their own grant.",
+      "result": "pass",
+      "observed": {
+        "self_approval": "403 SELF_APPROVAL",
+        "access": "deny"
+      }
+    },
+    {
+      "scenario": 10,
+      "title": "The simulator explains allow and deny and invokes nothing.",
+      "result": "pass",
+      "observed": {
+        "allow_explained": true,
+        "deny_explained": true,
+        "audit_rows_added": 0,
+        "uses_spent": 0
+      }
+    },
+    {
+      "scenario": 11,
+      "title": "Publishing creates a new immutable version.",
+      "result": "pass",
+      "observed": {
+        "version_before": 0,
+        "version_after": 2,
+        "active_versions": 1
+      }
+    },
+    {
+      "scenario": 12,
+      "title": "Two publishes from one base leave one winner and one 409.",
+      "result": "pass",
+      "observed": {
+        "statuses": [
+          200,
+          409
+        ],
+        "loser_code": "VERSION_CONFLICT"
+      }
+    },
+    {
+      "scenario": 13,
+      "title": "Rollback creates a new version and keeps every older one.",
+      "result": "pass",
+      "observed": {
+        "versions_before": 3,
+        "versions_after": 4,
+        "history_kept": true
+      }
+    },
+    {
+      "scenario": 14,
+      "title": "Runtime cancellation touches only the selected attempt.",
+      "result": "pass",
+      "observed": {
+        "selected_attempt": "cancelled",
+        "same_agent_turn": "queued",
+        "other_agent": "queued"
+      }
+    },
+    {
+      "scenario": 15,
+      "title": "Lockdown blocks writes and leaves reads.",
+      "result": "pass",
+      "observed": {
+        "confirm_phrase_required": true,
+        "write": "deny",
+        "read": "allow"
+      }
+    },
+    {
+      "scenario": 16,
+      "title": "Releasing the lockdown restores exactly the earlier policy state.",
+      "result": "pass",
+      "observed": {
+        "write_after_release": "allow",
+        "published_deny_still_holds": true,
+        "policy_unchanged": true
+      }
+    },
+    {
+      "scenario": 17,
+      "title": "Another tenant's agent and grant are 404.",
+      "result": "pass",
+      "observed": {
+        "agent": 404,
+        "grant": 404
+      }
+    },
+    {
+      "scenario": 18,
+      "title": "The audit trail names who did what and holds no secret value.",
+      "result": "pass",
+      "observed": {
+        "actions": [
+          "governance.grant.approved",
+          "governance.grant.created",
+          "governance.isolation.started",
+          "governance.lockdown.started"
+        ],
+        "every_row_has_actor_resource_time": true,
+        "secret_present": false
+      }
+    },
+    {
+      "scenario": 19,
+      "title": "The simulator, the matrix and the real engine give the same decision.",
+      "result": "pass",
+      "observed": {
+        "cases": {
+          "safe_default_denied": "deny",
+          "safe_with_grant": "allow",
+          "high_risk_no_grant": "deny",
+          "high_risk_approved": "allow"
+        },
+        "agree": true
+      }
+    },
+    {
+      "scenario": 20,
+      "title": "Simulating and reading the matrix never spend a one-use grant.",
+      "result": "pass",
+      "observed": {
+        "simulations": 3,
+        "matrix_reads": 3,
+        "used_count": 0
+      }
+    },
+    {
+      "scenario": 21,
+      "title": "One real invocation spends exactly one use.",
+      "result": "pass",
+      "observed": {
+        "invocations": 1,
+        "used_count": 1,
+        "status": "active"
+      }
+    },
+    {
+      "scenario": 22,
+      "title": "A policy draft is listed with its fields and its author can edit it.",
+      "result": "pass",
+      "observed": {
+        "listed_fields": [
+          "affects",
+          "base_version",
+          "created_at",
+          "created_by",
+          "diff",
+          "findings",
+          "id",
+          "loosens",
+          "published_version",
+          "reason",
+          "reviewers",
+          "rules",
+          "stale",
+          "status",
+          "ticket_ref",
+          "updated_at"
+        ],
+        "edit": "200",
+        "rules_after_edit": 2,
+        "surface": "API; the dashboard screens are covered by the Governance Studio vitest suite"
+      }
+    },
+    {
+      "scenario": 23,
+      "title": "Publish turns a draft into the active rules the engine enforces.",
+      "result": "pass",
+      "observed": {
+        "write_before": "allow",
+        "write_after": "deny",
+        "read_after": "allow"
+      }
+    },
+    {
+      "scenario": 24,
+      "title": "A stale edit and a stale publish return a visible 409.",
+      "result": "pass",
+      "observed": {
+        "stale_edit": "409 STALE_EDIT",
+        "stale_publish": "409 STALE_BASE"
+      }
+    },
+    {
+      "scenario": 25,
+      "title": "Rollback to an earlier version restores its behavior as a new version.",
+      "result": "pass",
+      "observed": {
+        "read_before": "allow",
+        "read_after": "deny",
+        "write_after": "deny",
+        "new_version": true
+      }
+    },
+    {
+      "scenario": 26,
+      "title": "A preset creates a draft and changes nothing until it is published.",
+      "result": "pass",
+      "observed": {
+        "draft": "created",
+        "active_policy": "unchanged",
+        "write_still": "allow",
+        "direct_setter": "absent"
+      }
+    },
+    {
+      "scenario": 27,
+      "title": "A secret, arbitrary network and terminal together raise a finding.",
+      "result": "pass",
+      "observed": {
+        "finding": "SECRET_NETWORK_TERMINAL",
+        "severity": "high",
+        "capabilities": [
+          "computer.terminal",
+          "data.secrets",
+          "exec.execute_code",
+          "tool.http-request",
+          "tool.msg-webhook-notify"
+        ]
+      }
+    },
+    {
+      "scenario": 28,
+      "title": "Revoking the secret binding clears the finding.",
+      "result": "pass",
+      "observed": {
+        "before": "finding",
+        "after_secret_revoked": "cleared"
+      }
+    },
+    {
+      "scenario": 29,
+      "title": "No grant, rule or preset can turn on an unenforceable capability.",
+      "result": "pass",
+      "observed": {
+        "simulated_with_allow_all": "deny NOT_ENFORCEABLE",
+        "grant": "422",
+        "preset": "excluded"
+      }
+    },
+    {
+      "scenario": 30,
+      "title": "Another tenant's agent, grant, draft and version ids are all 404.",
+      "result": "pass",
+      "observed": {
+        "statuses": {
+          "agent": 404,
+          "agent_presets": 404,
+          "grant_approve": 404,
+          "grant_revoke": 404,
+          "draft": 404,
+          "draft_publish": 404,
+          "version": 404,
+          "rollback": 404
+        },
+        "lists_empty": true
+      }
+    }
+  ]
+}

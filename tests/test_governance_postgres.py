@@ -135,6 +135,36 @@ class TestGrantRaces:
         assert results.count(True) == 3
         assert (await _grant_row(pg, ids, grant_id)).used_count == 3
 
+    async def test_one_invocation_replayed_at_once_is_charged_once(self, pg):  # noqa: ANN001
+        ids = await pg.seed()
+        grant_id = await pg.grant(ids, max_uses=5)
+
+        async def use(key: str) -> bool:
+            async with pg.session(ids["company"]) as db:
+                spent = await overlay.consume_temp_grant(db, ids["company"], grant_id, key)
+                await db.commit()
+                return spent
+
+        same = await asyncio.gather(*[use("inv-a") for _ in range(8)])
+        assert all(same)
+        assert (await _grant_row(pg, ids, grant_id)).used_count == 1
+        assert await use("inv-b")
+        assert (await _grant_row(pg, ids, grant_id)).used_count == 2
+
+    async def test_one_use_grant_with_distinct_invocations_has_one_winner(self, pg):  # noqa: ANN001
+        ids = await pg.seed()
+        grant_id = await pg.grant(ids, max_uses=1)
+
+        async def use(key: str) -> bool:
+            async with pg.session(ids["company"]) as db:
+                spent = await overlay.consume_temp_grant(db, ids["company"], grant_id, key)
+                await db.commit()
+                return spent
+
+        results = await asyncio.gather(*[use(f"inv-{i}") for i in range(10)])
+        assert results.count(True) == 1
+        assert (await _grant_row(pg, ids, grant_id)).used_count == 1
+
     async def test_revoke_and_use_race_has_one_winner(self, pg):  # noqa: ANN001
         for _ in range(6):
             ids = await pg.seed()

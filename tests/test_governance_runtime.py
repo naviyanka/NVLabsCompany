@@ -22,7 +22,7 @@ LOCK = {"reason": "incident drill", "confirm": "LOCKDOWN"}
 UNLOCK = {"reason": "drill is over", "confirm": "RELEASE LOCKDOWN"}
 
 
-async def _work(factory, t, agent="a") -> dict[str, uuid.UUID]:  # noqa: F811
+async def _work(factory, t, agent="a", session="s1") -> dict[str, uuid.UUID]:  # noqa: F811
     """One queued attempt (with its task) and one queued chat turn for ``agent``."""
     async with factory() as db:
         task = Task(company_id=t["acme"], title="work", status="in_progress")
@@ -33,7 +33,7 @@ async def _work(factory, t, agent="a") -> dict[str, uuid.UUID]:  # noqa: F811
             idempotency_key=str(uuid.uuid4()),
         )
         turn = ChatTurn(
-            company_id=t["acme"], agent_id=t[agent], session_id=t["s1"], turn_seq=1,
+            company_id=t["acme"], agent_id=t[agent], session_id=t[session], turn_seq=1,
             idempotency_key=str(uuid.uuid4()),
         )
         db.add_all([attempt, turn])
