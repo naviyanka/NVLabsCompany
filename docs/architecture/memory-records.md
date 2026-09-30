@@ -44,6 +44,14 @@ The ingestion key is a SHA-256 over company, source type, source id, extractor v
 
 Public API writes accept an `Idempotency-Key` header, bound to the authenticated company, actor and canonical payload.
 
+### Chat provenance
+
+A chat-extracted fact has `source_type=chat_reply` and `source_id` = the durable ChatTurn id, set by the server; the model and the browser cannot supply it. The item key is `<category>:<ordinal>` (the ordinal counts within the category, in reply order), and the extractor version is `FACT_EXTRACTOR_VERSION`. Together with the content digest, retrying extraction for the same turn derives the same keys and returns the existing rows. Two facts in one reply stay distinct; the same fact twice in one reply is one row; identical text from different turns keeps separate provenance.
+
+The response message id does not exist at extraction time (the reply is persisted after the model call), so it is not part of the key and no event id is invented. Model calls made outside a chat turn (scheduler, webhooks, orchestrator) use `source_id = reply:<sha256(agent, reply)[:40]>`, so a retry of the same reply still collapses. No random id is used as a logical source id. `PersistentLayeredMemory.store_fact` also keeps its near-duplicate check against live L2 rows, which can drop a repeat before ingest.
+
+Supersession (`PATCH` with new content) is idempotent the same way: the successor's source is `memory_record:<old id>` with the content digest, so a retry returns the same replacement, a different replacement of an already-replaced record is `MEMORY_SUPERSESSION_CONFLICT` (409) and leaves no record behind, and a record of another company is `MEMORY_NOT_FOUND`.
+
 ### Trust defaults
 
 | Origin | Status | Trust |
@@ -61,6 +69,24 @@ Agents cannot set `verified`. Candidate memories never enter prompts.
 Stable error codes: `MEMORY_NOT_FOUND`, `MEMORY_ALREADY_ARCHIVED`, `MEMORY_INVALID_TRANSITION`, `MEMORY_SUPERSESSION_CONFLICT`, `MEMORY_IDEMPOTENCY_CONFLICT`.
 
 Supersession creates the successor and closes the old record in one savepoint. If another writer closed the old record first, the successor rolls back and the caller gets `MEMORY_SUPERSESSION_CONFLICT`.
+
+## Hard deletes
+
+No production path deletes a `memory_records` row.
+
+| Path | Behavior |
+|------|----------|
+| `DELETE /api/v1/memory/{id}` (`memory_global.delete_memory`) | `archive_memory`, reason `deleted`; 204 |
+| `POST /api/v1/memory/{id}/archive` | `archive_memory`, tier `cold` |
+| L2 overflow in `store_fact` | archives the oldest live rows, reason `l2 capacity` |
+| L3 (shared) | no eviction; promotion inherits the parent's status |
+| `MemoryStore.demote` / `archive_old` | writes the redacted cold file, then sets `tier=cold`; the PG row stays |
+| Cold restore | re-ingests through `ingest_memory` (`cold_archive` source) |
+| Maintenance (`orchestrator`) | decays `importance` only; never changes status, scope or tier, never deletes |
+| CEO supersede / resolve | `supersede_memory` / `archive_memory`, audited |
+| `delete(MemoryRecord)`, `db.delete(row)`, raw `DELETE FROM memory_records` | none in `src`; `tests/test_memory_write_path_guard.py` fails on any |
+
+Exceptions: no code deletes a company's memory rows. `DELETE /companies/{id}` issues `delete(Company)`, and `memory_records.company_id` has no `ON DELETE CASCADE`, so the database refuses that delete while the company still has memory rows; a real erasure needs a separate, explicit purge that does not exist yet. The migration downgrade drops the added columns and keeps the rows. Tests and migrations may clean up their own data.
 
 ## Reads
 

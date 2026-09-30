@@ -153,6 +153,7 @@ async def db(tmp_path, monkeypatch):
     def _fk_on(conn, _record):
         cur = conn.cursor()
         cur.execute("PRAGMA foreign_keys=ON")
+        cur.execute("PRAGMA journal_mode=WAL")
         cur.close()
 
     async with engine.begin() as conn:
