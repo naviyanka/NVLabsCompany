@@ -7,7 +7,9 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlmodel import SQLModel
 
+import nexus.models  # noqa: F401
 from nexus.memory.store import MemoryStore
+from nexus.models.agent import Agent
 from nexus.models.company import Company
 from nexus.models.memory import MemoryRecord
 
@@ -16,9 +18,7 @@ from nexus.models.memory import MemoryRecord
 async def db():
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
     async with engine.begin() as conn:
-        await conn.run_sync(
-            SQLModel.metadata.create_all, tables=[Company.__table__, MemoryRecord.__table__]
-        )
+        await conn.run_sync(SQLModel.metadata.create_all)
     async with async_sessionmaker(engine, class_=AsyncSession)() as session:
         yield session
     await engine.dispose()
@@ -38,10 +38,14 @@ async def test_one_store_never_serves_another_companys_memory(db):
     for cid in (a, b):
         db.add(Company(id=cid, name=str(cid)))
     await db.flush()
-    scope_id = uuid.uuid4()  # same scope entity id in both tenants
+    agent = Agent(company_id=a, name="a", role="engineer", model="m")
+    db.add(agent)
+    await db.flush()
+    scope_id = agent.id  # company B holds a row that names the same scope entity id
     store = MemoryStore(db)
     await store.store(scope="agent", scope_id=scope_id, content="A secret", company_id=a)
-    await store.store(scope="agent", scope_id=scope_id, content="B secret", company_id=b)
+    db.add(MemoryRecord(company_id=b, scope="agent", scope_id=scope_id, content="B secret", tier="warm"))
+    await db.flush()
 
     # Hot tier: the cache is keyed by company.
     got_a = await store.retrieve("agent", scope_id, company_id=a)
@@ -134,7 +138,10 @@ async def test_archive_and_promote_round_trip_stay_inside_their_company(db, tmp_
 async def test_hot_cache_moves_are_company_scoped(db, tmp_path, two):
     a, b = two
     store = MemoryStore(db, cold_storage_path=tmp_path)
-    memory_id = uuid.UUID(await store.store("agent", uuid.uuid4(), "mine", company_id=a))
+    agent = Agent(company_id=a, name="a", role="engineer", model="m")
+    db.add(agent)
+    await db.flush()
+    memory_id = uuid.UUID(await store.store("agent", agent.id, "mine", company_id=a))
     with pytest.raises(ValueError, match="not found"):
         await store.demote(memory_id, b)
     assert await store.promote(memory_id, a) == "hot"

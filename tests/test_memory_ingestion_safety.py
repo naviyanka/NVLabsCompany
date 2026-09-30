@@ -256,8 +256,12 @@ async def test_patch_redacts_edited_content(db, c):  # noqa: F811
     created = (await c["call"]("POST", _url(c), {"content": "before"})).json()
     r = await c["call"]("PATCH", f"/api/v1/memory/{created['id']}", {"content": f"now {SECRET}"})
     assert r.status_code == 200
-    [row] = await _rows(db, MemoryRecord, MemoryRecord.id == uuid.UUID(created["id"]))
+    # Text is append-only: the edit is a new record that supersedes the original.
+    assert r.json()["superseded_id"] == created["id"] and r.json()["id"] != created["id"]
+    [row] = await _rows(db, MemoryRecord, MemoryRecord.id == uuid.UUID(r.json()["id"]))
     assert SECRET not in row.content and "[REDACTED]" in row.content
+    [old] = await _rows(db, MemoryRecord, MemoryRecord.id == uuid.UUID(created["id"]))
+    assert old.content == "before" and old.status == "superseded"
 
 
 # --- chat fact capture ------------------------------------------------------------------
@@ -278,6 +282,21 @@ async def test_chat_facts_are_redacted_untrusted_candidates(patched_db, company_
     assert meta["trust"] == safety.UNTRUSTED and meta["origin"] == "chat_extraction"
     assert meta["recorded_by"] == f"agent:{alpha.id}" and meta["redacted"] is True
     assert meta["source"] == {"type": "chat_reply"} and "fact_type" in meta
+
+
+async def test_candidate_memory_never_reaches_the_prompt(patched_db, company_and_agents):  # noqa: F811
+    from sqlalchemy import update
+
+    _, alpha, _ = company_and_agents
+    await chat_module._remember_response(alpha, "I learned that deploys go out on Tuesdays each week.")
+    async with patched_db() as s:
+        assert await chat_module._fetch_agent_memories(s, alpha.id, alpha.company_id) == []
+        assert await chat_module._fetch_agent_memories(s, alpha.id, alpha.company_id, query="deploys") == []
+        # Once a person or a later phase activates it, recall serves it.
+        await s.execute(update(MemoryRecord).values(status="active"))
+        await s.commit()
+        [seen] = await chat_module._fetch_agent_memories(s, alpha.id, alpha.company_id)
+    assert "Tuesdays" in seen["content"]
 
 
 async def test_chat_capture_failure_logs_no_raw_text(patched_db, company_and_agents, monkeypatch):  # noqa: F811
