@@ -18,7 +18,14 @@ from nexus.api.deps import CurrentCompanyId, CurrentPrincipal, DbSession
 from nexus.models.agent import Agent
 from nexus.models.agent_session import AgentSessionRecord
 from nexus.services.governance_studio import catalog as cat
-from nexus.services.governance_studio import effective, grants, policies, runtime, simulate
+from nexus.services.governance_studio import (
+    effective,
+    grants,
+    policies,
+    presets,
+    runtime,
+    simulate,
+)
 from nexus.services.governance_studio.audit import actor_of
 from nexus.services.governance_studio.errors import fail, require_admin_human, require_reader
 
@@ -93,6 +100,45 @@ async def effective_access(
     require_reader(principal)
     agent = await _agent(db, company_id, agent_id)
     return await effective.effective_access(db, company_id, agent)
+
+
+@router.get("/agents/{agent_id}/autonomy-presets")
+async def list_autonomy_presets(
+    agent_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId, principal: CurrentPrincipal
+) -> dict[str, Any]:
+    require_reader(principal)
+    return await presets.list_for(db, company_id, await _agent(db, company_id, agent_id))
+
+
+@router.get("/agents/{agent_id}/autonomy-presets/{key}")
+async def preview_autonomy_preset(
+    agent_id: uuid.UUID,
+    key: str,
+    db: DbSession,
+    company_id: CurrentCompanyId,
+    principal: CurrentPrincipal,
+) -> dict[str, Any]:
+    """The rules and exact capability diff a preset would propose. Writes nothing."""
+    require_reader(principal)
+    agent = await _agent(db, company_id, agent_id)
+    return await presets.preview(db, company_id, principal, agent, key)
+
+
+@router.post("/agents/{agent_id}/autonomy-presets/{key}/draft", status_code=201)
+async def draft_autonomy_preset(
+    agent_id: uuid.UUID,
+    key: str,
+    body: presets.PresetDraftBody,
+    db: DbSession,
+    company_id: CurrentCompanyId,
+    principal: CurrentPrincipal,
+) -> dict[str, Any]:
+    """Turn a preset into a policy draft. It never publishes."""
+    require_admin_human(principal)
+    agent = await _agent(db, company_id, agent_id)
+    out = await presets.create_draft(db, company_id, principal, agent, key, body)
+    await db.commit()
+    return out
 
 
 @router.post("/grants", status_code=201)
