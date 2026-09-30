@@ -25,7 +25,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 
 from nexus.memory.safety import (
@@ -290,6 +290,24 @@ async def _conflicting_event(
         )
 
 
+async def begin_write(db: Any) -> None:
+    """Start the write transaction before reading, on SQLite.
+
+    SQLite's driver opens its transaction at the first write, so a memory write that
+    starts with a read and a SAVEPOINT runs the SAVEPOINT as the outermost
+    transaction: releasing it commits the row before the caller's later work (the
+    audit row), and a writer that commits in between makes the audit insert fail
+    at once with "database is locked". A statement that changes no row takes the
+    write lock up front. PostgreSQL needs nothing.
+    """
+    try:
+        dialect = db.get_bind().dialect.name
+    except Exception:  # noqa: BLE001 - a test double or unbound session: nothing to do
+        return
+    if dialect == "sqlite":
+        await db.execute(text("UPDATE memory_records SET id = id WHERE 0"))
+
+
 async def ingest_memory(
     db: Any,
     ctx: MemoryContext,
@@ -310,6 +328,7 @@ async def ingest_memory(
         MemoryRejected: content or metadata failed the safety bounds.
         MemoryOpError: scope, agent or source refused, or an idempotency conflict.
     """
+    await begin_write(db)
     # 1-3. Tenant and actor come from ``ctx``; validate scope, ownership and source.
     if origin is Origin.PROMOTION:
         if parent is None or parent.company_id != ctx.company_id:

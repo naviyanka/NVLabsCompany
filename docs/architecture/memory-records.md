@@ -70,6 +70,14 @@ Stable error codes: `MEMORY_NOT_FOUND`, `MEMORY_ALREADY_ARCHIVED`, `MEMORY_INVAL
 
 Supersession creates the successor and closes the old record in one savepoint. If another writer closed the old record first, the successor rolls back and the caller gets `MEMORY_SUPERSESSION_CONFLICT`.
 
+## Transactions
+
+Ingest and lifecycle never commit or roll back. The caller owns the transaction: routes and services commit once at their boundary, and a rollback removes the memory row, its audit event, and any status change or supersession link together. The unique-key race is handled with a savepoint (`begin_nested`), never a full `session.rollback()`, so the caller's unrelated work is untouched.
+
+`ingest_memory`, `archive_memory`, `reject_memory` and `supersede_memory` all start with `begin_write(db)`. On PostgreSQL it does nothing: every statement already runs inside a real transaction, so a savepoint is nested in it. SQLite differs. Its driver only opens a transaction before the first insert, update or delete, not before a read or a `SAVEPOINT`. A write that begins with a read and a savepoint therefore runs the savepoint as the outermost transaction, and releasing it commits the row on its own. That breaks rollback atomicity, and it lets another writer take the lock before the audit insert, which then fails with `database is locked` (the audit chain's retries cannot help, because they run inside the same stale transaction).
+
+On SQLite `begin_write` runs an update that matches no row, which starts the transaction and takes the write lock up front. It does not commit, replaces nothing the caller opened, and is harmless when repeated in one transaction (`supersede_memory` reaches it again through `ingest_memory`). It needs no WAL setting and uses no sleep or retry. `tests/test_memory_sqlite_transactions.py` covers rollback and commit atomicity, an explicit outer transaction, repeated calls and contention with a background writer.
+
 ## Hard deletes
 
 No production path deletes a `memory_records` row.

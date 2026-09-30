@@ -26,6 +26,7 @@ from nexus.memory.ingest import (
     MemoryInput,
     MemoryOpError,
     Origin,
+    begin_write,
     get_in_company,
     ingest_memory,
 )
@@ -68,6 +69,7 @@ async def _transition(
 
     Returns (row, changed); ``changed`` is False for an idempotent repeat.
     """
+    await begin_write(db)
     record = await get_in_company(db, ctx.company_id, memory_id)
     if record is None:
         raise MemoryOpError("MEMORY_NOT_FOUND", "Memory not found", 404)
@@ -154,6 +156,7 @@ async def supersede_memory(
     both happen or neither. Repeating the same call returns the same successor;
     superseding a row that another record already replaced is a conflict.
     """
+    await begin_write(db)
     old = await get_in_company(db, ctx.company_id, old_id)
     if old is None:
         raise MemoryOpError("MEMORY_NOT_FOUND", "Memory not found", 404)
