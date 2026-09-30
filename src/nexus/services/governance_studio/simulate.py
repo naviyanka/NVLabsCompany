@@ -35,7 +35,12 @@ def _summary(d: dict[str, Any]) -> dict[str, Any]:
 
 def _findings(snap: effective.Snapshot, rule_dicts: list[dict[str, Any]]) -> list[dict[str, Any]]:
     decisions = [effective.decide(snap, c) for c in build_catalog()]
-    return risk.combination_findings(decisions) + risk.rule_findings(rule_dicts)
+    return (
+        risk.combination_findings(decisions)
+        + risk.approval_findings(decisions)
+        + risk.grant_findings(snap.grants, snap.at)
+        + risk.rule_findings(rule_dicts)
+    )
 
 
 async def simulate(

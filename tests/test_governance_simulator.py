@@ -11,6 +11,7 @@ from sqlmodel import select
 
 from nexus.models.governance import AuditLog
 from nexus.models.governance_studio import GovernanceRestriction, GovernanceTempAccess
+from nexus.models.secret import Secret, SecretBinding
 from nexus.models.tool import ToolPolicy
 from nexus.services.governance_studio import catalog, risk
 from nexus.tools.access import check_tool_access
@@ -160,23 +161,26 @@ class TestRiskRules:
     @pytest.mark.parametrize(
         ("tags", "code"),
         [
-            (({"code_write"}, {"pr_merge"}), "CODE_WRITE_PR_APPROVE"),
-            (({"pr_merge"}, {"deploy"}), "MERGE_DEPLOY"),
+            (({"pr_author"}, {"merge"}), "PR_AUTHOR_MERGE"),
+            (({"code_write"}, {"merge"}), "PR_AUTHOR_MERGE"),
+            (({"merge"}, {"deploy"}), "MERGE_DEPLOY"),
+            (({"policy_edit"}, {"policy_approve"}), "POLICY_EDIT_APPROVE"),
             (({"hire_request"}, {"hire_approve"}), "HIRE_REQUEST_APPROVE"),
             (({"spend_request"}, {"spend_approve"}), "SPEND_REQUEST_APPROVE"),
-            (({"browser_auth"}, {"external_post"}), "BROWSER_AUTH_EXTERNAL_POST"),
+            (({"browser_authentication"}, {"external_post"}), "BROWSER_AUTH_EXTERNAL_POST"),
         ],
     )
-    def test_each_combination_fires_when_both_sides_are_held(self, monkeypatch, tags, code):
-        monkeypatch.setitem(risk.TAGS, "x.one", frozenset(tags[0]))
-        monkeypatch.setitem(risk.TAGS, "x.two", frozenset(tags[1]))
+    def test_each_combination_fires_when_both_sides_are_held(self, tags, code):
+        # No capability carries pr_author, merge, deploy, *_approve or policy_* yet, so the rule
+        # table is exercised with synthetic tags. The tag test below pins the carried ones.
+        mapping = {"x.one": sorted(tags[0]), "x.two": sorted(tags[1])}
         decisions = [
             {"capability_id": c, "decision": "allow", "state": "allowed"}
             for c in ("x.one", "x.two")
         ]
-        assert code in {f["code"] for f in risk.combination_findings(decisions)}
+        assert code in {f["code"] for f in risk.combination_findings(decisions, mapping)}
         decisions[1]["decision"] = "deny"
-        assert code not in {f["code"] for f in risk.combination_findings(decisions)}
+        assert code not in {f["code"] for f in risk.combination_findings(decisions, mapping)}
 
     def test_secret_network_terminal_needs_all_three(self):
         def dec(cap, state="allowed", decision="allow"):
@@ -203,3 +207,79 @@ class TestRiskRules:
         finding = next(f for f in denied["findings"] if f["code"] == "BROWSER_AUTH_EXTERNAL_POST")
         # Policy now blocks every tool; the autonomy gate still lets a level-1 agent post.
         assert finding["capabilities"] == ["computer.browser", "exec.send_external_message"]
+
+    def test_tags_are_server_owned_real_and_only_where_they_apply(self):
+        caps = catalog.catalog_by_id()
+        tagged = {cid: set(c["tags"]) for cid, c in caps.items() if c["tags"]}
+        assert tagged["computer.terminal"] == {"terminal"}
+        assert tagged["computer.browser"] == {"browser_authentication"}
+        assert tagged["data.secrets"] == {"secret_reference"}
+        assert tagged["tool.http-request"] == {"arbitrary_network", "external_post"}
+        assert "arbitrary_network" not in tagged["tool.msg-slack-send"]
+        used = set().union(*tagged.values())
+        vocabulary = {
+            "secret_reference", "arbitrary_network", "terminal", "code_write", "pr_author",
+            "merge", "deploy", "hire_request", "hire_approve", "spend_request", "spend_approve",
+            "policy_edit", "policy_approve", "external_post", "browser_authentication",
+            "fs_write_outside",
+        }
+        assert used <= vocabulary
+        # No capability exists for these, so none may carry them (no tag just to pass a test).
+        inert = {"pr_author", "merge", "deploy", "hire_approve", "spend_approve",
+                 "policy_edit", "policy_approve"}
+        assert not inert & used
+
+    async def test_approval_and_duration_rules(self, t):  # noqa: F811
+        def dec(cap, code="POLICY_ALLOW", required=False):
+            return {"capability_id": cap, "decision": "allow", "state": "allowed", "code": code,
+                    "approval": {"required": required}}
+
+        open_hire = [dec("org.ceo_request_hire"), dec("org.ceo_list_managers"),
+                     dec("tool.http-request", "DEFAULT_ALLOW")]
+        [found] = risk.approval_findings(open_hire)
+        assert found["code"] == "HIGH_RISK_NO_APPROVAL"
+        assert found["capabilities"] == ["org.ceo_request_hire"]
+        assert risk.approval_findings([dec("org.ceo_request_hire", required=True)]) == []
+
+        now = datetime.now(UTC).replace(tzinfo=None)
+        long = _grant(t, risk_level="write", starts_at=now, expires_at=now + timedelta(hours=8))
+        short = _grant(t, risk_level="write", starts_at=now, expires_at=now + timedelta(hours=1))
+        found = risk.grant_findings([long, short], now + timedelta(minutes=1))
+        assert [f["grant_id"] for f in found] == [str(long.id)]
+        safe = _grant(t, tool_name="ceo_list_managers", risk_level="read", starts_at=now,
+                      expires_at=now + timedelta(hours=8))
+        assert risk.grant_findings([safe], now) == []
+
+
+class TestAttackPathsThroughTheApi:
+    async def _bind_fake_secret(self, factory, t):  # noqa: F811
+        async with factory() as db:
+            secret = Secret(company_id=t["acme"], name="fake-internal", encrypted_value="x")
+            db.add(secret)
+            await db.flush()
+            db.add(SecretBinding(secret_id=secret.id, agent_id=t["a"]))
+            await db.commit()
+
+    async def test_secret_network_terminal_appears_and_clears(self, api, factory, t):  # noqa: F811
+        assert "SECRET_NETWORK_TERMINAL" not in codes((await sim(api, t)).json())
+        await self._bind_fake_secret(factory, t)
+        body = (await sim(api, t)).json()
+        finding = next(f for f in body["findings"] if f["code"] == "SECRET_NETWORK_TERMINAL")
+        assert {"data.secrets", "computer.terminal", "tool.http-request"} <= set(
+            finding["capabilities"]
+        )
+        # Remove one side: the agent loses its secret binding.
+        async with factory() as db:
+            row = (await db.execute(select(SecretBinding))).scalars().one()
+            row.revoked = True
+            db.add(row)
+            await db.commit()
+        assert "SECRET_NETWORK_TERMINAL" not in codes((await sim(api, t)).json())
+
+    async def test_denying_the_network_side_clears_it_too(self, api, factory, t):  # noqa: F811
+        await self._bind_fake_secret(factory, t)
+        assert "SECRET_NETWORK_TERMINAL" in codes((await sim(api, t)).json())
+        no_net = {"name": "no network", "effect": "deny",
+                  "conditions": {"tool_name": ["http-request", "*-notify"]}}
+        body = (await sim(api, t, proposed_rules=[no_net])).json()
+        assert "SECRET_NETWORK_TERMINAL" not in codes(body)

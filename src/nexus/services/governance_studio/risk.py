@@ -8,50 +8,41 @@ Two kinds of finding:
 - **Rule hygiene** over a proposed rule set (:func:`rule_findings`): broad allows,
   high-impact allows with no owner or review date, and a rule set the author also reviews.
 
-A tag nobody carries yet (pull-request approval, deploy, hire approval, spend approval) keeps
-its rule in the table, so the rule starts to fire the moment a capability gains the tag.
+A tag nobody carries yet (pr_author, merge, deploy, hire_approve, spend_approve, policy_edit,
+policy_approve) keeps its rule in the table, so the rule starts to fire the moment a capability
+gains the tag in the catalogue. Tags live in the catalogue (``catalog._TAGS``), not here.
 """
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta
 from typing import Any
 
+from nexus.services.governance_studio.catalog import catalog_by_id
 from nexus.tools.access import EXPLICIT_ALLOW_ONLY
 
 HIGH_RISKS = frozenset({"high", "destructive", "critical"})
 HIGH, MEDIUM = "high", "medium"
-
-_NETWORK = {"tool.http-request", "tool.msg-discord-send", "tool.msg-slack-send",
-            "tool.msg-telegram-send", "tool.msg-webhook-notify", "exec.send_external_message"}
-
-TAGS: dict[str, frozenset[str]] = {
-    "data.secrets": frozenset({"secret"}),
-    "computer.terminal": frozenset({"terminal"}),
-    "exec.execute_code": frozenset({"terminal"}),
-    "exec.write_file": frozenset({"code_write"}),
-    "computer.filesystem_write": frozenset({"code_write", "fs_write_outside"}),
-    "computer.browser": frozenset({"browser_auth"}),
-    "exec.spend": frozenset({"spend_request"}),
-    "org.ceo_request_hire": frozenset({"hire_request"}),
-    "org.manager_request_hire": frozenset({"hire_request"}),
-    **{cap: frozenset({"network", "external_post"}) for cap in _NETWORK},
-}
+LONG_GRANT = timedelta(hours=4)
 
 # (id, severity, groups that must each be held, explanation)
 COMBINATIONS = (
-    ("SECRET_NETWORK_TERMINAL", HIGH, (("secret",), ("network",), ("terminal",)),
-     "Secret references, network access and a terminal together can exfiltrate a secret."),
-    ("CODE_WRITE_PR_APPROVE", HIGH, (("code_write",), ("pr_approve", "pr_merge")),
-     "One agent can write code and approve or merge the pull request."),
-    ("MERGE_DEPLOY", HIGH, (("pr_merge",), ("deploy",)),
+    ("SECRET_NETWORK_TERMINAL", HIGH,
+     (("secret_reference",), ("arbitrary_network",), ("terminal",)),
+     "Secret references, arbitrary network access and a terminal can exfiltrate a secret."),
+    ("PR_AUTHOR_MERGE", HIGH, (("pr_author", "code_write"), ("merge",)),
+     "One agent can write code and merge the pull request, so a change is never reviewed."),
+    ("MERGE_DEPLOY", HIGH, (("merge",), ("deploy",)),
      "One agent can merge and deploy, so a change reaches production unreviewed."),
     ("HIRE_REQUEST_APPROVE", HIGH, (("hire_request",), ("hire_approve",)),
      "One agent can request a hire and approve it."),
     ("SPEND_REQUEST_APPROVE", HIGH, (("spend_request",), ("spend_approve",)),
      "One agent can request a budget and approve it."),
+    ("POLICY_EDIT_APPROVE", HIGH, (("policy_edit",), ("policy_approve",)),
+     "One agent can edit a policy and approve the change."),
     ("FS_WRITE_OUTSIDE_SANDBOX", MEDIUM, (("fs_write_outside",),),
      "The agent can write files outside its workspace and nothing restricts it."),
-    ("BROWSER_AUTH_EXTERNAL_POST", HIGH, (("browser_auth",), ("external_post",)),
+    ("BROWSER_AUTH_EXTERNAL_POST", HIGH, (("browser_authentication",), ("external_post",)),
      "A signed-in browser plus external posting can act as a person in public."),
 )
 
@@ -68,11 +59,16 @@ def held_ids(decisions: list[dict[str, Any]]) -> set[str]:
     }
 
 
-def combination_findings(decisions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def combination_findings(
+    decisions: list[dict[str, Any]], tags: dict[str, list[str]] | None = None
+) -> list[dict[str, Any]]:
+    """Combination findings; ``tags`` (capability id to tags) defaults to the catalogue's."""
+    if tags is None:
+        tags = {cid: c["tags"] for cid, c in catalog_by_id().items()}
     held = held_ids(decisions)
     carriers: dict[str, list[str]] = {}
     for cap_id in held:
-        for tag in TAGS.get(cap_id, ()):
+        for tag in tags.get(cap_id, ()):
             carriers.setdefault(tag, []).append(cap_id)
     out = []
     for code, severity, groups, detail in COMBINATIONS:
@@ -125,3 +121,40 @@ def rule_findings(
             "SELF_REVIEW", HIGH, "The author of this change is also listed as its reviewer."
         ))
     return out
+
+
+def _high_impact_tool(risk_level: str, tool_name: str | None) -> bool:
+    return risk_level in HIGH_RISKS or tool_name in EXPLICIT_ALLOW_ONLY
+
+
+def grant_findings(grants: list[Any], at: datetime) -> list[dict[str, Any]]:
+    """A live high-impact allow that stays open for more than a few hours."""
+    hours = LONG_GRANT.total_seconds() / 3600
+    return [
+        _finding(
+            "GRANT_LONG_DURATION", MEDIUM,
+            f"A high-impact temporary allow stays open for over {hours:g} hours. Shorten it.",
+            grant_id=str(g.id), tool=g.tool_name,
+        )
+        for g in grants
+        if g.effect == "allow" and g.status == "active" and g.starts_at <= at < g.expires_at
+        and _high_impact_tool(g.risk_level, g.tool_name) and g.expires_at - g.starts_at > LONG_GRANT
+    ]
+
+
+def approval_findings(decisions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """High-risk capabilities a rule or grant allows outright, with no approval step."""
+    caps = catalog_by_id()
+    open_ = sorted(
+        d["capability_id"] for d in decisions
+        if d["decision"] == "allow" and d["code"] in ("POLICY_ALLOW", "TEMP_ALLOW")
+        and not d["approval"].get("required")
+        and _high_impact_tool(*(caps[d["capability_id"]][k] for k in ("risk", "tool_name")))
+    )
+    if not open_:
+        return []
+    return [_finding(
+        "HIGH_RISK_NO_APPROVAL", MEDIUM,
+        "A rule or grant allows high-risk capabilities with no approval required.",
+        capabilities=open_,
+    )]

@@ -51,6 +51,29 @@ _COMPUTER_USE = (
     ("desktop", "Desktop control", "Control the desktop through screenshots and input."),
 )
 
+# Risk tags, owned here so the risk rules read the catalogue and nothing else. A tag is only
+# attached where the capability truly is that thing. There is no capability yet for pr_author,
+# merge, deploy, hire_approve, spend_approve, policy_edit or policy_approve (policy edit and
+# approval are human-admin API calls, never a tool an agent holds), so nothing carries them.
+_WEBHOOK = ("tool.http-request", "tool.msg-webhook-notify")
+_POSTING = (
+    *_WEBHOOK, "tool.msg-discord-send", "tool.msg-slack-send", "tool.msg-telegram-send",
+    "exec.send_external_message",
+)
+_TAGS: dict[str, tuple[str, ...]] = {
+    "data.secrets": ("secret_reference",),
+    "computer.terminal": ("terminal",),
+    "exec.execute_code": ("terminal",),
+    "exec.write_file": ("code_write",),
+    "computer.filesystem_write": ("code_write", "fs_write_outside"),
+    "computer.browser": ("browser_authentication",),
+    "exec.spend": ("spend_request",),
+    "org.ceo_request_hire": ("hire_request",),
+    "org.manager_request_hire": ("hire_request",),
+    **{cap: ("arbitrary_network", "external_post") for cap in _WEBHOOK},
+    **{cap: ("external_post",) for cap in _POSTING if cap not in _WEBHOOK},
+}
+
 
 def _entry(
     cap_id: str,
@@ -84,6 +107,7 @@ def _entry(
         "feature_gates": [_GATE] if support == ENFORCED else [],
         "support": support,
         "toggleable": support == ENFORCED,
+        "tags": list(_TAGS.get(cap_id, ())),
         **extra,
     }
 
