@@ -83,6 +83,6 @@ Every ported component must satisfy these. A reviewer should reject a port that 
 
 ## Unknowns that could change this plan
 
-- Whether `cost_events` can carry speech usage (decided at migration review).
-- Which Teams SDK the bot PR adopts, which affects what the thin channel service shares with the backend.
+- Whether the four proposed nullable `cost_events` fields are compatible with every current reader (confirmed at migration review after PR #58 merges; ADR 0006 prefers extending `cost_events`).
+- Which Microsoft-supported Teams SDK the TypeScript bot service adopts (a PR 8 acceptance gate).
 - Whether the uncommitted gateway changes contain further fixes not yet catalogued. Before PR 4, the patch in the local backup should be re-read in full against the rows above.

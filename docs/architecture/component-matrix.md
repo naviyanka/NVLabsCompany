@@ -146,7 +146,7 @@ Proposed by [ADR 0006](../adr/0006-azure-conversational-ceo.md); none of these c
 | Channel-neutral streaming runtime | NEXUS (`chat_turns`, `ChatTurnWorker`) | Durable ChatTurn without turn events or generation IDs | **Adapt** | High | Turn events with offsets, generation IDs, sentence-safe buffering, cancellation, backpressure |
 | Browser live voice | PR #55 voice branch | Ticket, gateway, WebSocket proxy, dashboard panel | **Adapt** | Medium | Port selected pieces with live membership recheck; reject the local engine code |
 | Channel identity and installations | NEXUS (`user_profiles`, `user_sessions`) | OIDC SSO with hard-coded default company | **Build** | High | New tenant tables with FORCE RLS and one narrow audited pre-tenant lookup |
-| Teams personal app and bot | Microsoft Teams SDK or Microsoft 365 Agents SDK | None | **Wrap** | High | Thin channel service; SDK chosen in the bot PR |
+| Teams personal app and bot | Microsoft Teams SDK or Microsoft 365 Agents SDK | None | **Wrap** | High | Thin TypeScript channel service; supported SDK chosen as a bot PR acceptance gate |
 | Telegram adapter | NEXUS (`communication/` Telegram route) | Untrusted route: no secret check, no dedupe, no user mapping | **Adapt** | Medium | Harden first (PR 0), then text-only adapter with opt-in voice |
 | Attention engine | NEXUS (`incidents`, `notifications`) | Incidents and notifications without escalation | **Build** | High | Rules, incidents and idempotent delivery attempts |
 | Teams media calling service | Microsoft media SDK | None | **Build** | Very High | Separate isolated Windows and .NET service; no database or ToolPolicy; only after a spike |
