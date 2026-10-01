@@ -74,6 +74,7 @@ from nexus.api.routes.triggers import router as triggers_router
 from nexus.api.routes.webhooks import router as webhooks_router
 from nexus.api.routes.workflows import router as workflows_router
 from nexus.api.routes.workspaces import router as workspaces_router
+from nexus.api.routes.voice import router as voice_router
 from nexus.api.routes.ws import router as ws_router
 from nexus.api.versioning import APIVersionMiddleware
 from nexus.auth.middleware import AuthenticationMiddleware
@@ -533,6 +534,7 @@ app.include_router(secrets_router)
 app.include_router(incidents_router)
 app.include_router(degradation_router)
 app.include_router(rotation_router)
+app.include_router(voice_router)
 app.include_router(ws_router)
 app.include_router(notifications_router)
 app.include_router(dashboard_router)

@@ -27,6 +27,9 @@ def upgrade() -> None:
     bind = op.get_bind()
     is_pg = bind.dialect.name == "postgresql"
     uuid_type = postgresql.UUID(as_uuid=True) if is_pg else sa.Uuid()
+    # SQLite databases first built by create_all already have this table.
+    if not is_pg and sa.inspect(bind).has_table("plaza_posts"):
+        return
 
     op.create_table(
         "plaza_posts",

@@ -1,0 +1,94 @@
+"""``nexus-voice``: diagnose, setup, serve."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+
+from nexus_voice.config import Settings
+
+
+def diagnose(settings: Settings, *, full: bool = False, load_stt: bool = True) -> dict:
+    from nexus_voice import audio, devices, models
+
+    report: dict = {
+        "python": sys.version.split()[0],
+        "gpu": devices.gpu_name(),
+        "ffmpeg": audio.ffmpeg_version(),
+    }
+    report["gpu_detected"] = report["gpu"] is not None
+    report["ctranslate2_cuda"] = devices.cuda_available()
+    device, compute = devices.choose(settings.device)
+    reason = None
+    if load_stt and models.stt_available(settings):
+        from nexus_voice.stt import Transcriber
+
+        stt = Transcriber(settings)
+        device, compute, reason = stt.device, stt.compute_type, stt.fallback_reason
+    report.update(selected_device=device, selected_compute_type=compute, fallback_reason=reason)
+    report["ffmpeg_available"] = report["ffmpeg"] is not None
+    report["stt_model_available"] = models.stt_available(settings, full=full)
+    for lang, name in (("en", "english"), ("hi", "hindi")):
+        report[f"{name}_voice_available"] = any(
+            models.voice_available(settings, v, full=full)
+            for v in models.voices_for(lang, settings)
+        )
+    stt = models.manifest()["stt"]
+    report["stt_model"] = {k: stt.get(k) for k in ("id", "revision", "license", "commercial")}
+    report["vad_model"] = {**models.manifest()["vad"], "installed": models.vad_installed()}
+    report["allow_noncommercial_models"] = settings.allow_noncommercial
+    report["voices"] = models.voice_info(settings, full=full)
+    for lang, name in (("en", "english"), ("hi", "hindi")):
+        ready = [
+            v
+            for v in report["voices"]
+            if v["language"] == lang and v["installed"] and v["selectable"]
+        ]
+        report[f"{name}_tts"] = [
+            {"provider": v["provider"], "voice": v["id"], "locale": v.get("locale")} for v in ready
+        ]
+    # No commercially licensed Hindi voice ships: it stays a live check until one is supplied.
+    report["hindi_tts_status"] = (
+        "PASS" if report["hindi_voice_available"] else "LIVE_CHECK_REQUIRED"
+    )
+    return report
+
+
+def main(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(prog="nexus-voice")
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    d = sub.add_parser("diagnose")
+    d.add_argument("--full", action="store_true", help="verify SHA-256 of every model file")
+    d.add_argument("--no-load", action="store_true", help="do not load the STT model")
+    s = sub.add_parser("setup")
+    s.add_argument("--pin", action="store_true")
+    s.add_argument("only", nargs="*")
+    sub.add_parser("voices", help="list TTS voices with licence and commercial-use status")
+    sub.add_parser("serve")
+    args = ap.parse_args(argv)
+    settings = Settings()
+    if args.cmd == "diagnose":
+        print(json.dumps(diagnose(settings, full=args.full, load_stt=not args.no_load), indent=2))
+    elif args.cmd == "voices":
+        from nexus_voice import models
+
+        for v in models.voice_info(settings):
+            tag = "NON-COMMERCIAL/UNVERIFIED" if v["restricted"] else "commercial-ok"
+            use = "selectable" if v["selectable"] else "blocked (opt-in off)"
+            got = "installed" if v["installed"] else "not installed"
+            print(f"{v['id']:28} [{tag}] {use}, {got} - {v['license']}")
+    elif args.cmd == "setup":
+        from nexus_voice import models
+
+        for line in models.setup(settings, pin=args.pin, only=args.only or None):
+            print(line)
+    else:
+        from nexus_voice.server import run
+
+        run(settings)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

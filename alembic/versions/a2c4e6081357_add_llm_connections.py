@@ -28,20 +28,22 @@ def upgrade() -> None:
     is_pg = bind.dialect.name == "postgresql"
     uuid_type = postgresql.UUID(as_uuid=True) if is_pg else sa.Uuid()
 
-    op.create_table(
-        "llm_connections",
-        sa.Column("id", uuid_type, primary_key=True),
-        sa.Column("company_id", uuid_type, sa.ForeignKey("companies.id"), nullable=False),
-        sa.Column("name", sa.String(length=255), nullable=False),
-        sa.Column("base_url", sa.String(length=1024), nullable=False),
-        sa.Column("wire_format", sa.String(length=50), nullable=False),
-        sa.Column("api_key_ref", sa.String(length=255), nullable=True),
-        sa.Column("mgmt_key_ref", sa.String(length=255), nullable=True),
-        sa.Column("is_active", sa.Boolean(), nullable=False, server_default=sa.true()),
-        sa.Column("created_at", sa.DateTime(), nullable=False),
-        sa.Column("updated_at", sa.DateTime(), nullable=False),
-    )
-    op.create_index("ix_llm_connections_company_id", "llm_connections", ["company_id"])
+    # SQLite databases first built by create_all already have this table.
+    if is_pg or not sa.inspect(bind).has_table("llm_connections"):
+        op.create_table(
+            "llm_connections",
+            sa.Column("id", uuid_type, primary_key=True),
+            sa.Column("company_id", uuid_type, sa.ForeignKey("companies.id"), nullable=False),
+            sa.Column("name", sa.String(length=255), nullable=False),
+            sa.Column("base_url", sa.String(length=1024), nullable=False),
+            sa.Column("wire_format", sa.String(length=50), nullable=False),
+            sa.Column("api_key_ref", sa.String(length=255), nullable=True),
+            sa.Column("mgmt_key_ref", sa.String(length=255), nullable=True),
+            sa.Column("is_active", sa.Boolean(), nullable=False, server_default=sa.true()),
+            sa.Column("created_at", sa.DateTime(), nullable=False),
+            sa.Column("updated_at", sa.DateTime(), nullable=False),
+        )
+        op.create_index("ix_llm_connections_company_id", "llm_connections", ["company_id"])
 
     with op.batch_alter_table("agents") as batch:
         batch.add_column(

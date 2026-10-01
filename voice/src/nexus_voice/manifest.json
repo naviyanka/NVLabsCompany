@@ -1,0 +1,148 @@
+{
+  "schema": 1,
+  "stt": {
+    "id": "faster-whisper-medium",
+    "source": "https://huggingface.co/Systran/faster-whisper-medium",
+    "revision": "08e178d48790749d25932bbc082711ddcfdfbc4f",
+    "license": "MIT",
+    "url_base": "https://huggingface.co/Systran/faster-whisper-medium/resolve/08e178d48790749d25932bbc082711ddcfdfbc4f",
+    "files": {
+      "config.json": {
+        "size": 2257,
+        "sha256": "3622a2ddc41ec0e0fd4e68c13c6830f03b90c38d89aaad184de02c8c642cf807"
+      },
+      "model.bin": {
+        "size": 1527906378,
+        "sha256": "9b45e1009dcc4ab601eff815b61d80e60ce3fd8c74c1a14f4a282258286b51ae"
+      },
+      "tokenizer.json": {
+        "size": 2203239,
+        "sha256": "fb7b63191e9bb045082c79fd742a3106a12c99513ab30df4a0d47fa6cb6fd0ab"
+      },
+      "vocabulary.txt": {
+        "size": 459861,
+        "sha256": "34ce3fe1c5041027b3f8d42912270993f986dbc4bb34cf27f951e34a1e453913"
+      }
+    },
+    "commercial": true,
+    "attribution": "OpenAI Whisper (MIT) converted by SYSTRAN faster-whisper (MIT)"
+  },
+  "vad": {
+    "id": "silero-vad-v6-onnx",
+    "source": "bundled with faster-whisper (faster_whisper/assets/silero_vad_v6.onnx)",
+    "license": "MIT",
+    "commercial": true
+  },
+  "voices": {
+    "en_US-ljspeech-medium": {
+      "language": "en",
+      "locale": "en_US",
+      "quality": "medium",
+      "sample_rate": 22050,
+      "license": "Public domain (LJ Speech dataset, https://keithito.com/LJ-Speech-Dataset/)",
+      "commercial": true,
+      "attribution": "LJ Speech dataset (public domain); Piper model trained from scratch by Bryce Beattie",
+      "revision": "c10ece1aade47bb51c153c893d14e5bf8e5b7117",
+      "source": "https://huggingface.co/rhasspy/piper-voices/tree/c10ece1aade47bb51c153c893d14e5bf8e5b7117/en/en_US/ljspeech/medium",
+      "url_base": "https://huggingface.co/rhasspy/piper-voices/resolve/c10ece1aade47bb51c153c893d14e5bf8e5b7117/en/en_US/ljspeech/medium",
+      "files": {
+        "en_US-ljspeech-medium.onnx": {
+          "size": 63531379,
+          "sha256": "6f52a751e2349abe7a76735eb09dc1875298c77ea2342ffd2fef79ff81b87f22"
+        },
+        "en_US-ljspeech-medium.onnx.json": {
+          "size": 4972,
+          "sha256": "141d612cc0a95ed7efc1ca936b845c2364967f2e9217c5dbfcf69fc4d6c65860"
+        }
+      }
+    },
+    "en_US-lessac-medium": {
+      "language": "en",
+      "locale": "en_US",
+      "quality": "medium",
+      "sample_rate": 22050,
+      "license": "Blizzard 2013 Lessac research licence: forbids commercial use incl. voice-synthesis products",
+      "source": "https://huggingface.co/rhasspy/piper-voices/tree/c10ece1aade47bb51c153c893d14e5bf8e5b7117/en/en_US/lessac/medium",
+      "url_base": "https://huggingface.co/rhasspy/piper-voices/resolve/c10ece1aade47bb51c153c893d14e5bf8e5b7117/en/en_US/lessac/medium",
+      "files": {
+        "en_US-lessac-medium.onnx": {
+          "size": 63201294,
+          "sha256": "5efe09e69902187827af646e1a6e9d269dee769f9877d17b16b1b46eeaaf019f"
+        },
+        "en_US-lessac-medium.onnx.json": {
+          "size": 4885,
+          "sha256": "efe19c417bed055f2d69908248c6ba650fa135bc868b0e6abb3da181dab690a0"
+        }
+      },
+      "commercial": false,
+      "attribution": "Lessac Technologies / Voice Factory (Blizzard 2013 dataset)",
+      "revision": "c10ece1aade47bb51c153c893d14e5bf8e5b7117"
+    },
+    "en_US-ryan-medium": {
+      "language": "en",
+      "locale": "en_US",
+      "quality": "medium",
+      "sample_rate": 22050,
+      "license": "CC BY-NC-SA 4.0 (non-commercial)",
+      "source": "https://huggingface.co/rhasspy/piper-voices/tree/c10ece1aade47bb51c153c893d14e5bf8e5b7117/en/en_US/ryan/medium",
+      "url_base": "https://huggingface.co/rhasspy/piper-voices/resolve/c10ece1aade47bb51c153c893d14e5bf8e5b7117/en/en_US/ryan/medium",
+      "files": {
+        "en_US-ryan-medium.onnx": {
+          "size": 63201294,
+          "sha256": "abf4c274862564ed647ba0d2c47f8ee7c9b717d27bdad9219100eb310db4047a"
+        },
+        "en_US-ryan-medium.onnx.json": {
+          "size": 4883,
+          "sha256": "44034c056cb15681b2ad494307c7f3f2e4499d1253c700c711fa0a4607ffe78d"
+        }
+      },
+      "commercial": false,
+      "attribution": "Ryan voice dataset, CC BY-NC-SA 4.0",
+      "revision": "c10ece1aade47bb51c153c893d14e5bf8e5b7117"
+    },
+    "hi_IN-pratham-medium": {
+      "language": "hi",
+      "locale": "hi_IN",
+      "quality": "medium",
+      "sample_rate": 22050,
+      "license": "CC BY-NC-SA 4.0 (non-commercial)",
+      "source": "https://huggingface.co/rhasspy/piper-voices/tree/c10ece1aade47bb51c153c893d14e5bf8e5b7117/hi/hi_IN/pratham/medium",
+      "url_base": "https://huggingface.co/rhasspy/piper-voices/resolve/c10ece1aade47bb51c153c893d14e5bf8e5b7117/hi/hi_IN/pratham/medium",
+      "files": {
+        "hi_IN-pratham-medium.onnx": {
+          "size": 63516050,
+          "sha256": "169964b0871667f6793416d4b35e97357a68ba1ad01df8580c28048989ee7693"
+        },
+        "hi_IN-pratham-medium.onnx.json": {
+          "size": 4970,
+          "sha256": "b68edd2cd7950dd436314013b7cd12e9699e5a3f6fe5af5af94294cf6aa7b9fd"
+        }
+      },
+      "commercial": false,
+      "attribution": "PravalX / AI4Bharat indicnlp_corpus, CC BY-NC-SA 4.0",
+      "revision": "c10ece1aade47bb51c153c893d14e5bf8e5b7117"
+    },
+    "hi_IN-priyamvada-medium": {
+      "language": "hi",
+      "locale": "hi_IN",
+      "quality": "medium",
+      "sample_rate": 22050,
+      "license": "CC BY-NC-SA 4.0 (non-commercial)",
+      "source": "https://huggingface.co/rhasspy/piper-voices/tree/c10ece1aade47bb51c153c893d14e5bf8e5b7117/hi/hi_IN/priyamvada/medium",
+      "url_base": "https://huggingface.co/rhasspy/piper-voices/resolve/c10ece1aade47bb51c153c893d14e5bf8e5b7117/hi/hi_IN/priyamvada/medium",
+      "files": {
+        "hi_IN-priyamvada-medium.onnx": {
+          "size": 63516050,
+          "sha256": "aa63bcf2cd493b55a450f280e23cf77f03afc9af7015e6e5acd43b652f166c88"
+        },
+        "hi_IN-priyamvada-medium.onnx.json": {
+          "size": 4973,
+          "sha256": "5efc0ccf7529f3528996d46e0fac1f969f681d44a8e55bfa6236ff8841b5d52d"
+        }
+      },
+      "commercial": false,
+      "attribution": "PravalX / AI4Bharat indicnlp_corpus, CC BY-NC-SA 4.0",
+      "revision": "c10ece1aade47bb51c153c893d14e5bf8e5b7117"
+    }
+  }
+}

@@ -146,7 +146,10 @@ def upgrade() -> None:
     if is_postgres:
         op.execute("ALTER TABLE audit_log NO FORCE ROW LEVEL SECURITY;")
 
-    op.drop_index("ix_audit_log_sequence_number", table_name="audit_log")
+    # A database built by create_all + ad-hoc ALTERs may not have the old index.
+    indexes = sa.inspect(op.get_bind()).get_indexes("audit_log")
+    if any(i["name"] == "ix_audit_log_sequence_number" for i in indexes):
+        op.drop_index("ix_audit_log_sequence_number", table_name="audit_log")
     op.create_index("ix_audit_log_sequence_number", "audit_log", ["sequence_number"])
     op.create_index(
         "uq_audit_log_company_sequence",

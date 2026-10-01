@@ -190,6 +190,7 @@ async def create_turn(
     work_mode: str | None = None,
     require_manager_tools: bool = False,
     record_directive: bool = False,
+    prompt_payload: dict[str, Any] | None = None,
 ) -> Enqueued:
     """Store the user's prompt and its queued turn in one transaction, then commit.
 
@@ -200,6 +201,7 @@ async def create_turn(
     requires, a directive not from a human to the CEO) are raised before
     anything is stored. ``record_directive`` stores the prompt, in the same
     transaction, as a human directive in the CEO's executive memory.
+    ``prompt_payload`` is safe metadata stored with the user message (voice: no audio).
     """
     from nexus.api.routes import chat
     from nexus.services import ceo_service
@@ -257,7 +259,7 @@ async def create_turn(
             )
 
     message = await chat._persist_message_to_db(
-        db, pinned.id, company_id, "user", prompt, session_id=record.id
+        db, pinned.id, company_id, "user", prompt, session_id=record.id, payload=prompt_payload
     )
     if message is None:
         # Nothing has been spent yet; refuse rather than run an unrecorded turn.

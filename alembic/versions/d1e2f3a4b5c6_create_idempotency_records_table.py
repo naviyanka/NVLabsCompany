@@ -18,6 +18,11 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
+    # SQLite databases first built by create_all already have this table.
+    bind = op.get_bind()
+    if bind.dialect.name == "sqlite" and sa.inspect(bind).has_table("idempotency_records"):
+        return
+
     op.create_table(
         'idempotency_records',
         sa.Column('id', sa.Uuid(), nullable=False),
