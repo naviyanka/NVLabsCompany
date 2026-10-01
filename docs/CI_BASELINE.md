@@ -57,7 +57,7 @@ the same range.
 | Job | Commands |
 |---|---|
 | arch-guard | `python scripts/arch_guard.py`, `python scripts/check_generated_artifacts.py`, `python scripts/check_test_invocations.py` |
-| backend | `pip install -e ".[dev,otel]"` (the observability tests assert on real spans), then `pytest tests/ --ignore=tests/test_postgres_integration.py -x --tb=short -q` with `DATABASE_URL=sqlite+aiosqlite:///./test.db` and `AUTH_ENABLED=false` |
+| backend | `pip install -e ".[dev,otel]"` (the observability tests assert on real spans), then `pytest tests/ --ignore=tests/test_postgres_integration.py --ignore=tests/test_memory_rls_postgres.py --ignore=tests/test_memory_ingest_postgres.py -x --tb=short -q` (every PostgreSQL-marked file is ignored here and run only by postgres-integration; `tests/test_ci_postgres_split.py` enforces it) with `DATABASE_URL=sqlite+aiosqlite:///./test.db` and `AUTH_ENABLED=false` |
 | postgres-integration | `alembic upgrade head`, `alembic downgrade base`, `alembic upgrade head`, then `pytest tests/test_postgres_integration.py -v` against the pgvector service. The pytest step sets `DATABASE_URL` as well as `TEST_DATABASE_URL`, because `IdempotencyMiddleware` uses the app's own engine |
 | compose-boot | `docker compose up -d postgres`, `docker compose run --rm migrate`, `docker compose up -d backend`, then poll `http://localhost:8000/health/live`; teardown with `docker compose down -v` |
 | frontend (`dashboard/`) | `npm ci`, `npx tsc --noEmit`, `npm test`, `npm run build` |
