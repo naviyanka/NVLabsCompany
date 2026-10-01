@@ -135,6 +135,23 @@ This document maps each NEXUS system component to its source project(s), identif
 | Sandbox Execution | PraisonAI | `sandbox/` (Docker, E2B, Modal) | **Reuse** | Medium | Multiple isolation options |
 | Session Management | Cronus AI-Company | `session_registry.py`, `session_probe.py`, fleet downlink | **Adapt** | Medium | Cross-session coordination for distributed agents |
 
+### Conversational / Channel Layer (Azure) — proposed
+
+Proposed by [ADR 0006](../adr/0006-azure-conversational-ceo.md); none of these components exist yet. Reuse sources and rejected pieces are itemized in the [extraction plan](azure-conversational-ceo-extraction-plan.md). These rows are not included in the Difficulty Distribution Summary below, which counts the components that exist today.
+
+| NEXUS Component | Source Project | Existing Implementation | Reuse Strategy | Integration Difficulty | Rewrite Requirement |
+|-----------------|---------------|------------------------|----------------|----------------------|-------------------|
+| Azure OpenAI streaming provider | NEXUS (`hermes_provider.py`, `azure_adapter.py`) | Non-streaming `azure_adapter.py`; streaming `hermes_provider.py` without a text callback | **Adapt** | High | Streaming with `on_text`, tool lifecycle events, budget reserve and settle, Entra auth, SSRF guard |
+| Azure Speech STT and TTS providers | PR #55 voice branch (interfaces only) | Local worker transport | **Build** | Medium | Provider interfaces replace the local worker; Entra auth via the Speech custom subdomain |
+| Channel-neutral streaming runtime | NEXUS (`chat_turns`, `ChatTurnWorker`) | Durable ChatTurn without turn events or generation IDs | **Adapt** | High | Turn events with offsets, generation IDs, sentence-safe buffering, cancellation, backpressure |
+| Browser live voice | PR #55 voice branch | Ticket, gateway, WebSocket proxy, dashboard panel | **Adapt** | Medium | Port selected pieces with live membership recheck; reject the local engine code |
+| Channel identity and installations | NEXUS (`user_profiles`, `user_sessions`) | OIDC SSO with hard-coded default company | **Build** | High | New tenant tables with FORCE RLS and one narrow audited pre-tenant lookup |
+| Teams personal app and bot | Microsoft Teams SDK or Microsoft 365 Agents SDK | None | **Wrap** | High | Thin TypeScript channel service; supported SDK chosen as a bot PR acceptance gate |
+| Telegram adapter | NEXUS (`communication/` Telegram route) | Untrusted route: no secret check, no dedupe, no user mapping | **Adapt** | Medium | Harden first (PR 0), then text-only adapter with opt-in voice |
+| Attention engine | NEXUS (`incidents`, `notifications`) | Incidents and notifications without escalation | **Build** | High | Rules, incidents and idempotent delivery attempts |
+| Teams media calling service | Microsoft media SDK | None | **Build** | Very High | Separate isolated Windows and .NET service; no database or ToolPolicy; only after a spike |
+| Infrastructure as code | Azure Bicep | Docker Compose and Helm | **Build** | Medium | Container Apps, Key Vault, managed identities, Speech and OpenAI resources |
+
 ---
 
 ## Difficulty Distribution Summary
