@@ -11,7 +11,7 @@ import { PolicyDrafts } from '@/components/governance/PolicyDrafts';
 import { PolicyVersions } from '@/components/governance/PolicyVersions';
 import { PresetsPanel } from '@/components/governance/PresetsPanel';
 import { GrantForm } from '@/components/governance/GrantForm';
-import { BASE, PAGE, ConfirmModal, Pager, StateLine, errorText, label, useCanEdit } from '@/components/governance/shared';
+import { BASE, PAGE, ConfirmModal, Pager, StateLine, errorText, label, usePermission } from '@/components/governance/shared';
 
 export const LOCKDOWN_PHRASE = 'LOCKDOWN';
 export const RELEASE_PHRASE = 'RELEASE LOCKDOWN';
@@ -70,7 +70,8 @@ const TABS: [Tab, string][] = [
 
 export function GovernanceAccess() {
   const qc = useQueryClient();
-  const canEdit = useCanEdit();
+  const permission = usePermission();
+  const canEdit = permission === 'write';
   const [tab, setTab] = useState<Tab>('access');
   const [agentId, setAgentId] = useState('');
   const [reason, setReason] = useState('');
@@ -164,9 +165,14 @@ export function GovernanceAccess() {
         )}
       </header>
 
-      {!canEdit && (
+      {permission === 'read' && (
         <p role="note" className="rounded-[8px] border border-white/[0.12] p-3 text-sm">
           View only. Only a human administrator can change governance.
+        </p>
+      )}
+      {permission === 'unknown' && (
+        <p role="note" className="rounded-[8px] border border-white/[0.12] p-3 text-sm">
+          Could not confirm your permission, so every change control is off. Reload to try again.
         </p>
       )}
 
@@ -376,7 +382,7 @@ export function GovernanceAccess() {
         </Card>
       )}
 
-      <ConfirmModal open={!!confirm} title={confirm?.title ?? ''} onClose={() => setConfirm(null)} danger
+      <ConfirmModal open={canEdit && !!confirm} title={confirm?.title ?? ''} onClose={() => setConfirm(null)} danger
         confirmLabel={confirm?.action ?? 'Confirm'} pending={act.isPending}
         onConfirm={() => confirm && act.mutate({ path: confirm.path, body: confirm.body })}
         error={act.error && errorText(act.error)}>
@@ -384,7 +390,7 @@ export function GovernanceAccess() {
         <p className="text-sm text-[#A8A8AB]">Reason: {reason}</p>
       </ConfirmModal>
 
-      <Modal isOpen={lockOpen} onClose={() => setLockOpen(false)}
+      <Modal isOpen={canEdit && lockOpen} onClose={() => setLockOpen(false)}
         title={locked ? 'Release company lockdown' : 'Lock down company'}>
         <div className="space-y-3">
           <p className="text-sm">

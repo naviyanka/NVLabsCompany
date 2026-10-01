@@ -3,7 +3,12 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { GovernanceAccess } from '../GovernanceAccess';
 
-const auth = vi.hoisted(() => ({ isAdmin: true }));
+// `isAdmin` is false on purpose: the screen must follow the server's `can_write`, never this.
+const auth = vi.hoisted(() => ({
+  status: 'authenticated', isAdmin: false,
+  me: { company_id: 'c1', user: { id: 'u1' } },
+}));
+const server = vi.hoisted(() => ({ canWrite: true }));
 vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => auth }));
 const get = vi.fn();
 const post = vi.fn();
@@ -52,6 +57,7 @@ let presetItems: unknown[];
 let grants: unknown[];
 
 function respond(path: string): unknown {
+  if (path.endsWith('/me')) return { can_write: server.canWrite };
   if (path.endsWith('/agents')) return { items: [{ id: 'a1', name: 'Atlas', role: 'engineer' }] };
   if (path.endsWith('/restrictions')) return { lockdown: null, isolated_agents: [] };
   if (path.endsWith('/catalog')) return { capabilities: CATALOG };
@@ -110,6 +116,7 @@ const conflict = () => Object.assign(new Error('API Error 409: STALE_BASE: moved
 
 describe('Governance Studio', () => {
   beforeEach(() => {
+    server.canWrite = true;
     get.mockReset(); post.mockReset(); put.mockReset();
     get.mockImplementation((path: string) => Promise.resolve(respond(path)));
     post.mockResolvedValue({});

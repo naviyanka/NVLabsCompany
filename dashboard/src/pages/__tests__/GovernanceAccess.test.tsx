@@ -3,7 +3,12 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { GovernanceAccess } from '../GovernanceAccess';
 
-const auth = vi.hoisted(() => ({ isAdmin: true }));
+// `isAdmin` is false on purpose: the screen must follow the server's `can_write`, never this.
+const auth = vi.hoisted(() => ({
+  status: 'authenticated', isAdmin: false,
+  me: { company_id: 'c1', user: { id: 'u1' } },
+}));
+const server = vi.hoisted(() => ({ canWrite: true }));
 vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => auth }));
 const get = vi.fn();
 const post = vi.fn();
@@ -26,6 +31,7 @@ let restrictions: unknown;
 let runtime: unknown;
 
 function respond(path: string) {
+  if (path.endsWith('/me')) return { can_write: server.canWrite };
   if (path.endsWith('/agents')) return { items: [{ id: 'a1', name: 'Atlas', role: 'engineer' }] };
   if (path.endsWith('/restrictions')) return restrictions;
   if (path.endsWith('/effective-access')) return { capabilities: CAPS };
@@ -45,7 +51,7 @@ function mount() {
 
 describe('GovernanceAccess', () => {
   beforeEach(() => {
-    auth.isAdmin = true;
+    server.canWrite = true;
     get.mockReset();
     post.mockReset();
     post.mockResolvedValue({});
@@ -144,7 +150,7 @@ describe('GovernanceAccess', () => {
   });
 
   it('shows a viewer the state but offers no write control', async () => {
-    auth.isAdmin = false;
+    server.canWrite = false;
     restrictions = { lockdown: null, isolated_agents: [] };
     mount();
     expect(await screen.findByRole('note')).toHaveTextContent('View only');

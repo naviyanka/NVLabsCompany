@@ -120,6 +120,7 @@ function Detail({ number, onClose, onRollback }: { number: number; onClose: () =
 }
 
 export function PolicyVersions() {
+  const canEdit = useCanEdit();
   const [offset, setOffset] = useState(0);
   const [open, setOpen] = useState<number | null>(null);
   const [rolling, setRolling] = useState<number | null>(null);
@@ -169,7 +170,7 @@ export function PolicyVersions() {
         )}
         <Pager offset={offset} count={items.length} onChange={setOffset} />
       </Card>
-      {rolling !== null && <RollbackDialog number={rolling} onClose={() => setRolling(null)} />}
+      {rolling !== null && canEdit && <RollbackDialog number={rolling} onClose={() => setRolling(null)} />}
     </div>
   );
 }

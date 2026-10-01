@@ -188,7 +188,7 @@ function Editor({
         )}
         <Button variant="ghost" onClick={onDone}>Close</Button>
       </div>
-      {publishing && saved && (
+      {publishing && saved && canEdit && (
         <PublishDialog draft={saved} agents={agents} version={version} onClose={() => setPublishing(false)} />
       )}
     </Card>

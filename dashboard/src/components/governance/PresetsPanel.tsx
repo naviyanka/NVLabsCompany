@@ -110,7 +110,7 @@ export function PresetsPanel({ agents, defaultAgentId }: { agents: AgentRow[]; d
           </li>
         ))}
       </ul>
-      {picked && agent && <PresetDialog agent={agent} preset={picked} onClose={() => setPicked(null)} />}
+      {picked && agent && canEdit && <PresetDialog agent={agent} preset={picked} onClose={() => setPicked(null)} />}
     </Card>
   );
 }

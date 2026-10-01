@@ -1,4 +1,6 @@
 import type { ReactNode } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { apiClient } from '@/api/client';
 import { Badge, type BadgeVariant } from '@/components/common/Badge';
 import { Button } from '@/components/common/Button';
 import { Modal } from '@/components/common/Modal';
@@ -28,8 +30,32 @@ export interface CapDiffData {
 export interface Affects { all_agents: boolean; agent_ids: string[]; capability_ids: string[] }
 export interface AgentRow { id: string; name: string; role: string }
 
-/** The server allows every governance write only to a human administrator; mirror that here. */
-export const useCanEdit = () => useAuth().isAdmin;
+export type Permission = 'loading' | 'write' | 'read' | 'unknown';
+
+/**
+ * What the server says the caller may do (`GET /governance/me`, the same predicate as the write
+ * guard). The signed-in identity only keys the cache and switches the query on: it never decides
+ * anything. Only an explicit `can_write: true` gives `write`. Loading, an error, a failed refetch
+ * and a signed-out browser never do, so write controls stay off until the server says yes.
+ */
+export function usePermission(): Permission {
+  const { status, me } = useAuth();
+  const q = useQuery({
+    queryKey: ['gov', 'me', me?.company_id ?? null, me?.user?.id ?? null],
+    enabled: status === 'authenticated',
+    queryFn: () => apiClient.get<{ can_write: boolean }>(`${BASE}/me`),
+    staleTime: 0,
+    gcTime: 0,
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: true,
+    retry: false,
+  });
+  if (status === 'loading' || (status === 'authenticated' && q.isPending)) return 'loading';
+  if (status !== 'authenticated' || q.status === 'error') return 'unknown';
+  return q.data?.can_write === true ? 'write' : 'read';
+}
+
+export const useCanEdit = () => usePermission() === 'write';
 
 export const label = (s: string) => s.replace(/_/g, ' ');
 export const errorText = (e: unknown) => (e instanceof Error ? e.message : 'Request failed');
