@@ -8,6 +8,7 @@ import { AgentDetailPage } from '@/pages/AgentDetailPage';
 import { Agents } from '@/pages/Agents';
 import { Approvals } from '@/pages/Approvals';
 import { Budgets } from '@/pages/Budgets';
+import { GovernanceAccess } from '@/pages/GovernanceAccess';
 import { Dashboard } from '@/pages/Dashboard';
 import { Evolution } from '@/pages/Evolution';
 import { GitRepos } from '@/pages/GitRepos';
@@ -90,6 +91,7 @@ export default function App() {
               <Route path="/knowledge-base" element={<KnowledgeBase />} />
               <Route path="/approvals" element={<Approvals />} />
               <Route path="/budgets" element={<Budgets />} />
+              <Route path="/governance/access" element={<GovernanceAccess />} />
               <Route path="/evolution" element={<Evolution />} />
               <Route path="/workflows" element={<Workflows />} />
               <Route path="/nodes" element={<Navigate to="/pipelines" replace />} />

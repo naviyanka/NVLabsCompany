@@ -1,0 +1,242 @@
+"""A temporary allow must really allow, and be spent exactly once per real invocation.
+
+The simulator, the effective-access matrix and the real ``guarded_call`` are asked the same
+question and must agree. Reads (simulator, matrix) never spend a use.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import dataclasses
+import uuid
+from datetime import timedelta
+from typing import Any
+
+import pytest
+from sqlmodel import select
+
+from nexus.models.governance_studio import GovernanceGrantUse, GovernanceTempAccess
+from nexus.models.tool import ToolProfile, ToolProfileBinding
+from nexus.tools import governance_overlay
+from nexus.tools.factory import guarded_call
+from tests.test_governance_grants import (  # noqa: F401 -- fixtures and helpers
+    HIRE,
+    READ,
+    _active_allow,
+    _create,
+    _decide,
+)
+from tests.test_governance_studio import _eff, _policy, api  # noqa: F401 -- fixtures, helpers
+from tests.test_tool_access import ctx, factory, t  # noqa: F401 -- fixtures and helper
+
+CAP = {HIRE: "org.ceo_request_hire", READ: "org.ceo_list_managers"}
+
+
+async def _close(factory, t):  # noqa: F811
+    """Company-wide default deny, so a safe read tool is denied until something allows it."""
+    async with factory() as db:
+        profile = ToolProfile(company_id=t["acme"], name="closed", default_action="deny")
+        db.add(profile)
+        await db.flush()
+        db.add(ToolProfileBinding(company_id=t["acme"], profile_id=profile.id,
+                                  target_type="agent", target_id=t["a"]))
+        await db.commit()
+
+
+async def _sim(api, t, tool) -> str:  # noqa: F811
+    body = {"agent_id": str(t["a"]), "capability_id": CAP[tool]}
+    r = await api("POST", "/simulate", body)
+    assert r.status_code == 200, r.text
+    return r.json()["current"]["decision"]
+
+
+async def _three_ways(api, factory, t, tool) -> tuple[bool, bool, bool]:  # noqa: F811
+    """(simulator allows, matrix allows, runtime allows) for the exact tool."""
+    sim = await _sim(api, t, tool) == "allow"
+    matrix = (await _eff(factory, t))[CAP[tool]]["decision"] == "allow"
+    runtime = (await _decide(factory, t, tool=tool)).allowed
+    return sim, matrix, runtime
+
+
+async def _row(factory, grant_id) -> GovernanceTempAccess:  # noqa: F811
+    async with factory() as db:
+        return await db.get(GovernanceTempAccess, uuid.UUID(grant_id))
+
+
+def _call(t, tool=READ, args=None, **ctx_over):  # noqa: F811
+    context = dataclasses.replace(ctx(t), **ctx_over)
+    ran: list[int] = []
+
+    async def run():
+        ran.append(1)
+        return "ok"
+
+    async def go() -> dict[str, Any]:
+        return await guarded_call(context, tool, args or {}, run, source="test",
+                                  default_risk="write")
+
+    return go, ran
+
+
+class TestTemporaryAllowActuallyAllows:
+    async def test_safe_default_denied_capability_is_allowed_by_a_valid_grant(
+        self, api, factory, t  # noqa: F811
+    ):
+        await _close(factory, t)
+        assert await _three_ways(api, factory, t, READ) == (False, False, False)
+        await _create(api, t, tool=READ)
+        assert await _three_ways(api, factory, t, READ) == (True, True, True)
+
+    async def test_high_risk_capability_needs_an_approved_grant_for_that_exact_tool(
+        self, api, factory, t  # noqa: F811
+    ):
+        assert await _three_ways(api, factory, t, HIRE) == (False, False, False)
+        g = await _create(api, t)  # pending approval
+        assert await _three_ways(api, factory, t, HIRE) == (False, False, False)
+        await api("POST", f"/grants/{g['id']}/approve", {}, who="second_admin")
+        assert await _three_ways(api, factory, t, HIRE) == (True, True, True)
+        # A grant for another tool is no wildcard.
+        assert not (await _decide(factory, t, tool="ceo_record_decision")).allowed
+
+    async def test_an_active_row_without_approval_grants_nothing(self, api, factory, t):  # noqa: F811
+        g = await _create(api, t)  # pending; force it active without the approval
+        async with factory() as db:
+            row = await db.get(GovernanceTempAccess, uuid.UUID(g["id"]))
+            row.status = "active"
+            db.add(row)
+            await db.commit()
+        assert await _three_ways(api, factory, t, HIRE) == (False, False, False)
+
+    async def test_grant_cannot_bypass_an_explicit_deny(self, api, factory, t):  # noqa: F811
+        await _active_allow(api, t)
+        await _policy(factory, t["acme"], name="freeze hiring", effect="deny",
+                      conditions={"tool_name": [HIRE]})
+        assert await _three_ways(api, factory, t, HIRE) == (False, False, False)
+
+    async def test_temporary_deny_beats_a_temporary_allow(self, api, factory, t):  # noqa: F811
+        await _active_allow(api, t)
+        await _create(api, t, effect="deny")
+        assert await _three_ways(api, factory, t, HIRE) == (False, False, False)
+
+    async def test_guarded_call_runs_the_tool_only_when_the_grant_allows(
+        self, api, factory, t  # noqa: F811
+    ):
+        go, ran = _call(t, HIRE)
+        assert (await go())["status"] == "denied" and ran == []
+        await _active_allow(api, t)
+        assert (await go())["status"] == "success" and ran == [1]
+
+
+class TestConsumption:
+    async def test_reads_never_spend_a_use(self, api, factory, t):  # noqa: F811
+        g = await _active_allow(api, t, max_uses=1)
+        for _ in range(3):
+            await _three_ways(api, factory, t, HIRE)
+            assert (await api("GET", "/grants")).status_code == 200
+            assert (await api("GET", f"/agents/{t['a']}/effective-access")).status_code == 200
+            assert (await api("GET", "/catalog")).status_code == 200
+        row = await _row(factory, g["id"])
+        assert (row.used_count, row.status) == (0, "active")
+
+    async def test_a_real_invocation_spends_exactly_one_use(self, api, factory, t):  # noqa: F811
+        g = await _active_allow(api, t, max_uses=3)
+        go, ran = _call(t, HIRE)
+        assert (await go())["status"] == "success"
+        row = await _row(factory, g["id"])
+        assert (row.used_count, row.status, ran) == (1, "active", [1])
+
+    async def test_last_use_marks_the_grant_used_up_and_the_next_call_is_denied(
+        self, api, factory, t  # noqa: F811
+    ):
+        g = await _active_allow(api, t, max_uses=1)
+        go, ran = _call(t, HIRE)
+        assert (await go())["status"] == "success"
+        assert (await _row(factory, g["id"])).status == "used_up"
+        assert (await go())["status"] == "denied" and ran == [1]
+
+    async def test_a_denied_request_spends_nothing(self, api, factory, t):  # noqa: F811
+        g = await _active_allow(api, t, max_uses=2)
+        await _policy(factory, t["acme"], name="freeze hiring", effect="deny",
+                      conditions={"tool_name": [HIRE]})
+        go, ran = _call(t, HIRE)
+        assert (await go())["status"] == "denied" and ran == []
+        # Denied by a role check that runs before the grant is even read.
+        viewer, ran_v = _call(t, HIRE, principal_role="viewer")
+        assert (await viewer())["status"] == "denied" and ran_v == []
+        assert (await _row(factory, g["id"])).used_count == 0
+
+    async def test_a_pending_grant_spends_nothing(self, api, factory, t):  # noqa: F811
+        g = await _create(api, t, max_uses=2)
+        go, _ = _call(t, HIRE)
+        assert (await go())["status"] == "denied"
+        assert (await _row(factory, g["id"])).used_count == 0
+
+    async def test_a_downstream_tool_failure_still_spends_the_use(self, api, factory, t):  # noqa: F811
+        g = await _active_allow(api, t, max_uses=2)
+
+        async def boom():
+            raise RuntimeError("tool failed")
+
+        with pytest.raises(RuntimeError):
+            await guarded_call(ctx(t), HIRE, {}, boom, source="test", default_risk="write")
+        assert (await _row(factory, g["id"])).used_count == 1
+
+    async def test_a_replay_of_one_invocation_is_not_charged_twice(self, api, factory, t):  # noqa: F811
+        g = await _active_allow(api, t, max_uses=3)
+        turn = uuid.uuid4()
+        go, ran = _call(t, HIRE, {"k": 1}, turn_id=turn)
+        assert (await go())["status"] == "success"
+        assert (await go())["status"] == "success"
+        assert (await _row(factory, g["id"])).used_count == 1 and ran == [1, 1]
+        # A different invocation (other arguments, or another turn) pays again.
+        other, _ = _call(t, HIRE, {"k": 2}, turn_id=turn)
+        assert (await other())["status"] == "success"
+        fresh, _ = _call(t, HIRE, {"k": 1}, turn_id=uuid.uuid4())
+        assert (await fresh())["status"] == "success"
+        assert (await _row(factory, g["id"])).used_count == 3
+        async with factory() as db:
+            ledger = (await db.execute(select(GovernanceGrantUse))).scalars().all()
+        assert len(ledger) == 3
+
+    async def test_a_replay_after_revoke_is_denied(self, api, factory, t):  # noqa: F811
+        g = await _active_allow(api, t, max_uses=3)
+        go, _ = _call(t, HIRE, turn_id=uuid.uuid4())
+        assert (await go())["status"] == "success"
+        await api("POST", f"/grants/{g['id']}/revoke", {"reason": "done with it"})
+        assert (await go())["status"] == "denied"
+
+    async def test_concurrent_one_use_invocations_have_one_winner(self, api, factory, t):  # noqa: F811
+        g = await _active_allow(api, t, max_uses=1)
+        go, ran = _call(t, HIRE)
+        results = await asyncio.gather(*(go() for _ in range(5)))
+        assert [r["status"] for r in results].count("success") == 1 and ran == [1]
+        assert (await _row(factory, g["id"])).used_count == 1
+
+    @pytest.mark.parametrize("fate", ["revoked", "expired"])
+    async def test_revoke_or_expiry_before_the_spend_wins(self, api, factory, t, fate):  # noqa: F811
+        g = await _active_allow(api, t, max_uses=2)
+        async with factory() as db:
+            row = await db.get(GovernanceTempAccess, uuid.UUID(g["id"]))
+            if fate == "revoked":
+                row.status = "revoked"
+            else:
+                row.expires_at = governance_overlay.now() - timedelta(seconds=1)
+            db.add(row)
+            await db.commit()
+        async with factory() as db:
+            spent = await governance_overlay.consume_temp_grant(
+                db, t["acme"], uuid.UUID(g["id"]), key="k" * 64
+            )
+            await db.commit()
+        assert spent is False and (await _row(factory, g["id"])).used_count == 0
+
+    async def test_other_tenants_cannot_tell_whether_a_grant_exists(self, api, t):  # noqa: F811
+        g = await _create(api, t, tool=READ)
+        real = await api("POST", f"/grants/{g['id']}/revoke", {"reason": "not yours"},
+                         who="outsider")
+        ghost = await api("POST", f"/grants/{uuid.uuid4()}/revoke", {"reason": "not yours"},
+                          who="outsider")
+        assert real.status_code == ghost.status_code == 404
+        assert real.json() == ghost.json()
+        listed = (await api("GET", "/grants", who="outsider")).json()["items"]
+        assert g["id"] not in [i["id"] for i in listed]

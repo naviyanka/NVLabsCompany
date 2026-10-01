@@ -77,6 +77,7 @@ const navGroups: NavGroup[] = [
     label: 'GOVERNANCE & DATA',
     items: [
       { name: 'Approval Gate', to: '/approvals', icon: ShieldAlert },
+      { name: 'Access Governance', to: '/governance/access', icon: Shield },
       { name: 'Budgets & Limits', to: '/budgets', icon: DollarSign },
       { name: 'Evolution & Evals', to: '/evolution', icon: TrendingUp },
       { name: 'Memory Graph', to: '/memory-graph', icon: Share2 },

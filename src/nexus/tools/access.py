@@ -48,6 +48,7 @@ from nexus.models.tool import (
     ToolProfile,
     ToolProfileBinding,
 )
+from nexus.tools import governance_overlay
 from nexus.tools.context import INBOUND_MCP, ExecutionContext
 from nexus.tools.policy_engine import (
     PolicyRule,
@@ -103,6 +104,9 @@ class AccessDecision:
     binding_ids: list[str] = field(default_factory=list)
     risk_level: str = UNCLASSIFIED_RISK
     problems: list[dict[str, Any]] = field(default_factory=list)
+    # Set when a Governance Studio temporary allow turned a default deny into an allow; the
+    # caller spends one use of it (``governance_overlay.consume_temp_grant``) before running.
+    temp_grant_id: uuid.UUID | None = None
 
     @property
     def allowed(self) -> bool:
@@ -116,13 +120,16 @@ class AccessDecision:
 
     def detail(self) -> dict[str, Any]:
         """JSON-safe record for ``ToolInvocation.authorization_detail``."""
-        return {
+        detail = {
             "enforcement": self.enforcement,
             "connection_id": str(self.connection_id) if self.connection_id else None,
             "binding_ids": self.binding_ids,
             "risk_level": self.risk_level,
             "problems": self.problems,
         }
+        if self.temp_grant_id is not None:
+            detail["temp_grant_id"] = str(self.temp_grant_id)
+        return detail
 
 
 async def check_tool_access(
@@ -222,7 +229,21 @@ async def check_tool_access(
             decision.risk_level,
             external=ctx is not None and ctx.source == INBOUND_MCP,
         )
-        if not policy.allowed:
+        overlay = await governance_overlay.evaluate(
+            db,
+            decision.company_id,
+            decision.agent_id,
+            tool_name,
+            decision.risk_level,
+            policy,
+            explicit_only=tool_name in EXPLICIT_ALLOW_ONLY,
+            session_id=decision.session_id,
+        )
+        for stage, reason, hard in overlay.problems:
+            problem(stage, reason, hard=hard)
+        if overlay.policy_overridden:
+            decision.temp_grant_id = overlay.grant_id
+        elif not policy.allowed:
             problem("policy", policy.reason, hard=True)
 
     if any(p["hard"] for p in decision.problems):
@@ -315,23 +336,27 @@ async def _check_connection(
         problem("catalog", f"tool '{tool_name}' is disabled in the catalog", hard=False)
 
 
-async def _evaluate_policy(
-    db: Any,
-    company_id: uuid.UUID,
-    agent: Agent | None,
-    tool_name: str,
-    risk_level: str,
-    *,
-    external: bool = False,
-) -> Any:
-    """Evaluate the company's ToolPolicy rows for this call.
+@dataclass
+class PolicyInputs:
+    """Everything :func:`decide_policy` needs, loaded once so many tools can be decided."""
 
-    With no matching policy the effect is the ``default_action`` of the
-    agent's ToolProfile (agent, then department, then company binding). With
-    no profile bound it is ``allow`` for NEXUS's own agents, which is the
-    behaviour before ws05, and ``deny`` for an ``external`` caller (an inbound
-    MCP client), which also gets :func:`default_read_policy` when the company
-    has written no policies at all.
+    company_id: uuid.UUID
+    agent_id: uuid.UUID | None
+    default_effect: str
+    default_source: str
+    rules: list[PolicyRule]
+
+
+async def load_policy_inputs(
+    db: Any, company_id: uuid.UUID, agent: Agent | None, *, external: bool = False
+) -> PolicyInputs:
+    """Load the company's active rules and the default effect for ``agent``.
+
+    The default effect is the ``default_action`` of the agent's ToolProfile (agent, then
+    department, then company binding). With no profile bound it is ``allow`` for NEXUS's own
+    agents, which is the behaviour before ws05, and ``deny`` for an ``external`` caller (an
+    inbound MCP client), which also gets :func:`default_read_policy` when the company has
+    written no policies at all.
     """
     bound = (
         await db.execute(
@@ -362,7 +387,6 @@ async def _evaluate_policy(
     profile = resolver.resolve(agent_id, department_id, company_id)
 
     fallback = "deny" if external else "allow"
-    engine = ToolPolicyEngine(default_effect=profile.default_action if profile else fallback)
     rows = (
         await db.execute(
             select(ToolPolicy).where(
@@ -384,17 +408,44 @@ async def _evaluate_policy(
     ]
     if external and not rules:
         rules = [default_read_policy(company_id)]
-    context = {"company_id": str(company_id), "hour": datetime.now(UTC).hour}
+    return PolicyInputs(
+        company_id=company_id,
+        agent_id=agent_id,
+        default_effect=profile.default_action if profile else fallback,
+        default_source="tool profile default" if profile else "system default",
+        rules=rules,
+    )
+
+
+def decide_policy(inputs: PolicyInputs, tool_name: str, risk_level: str) -> Any:
+    """Evaluate loaded rules for one tool: first match by priority, else the default effect."""
+    rules = inputs.rules
+    engine = ToolPolicyEngine(default_effect=inputs.default_effect)
+    context = {"company_id": str(inputs.company_id), "hour": datetime.now(UTC).hour}
     if tool_name in EXPLICIT_ALLOW_ONLY:
         denies = ToolPolicyEngine(default_effect="allow")
         denies.load_policies([r for r in rules if r.effect != "allow"])
-        denied = denies.evaluate(agent_id, tool_name, risk_level, context)
+        denied = denies.evaluate(inputs.agent_id, tool_name, risk_level, context)
         if not denied.allowed:
             return denied
         engine = ToolPolicyEngine(default_effect="deny")
         rules = [r for r in rules if r.effect == "allow" and names_tool(r.conditions, tool_name)]
     engine.load_policies(rules)
-    return engine.evaluate(agent_id, tool_name, risk_level, context)
+    return engine.evaluate(inputs.agent_id, tool_name, risk_level, context)
+
+
+async def _evaluate_policy(
+    db: Any,
+    company_id: uuid.UUID,
+    agent: Agent | None,
+    tool_name: str,
+    risk_level: str,
+    *,
+    external: bool = False,
+) -> Any:
+    """Evaluate the company's ToolPolicy rows for this call."""
+    inputs = await load_policy_inputs(db, company_id, agent, external=external)
+    return decide_policy(inputs, tool_name, risk_level)
 
 
 def default_read_policy(company_id: uuid.UUID) -> PolicyRule:

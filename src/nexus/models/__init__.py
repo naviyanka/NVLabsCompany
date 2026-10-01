@@ -21,6 +21,13 @@ from nexus.models.evolution import (
     EvolutionProposal,
     SkillVersion,
 )
+from nexus.models.governance_studio import (
+    GovernanceGrantUse,
+    GovernancePolicyDraft,
+    GovernancePolicyVersion,
+    GovernanceRestriction,
+    GovernanceTempAccess,
+)
 from nexus.models.governance import (
     Approval,
     AuditLog,
@@ -68,6 +75,12 @@ from nexus.models.idempotency import IdempotencyRecord
 from nexus.models.organization_snapshot import OrganizationSnapshot, OrganizationSnapshotState
 
 __all__ = [
+    # Governance Studio
+    "GovernancePolicyDraft",
+    "GovernancePolicyVersion",
+    "GovernanceRestriction",
+    "GovernanceGrantUse",
+    "GovernanceTempAccess",
     # Company / Organization
     "Company",
     "CompanyMembership",
