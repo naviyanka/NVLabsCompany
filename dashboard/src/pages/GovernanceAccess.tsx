@@ -11,7 +11,7 @@ import { PolicyDrafts } from '@/components/governance/PolicyDrafts';
 import { PolicyVersions } from '@/components/governance/PolicyVersions';
 import { PresetsPanel } from '@/components/governance/PresetsPanel';
 import { GrantForm } from '@/components/governance/GrantForm';
-import { BASE, PAGE, ConfirmModal, Pager, StateLine, errorText, label } from '@/components/governance/shared';
+import { BASE, PAGE, ConfirmModal, Pager, StateLine, errorText, label, useCanEdit } from '@/components/governance/shared';
 
 export const LOCKDOWN_PHRASE = 'LOCKDOWN';
 export const RELEASE_PHRASE = 'RELEASE LOCKDOWN';
@@ -70,6 +70,7 @@ const TABS: [Tab, string][] = [
 
 export function GovernanceAccess() {
   const qc = useQueryClient();
+  const canEdit = useCanEdit();
   const [tab, setTab] = useState<Tab>('access');
   const [agentId, setAgentId] = useState('');
   const [reason, setReason] = useState('');
@@ -155,11 +156,19 @@ export function GovernanceAccess() {
             What each agent can do, decided by the same engine that enforces it.
           </p>
         </div>
-        <Button variant={locked ? 'secondary' : 'danger'} onClick={() => setLockOpen(true)}
-          icon={locked ? <Unlock className="h-4 w-4" /> : <Lock className="h-4 w-4" />}>
-          {locked ? 'Release lockdown' : 'Lock down company'}
-        </Button>
+        {canEdit && (
+          <Button variant={locked ? 'secondary' : 'danger'} onClick={() => setLockOpen(true)}
+            icon={locked ? <Unlock className="h-4 w-4" /> : <Lock className="h-4 w-4" />}>
+            {locked ? 'Release lockdown' : 'Lock down company'}
+          </Button>
+        )}
       </header>
+
+      {!canEdit && (
+        <p role="note" className="rounded-[8px] border border-white/[0.12] p-3 text-sm">
+          View only. Only a human administrator can change governance.
+        </p>
+      )}
 
       {locked && (
         <div role="alert" className="rounded-[8px] border border-[#EF4444]/40 bg-[#EF4444]/10 p-3 text-sm">
@@ -192,6 +201,7 @@ export function GovernanceAccess() {
               ))}
             </select>
             {isolated ? (
+              !canEdit ? <Badge variant="danger">Isolated: {isolated.reason}</Badge> :
               <>
                 <Badge variant="danger">Isolated: {isolated.reason}</Badge>
                 {reasonField}
@@ -205,7 +215,7 @@ export function GovernanceAccess() {
                 </Button>
               </>
             ) : (
-              selected && (
+              selected && canEdit && (
                 <>
                   {reasonField}
                   <Button size="sm" variant="danger" disabled={!reasonOk}
@@ -295,16 +305,18 @@ export function GovernanceAccess() {
 
       {tab === 'runtime' && (
         <Card>
-          <div className="mb-3">{reasonField}</div>
+          {canEdit && <div className="mb-3">{reasonField}</div>}
           {[...(runtime.data?.attempts ?? []).map((a) => ({ ...a, kind: 'attempts' })),
             ...(runtime.data?.turns ?? []).map((a) => ({ ...a, kind: 'turns' }))].map((w) => (
             <div key={w.id} className="flex items-center justify-between border-t border-white/[0.06] py-2 text-sm">
               <span>{w.kind === 'attempts' ? 'Attempt' : 'Turn'} {w.id.slice(0, 8)} · {w.status}
                 {w.cancel_requested ? ' · cancelling' : ''}</span>
-              <Button size="xs" variant="danger" disabled={!reasonOk || w.cancel_requested}
-                onClick={() => act.mutate({ path: `/runtime/${w.kind}/${w.id}/cancel`, body: { reason } })}>
-                Cancel
-              </Button>
+              {canEdit && (
+                <Button size="xs" variant="danger" disabled={!reasonOk || w.cancel_requested}
+                  onClick={() => act.mutate({ path: `/runtime/${w.kind}/${w.id}/cancel`, body: { reason } })}>
+                  Cancel
+                </Button>
+              )}
             </div>
           ))}
           <StateLine loading={runtime.isLoading} error={runtime.error}
@@ -315,13 +327,13 @@ export function GovernanceAccess() {
 
       {tab === 'grants' && (
         <Card>
-          <GrantForm agents={agents.data?.items ?? []} />
-          <div className="mb-3">{reasonField}</div>
+          {canEdit && <GrantForm agents={agents.data?.items ?? []} />}
+          {canEdit && <div className="mb-3">{reasonField}</div>}
           {(grants.data?.items ?? []).map((g) => (
             <div key={g.id} className="flex items-center justify-between border-t border-white/[0.06] py-2 text-sm">
               <span>{g.effect} {g.tool_name} · {label(g.status)} · until {g.expires_at.slice(0, 16)} · by {g.requested_by}</span>
               <span className="flex gap-2">
-                {g.status === 'pending_approval' && (
+                {canEdit && g.status === 'pending_approval' && (
                   <>
                     <Button size="xs" onClick={() => act.mutate({ path: `/grants/${g.id}/approve`, body: { note: reason } })}>
                       Approve
@@ -331,7 +343,7 @@ export function GovernanceAccess() {
                     </Button>
                   </>
                 )}
-                {(g.status === 'active' || g.status === 'pending_approval') && (
+                {canEdit && (g.status === 'active' || g.status === 'pending_approval') && (
                   <Button size="xs" variant="danger" disabled={!reasonOk}
                     onClick={() => setConfirm({
                       title: 'Revoke temporary grant', action: 'Revoke grant',

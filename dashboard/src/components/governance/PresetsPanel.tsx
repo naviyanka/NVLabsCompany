@@ -5,7 +5,7 @@ import { Button } from '@/components/common/Button';
 import { Badge } from '@/components/common/Badge';
 import { apiClient } from '@/api/client';
 import {
-  BASE, CapabilityDiff, ConfirmModal, Field, RuleDiff, StateLine, errorText, inputClass,
+  BASE, CapabilityDiff, ConfirmModal, Field, RuleDiff, StateLine, errorText, inputClass, useCanEdit,
   type AgentRow, type CapDiffData, type Rule,
 } from './shared';
 
@@ -67,6 +67,7 @@ function PresetDialog({ agent, preset, onClose }: { agent: AgentRow; preset: Pre
 }
 
 export function PresetsPanel({ agents, defaultAgentId }: { agents: AgentRow[]; defaultAgentId: string }) {
+  const canEdit = useCanEdit();
   const [agentId, setAgentId] = useState('');
   const [picked, setPicked] = useState<PresetItem | null>(null);
   const agent = agents.find((a) => a.id === (agentId || defaultAgentId));
@@ -81,6 +82,7 @@ export function PresetsPanel({ agents, defaultAgentId }: { agents: AgentRow[]; d
       <p className="mb-3 text-sm text-[#A8A8AB]">
         An autonomy preset is a named shape of access. Choosing one creates a policy draft with an
         exact capability diff. It is never published immediately.
+        {!canEdit && ' Only a human administrator can create one.'}
       </p>
       <div className="mb-3 flex">
         <Field name="Agent">
@@ -99,10 +101,12 @@ export function PresetsPanel({ agents, defaultAgentId }: { agents: AgentRow[]; d
               <div className="text-[#A8A8AB]">{p.summary}</div>
               {p.unavailable_reason && <Badge variant="neutral">Unavailable: {p.unavailable_reason}</Badge>}
             </div>
-            <Button size="xs" variant="secondary" disabled={!!p.unavailable_reason}
-              aria-label={`Preview ${p.label}`} onClick={() => setPicked(p)}>
-              Preview and draft…
-            </Button>
+            {canEdit && (
+              <Button size="xs" variant="secondary" disabled={!!p.unavailable_reason}
+                aria-label={`Preview ${p.label}`} onClick={() => setPicked(p)}>
+                Preview and draft…
+              </Button>
+            )}
           </li>
         ))}
       </ul>

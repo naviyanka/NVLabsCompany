@@ -3,6 +3,8 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { GovernanceAccess } from '../GovernanceAccess';
 
+const auth = vi.hoisted(() => ({ isAdmin: true }));
+vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => auth }));
 const get = vi.fn();
 const post = vi.fn();
 const put = vi.fn();

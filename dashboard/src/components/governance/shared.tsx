@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import { Badge, type BadgeVariant } from '@/components/common/Badge';
 import { Button } from '@/components/common/Button';
 import { Modal } from '@/components/common/Modal';
+import { useAuth } from '@/contexts/AuthContext';
 
 export const BASE = '/api/v1/governance';
 export const PAGE = 20;
@@ -26,6 +27,9 @@ export interface CapDiffData {
 }
 export interface Affects { all_agents: boolean; agent_ids: string[]; capability_ids: string[] }
 export interface AgentRow { id: string; name: string; role: string }
+
+/** The server allows every governance write only to a human administrator; mirror that here. */
+export const useCanEdit = () => useAuth().isAdmin;
 
 export const label = (s: string) => s.replace(/_/g, ' ');
 export const errorText = (e: unknown) => (e instanceof Error ? e.message : 'Request failed');

@@ -6,7 +6,7 @@ import { Badge } from '@/components/common/Badge';
 import { apiClient } from '@/api/client';
 import {
   BASE, PAGE, ConfirmModal, Field, Findings, Pager, RuleDiff, StateLine, errorText, inputClass,
-  isConflict, type Affects, type Finding, type RuleDiffData,
+  isConflict, useCanEdit, type Affects, type Finding, type RuleDiffData,
 } from './shared';
 
 interface VersionRow {
@@ -84,6 +84,7 @@ function RollbackDialog({ number, onClose }: { number: number; onClose: () => vo
 }
 
 function Detail({ number, onClose, onRollback }: { number: number; onClose: () => void; onRollback: () => void }) {
+  const canEdit = useCanEdit();
   const detail = useQuery({
     queryKey: ['gov', 'version', number],
     queryFn: () => apiClient.get<VersionDetail>(`${BASE}/versions/${number}`),
@@ -107,9 +108,11 @@ function Detail({ number, onClose, onRollback }: { number: number; onClose: () =
         </div>
       )}
       <div className="mt-3 flex gap-2">
-        <Button variant="danger" disabled={!d || d.status === 'active'} onClick={onRollback}>
-          {d?.status === 'active' ? 'This is the active version' : 'Roll back to this version…'}
-        </Button>
+        {canEdit && (
+          <Button variant="danger" disabled={!d || d.status === 'active'} onClick={onRollback}>
+            {d?.status === 'active' ? 'This is the active version' : 'Roll back to this version…'}
+          </Button>
+        )}
         <Button variant="ghost" onClick={onClose}>Close</Button>
       </div>
     </Card>

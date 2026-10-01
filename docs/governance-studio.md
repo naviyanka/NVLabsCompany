@@ -196,9 +196,11 @@ The agent picker has a search box. Selecting a capability name in the matrix ope
 reason code, source, what it is inherited from, conditions, approval need, grant validity and last
 use. The Grants tab has a form to create a temporary grant (one enforceable tool, effect, expiry,
 an optional session scope and a reason). The form checks the inputs before it posts; the server
-still enforces the expiry limits and the approval rules. The dashboard does not hide or disable
-editing controls for a viewer; the server answers 403 `HUMAN_ADMIN_REQUIRED` to every change they
-attempt.
+still enforces the expiry limits and the approval rules. A viewer sees every screen but none of the write controls: lockdown, isolation, grant forms and
+actions, draft editing, publish, rollback, preset drafts and cancel are hidden, and the page says it
+is view only. The controls follow the signed-in role (`GET /auth/me`) and stay hidden until it is
+known. This only shapes the screen; the server still answers 403 `HUMAN_ADMIN_REQUIRED` to every
+change a non-administrator attempts.
 
 ## Not in v1
 

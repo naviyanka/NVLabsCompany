@@ -3,6 +3,8 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { GovernanceAccess } from '../GovernanceAccess';
 
+const auth = vi.hoisted(() => ({ isAdmin: true }));
+vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => auth }));
 const get = vi.fn();
 const post = vi.fn();
 vi.mock('@/api/client', () => ({
@@ -43,6 +45,7 @@ function mount() {
 
 describe('GovernanceAccess', () => {
   beforeEach(() => {
+    auth.isAdmin = true;
     get.mockReset();
     post.mockReset();
     post.mockResolvedValue({});
@@ -138,6 +141,25 @@ describe('GovernanceAccess', () => {
         reason: 'needed for the demo',
       }))
     );
+  });
+
+  it('shows a viewer the state but offers no write control', async () => {
+    auth.isAdmin = false;
+    restrictions = { lockdown: null, isolated_agents: [] };
+    mount();
+    expect(await screen.findByRole('note')).toHaveTextContent('View only');
+    await screen.findByTestId('cap-tool.http-request');
+    expect(screen.queryByRole('button', { name: /lock down company/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /isolate agent/i })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Grants' }));
+    await screen.findByText('No temporary grants.');
+    expect(screen.queryByRole('form', { name: 'New temporary grant' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Policy' }));
+    await screen.findByText(/Policy drafts/);
+    expect(screen.queryByRole('button', { name: /new draft/i })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Autonomy presets' }));
+    await screen.findByText(/Only a human administrator can create one/);
+    expect(screen.queryByRole('button', { name: /^Preview /i })).toBeNull();
   });
 
   it('cancels running work with a reason', async () => {

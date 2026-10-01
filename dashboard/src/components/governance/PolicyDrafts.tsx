@@ -7,7 +7,7 @@ import { apiClient } from '@/api/client';
 import { RuleEditor, newRule } from './RuleEditor';
 import {
   BASE, PAGE, CapabilityDiff, ConfirmModal, Field, Findings, Pager, RuleDiff, StateLine,
-  errorText, inputClass, isConflict,
+  errorText, inputClass, isConflict, useCanEdit,
   type AgentRow, type Affects, type CapDiffData, type Finding, type Rule, type RuleDiffData,
 } from './shared';
 
@@ -98,6 +98,7 @@ function Editor({
   draft, agents, version, onDone,
 }: { draft: Draft | null; agents: AgentRow[]; version: number; onDone: () => void }) {
   const qc = useQueryClient();
+  const canEdit = useCanEdit();
   const live = useQuery({
     queryKey: ['gov', 'policy'],
     enabled: !draft,
@@ -128,7 +129,7 @@ function Editor({
   });
   const edit = (i: number, r: Rule) => setRules(current.map((x, j) => (j === i ? r : x)));
   const valid = reason.trim().length >= 5 && current.every((r) => r.name.trim());
-  const open = !saved || saved.status === 'draft';
+  const open = canEdit && (!saved || saved.status === 'draft');
   return (
     <Card>
       <h2 className="mb-3 text-base font-medium">{saved ? 'Edit policy draft' : 'New policy draft'}</h2>
@@ -140,7 +141,7 @@ function Editor({
           reload the drafts and re-apply your edit. ({errorText(save.error)})
         </div>
       )}
-      <div className="space-y-3">
+      <fieldset disabled={!open} className="m-0 min-w-0 space-y-3 border-0 p-0">
         {current.map((r, i) => (
           <RuleEditor key={i} rule={r} agents={agents} onChange={(n) => edit(i, n)}
             onRemove={() => setRules(current.filter((_, j) => j !== i))} />
@@ -158,7 +159,7 @@ function Editor({
             <input className={inputClass} value={reviewers} onChange={(e) => setReviewers(e.target.value)} />
           </Field>
         </div>
-      </div>
+      </fieldset>
       {saved && (
         <div className="mt-4 space-y-3">
           <section aria-label="Exact diff against the active policy">
@@ -174,9 +175,11 @@ function Editor({
       )}
       {discard.error && <p role="alert" className="mt-2 text-sm text-[#EF4444]">{errorText(discard.error)}</p>}
       <div className="mt-4 flex flex-wrap gap-2">
-        <Button disabled={!valid || !open} loading={save.isPending} onClick={() => save.mutate()}>
-          Save draft
-        </Button>
+        {open && (
+          <Button disabled={!valid} loading={save.isPending} onClick={() => save.mutate()}>
+            Save draft
+          </Button>
+        )}
         {saved && open && (
           <>
             <Button variant="danger" onClick={() => setPublishing(true)}>Review and publish…</Button>
@@ -193,6 +196,7 @@ function Editor({
 }
 
 export function PolicyDrafts({ agents }: { agents: AgentRow[] }) {
+  const canEdit = useCanEdit();
   const [offset, setOffset] = useState(0);
   const [editing, setEditing] = useState<Draft | 'new' | null>(null);
   const drafts = useQuery({
@@ -215,7 +219,7 @@ export function PolicyDrafts({ agents }: { agents: AgentRow[] }) {
     <Card>
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <h2 className="text-base font-medium">Policy drafts <span className="text-sm font-normal text-[#A8A8AB]">(active version {version})</span></h2>
-        <Button size="sm" onClick={() => setEditing('new')}>New draft from active policy</Button>
+        {canEdit && <Button size="sm" onClick={() => setEditing('new')}>New draft from active policy</Button>}
       </div>
       <StateLine loading={drafts.isLoading} error={drafts.error} empty={!!drafts.data && !items.length}
         emptyText="No policy drafts yet." />
@@ -243,7 +247,7 @@ export function PolicyDrafts({ agents }: { agents: AgentRow[] }) {
                   <td className="text-[#A8A8AB]">{d.created_at?.slice(0, 16)} by {d.created_by}</td>
                   <td>
                     <Button size="xs" variant="secondary" aria-label={`Open draft: ${d.reason}`} onClick={() => setEditing(d)}>
-                      {d.status === 'draft' ? 'Edit' : 'View'}
+                      {canEdit && d.status === 'draft' ? 'Edit' : 'View'}
                     </Button>
                   </td>
                 </tr>
