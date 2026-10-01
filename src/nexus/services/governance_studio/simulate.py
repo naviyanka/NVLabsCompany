@@ -85,7 +85,9 @@ def capability_diff(before: effective.Snapshot, after: effective.Snapshot) -> di
     for cap in build_catalog():
         if not (cap["support"] == "enforced" and cap["tool_name"]):
             excluded.append({
-                "capability_id": cap["id"], "name": cap["name"], "support": cap["support"],
+                "capability_id": cap["id"], "name": cap["name"],
+                "display_name": cap["display_name"],
+                "support": cap["support"],
                 "label": "Not enforceable" if cap["support"] == UNSUPPORTED
                 else "Not controlled by policy",
             })
@@ -93,7 +95,9 @@ def capability_diff(before: effective.Snapshot, after: effective.Snapshot) -> di
         was, now = effective.decide(before, cap), effective.decide(after, cap)
         if was["decision"] != now["decision"] or was["code"] != now["code"]:
             changes.append({
-                "capability_id": cap["id"], "name": cap["name"], "risk": cap["risk"],
+                "capability_id": cap["id"], "name": cap["name"],
+                "display_name": cap["display_name"],
+                "risk": cap["risk"],
                 "before": was["decision"], "after": now["decision"], "code": now["code"],
             })
     return {"changes": changes, "excluded": excluded}

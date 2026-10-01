@@ -1,0 +1,1243 @@
+[
+ {
+  "approval_support": true,
+  "backends": [
+   "tool_policy",
+   "rbac",
+   "governance_overlay"
+  ],
+  "category": "organization",
+  "effect_class": "write",
+  "explicit_allow_required": true,
+  "feature_gates": [
+   {
+    "name": "tool_binding_enforcement"
+   }
+  ],
+  "id": "org.ceo_create_goal_or_work_order",
+  "name": "ceo_create_goal_or_work_order",
+  "risk": "write",
+  "scope_schema": {
+   "conditions": [
+    "risk_level",
+    "tool_name",
+    "agent_id",
+    "time_of_day"
+   ]
+  },
+  "support": "enforced",
+  "tags": [],
+  "toggleable": true,
+  "tool_name": "ceo_create_goal_or_work_order"
+ },
+ {
+  "approval_support": true,
+  "backends": [
+   "tool_policy",
+   "rbac",
+   "governance_overlay"
+  ],
+  "category": "organization",
+  "effect_class": "write",
+  "explicit_allow_required": true,
+  "feature_gates": [
+   {
+    "name": "tool_binding_enforcement"
+   }
+  ],
+  "id": "org.ceo_delegate_task_to_manager",
+  "name": "ceo_delegate_task_to_manager",
+  "risk": "write",
+  "scope_schema": {
+   "conditions": [
+    "risk_level",
+    "tool_name",
+    "agent_id",
+    "time_of_day"
+   ]
+  },
+  "support": "enforced",
+  "tags": [],
+  "toggleable": true,
+  "tool_name": "ceo_delegate_task_to_manager"
+ },
+ {
+  "approval_support": true,
+  "backends": [
+   "tool_policy",
+   "rbac",
+   "governance_overlay"
+  ],
+  "category": "organization",
+  "effect_class": "read",
+  "explicit_allow_required": false,
+  "feature_gates": [
+   {
+    "name": "tool_binding_enforcement"
+   }
+  ],
+  "id": "org.ceo_get_manager_status",
+  "name": "ceo_get_manager_status",
+  "risk": "read",
+  "scope_schema": {
+   "conditions": [
+    "risk_level",
+    "tool_name",
+    "agent_id",
+    "time_of_day"
+   ]
+  },
+  "support": "enforced",
+  "tags": [],
+  "toggleable": true,
+  "tool_name": "ceo_get_manager_status"
+ },
+ {
+  "approval_support": true,
+  "backends": [
+   "tool_policy",
+   "rbac",
+   "governance_overlay"
+  ],
+  "category": "organization",
+  "effect_class": "read",
+  "explicit_allow_required": false,
+  "feature_gates": [
+   {
+    "name": "tool_binding_enforcement"
+   }
+  ],
+  "id": "org.ceo_get_organization_snapshot",
+  "name": "ceo_get_organization_snapshot",
+  "risk": "read",
+  "scope_schema": {
+   "conditions": [
+    "risk_level",
+    "tool_name",
+    "agent_id",
+    "time_of_day"
+   ]
+  },
+  "support": "enforced",
+  "tags": [],
+  "toggleable": true,
+  "tool_name": "ceo_get_organization_snapshot"
+ },
+ {
+  "approval_support": true,
+  "backends": [
+   "tool_policy",
+   "rbac",
+   "governance_overlay"
+  ],
+  "category": "organization",
+  "effect_class": "read",
+  "explicit_allow_required": false,
+  "feature_gates": [
+   {
+    "name": "tool_binding_enforcement"
+   }
+  ],
+  "id": "org.ceo_list_managers",
+  "name": "ceo_list_managers",
+  "risk": "read",
+  "scope_schema": {
+   "conditions": [
+    "risk_level",
+    "tool_name",
+    "agent_id",
+    "time_of_day"
+   ]
+  },
+  "support": "enforced",
+  "tags": [],
+  "toggleable": true,
+  "tool_name": "ceo_list_managers"
+ },
+ {
+  "approval_support": true,
+  "backends": [
+   "tool_policy",
+   "rbac",
+   "governance_overlay"
+  ],
+  "category": "organization",
+  "effect_class": "read",
+  "explicit_allow_required": false,
+  "feature_gates": [
+   {
+    "name": "tool_binding_enforcement"
+   }
+  ],
+  "id": "org.ceo_list_pending_approvals",
+  "name": "ceo_list_pending_approvals",
+  "risk": "read",
+  "scope_schema": {
+   "conditions": [
+    "risk_level",
+    "tool_name",
+    "agent_id",
+    "time_of_day"
+   ]
+  },
+  "support": "enforced",
+  "tags": [],
+  "toggleable": true,
+  "tool_name": "ceo_list_pending_approvals"
+ },
+ {
+  "approval_support": true,
+  "backends": [
+   "tool_policy",
+   "rbac",
+   "governance_overlay"
+  ],
+  "category": "organization",
+  "effect_class": "write",
+  "explicit_allow_required": true,
+  "feature_gates": [
+   {
+    "name": "tool_binding_enforcement"
+   }
+  ],
+  "id": "org.ceo_record_decision",
+  "name": "ceo_record_decision",
+  "risk": "write",
+  "scope_schema": {
+   "conditions": [
+    "risk_level",
+    "tool_name",
+    "agent_id",
+    "time_of_day"
+   ]
+  },
+  "support": "enforced",
+  "tags": [],
+  "toggleable": true,
+  "tool_name": "ceo_record_decision"
+ },
+ {
+  "approval_support": true,
+  "backends": [
+   "tool_policy",
+   "rbac",
+   "governance_overlay"
+  ],
+  "category": "organization",
+  "effect_class": "write",
+  "explicit_allow_required": true,
+  "feature_gates": [
+   {
+    "name": "tool_binding_enforcement"
+   }
+  ],
+  "id": "org.ceo_request_hire",
+  "name": "ceo_request_hire",
+  "risk": "write",
+  "scope_schema": {
+   "conditions": [
+    "risk_level",
+    "tool_name",
+    "agent_id",
+    "time_of_day"
+   ]
+  },
+  "support": "enforced",
+  "tags": [
+   "hire_request"
+  ],
+  "toggleable": true,
+  "tool_name": "ceo_request_hire"
+ },
+ {
+  "approval_support": true,
+  "backends": [
+   "tool_policy",
+   "rbac",
+   "governance_overlay"
+  ],
+  "category": "organization",
+  "effect_class": "read",
+  "explicit_allow_required": false,
+  "feature_gates": [
+   {
+    "name": "tool_binding_enforcement"
+   }
+  ],
+  "id": "org.ceo_search_executive_memory",
+  "name": "ceo_search_executive_memory",
+  "risk": "read",
+  "scope_schema": {
+   "conditions": [
+    "risk_level",
+    "tool_name",
+    "agent_id",
+    "time_of_day"
+   ]
+  },
+  "support": "enforced",
+  "tags": [],
+  "toggleable": true,
+  "tool_name": "ceo_search_executive_memory"
+ },
+ {
+  "approval_support": true,
+  "backends": [
+   "tool_policy",
+   "rbac",
+   "governance_overlay"
+  ],
+  "category": "organization",
+  "effect_class": "write",
+  "explicit_allow_required": false,
+  "feature_gates": [
+   {
+    "name": "tool_binding_enforcement"
+   }
+  ],
+  "id": "org.manager_delegate_task",
+  "name": "manager_delegate_task",
+  "risk": "write",
+  "scope_schema": {
+   "conditions": [
+    "risk_level",
+    "tool_name",
+    "agent_id",
+    "time_of_day"
+   ]
+  },
+  "support": "enforced",
+  "tags": [],
+  "toggleable": true,
+  "tool_name": "manager_delegate_task"
+ },
+ {
+  "approval_support": true,
+  "backends": [
+   "tool_policy",
+   "rbac",
+   "governance_overlay"
+  ],
+  "category": "organization",
+  "effect_class": "read",
+  "explicit_allow_required": false,
+  "feature_gates": [
+   {
+    "name": "tool_binding_enforcement"
+   }
+  ],
+  "id": "org.manager_employee_status",
+  "name": "manager_employee_status",
+  "risk": "read",
+  "scope_schema": {
+   "conditions": [
+    "risk_level",
+    "tool_name",
+    "agent_id",
+    "time_of_day"
+   ]
+  },
+  "support": "enforced",
+  "tags": [],
+  "toggleable": true,
+  "tool_name": "manager_employee_status"
+ },
+ {
+  "approval_support": true,
+  "backends": [
+   "tool_policy",
+   "rbac",
+   "governance_overlay"
+  ],
+  "category": "organization",
+  "effect_class": "read",
+  "explicit_allow_required": false,
+  "feature_gates": [
+   {
+    "name": "tool_binding_enforcement"
+   }
+  ],
+  "id": "org.manager_get_hiring_request",
+  "name": "manager_get_hiring_request",
+  "risk": "read",
+  "scope_schema": {
+   "conditions": [
+    "risk_level",
+    "tool_name",
+    "agent_id",
+    "time_of_day"
+   ]
+  },
+  "support": "enforced",
+  "tags": [],
+  "toggleable": true,
+  "tool_name": "manager_get_hiring_request"
+ },
+ {
+  "approval_support": true,
+  "backends": [
+   "tool_policy",
+   "rbac",
+   "governance_overlay"
+  ],
+  "category": "organization",
+  "effect_class": "read",
+  "explicit_allow_required": false,
+  "feature_gates": [
+   {
+    "name": "tool_binding_enforcement"
+   }
+  ],
+  "id": "org.manager_list_hiring_requests",
+  "name": "manager_list_hiring_requests",
+  "risk": "read",
+  "scope_schema": {
+   "conditions": [
+    "risk_level",
+    "tool_name",
+    "agent_id",
+    "time_of_day"
+   ]
+  },
+  "support": "enforced",
+  "tags": [],
+  "toggleable": true,
+  "tool_name": "manager_list_hiring_requests"
+ },
+ {
+  "approval_support": true,
+  "backends": [
+   "tool_policy",
+   "rbac",
+   "governance_overlay"
+  ],
+  "category": "organization",
+  "effect_class": "read",
+  "explicit_allow_required": false,
+  "feature_gates": [
+   {
+    "name": "tool_binding_enforcement"
+   }
+  ],
+  "id": "org.manager_list_reports",
+  "name": "manager_list_reports",
+  "risk": "read",
+  "scope_schema": {
+   "conditions": [
+    "risk_level",
+    "tool_name",
+    "agent_id",
+    "time_of_day"
+   ]
+  },
+  "support": "enforced",
+  "tags": [],
+  "toggleable": true,
+  "tool_name": "manager_list_reports"
+ },
+ {
+  "approval_support": true,
+  "backends": [
+   "tool_policy",
+   "rbac",
+   "governance_overlay"
+  ],
+  "category": "organization",
+  "effect_class": "write",
+  "explicit_allow_required": true,
+  "feature_gates": [
+   {
+    "name": "tool_binding_enforcement"
+   }
+  ],
+  "id": "org.manager_request_hire",
+  "name": "manager_request_hire",
+  "risk": "write",
+  "scope_schema": {
+   "conditions": [
+    "risk_level",
+    "tool_name",
+    "agent_id",
+    "time_of_day"
+   ]
+  },
+  "support": "enforced",
+  "tags": [
+   "hire_request"
+  ],
+  "toggleable": true,
+  "tool_name": "manager_request_hire"
+ },
+ {
+  "approval_support": true,
+  "backends": [
+   "tool_policy",
+   "rbac",
+   "governance_overlay"
+  ],
+  "category": "organization",
+  "effect_class": "read",
+  "explicit_allow_required": false,
+  "feature_gates": [
+   {
+    "name": "tool_binding_enforcement"
+   }
+  ],
+  "id": "org.manager_rollup",
+  "name": "manager_rollup",
+  "risk": "read",
+  "scope_schema": {
+   "conditions": [
+    "risk_level",
+    "tool_name",
+    "agent_id",
+    "time_of_day"
+   ]
+  },
+  "support": "enforced",
+  "tags": [],
+  "toggleable": true,
+  "tool_name": "manager_rollup"
+ },
+ {
+  "approval_support": true,
+  "backends": [
+   "tool_policy",
+   "rbac",
+   "governance_overlay"
+  ],
+  "category": "organization",
+  "effect_class": "read",
+  "explicit_allow_required": false,
+  "feature_gates": [
+   {
+    "name": "tool_binding_enforcement"
+   }
+  ],
+  "id": "org.manager_task_evidence",
+  "name": "manager_task_evidence",
+  "risk": "read",
+  "scope_schema": {
+   "conditions": [
+    "risk_level",
+    "tool_name",
+    "agent_id",
+    "time_of_day"
+   ]
+  },
+  "support": "enforced",
+  "tags": [],
+  "toggleable": true,
+  "tool_name": "manager_task_evidence"
+ },
+ {
+  "approval_support": true,
+  "backends": [
+   "tool_policy",
+   "rbac",
+   "governance_overlay"
+  ],
+  "category": "organization",
+  "effect_class": "read",
+  "explicit_allow_required": false,
+  "feature_gates": [
+   {
+    "name": "tool_binding_enforcement"
+   }
+  ],
+  "id": "org.organization_get_snapshot",
+  "name": "organization_get_snapshot",
+  "risk": "read",
+  "scope_schema": {
+   "conditions": [
+    "risk_level",
+    "tool_name",
+    "agent_id",
+    "time_of_day"
+   ]
+  },
+  "support": "enforced",
+  "tags": [],
+  "toggleable": true,
+  "tool_name": "organization_get_snapshot"
+ },
+ {
+  "approval_support": true,
+  "backends": [
+   "tool_policy",
+   "rbac",
+   "governance_overlay"
+  ],
+  "category": "tools",
+  "effect_class": "read",
+  "explicit_allow_required": false,
+  "feature_gates": [
+   {
+    "name": "tool_binding_enforcement"
+   }
+  ],
+  "id": "tool.ai-chat",
+  "name": "AI Chat",
+  "risk": "read",
+  "scope_schema": {
+   "conditions": [
+    "risk_level",
+    "tool_name",
+    "agent_id",
+    "time_of_day"
+   ]
+  },
+  "support": "enforced",
+  "tags": [],
+  "toggleable": true,
+  "tool_name": "ai-chat"
+ },
+ {
+  "approval_support": true,
+  "backends": [
+   "tool_policy",
+   "rbac",
+   "governance_overlay"
+  ],
+  "category": "tools",
+  "effect_class": "read",
+  "explicit_allow_required": false,
+  "feature_gates": [
+   {
+    "name": "tool_binding_enforcement"
+   }
+  ],
+  "id": "tool.ai-sentiment",
+  "name": "Sentiment Analysis",
+  "risk": "read",
+  "scope_schema": {
+   "conditions": [
+    "risk_level",
+    "tool_name",
+    "agent_id",
+    "time_of_day"
+   ]
+  },
+  "support": "enforced",
+  "tags": [],
+  "toggleable": true,
+  "tool_name": "ai-sentiment"
+ },
+ {
+  "approval_support": true,
+  "backends": [
+   "tool_policy",
+   "rbac",
+   "governance_overlay"
+  ],
+  "category": "tools",
+  "effect_class": "read",
+  "explicit_allow_required": false,
+  "feature_gates": [
+   {
+    "name": "tool_binding_enforcement"
+   }
+  ],
+  "id": "tool.ai-summarize",
+  "name": "AI Summarize",
+  "risk": "read",
+  "scope_schema": {
+   "conditions": [
+    "risk_level",
+    "tool_name",
+    "agent_id",
+    "time_of_day"
+   ]
+  },
+  "support": "enforced",
+  "tags": [],
+  "toggleable": true,
+  "tool_name": "ai-summarize"
+ },
+ {
+  "approval_support": true,
+  "backends": [
+   "tool_policy",
+   "rbac",
+   "governance_overlay"
+  ],
+  "category": "tools",
+  "effect_class": "read",
+  "explicit_allow_required": false,
+  "feature_gates": [
+   {
+    "name": "tool_binding_enforcement"
+   }
+  ],
+  "id": "tool.ai-translate",
+  "name": "AI Translate",
+  "risk": "read",
+  "scope_schema": {
+   "conditions": [
+    "risk_level",
+    "tool_name",
+    "agent_id",
+    "time_of_day"
+   ]
+  },
+  "support": "enforced",
+  "tags": [],
+  "toggleable": true,
+  "tool_name": "ai-translate"
+ },
+ {
+  "approval_support": true,
+  "backends": [
+   "tool_policy",
+   "rbac",
+   "governance_overlay"
+  ],
+  "category": "tools",
+  "effect_class": "write",
+  "explicit_allow_required": false,
+  "feature_gates": [
+   {
+    "name": "tool_binding_enforcement"
+   }
+  ],
+  "id": "tool.db-redis-get",
+  "name": "Redis Get",
+  "risk": "write",
+  "scope_schema": {
+   "conditions": [
+    "risk_level",
+    "tool_name",
+    "agent_id",
+    "time_of_day"
+   ]
+  },
+  "support": "enforced",
+  "tags": [],
+  "toggleable": true,
+  "tool_name": "db-redis-get"
+ },
+ {
+  "approval_support": true,
+  "backends": [
+   "tool_policy",
+   "rbac",
+   "governance_overlay"
+  ],
+  "category": "tools",
+  "effect_class": "write",
+  "explicit_allow_required": false,
+  "feature_gates": [
+   {
+    "name": "tool_binding_enforcement"
+   }
+  ],
+  "id": "tool.db-redis-set",
+  "name": "Redis Set",
+  "risk": "write",
+  "scope_schema": {
+   "conditions": [
+    "risk_level",
+    "tool_name",
+    "agent_id",
+    "time_of_day"
+   ]
+  },
+  "support": "enforced",
+  "tags": [],
+  "toggleable": true,
+  "tool_name": "db-redis-set"
+ },
+ {
+  "approval_support": true,
+  "backends": [
+   "tool_policy",
+   "rbac",
+   "governance_overlay"
+  ],
+  "category": "tools",
+  "effect_class": "write",
+  "explicit_allow_required": false,
+  "feature_gates": [
+   {
+    "name": "tool_binding_enforcement"
+   }
+  ],
+  "id": "tool.db-sqlite-query",
+  "name": "SQLite Query",
+  "risk": "write",
+  "scope_schema": {
+   "conditions": [
+    "risk_level",
+    "tool_name",
+    "agent_id",
+    "time_of_day"
+   ]
+  },
+  "support": "enforced",
+  "tags": [],
+  "toggleable": true,
+  "tool_name": "db-sqlite-query"
+ },
+ {
+  "approval_support": true,
+  "backends": [
+   "tool_policy",
+   "rbac",
+   "governance_overlay"
+  ],
+  "category": "tools",
+  "effect_class": "read",
+  "explicit_allow_required": false,
+  "feature_gates": [
+   {
+    "name": "tool_binding_enforcement"
+   }
+  ],
+  "id": "tool.file-csv-parse",
+  "name": "Parse CSV",
+  "risk": "read",
+  "scope_schema": {
+   "conditions": [
+    "risk_level",
+    "tool_name",
+    "agent_id",
+    "time_of_day"
+   ]
+  },
+  "support": "enforced",
+  "tags": [],
+  "toggleable": true,
+  "tool_name": "file-csv-parse"
+ },
+ {
+  "approval_support": true,
+  "backends": [
+   "tool_policy",
+   "rbac",
+   "governance_overlay"
+  ],
+  "category": "tools",
+  "effect_class": "read",
+  "explicit_allow_required": false,
+  "feature_gates": [
+   {
+    "name": "tool_binding_enforcement"
+   }
+  ],
+  "id": "tool.file-json-parse",
+  "name": "Parse JSON",
+  "risk": "read",
+  "scope_schema": {
+   "conditions": [
+    "risk_level",
+    "tool_name",
+    "agent_id",
+    "time_of_day"
+   ]
+  },
+  "support": "enforced",
+  "tags": [],
+  "toggleable": true,
+  "tool_name": "file-json-parse"
+ },
+ {
+  "approval_support": true,
+  "backends": [
+   "tool_policy",
+   "rbac",
+   "governance_overlay"
+  ],
+  "category": "tools",
+  "effect_class": "write",
+  "explicit_allow_required": false,
+  "feature_gates": [
+   {
+    "name": "tool_binding_enforcement"
+   }
+  ],
+  "id": "tool.http-request",
+  "name": "HTTP Request",
+  "risk": "write",
+  "scope_schema": {
+   "conditions": [
+    "risk_level",
+    "tool_name",
+    "agent_id",
+    "time_of_day"
+   ]
+  },
+  "support": "enforced",
+  "tags": [
+   "arbitrary_network",
+   "external_post"
+  ],
+  "toggleable": true,
+  "tool_name": "http-request"
+ },
+ {
+  "approval_support": true,
+  "backends": [
+   "tool_policy",
+   "rbac",
+   "governance_overlay"
+  ],
+  "category": "tools",
+  "effect_class": "write",
+  "explicit_allow_required": false,
+  "feature_gates": [
+   {
+    "name": "tool_binding_enforcement"
+   }
+  ],
+  "id": "tool.msg-discord-send",
+  "name": "Discord Send",
+  "risk": "write",
+  "scope_schema": {
+   "conditions": [
+    "risk_level",
+    "tool_name",
+    "agent_id",
+    "time_of_day"
+   ]
+  },
+  "support": "enforced",
+  "tags": [
+   "external_post"
+  ],
+  "toggleable": true,
+  "tool_name": "msg-discord-send"
+ },
+ {
+  "approval_support": true,
+  "backends": [
+   "tool_policy",
+   "rbac",
+   "governance_overlay"
+  ],
+  "category": "tools",
+  "effect_class": "write",
+  "explicit_allow_required": false,
+  "feature_gates": [
+   {
+    "name": "tool_binding_enforcement"
+   }
+  ],
+  "id": "tool.msg-slack-send",
+  "name": "Slack Send",
+  "risk": "write",
+  "scope_schema": {
+   "conditions": [
+    "risk_level",
+    "tool_name",
+    "agent_id",
+    "time_of_day"
+   ]
+  },
+  "support": "enforced",
+  "tags": [
+   "external_post"
+  ],
+  "toggleable": true,
+  "tool_name": "msg-slack-send"
+ },
+ {
+  "approval_support": true,
+  "backends": [
+   "tool_policy",
+   "rbac",
+   "governance_overlay"
+  ],
+  "category": "tools",
+  "effect_class": "write",
+  "explicit_allow_required": false,
+  "feature_gates": [
+   {
+    "name": "tool_binding_enforcement"
+   }
+  ],
+  "id": "tool.msg-telegram-send",
+  "name": "Telegram Send",
+  "risk": "write",
+  "scope_schema": {
+   "conditions": [
+    "risk_level",
+    "tool_name",
+    "agent_id",
+    "time_of_day"
+   ]
+  },
+  "support": "enforced",
+  "tags": [
+   "external_post"
+  ],
+  "toggleable": true,
+  "tool_name": "msg-telegram-send"
+ },
+ {
+  "approval_support": true,
+  "backends": [
+   "tool_policy",
+   "rbac",
+   "governance_overlay"
+  ],
+  "category": "tools",
+  "effect_class": "write",
+  "explicit_allow_required": false,
+  "feature_gates": [
+   {
+    "name": "tool_binding_enforcement"
+   }
+  ],
+  "id": "tool.msg-webhook-notify",
+  "name": "Webhook Notify",
+  "risk": "write",
+  "scope_schema": {
+   "conditions": [
+    "risk_level",
+    "tool_name",
+    "agent_id",
+    "time_of_day"
+   ]
+  },
+  "support": "enforced",
+  "tags": [
+   "arbitrary_network",
+   "external_post"
+  ],
+  "toggleable": true,
+  "tool_name": "msg-webhook-notify"
+ },
+ {
+  "approval_support": true,
+  "backends": [
+   "autonomy_gate"
+  ],
+  "bucket": "delete",
+  "category": "execution",
+  "effect_class": "write",
+  "explicit_allow_required": false,
+  "feature_gates": [],
+  "id": "exec.delete",
+  "name": "Delete data",
+  "risk": "high",
+  "scope_schema": {},
+  "support": "approval_only",
+  "tags": [],
+  "toggleable": false,
+  "tool_name": null
+ },
+ {
+  "approval_support": true,
+  "backends": [
+   "autonomy_gate"
+  ],
+  "bucket": "execute_code",
+  "category": "execution",
+  "effect_class": "write",
+  "explicit_allow_required": false,
+  "feature_gates": [],
+  "id": "exec.execute_code",
+  "name": "Execute code",
+  "risk": "high",
+  "scope_schema": {},
+  "support": "approval_only",
+  "tags": [
+   "terminal"
+  ],
+  "toggleable": false,
+  "tool_name": null
+ },
+ {
+  "approval_support": true,
+  "backends": [
+   "autonomy_gate"
+  ],
+  "bucket": "send_external_message",
+  "category": "execution",
+  "effect_class": "write",
+  "explicit_allow_required": false,
+  "feature_gates": [],
+  "id": "exec.send_external_message",
+  "name": "Send external messages",
+  "risk": "high",
+  "scope_schema": {},
+  "support": "approval_only",
+  "tags": [
+   "external_post"
+  ],
+  "toggleable": false,
+  "tool_name": null
+ },
+ {
+  "approval_support": true,
+  "backends": [
+   "autonomy_gate"
+  ],
+  "bucket": "write_file",
+  "category": "execution",
+  "effect_class": "write",
+  "explicit_allow_required": false,
+  "feature_gates": [],
+  "id": "exec.write_file",
+  "name": "Write files",
+  "risk": "write",
+  "scope_schema": {},
+  "support": "approval_only",
+  "tags": [
+   "code_write"
+  ],
+  "toggleable": false,
+  "tool_name": null
+ },
+ {
+  "approval_support": true,
+  "backends": [
+   "autonomy_gate"
+  ],
+  "bucket": "spend",
+  "category": "execution",
+  "effect_class": "write",
+  "explicit_allow_required": false,
+  "feature_gates": [],
+  "id": "exec.spend",
+  "name": "Spend money",
+  "risk": "high",
+  "scope_schema": {},
+  "support": "approval_only",
+  "tags": [
+   "spend_request"
+  ],
+  "toggleable": false,
+  "tool_name": null
+ },
+ {
+  "approval_support": false,
+  "backends": [],
+  "category": "computer_use",
+  "effect_class": "write",
+  "explicit_allow_required": false,
+  "feature_gates": [],
+  "id": "computer.browser",
+  "name": "Browser control",
+  "risk": "high",
+  "scope_schema": {},
+  "support": "unsupported",
+  "tags": [
+   "browser_authentication"
+  ],
+  "toggleable": false,
+  "tool_name": null
+ },
+ {
+  "approval_support": false,
+  "backends": [],
+  "category": "computer_use",
+  "effect_class": "write",
+  "explicit_allow_required": false,
+  "feature_gates": [],
+  "id": "computer.terminal",
+  "name": "Terminal",
+  "risk": "high",
+  "scope_schema": {},
+  "support": "unsupported",
+  "tags": [
+   "terminal"
+  ],
+  "toggleable": false,
+  "tool_name": null
+ },
+ {
+  "approval_support": false,
+  "backends": [],
+  "category": "computer_use",
+  "effect_class": "write",
+  "explicit_allow_required": false,
+  "feature_gates": [],
+  "id": "computer.filesystem_write",
+  "name": "Filesystem write",
+  "risk": "high",
+  "scope_schema": {},
+  "support": "unsupported",
+  "tags": [
+   "code_write",
+   "fs_write_outside"
+  ],
+  "toggleable": false,
+  "tool_name": null
+ },
+ {
+  "approval_support": false,
+  "backends": [],
+  "category": "computer_use",
+  "effect_class": "write",
+  "explicit_allow_required": false,
+  "feature_gates": [],
+  "id": "computer.desktop",
+  "name": "Desktop control",
+  "risk": "high",
+  "scope_schema": {},
+  "support": "unsupported",
+  "tags": [],
+  "toggleable": false,
+  "tool_name": null
+ },
+ {
+  "approval_support": false,
+  "backends": [
+   "rbac",
+   "tenant_isolation"
+  ],
+  "category": "data",
+  "effect_class": "write",
+  "explicit_allow_required": false,
+  "feature_gates": [],
+  "id": "data.memory",
+  "name": "Company memory",
+  "risk": "write",
+  "scope_schema": {},
+  "support": "display_only",
+  "tags": [],
+  "toggleable": false,
+  "tool_name": null
+ },
+ {
+  "approval_support": false,
+  "backends": [
+   "rbac",
+   "tenant_isolation"
+  ],
+  "category": "data",
+  "effect_class": "write",
+  "explicit_allow_required": false,
+  "feature_gates": [],
+  "id": "data.secrets",
+  "name": "Secret references",
+  "risk": "high",
+  "scope_schema": {},
+  "support": "display_only",
+  "tags": [
+   "secret_reference"
+  ],
+  "toggleable": false,
+  "tool_name": null
+ },
+ {
+  "approval_support": false,
+  "backends": [
+   "rbac",
+   "tenant_isolation"
+  ],
+  "category": "providers",
+  "effect_class": "read",
+  "explicit_allow_required": false,
+  "feature_gates": [],
+  "id": "provider.runtime",
+  "name": "Runtime provider",
+  "risk": "low",
+  "scope_schema": {},
+  "support": "display_only",
+  "tags": [],
+  "toggleable": false,
+  "tool_name": null
+ }
+]

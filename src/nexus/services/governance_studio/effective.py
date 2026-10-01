@@ -27,6 +27,7 @@ from nexus.models.governance_studio import (
 )
 from nexus.models.secret import Secret, SecretBinding
 from nexus.models.tool_invocation import ToolInvocation
+from nexus.services.governance_studio.capability_text import plain_explanation
 from nexus.services.governance_studio.catalog import (
     APPROVAL_ONLY,
     DISPLAY_ONLY,
@@ -137,6 +138,7 @@ async def load_snapshot(
 def _result(
     cap: dict[str, Any], snap: Snapshot, state: str, code: str, why: str, **extra: Any
 ) -> dict[str, Any]:
+    plain = extra.pop("plain", None)
     used = snap.last_used.get(cap.get("tool_name"))
     return {
         "capability_id": cap["id"],
@@ -144,6 +146,7 @@ def _result(
         "decision": _DECISION.get(state, "none"),
         "code": code,
         "explanation": why,
+        "plain_explanation": plain or plain_explanation(code, state, why),
         "source": extra.pop("source", None),
         "version_id": snap.version,
         "inheritance_source": extra.pop("inheritance_source", None),
@@ -217,6 +220,7 @@ def decide(snap: Snapshot, cap: dict[str, Any]) -> dict[str, Any]:
         return _result(
             cap, snap, "denied", "RBAC_DENIED",
             f"Role '{snap.role}' may not execute tools.", source="rbac",
+            plain=f"The agent's role ({snap.role}) is not allowed to run tools, so this is denied.",
         )
 
     if (risk not in overlay.READ_RISKS or cap["explicit_allow_required"]) and snap.restrictions:
@@ -225,6 +229,10 @@ def decide(snap: Snapshot, cap: dict[str, Any]) -> dict[str, Any]:
         return _result(
             cap, snap, "denied", "RESTRICTION_ACTIVE",
             f"{label} is active: {r.reason}", source=f"restriction:{r.id}",
+            plain=(
+                f"{'A company lockdown' if r.kind == 'lockdown' else 'This agent is isolated'} "
+                f"is active ({r.reason}), so write and external capabilities are denied."
+            ),
         )
 
     live = [

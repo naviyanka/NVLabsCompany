@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import Any
 
 from nexus.config import settings
+from nexus.services.governance_studio.capability_text import describe
 from nexus.tools.access import EXPLICIT_ALLOW_ONLY
 from nexus.tools.autonomy import (
     ACTION_DELETE,
@@ -78,7 +79,7 @@ _TAGS: dict[str, tuple[str, ...]] = {
 def _entry(
     cap_id: str,
     name: str,
-    description: str,
+    _registry_description: str,
     category: str,
     risk: str,
     support: str,
@@ -87,10 +88,13 @@ def _entry(
     **extra: Any,
 ) -> dict[str, Any]:
     effect = "read" if risk in ("read", "low") else "write"
+    # name stays the registry name for compatibility; display_name, description, limitations and
+    # examples come from capability_text and are presentation only. The registry description is
+    # kept out of the response: it is written for a model, not for a person.
     return {
         "id": cap_id,
         "name": name,
-        "description": description,
+        **describe(cap_id, support),
         "category": category,
         "risk": risk,
         "effect_class": effect,
