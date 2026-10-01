@@ -17,6 +17,14 @@ The system is organized into four architectural bands:
 
 ---
 
+## Related Architecture Decisions
+
+- [ADR 0006 — Azure conversational CEO](docs/adr/0006-azure-conversational-ceo.md): proposed design for governed voice and chat through the browser, Microsoft Teams and Telegram.
+- [Azure conversational CEO extraction plan](docs/architecture/azure-conversational-ceo-extraction-plan.md): which parts of the existing local voice work are reused or rejected.
+- [Component matrix](docs/architecture/component-matrix.md): reuse strategy per component, including the proposed conversational and channel layer.
+
+---
+
 ## System Metrics & Tech Stack
 
 | Aspect | Tech / Specification | Details |
