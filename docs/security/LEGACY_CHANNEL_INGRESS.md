@@ -125,7 +125,9 @@ and Slack mutation stays off.
 
 - `tests/test_channel_tenant_binding.py` drives both routes with an API key, a
   forged `X-Company-Id`, no credential, wrong, empty and missing secrets,
-  malformed, deep and oversized bodies and replayed deliveries. It asserts a 410
+  malformed, deep and oversized bodies and replayed deliveries. Tests that need
+  authentication on turn it on explicitly, because CI runs the suite with
+  `AUTH_ENABLED=false`. It asserts a 410
   with a fixed body, no leaked tenant detail, no secrets or payload in logs, and
   an unchanged row count in every table.
 - `tests/test_legacy_channel_ingress_guard.py` scans every route module under
@@ -133,4 +135,12 @@ and Slack mutation stays off.
   ChatTurn, ToolInvocation or Approval, opens a `tenant_session`, depends on
   `CurrentCompanyId`, makes an HTTP call, or accepts request input. It also
   fails if any route calls `handle_inbound`.
+
+  The guard protects only the retired legacy Telegram and Slack ingress. It is
+  not a prohibition on future secure channel routes. Those routes must provide
+  verified provider authentication, a linked NEXUS identity, active company
+  membership, normal server-side authorization and durable idempotency or replay
+  protection. The ADR 0006 PR that introduces them is expected to replace or
+  narrow this guard deliberately, with tests for those properties. The guard
+  must not be loosened to make that work easier.
 - PostgreSQL: `test_legacy_channel_webhooks_create_no_task_in_any_company`.

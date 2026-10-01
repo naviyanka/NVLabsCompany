@@ -66,6 +66,17 @@ async def factory(tmp_path, monkeypatch):
 
 
 @pytest.fixture()
+def auth_on(monkeypatch):
+    """Authentication enabled for this test, whatever the environment says.
+
+    CI runs the suite with ``AUTH_ENABLED=false``, so a test that needs the middleware
+    to refuse anonymous callers, or to resolve an API key as the only principal, must
+    say so. monkeypatch restores the previous value even when an assertion fails.
+    """
+    monkeypatch.setattr(settings, "auth_enabled", True)
+
+
+@pytest.fixture()
 async def client():
     from nexus.main import app
 
@@ -107,6 +118,7 @@ async def _snapshot(factory) -> dict[str, int]:
 
 
 @pytest.mark.parametrize("path, body", PAYLOADS)
+@pytest.mark.usefixtures("auth_on")
 async def test_an_api_key_caller_creates_nothing(factory, client, path, body):
     _, key = await _seed(factory)
     before = await _snapshot(factory)
@@ -135,6 +147,7 @@ async def test_a_forged_company_header_creates_nothing(factory, client, monkeypa
 
 
 @pytest.mark.parametrize("path, body", PAYLOADS)
+@pytest.mark.usefixtures("auth_on")
 async def test_an_anonymous_request_is_refused_and_creates_nothing(factory, client, path, body):
     await _seed(factory)
     before = await _snapshot(factory)
@@ -150,6 +163,7 @@ async def test_an_anonymous_request_is_refused_and_creates_nothing(factory, clie
     [None, "", "wrong-secret", "123456:SECRET-BOT-TOKEN"],
     ids=["missing", "empty", "wrong", "bot-token"],
 )
+@pytest.mark.usefixtures("auth_on")
 async def test_a_webhook_secret_never_unlocks_the_route(factory, client, path, secret):
     """A secret may authenticate the sending service; it does not identify the human."""
     _, key = await _seed(factory)
@@ -177,6 +191,7 @@ async def test_a_webhook_secret_never_unlocks_the_route(factory, client, path, s
     ],
     ids=["malformed", "empty", "truncated", "binary", "deep", "oversized"],
 )
+@pytest.mark.usefixtures("auth_on")
 async def test_hostile_bodies_get_the_same_stable_refusal(factory, client, path, content):
     """The body is never read, so malformed, deep or huge payloads reach no parser."""
     _, key = await _seed(factory)
@@ -192,6 +207,7 @@ async def test_hostile_bodies_get_the_same_stable_refusal(factory, client, path,
 
 
 @pytest.mark.parametrize("path, body", PAYLOADS)
+@pytest.mark.usefixtures("auth_on")
 async def test_the_refusal_reveals_nothing_about_the_tenant(factory, client, path, body):
     _, key = await _seed(factory)
     response = await client.post(path, json=body, headers={"Authorization": f"Bearer {key}"})
@@ -201,6 +217,7 @@ async def test_the_refusal_reveals_nothing_about_the_tenant(factory, client, pat
 
 
 @pytest.mark.parametrize("path, body", PAYLOADS)
+@pytest.mark.usefixtures("auth_on")
 async def test_logs_hold_no_payload_headers_or_tokens(factory, client, caplog, path, body):
     _, key = await _seed(factory)
     payload = {**body, "leak": "message-body-canary", "username": "chat-user-canary"}

@@ -1,11 +1,17 @@
-"""Inbound channel routes never mutate NEXUS state on their own authority.
+"""The retired legacy Telegram and Slack ingress stays retired.
 
 A provider webhook or an API key authenticates the sending service, not the human
-who wrote the message. Until a channel route can map the sender to an active NEXUS
-user and run normal authorization (ADR 0006), it must not create Tasks, Goals,
-ChatTurns, tool invocations or approvals, and must not open a tenant session or
-call out with a bot token. A source scan, so a new or revived legacy channel route
-fails here instead of shipping.
+who wrote the message. The legacy routes under ``/api/v1/channels/`` had no sender
+mapping, so they must not create Tasks, Goals, ChatTurns, tool invocations or
+approvals, open a tenant session, or call out with a bot token. A source scan, so a
+revived or copied legacy route fails here instead of shipping.
+
+Scope: this guards the retired legacy implementations only. It is not a permanent
+ban on channel routes. Secure ADR 0006 channel ingress will need verified provider
+authentication, a linked NEXUS identity, active company membership, normal
+server-side authorization and durable idempotency. When those routes are introduced
+this guard is meant to be replaced or narrowed deliberately, in the same PR, and
+not worked around.
 """
 
 import ast
