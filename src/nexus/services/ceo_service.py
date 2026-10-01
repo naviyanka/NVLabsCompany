@@ -105,7 +105,7 @@ def redact(text: str) -> tuple[str, bool]:
 def dev_fallback(principal: Any) -> bool:
     """The ``AUTH_ENABLED=false`` development principal: keyless, unlabelled service admin."""
     return (
-        not settings.auth_enabled
+        settings.auth_bypass_active
         and principal.kind == "service"
         and principal.api_key_id is None
         and not principal.label

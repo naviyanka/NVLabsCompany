@@ -101,7 +101,7 @@ def rejection_for(path: str, principal: Principal | None) -> JSONResponse | None
         return None
 
     if principal is None:
-        if not settings.auth_enabled:
+        if settings.auth_bypass_active:
             # Legacy mode: no credential and no ``X-Company-Id`` either. Let the
             # route answer as it did before auth existed.
             return None
@@ -170,7 +170,7 @@ class AuthenticationMiddleware:
 
         principal, cookie_authenticated = await self._resolve(headers)
 
-        if principal is None and not settings.auth_enabled:
+        if principal is None and settings.auth_bypass_active:
             principal = self._legacy_header_principal(headers)
 
         if scope["type"] == "http":
@@ -239,9 +239,10 @@ class AuthenticationMiddleware:
     def _legacy_header_principal(self, headers: Headers) -> Principal | None:
         """Build a principal from ``X-Company-Id`` when auth is switched off.
 
-        Only reachable with ``AUTH_ENABLED=false``, which the config validator
-        warns about, because it makes every tenant impersonable. It exists so a
-        deployment mid-rollout can fall back without a code change.
+        Only reachable when ``settings.auth_bypass_active``: ``AUTH_ENABLED=false``
+        in ``test``, or in ``development`` with the insecure-auth acknowledgement.
+        Startup refuses every other environment, and this check holds even if the
+        app is built without running startup, so a forged header never bypasses it.
         """
         raw = headers.get("x-company-id")
         if not raw:

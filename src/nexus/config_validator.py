@@ -1,8 +1,9 @@
 """Configuration validation for NEXUS startup.
 
 Validates application settings on startup and logs warnings for potential
-issues. Designed to be non-blocking - never raises exceptions or prevents
-startup, only logs warnings to alert operators of misconfigurations.
+issues. ``validate_config`` is non-blocking - it never raises, only logs
+warnings. ``enforce_auth_policy`` is the one deliberate exception: it refuses to
+start when authentication is disabled somewhere that is not allowed.
 """
 
 import logging
@@ -13,6 +14,33 @@ from urllib.parse import urlparse
 from nexus.config import settings
 
 logger = logging.getLogger(__name__)
+
+
+class ConfigurationError(RuntimeError):
+    """Startup refused: ``code`` is stable and the message never carries a value."""
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(f"{code}: {message}")
+        self.code = code
+
+
+def enforce_auth_policy() -> None:
+    """Refuse to start when ``AUTH_ENABLED=false`` is not allowed in this environment.
+
+    Allowed: ``NEXUS_ENV=test``, or ``development`` with
+    ``NEXUS_ALLOW_INSECURE_AUTH_DISABLED=true``. Production, staging and an unset
+    or unknown environment always refuse. Raises before any request is served.
+    The message names the setting, never a header, company id or credential.
+    """
+    code = settings.auth_disabled_refusal()
+    if code is None:
+        return
+    raise ConfigurationError(
+        code,
+        "AUTH_ENABLED=false is not permitted in this environment. Set NEXUS_ENV to "
+        "'test', or to 'development' together with NEXUS_ALLOW_INSECURE_AUTH_DISABLED=true; "
+        "production and staging must keep authentication enabled.",
+    )
 
 
 async def validate_config() -> None:
@@ -123,11 +151,12 @@ def _check_auth_settings() -> None:
             "set a unique value before exposing this deployment"
         )
 
-    if not settings.auth_enabled:
+    if settings.auth_bypass_active:
         logger.warning(
-            "AUTH_ENABLED is False - the API is trusting the X-Company-Id "
-            "header and every tenant is impersonable. Do not run this way "
-            "outside local development."
+            "INSECURE: AUTH_ENABLED=false in NEXUS_ENV=%s - the API trusts the "
+            "X-Company-Id header and every tenant is impersonable. Local "
+            "development and tests only; never expose this process.",
+            settings.environment,
         )
 
     if not settings.session_cookie_secure:

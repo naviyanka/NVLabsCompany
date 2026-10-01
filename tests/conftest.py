@@ -11,6 +11,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+# Settings read the environment at import, so this must precede any nexus import.
+# The suite runs with AUTH_ENABLED=false in CI; that is only honoured in "test".
+os.environ.setdefault("NEXUS_ENV", "test")
+
 
 # pytest-asyncio mode configuration
 def pytest_configure(config):

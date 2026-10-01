@@ -7,7 +7,9 @@ All configuration is done via environment variables. Copy `.env.example` → `.e
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
 | `DATABASE_URL` | Yes | `sqlite+aiosqlite:///./nexus.db` | Database connection URL (SQLite for dev, PostgreSQL for prod) |
-| `AUTH_ENABLED` | No | `true` | Enable session-based auth. Set `false` for development without login. |
+| `NEXUS_ENV` | Yes for any deployment | — (unset) | Runtime environment: `production`, `staging`, `development` or `test`. Unset or unknown is treated as unsafe and cannot disable auth. |
+| `AUTH_ENABLED` | No | `true` | Session-based auth. `false` is honoured only when `NEXUS_ENV=test`, or `NEXUS_ENV=development` with `NEXUS_ALLOW_INSECURE_AUTH_DISABLED=true`. In every other environment the server refuses to start. |
+| `NEXUS_ALLOW_INSECURE_AUTH_DISABLED` | No | `false` | Development only. Acknowledges that `AUTH_ENABLED=false` trusts the `X-Company-Id` header, so any caller can act as any tenant. Ignored and refused in staging and production. |
 | `CORS_ORIGINS` | No | `http://localhost:3000` | Comma-separated allowed origins |
 | `ANTHROPIC_API_KEY` | No | — | Anthropic API key for Claude models |
 | `OPENAI_API_KEY` | No | — | OpenAI API key for GPT models |

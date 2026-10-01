@@ -8,6 +8,7 @@ services:
     environment:
       - DATABASE_URL=postgresql+asyncpg://nexus:nexus@postgres:5432/nexus
       - REDIS_URL=redis://redis:6379/0
+      - NEXUS_ENV=development
       - AUTH_ENABLED=true
       - CORS_ORIGINS=http://localhost:3000,http://localhost:5173
       - TEMPORAL_HOST=temporal:7233
