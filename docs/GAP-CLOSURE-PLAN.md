@@ -88,7 +88,7 @@ nothing.
 ### W-04 Comms channels — ✅ DONE (2026-08-26)
 - All three placeholder senders replaced with real HTTP calls: **WebhookChannel** posts JSON signed with `X-Nexus-Signature` (HMAC-SHA256 over exact body bytes) and enqueues failures into `WebhookDeliveryQueue` for retry/dead-letter; **SlackChannel** posts via incoming webhook; **DiscordChannel** posts via bot-token REST (`/channels/{id}/messages`).
 - Unconfigured channels now return `False` honestly (two old tests asserting fake success updated).
-- **Inbound**: Slack Events API endpoint (`POST /api/v1/channels/slack/events`) handles `url_verification` challenge and `app_mention` events → creates a Task. Email notifications via `EmailChannel` (SMTP with TLS, async thread offload).
+- **Inbound** (superseded): the Slack Events API endpoint (`POST /api/v1/channels/slack/events`) once created a Task from `app_mention` events. It is now disabled because an API key does not identify the Slack sender; see `docs/security/LEGACY_CHANNEL_INGRESS.md`. Email notifications via `EmailChannel` (SMTP with TLS, async thread offload).
 - OTel trace span on `ChannelRouter.route_outbound()`.
 - Per-company token storage deferred to Phase 3 (secret_backend already supports it).
 

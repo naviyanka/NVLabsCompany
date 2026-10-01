@@ -176,7 +176,7 @@ NEXUS combines **25 React UI modules/pages** and **54 FastAPI backend routers** 
 
 ### Third-Party Integrations
 - **Slack Integration**: Webhook event processing and Slack bot notifications.
-- **Telegram Bot**: Interact with agents and receive emergency alerts via Telegram.
+- **Telegram notifications**: Receive emergency alerts via the outbound `msg-telegram-send` node. Inbound Telegram commands are disabled (see `docs/security/LEGACY_CHANNEL_INGRESS.md`).
 - **GitHub Integration**: Repository mapping, pull request analysis, and automated code review.
 
 ### Enterprise Security & Identity

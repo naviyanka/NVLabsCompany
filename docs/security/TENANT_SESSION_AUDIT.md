@@ -36,8 +36,7 @@ All of these previously used a raw session (`async_session_factory`).
 | `api/routes/pipelines.py::_execute_pipeline_bg` | `PipelineRun`, `Pipeline`, `Agent` | `tenant_session(company_id)`; run and pipeline lookups also filter on `company_id` | `test_pipeline_save.py`, `test_pipeline_execution_context.py` |
 | `api/routes/workflows.py::_persist_completion` | `WorkflowRun` | `tenant_session(company_id)` | `test_workflow_routes.py` |
 | `api/routes/workflows.py::_register_company_agents` | `Agent` | `tenant_session(company_uuid)` | guard test only |
-| `api/routes/slack_events.py::slack_events` | `Task` | Company from the authenticated principal (`CurrentCompanyId`), not the hardcoded seed UUID; `tenant_session` | `test_channel_tenant_binding.py`; PostgreSQL: `test_channel_webhooks_write_into_the_callers_company[slack]` |
-| `api/routes/telegram_bot.py::_handle_agents`, `_handle_task` | `Agent`, `Task` | Company from the authenticated principal, not `pick_setup_company` (the oldest company); `tenant_session` | `test_channel_tenant_binding.py`; PostgreSQL: `test_channel_webhooks_write_into_the_callers_company[telegram]` |
+| `api/routes/slack_events.py::slack_events`, `api/routes/telegram_bot.py::telegram_webhook` | none | Legacy inbound routes disabled; they open no session and write nothing (see [Legacy channel ingress](LEGACY_CHANNEL_INGRESS.md)) | `test_channel_tenant_binding.py`; PostgreSQL: `test_legacy_channel_webhooks_create_no_task_in_any_company[slack\|telegram]` |
 | `api/routes/audit.py::verify_audit_chain` | `AuditLog` | `PersistentAuditLogger(session_factory=tenant_session_factory(company_id), company_id=company_id)`; verifies that company's chain only | PostgreSQL: `test_concurrent_audit_writes_form_one_valid_chain_per_company` |
 | `runtime/event_bridge.py::_handle_task_failure` | `Task`, `EvolutionProposal` | `tenant_session(company_uuid)`; both counts also filter on `company_id` | guard test only (fire-and-forget analysis) |
 | `temporal/activities.py::call_llm_activity` | `Agent`, memories | `tenant_session(company_uuid)`. The session now closes before the model call, so no transaction is held while the model runs. | `test_temporal_activity_layer.py`, `test_pipeline_execution_context.py` |
@@ -51,19 +50,13 @@ PostgreSQL RLS tests below prove that `tenant_session` itself scopes correctly.
 ## Slack and Telegram tenant resolution
 
 Neither webhook payload carries a tenant. There is also no installation table
-that maps a Slack workspace or a Telegram bot to a company. Before this change:
-
-- Slack wrote every task into the hardcoded seed company
-  `00000000-0000-4000-8000-000000000001`.
-- Telegram wrote into the oldest company (`pick_setup_company`).
-
-Both now take the company of the authenticated principal (`CurrentCompanyId`).
-The authentication middleware resolves the credential, and an API key is issued
-for exactly one company. A request without a credential is refused with 401
-before the handler runs, and it is never assigned to a default company.
-
-With `AUTH_ENABLED=false` (legacy development mode), `X-Company-Id` is the
-principal.
+that maps a Slack workspace or a Telegram bot to a company. Binding the routes
+to the company of the calling API key fixed the tenant, but not the sender: an
+API key names a company, not the person who wrote the message, so every sender
+was treated as an authorized operator. The legacy Slack and Telegram inbound
+routes are therefore disabled outright. They return 410
+`LEGACY_CHANNEL_INGRESS_DISABLED`, read no body and write nothing. See
+[Legacy channel ingress](LEGACY_CHANNEL_INGRESS.md).
 
 ## Callers that already used system sessions
 
@@ -123,6 +116,6 @@ application role.
 | `test_tenant_session_keeps_tenant_context_across_commits` | The tenant is reapplied after a commit on the same session. |
 | `test_background_audit_write_carries_the_tenant` | An audit write from background code carries its tenant. |
 | `test_a_session_without_a_tenant_cannot_mutate_tenant_rows` | Updates and deletes affect 0 rows, and inserts are refused by row-level security. |
-| `test_channel_webhooks_write_into_the_callers_company[slack\|telegram]` | Each webhook's task lands in the caller's company and nowhere else. |
+| `test_legacy_channel_webhooks_create_no_task_in_any_company[slack\|telegram]` | The disabled legacy webhooks create no task in the caller's company or any other. |
 | `test_concurrent_audit_writes_form_one_valid_chain_per_company` | 24 racing audit writes over two companies produce two gap-free chains, both verify, and no rows leak across tenants. |
 | `test_an_audit_write_without_a_tenant_is_refused_not_unchained` | An audit write without a tenant is refused rather than written unchained. |
