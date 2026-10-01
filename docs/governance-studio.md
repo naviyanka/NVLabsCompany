@@ -163,20 +163,19 @@ Other rules: `WILDCARD_HIGH_RISK` (a rule matching every tool, or a pattern, at 
 high-risk capability with no required approval). The old "temporary high-risk grant with no
 expiry" rule is gone because that state cannot occur.
 
-## Migration coordination
+## Migration chain
 
-PR #57 and PR #58 both add a migration whose `down_revision` is `e7a1c2d3f407`:
+Memory Phase 2 (PR #57) merged first, so this migration sits on top of its migration:
 
-| PR | revision | down_revision |
-|----|----------|---------------|
-| #58 (this) | `e7a1c2d3f408` | `e7a1c2d3f407` |
-| #57 | `f1b7c9d2a508` | `e7a1c2d3f407` |
+| revision | down_revision |
+|----------|---------------|
+| `e7a1c2d3f407` (memory RLS) | |
+| `f1b7c9d2a508` (memory canonical ingest) | `e7a1c2d3f407` |
+| `e7a1c2d3f408` (governance studio, this PR) | `f1b7c9d2a508` |
 
-Merged unchanged, they would leave two heads. No merge migration is added here because PR #57 is
-still changing. **The PR merged second must reparent its migration onto the actual `main` head**
-(edit its `down_revision`), then verify that `alembic heads` shows one head and that
-upgrade head, downgrade -1, upgrade head all pass. PR #58 must not merge while it would create a
-second head.
+`alembic heads` reports one head, `e7a1c2d3f408`. No merge migration is needed. Downgrading through
+the governance revision drops only the five governance tables and leaves the Memory Phase 2
+schema in place.
 
 ## Known unsupported capabilities
 

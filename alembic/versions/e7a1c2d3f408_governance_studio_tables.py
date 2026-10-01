@@ -1,7 +1,7 @@
 """governance studio: policy versions, drafts, temporary access, restrictions
 
 Revision ID: e7a1c2d3f408
-Revises: e7a1c2d3f407
+Revises: f1b7c9d2a508
 Create Date: 2026-09-30
 
 Five tenant tables, each with ``company_id`` and the same FORCE ``tenant_isolation``
@@ -17,7 +17,7 @@ import sqlmodel
 from alembic import op
 
 revision: str = "e7a1c2d3f408"
-down_revision: str | None = "e7a1c2d3f407"
+down_revision: str | None = "f1b7c9d2a508"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
