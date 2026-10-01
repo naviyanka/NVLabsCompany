@@ -27,7 +27,12 @@ from nexus.services.governance_studio import (
     simulate,
 )
 from nexus.services.governance_studio.audit import actor_of
-from nexus.services.governance_studio.errors import fail, require_admin_human, require_reader
+from nexus.services.governance_studio.errors import (
+    can_write,
+    fail,
+    require_admin_human,
+    require_reader,
+)
 
 router = APIRouter(prefix="/api/v1/governance", tags=["governance"])
 
@@ -41,6 +46,13 @@ async def _agent(db: Any, company_id: uuid.UUID, agent_id: uuid.UUID) -> Agent:
     if agent is None:
         fail(404, "AGENT_NOT_FOUND", "No such agent")
     return agent
+
+
+@router.get("/me")
+async def get_me(principal: CurrentPrincipal) -> dict[str, bool]:
+    """Whether this caller may change governance. Nothing else about the caller is returned."""
+    require_reader(principal)
+    return {"can_write": can_write(principal)}
 
 
 @router.get("/catalog")
