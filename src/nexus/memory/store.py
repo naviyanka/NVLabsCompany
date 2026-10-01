@@ -7,11 +7,18 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import select, update, delete
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from nexus.memory.ingest import (
+    MemoryContext,
+    MemoryInput,
+    Origin,
+    clean_user_metadata,
+    ingest_memory,
+)
 from nexus.memory.safety import redact_text, sanitize_value
-from nexus.models.memory import MemoryRecord
+from nexus.models.memory import LIVE_STATUSES, MemoryRecord
 
 
 @dataclass
@@ -101,20 +108,26 @@ class MemoryStore:
             raise ValueError("executive memory is recorded through the CEO service")
         memory_id = uuid.uuid4()
 
-        # Store in warm tier (database)
-        record = MemoryRecord(
-            id=memory_id,
-            company_id=company_id,
-            agent_id=agent_id,
-            scope=scope,
-            scope_id=scope_id,
-            content=content,
-            metadata=metadata,
-            importance=importance,
-            tier="warm",
+        # Warm tier goes through the canonical ingest path (redacted, hashed, sourced).
+        result = await ingest_memory(
+            self._db,
+            MemoryContext(company_id, f"agent:{agent_id}" if agent_id else "system:memory-store"),
+            MemoryInput(
+                scope=scope,
+                content=content,
+                agent_id=agent_id,
+                scope_id=scope_id,
+                importance=importance,
+                tier="warm",
+                metadata=metadata,
+                record_id=memory_id,
+                extractor_version="memory-store-v1",
+            ),
+            Origin.SYSTEM,
         )
-        self._db.add(record)
-        await self._db.flush()
+        content = result.record.content  # what was stored: redacted and normalized
+        metadata = clean_user_metadata(result.record.record_metadata)
+        memory_id = result.record.id
 
         # Also add to hot cache
         entry = MemoryEntry(
@@ -192,6 +205,7 @@ class MemoryStore:
                 .where(MemoryRecord.company_id == company_id)
                 .where(MemoryRecord.scope == scope)
                 .where(MemoryRecord.tier == "warm")
+                .where(MemoryRecord.status.in_(LIVE_STATUSES))
             )
             if scope_id:
                 stmt = stmt.where(MemoryRecord.scope_id == scope_id)
@@ -278,21 +292,28 @@ class MemoryStore:
         # A file exists only for a memory that was archived from this company's rows.
         cold_record = await self._load_from_cold(memory_id, company_id)
         if cold_record:
-            self._db.add(
-                MemoryRecord(
-                    id=cold_record["id"],
-                    company_id=company_id,
+            await ingest_memory(
+                self._db,
+                MemoryContext(company_id, "system:cold-restore"),
+                MemoryInput(
                     scope=cold_record["scope"],
+                    content=cold_record["content"],
+                    agent_id=(
+                        uuid.UUID(cold_record["agent_id"]) if cold_record.get("agent_id") else None
+                    ),
                     scope_id=(
                         uuid.UUID(cold_record["scope_id"]) if cold_record.get("scope_id") else None
                     ),
-                    content=cold_record["content"],
-                    record_metadata=cold_record.get("metadata"),
                     importance=cold_record.get("importance", 0.5),
                     tier="warm",
-                )
+                    metadata=clean_user_metadata(cold_record.get("metadata")),
+                    source_type="cold_archive",
+                    source_id=str(cold_record["id"]),
+                    extractor_version="cold-restore-v1",
+                    record_id=cold_record["id"],
+                ),
+                Origin.SYSTEM,
             )
-            await self._db.flush()
             return "warm"
 
         raise ValueError(f"Memory {memory_id} not found in any tier")

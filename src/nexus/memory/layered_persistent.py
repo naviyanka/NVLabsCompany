@@ -27,13 +27,22 @@ import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from nexus.memory.dedup import is_duplicate
+from nexus.memory.ingest import (
+    MemoryContext,
+    MemoryInput,
+    Origin,
+    clean_user_metadata,
+    ingest_memory,
+)
 from nexus.memory.layered import Fact, L1Summary, LayeredMemoryConfig, MemoryLayer
+from nexus.memory.lifecycle import archive_memory
 from nexus.memory.promotion import PromotionCriteria, PromotionEngine
-from nexus.models.memory import MemoryRecord
+from nexus.memory.safety import MAX_STRING
+from nexus.models.memory import LIVE_STATUSES, MemoryRecord
 
 L2_SCOPE = MemoryLayer.L2_AGENT.value
 L3_SCOPE = MemoryLayer.L3_SHARED.value
@@ -47,6 +56,7 @@ def _to_fact(record: MemoryRecord) -> Fact:
         created_at=record.created_at.replace(tzinfo=UTC),
         access_count=record.access_count,
         metadata=record.record_metadata,
+        record_id=record.id,
     )
 
 
@@ -95,17 +105,26 @@ class PersistentLayeredMemory:
         agent_id: uuid.UUID,
         content: str,
         metadata: dict | None = None,
+        *,
+        origin: Origin = Origin.SYSTEM,
+        source_type: str | None = None,
+        source_id: str | None = None,
+        extractor_version: str | None = None,
+        item_key: str = "",
+        max_chars: int = MAX_STRING,
     ) -> bool:
         """Store an L2 fact for an agent, skipping near-duplicates.
 
-        Dedup runs against the agent's rows in the database (2.3.3), not a
-        process-local list, so a restarted process still recognises a
-        duplicate. When the agent is at ``l2_max_facts``, the oldest row is
-        deleted to make room.
+        Goes through :func:`nexus.memory.ingest.ingest_memory`: ``origin`` (not the
+        caller's metadata) decides status and trust, and the source fields record
+        where the fact came from. Dedup runs against the agent's live rows in the
+        database (2.3.3), not a process-local list. When the agent is at
+        ``l2_max_facts`` the oldest live rows are archived, not deleted, to make room.
 
         Returns:
             True if a row was written, False if it deduplicated away.
         """
+        ctx = MemoryContext(self.company_id, f"agent:{agent_id}")
         async with self.session_factory() as session:
             existing = list(
                 (await session.execute(self._l2_query(agent_id))).scalars().all()
@@ -119,24 +138,30 @@ class PersistentLayeredMemory:
 
             overflow = len(existing) + 1 - self.config.l2_max_facts
             if overflow > 0:
-                # Oldest first: the query is newest-first, so evict from the tail.
+                # Oldest first: the query is newest-first, so retire from the tail.
                 for record in existing[-overflow:]:
-                    await session.execute(
-                        delete(MemoryRecord).where(MemoryRecord.id == record.id)
-                    )
+                    await archive_memory(session, ctx, record.id, reason="l2 capacity")
 
-            session.add(
-                MemoryRecord(
-                    company_id=self.company_id,
-                    agent_id=agent_id,
+            result = await ingest_memory(
+                session,
+                ctx,
+                MemoryInput(
                     scope=L2_SCOPE,
-                    scope_id=agent_id,
                     content=content,
-                    record_metadata=metadata,
-                )
+                    memory_type="fact",
+                    agent_id=agent_id,
+                    scope_id=agent_id,
+                    metadata=metadata,
+                    source_type=source_type,
+                    source_id=source_id,
+                    extractor_version=extractor_version,
+                    item_key=item_key,
+                    content_max=max_chars,
+                ),
+                origin,
             )
             await session.commit()
-        return True
+        return result.created
 
     async def get_agent_facts(
         self, agent_id: uuid.UUID, limit: int = 10
@@ -179,6 +204,7 @@ class PersistentLayeredMemory:
                         select(MemoryRecord)
                         .where(MemoryRecord.company_id == self.company_id)
                         .where(MemoryRecord.scope == L2_SCOPE)
+                        .where(MemoryRecord.status.in_(LIVE_STATUSES))
                         .order_by(MemoryRecord.created_at.desc())
                     )
                 )
@@ -204,6 +230,7 @@ class PersistentLayeredMemory:
                         select(MemoryRecord)
                         .where(MemoryRecord.company_id == self.company_id)
                         .where(MemoryRecord.scope == L3_SCOPE)
+                        .where(MemoryRecord.status == "active")
                         .order_by(MemoryRecord.created_at.desc())
                         .limit(limit)
                     )
@@ -235,19 +262,9 @@ class PersistentLayeredMemory:
             if await self._l3_has(session, content):
                 return False
 
-            session.add(
-                MemoryRecord(
-                    company_id=self.company_id,
-                    agent_id=source.agent_id,
-                    scope=L3_SCOPE,
-                    content=source.content,
-                    record_metadata=source.record_metadata,
-                    importance=source.importance,
-                    access_count=source.access_count,
-                )
-            )
+            written = await self._promote(session, source)
             await session.commit()
-        return True
+        return written
 
     async def run_promotion(
         self, criteria: PromotionCriteria | None = None
@@ -268,19 +285,15 @@ class PersistentLayeredMemory:
             for fact in eligible:
                 if await self._l3_has(session, fact.content):
                     continue
-                session.add(
-                    MemoryRecord(
-                        company_id=self.company_id,
-                        agent_id=fact.source_agent_id,
-                        scope=L3_SCOPE,
-                        content=fact.content,
-                        record_metadata=fact.metadata,
-                        access_count=fact.access_count,
-                    )
+                parent = (
+                    await session.get(MemoryRecord, fact.record_id) if fact.record_id else None
                 )
+                if parent is None or parent.company_id != self.company_id:
+                    continue
+                if await self._promote(session, parent):
+                    promoted.append(fact)
                 # Commit per fact so the next dedup check sees this one.
                 await session.commit()
-                promoted.append(fact)
         return promoted
 
     # ── Combined context ─────────────────────────────────────────────────────
@@ -308,6 +321,26 @@ class PersistentLayeredMemory:
 
     # ── Internals ────────────────────────────────────────────────────────────
 
+    async def _promote(self, session: AsyncSession, parent: MemoryRecord) -> bool:
+        """Append an L3 copy of ``parent``; it keeps the parent's status and trust."""
+        result = await ingest_memory(
+            session,
+            MemoryContext(self.company_id, "policy:promotion"),
+            MemoryInput(
+                scope=L3_SCOPE,
+                content=parent.content,
+                memory_type=parent.memory_type,
+                agent_id=parent.agent_id,
+                importance=parent.importance,
+                access_count=parent.access_count,
+                metadata=clean_user_metadata(parent.record_metadata),
+                extractor_version="promotion-v1",
+            ),
+            Origin.PROMOTION,
+            parent=parent,
+        )
+        return result.created
+
     def _l2_query(self, agent_id: uuid.UUID):
         """Newest-first select of one agent's L2 rows in this company."""
         return (
@@ -315,6 +348,7 @@ class PersistentLayeredMemory:
             .where(MemoryRecord.company_id == self.company_id)
             .where(MemoryRecord.scope == L2_SCOPE)
             .where(MemoryRecord.agent_id == agent_id)
+            .where(MemoryRecord.status.in_(LIVE_STATUSES))
             .order_by(MemoryRecord.created_at.desc())
         )
 
@@ -326,6 +360,7 @@ class PersistentLayeredMemory:
                     select(MemoryRecord)
                     .where(MemoryRecord.company_id == self.company_id)
                     .where(MemoryRecord.scope == L3_SCOPE)
+                    .where(MemoryRecord.status.in_(LIVE_STATUSES))
                 )
             )
             .scalars()

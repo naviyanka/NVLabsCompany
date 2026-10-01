@@ -256,8 +256,45 @@ async def test_patch_redacts_edited_content(db, c):  # noqa: F811
     created = (await c["call"]("POST", _url(c), {"content": "before"})).json()
     r = await c["call"]("PATCH", f"/api/v1/memory/{created['id']}", {"content": f"now {SECRET}"})
     assert r.status_code == 200
-    [row] = await _rows(db, MemoryRecord, MemoryRecord.id == uuid.UUID(created["id"]))
+    # Text is append-only: the edit is a new record that supersedes the original.
+    assert r.json()["superseded_id"] == created["id"] and r.json()["id"] != created["id"]
+    [row] = await _rows(db, MemoryRecord, MemoryRecord.id == uuid.UUID(r.json()["id"]))
     assert SECRET not in row.content and "[REDACTED]" in row.content
+    [old] = await _rows(db, MemoryRecord, MemoryRecord.id == uuid.UUID(created["id"]))
+    assert old.content == "before" and old.status == "superseded"
+
+
+async def _patch(c, memory_id, body, who="admin"):  # noqa: F811
+    return await c["call"]("PATCH", f"/api/v1/memory/{memory_id}", body, who)
+
+
+async def test_patch_retry_returns_the_same_replacement(db, c):  # noqa: F811
+    created = (await c["call"]("POST", _url(c), {"content": "before"})).json()
+    first = await _patch(c, created["id"], {"content": "after"})
+    retry = await _patch(c, created["id"], {"content": "after"})
+    assert first.status_code == retry.status_code == 200
+    assert retry.json() == first.json()
+    # One replacement, one link: the chain was not created twice.
+    rows = await _rows(db, MemoryRecord, MemoryRecord.supersedes_id == uuid.UUID(created["id"]))
+    assert [str(r.id) for r in rows] == [first.json()["id"]]
+
+
+async def test_patch_with_a_changed_payload_after_supersession_conflicts(db, c):  # noqa: F811
+    created = (await c["call"]("POST", _url(c), {"content": "before"})).json()
+    winner = await _patch(c, created["id"], {"content": "B"})
+    loser = await _patch(c, created["id"], {"content": "C"})  # A -> C after A -> B
+    assert winner.status_code == 200 and loser.status_code == 409
+    assert loser.json()["detail"]["code"] == "MEMORY_SUPERSESSION_CONFLICT"
+    rows = await _rows(db, MemoryRecord, MemoryRecord.supersedes_id == uuid.UUID(created["id"]))
+    assert [r.content for r in rows] == ["B"]  # C left no record behind
+
+
+async def test_patch_cannot_supersede_across_companies(db, c):  # noqa: F811
+    created = (await c["call"]("POST", _url(c), {"content": "before"})).json()
+    r = await _patch(c, created["id"], {"content": "hijack"}, who="outsider")
+    assert r.status_code == 404
+    rows = await _rows(db, MemoryRecord, MemoryRecord.supersedes_id == uuid.UUID(created["id"]))
+    assert rows == []
 
 
 # --- chat fact capture ------------------------------------------------------------------
@@ -278,6 +315,28 @@ async def test_chat_facts_are_redacted_untrusted_candidates(patched_db, company_
     assert meta["trust"] == safety.UNTRUSTED and meta["origin"] == "chat_extraction"
     assert meta["recorded_by"] == f"agent:{alpha.id}" and meta["redacted"] is True
     assert meta["source"] == {"type": "chat_reply"} and "fact_type" in meta
+
+
+async def test_candidate_memory_never_reaches_the_prompt(patched_db, company_and_agents):  # noqa: F811
+    from sqlalchemy import update
+
+    _, alpha, _ = company_and_agents
+    await chat_module._remember_response(
+        alpha, "I learned that deploys go out on Tuesdays each week."
+    )
+    async with patched_db() as s:
+        assert await chat_module._fetch_agent_memories(s, alpha.id, alpha.company_id) == []
+        assert (
+            await chat_module._fetch_agent_memories(
+                s, alpha.id, alpha.company_id, query="deploys"
+            )
+            == []
+        )
+        # Once a person or a later phase activates it, recall serves it.
+        await s.execute(update(MemoryRecord).values(status="active"))
+        await s.commit()
+        [seen] = await chat_module._fetch_agent_memories(s, alpha.id, alpha.company_id)
+    assert "Tuesdays" in seen["content"]
 
 
 async def test_chat_capture_failure_logs_no_raw_text(patched_db, company_and_agents, monkeypatch):  # noqa: F811

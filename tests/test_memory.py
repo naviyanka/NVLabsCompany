@@ -22,6 +22,39 @@ from nexus.memory.store import MemoryStore, MemoryEntry
 CID = uuid.uuid4()  # company for the MemoryStore tests
 
 
+@pytest.fixture
+async def real_db():
+    """A real SQLite session with one company, agent, department and team.
+
+    MemoryStore writes through the canonical ingest path, which validates the
+    company's own agent/team and writes an audit row, so these tests use real rows
+    rather than a mock session.
+    """
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+    from sqlmodel import SQLModel
+
+    import nexus.models  # noqa: F401
+    from nexus.models.agent import Agent
+    from nexus.models.company import Company, Department, Team
+
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(SQLModel.metadata.create_all)
+    async with async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)() as session:
+        session.add(Company(id=CID, name="acme"))
+        await session.flush()
+        agent = Agent(company_id=CID, name="a", role="engineer", model="m")
+        dept = Department(company_id=CID, name="d")
+        session.add_all([agent, dept])
+        await session.flush()
+        team = Team(company_id=CID, department_id=dept.id, name="t")
+        session.add(team)
+        await session.flush()
+        session.agent_id, session.team_id = agent.id, team.id
+        yield session
+    await engine.dispose()
+
+
 # ============================================================
 # BM25 Retriever Tests (pure logic, no mocks needed)
 # ============================================================
@@ -256,12 +289,12 @@ class TestMemoryStoreHotCache:
     """Tests for MemoryStore hot cache operations."""
 
     @pytest.mark.asyncio
-    async def test_store_adds_to_hot_cache(self, mock_db_session):
+    async def test_store_adds_to_hot_cache(self, real_db):
         """Storing a memory adds it to the hot cache."""
-        store = MemoryStore(mock_db_session)
+        store = MemoryStore(real_db)
 
         scope = "agent"
-        scope_id = uuid.uuid4()
+        scope_id = real_db.agent_id
         memory_id = await store.store(
             scope=scope,
             scope_id=scope_id,
@@ -279,42 +312,44 @@ class TestMemoryStoreHotCache:
         assert store._hot[key][0].importance == 0.8
 
     @pytest.mark.asyncio
-    async def test_store_persists_to_db(self, mock_db_session):
-        """Storing a memory calls db.add and db.flush."""
-        store = MemoryStore(mock_db_session)
+    async def test_store_persists_to_db(self, real_db):
+        """Storing a memory writes exactly one active, provenance-stamped row."""
+        from sqlalchemy import select
 
-        await store.store(
+        from nexus.models.memory import MemoryRecord
+
+        store = MemoryStore(real_db)
+
+        memory_id = await store.store(
             scope="company",
-            scope_id=uuid.uuid4(),
+            scope_id=CID,
             content="Persistent memory",
             company_id=CID,
         )
 
-        mock_db_session.add.assert_called_once()
-        mock_db_session.flush.assert_awaited_once()
+        rows = (await real_db.execute(select(MemoryRecord))).scalars().all()
+        assert [str(r.id) for r in rows] == [memory_id]
+        assert rows[0].content == "Persistent memory"
+        assert rows[0].company_id == CID
+        assert (rows[0].status, rows[0].tier) == ("active", "warm")
+        assert rows[0].content_hash and rows[0].ingestion_key
 
     @pytest.mark.asyncio
-    async def test_retrieve_from_hot_cache(self, mock_db_session):
+    async def test_retrieve_from_hot_cache(self, real_db):
         """Retrieve finds memories in the hot cache first."""
-        store = MemoryStore(mock_db_session)
+        store = MemoryStore(real_db)
         scope = "agent"
-        scope_id = uuid.uuid4()
+        scope_id = real_db.agent_id
 
         # Store a memory (goes to hot cache)
         await store.store(
             scope=scope, scope_id=scope_id, content="Hot memory", company_id=CID
         )
 
-        # Mock execute to return empty (simulating no warm records needed)
-        mock_result = MagicMock()
-        mock_scalars = MagicMock()
-        mock_scalars.all.return_value = []
-        mock_result.scalars.return_value = mock_scalars
-        mock_db_session.execute.return_value = mock_result
-
         results = await store.retrieve(scope=scope, scope_id=scope_id, company_id=CID)
 
-        assert len(results) >= 1
+        # The hot copy answers; the warm row of the same memory is not returned twice.
+        assert len(results) == 1
         assert results[0].content == "Hot memory"
         assert results[0].tier == "hot"
 
@@ -356,11 +391,11 @@ class TestMemoryStorePromoteDemote:
         assert any(e.id == memory_id for e in store._hot[key])
 
     @pytest.mark.asyncio
-    async def test_demote_hot_to_warm(self, mock_db_session):
+    async def test_demote_hot_to_warm(self, real_db):
         """Demoting a hot memory removes it from hot cache."""
-        store = MemoryStore(mock_db_session)
+        store = MemoryStore(real_db)
         scope = "team"
-        scope_id = uuid.uuid4()
+        scope_id = real_db.team_id
 
         # First store to hot cache
         memory_id_str = await store.store(
@@ -384,11 +419,11 @@ class TestMemoryStoreScopeFiltering:
     """Tests for MemoryStore scope-based filtering."""
 
     @pytest.mark.asyncio
-    async def test_different_scopes_isolated(self, mock_db_session):
+    async def test_different_scopes_isolated(self, real_db):
         """Memories in different scopes are isolated."""
-        store = MemoryStore(mock_db_session)
-        scope_id_1 = uuid.uuid4()
-        scope_id_2 = uuid.uuid4()
+        store = MemoryStore(real_db)
+        scope_id_1 = real_db.agent_id
+        scope_id_2 = real_db.team_id
 
         await store.store(
             scope="agent", scope_id=scope_id_1, content="Agent memory 1", company_id=CID

@@ -22,9 +22,11 @@ url_override = config.get_main_option("sqlalchemy.url")
 if not url_override or "driver://user:pass" in url_override:
     config.set_main_option("sqlalchemy.url", settings.database_url)
 
-# Interpret the config file for Python logging
+# Interpret the config file for Python logging. Keep loggers that already exist enabled:
+# the default would silently disable every application logger, which also breaks log
+# capture in any process that runs migrations in-process (tests, embedded upgrades).
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 # SQLModel metadata for autogenerate support
 target_metadata = SQLModel.metadata

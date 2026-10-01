@@ -75,6 +75,7 @@ class Fact:
     created_at: datetime
     access_count: int = 0
     metadata: dict | None = None
+    record_id: UUID | None = None  # the memory_records row, when the fact came from one
 
 
 @dataclass
