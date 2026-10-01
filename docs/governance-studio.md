@@ -193,6 +193,14 @@ loading, empty and error states. State is always text as well as colour, tabs an
 keyboard reachable, and wide tables scroll inside their card. No secret reference, raw prompt or
 raw policy internals are shown.
 
+The agent picker has a search box. Selecting a capability name in the matrix opens its details:
+reason code, source, what it is inherited from, conditions, approval need, grant validity and last
+use. The Grants tab has a form to create a temporary grant (one enforceable tool, effect, expiry,
+an optional session scope and a reason). The form checks the inputs before it posts; the server
+still enforces the expiry limits and the approval rules. The dashboard does not hide or disable
+editing controls for a viewer; the server answers 403 `HUMAN_ADMIN_REQUIRED` to every change they
+attempt.
+
 ## Not in v1
 
 AI policy recommendations, automatic policy changes, compliance certification, policy scripting,
