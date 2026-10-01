@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ShieldAlert, Lock, Unlock } from 'lucide-react';
 import { Card } from '@/components/common/Card';
@@ -10,6 +10,7 @@ import { SimulatorPanel } from '@/components/governance/SimulatorPanel';
 import { PolicyDrafts } from '@/components/governance/PolicyDrafts';
 import { PolicyVersions } from '@/components/governance/PolicyVersions';
 import { PresetsPanel } from '@/components/governance/PresetsPanel';
+import { GrantForm } from '@/components/governance/GrantForm';
 import { BASE, PAGE, ConfirmModal, Pager, StateLine, errorText, label } from '@/components/governance/shared';
 
 export const LOCKDOWN_PHRASE = 'LOCKDOWN';
@@ -24,6 +25,13 @@ interface Capability {
   state: string;
   explanation: string;
   source?: string | null;
+  code?: string;
+  tool_name?: string | null;
+  inheritance_source?: string | null;
+  conditions?: Record<string, unknown> | null;
+  approval?: { required: boolean; level?: number };
+  validity?: { expires_at: string; uses_left: number | null } | null;
+  last_used?: string | null;
 }
 interface AgentRow { id: string; name: string; role: string }
 interface Confirm { title: string; text: string; path: string; body: unknown; action: string }
@@ -71,6 +79,8 @@ export function GovernanceAccess() {
   const [confirm, setConfirm] = useState<Confirm | null>(null);
   const [grantOffset, setGrantOffset] = useState(0);
   const [auditOffset, setAuditOffset] = useState(0);
+  const [agentQuery, setAgentQuery] = useState('');
+  const [openCap, setOpenCap] = useState<string | null>(null);
 
   const agents = useQuery({
     queryKey: ['gov', 'agents'],
@@ -170,9 +180,14 @@ export function GovernanceAccess() {
       {tab === 'access' && (
         <Card>
           <div className="mb-4 flex flex-wrap items-center gap-3">
+            <input aria-label="Search agents" type="search" placeholder="Search agents"
+              className="rounded-[6px] bg-transparent border border-white/[0.12] px-3 py-2 text-sm"
+              value={agentQuery} onChange={(e) => setAgentQuery(e.target.value)} />
             <select aria-label="Agent" className="rounded-[6px] bg-[#141416] border border-white/[0.12] px-3 py-2 text-sm"
               value={selected} onChange={(e) => setAgentId(e.target.value)}>
-              {(agents.data?.items ?? []).map((a) => (
+              {(agents.data?.items ?? [])
+                .filter((a) => a.id === selected || `${a.name} ${a.role}`.toLowerCase().includes(agentQuery.trim().toLowerCase()))
+                .map((a) => (
                 <option key={a.id} value={a.id}>{a.name}</option>
               ))}
             </select>
@@ -219,13 +234,37 @@ export function GovernanceAccess() {
                 </thead>
                 <tbody>
                   {rows.map((c) => (
-                    <tr key={c.id} data-testid={`cap-${c.id}`} className="border-t border-white/[0.06] align-top">
-                      <td className="py-2">{c.name}</td>
-                      <td>{c.risk}</td>
-                      <td>{SUPPORT_LABEL[c.support]}</td>
-                      <td><Badge variant={STATE_VARIANT[c.state] ?? 'neutral'}>{label(c.state)}</Badge></td>
-                      <td className="text-[#A8A8AB]">{c.explanation}</td>
-                    </tr>
+                    <Fragment key={c.id}>
+                      <tr data-testid={`cap-${c.id}`} className="border-t border-white/[0.06] align-top">
+                        <td className="py-2">
+                          <button type="button" className="text-left underline decoration-dotted"
+                            aria-expanded={openCap === c.id}
+                            onClick={() => setOpenCap(openCap === c.id ? null : c.id)}>
+                            {c.name}
+                          </button>
+                        </td>
+                        <td>{c.risk}</td>
+                        <td>{SUPPORT_LABEL[c.support]}</td>
+                        <td><Badge variant={STATE_VARIANT[c.state] ?? 'neutral'}>{label(c.state)}</Badge></td>
+                        <td className="text-[#A8A8AB]">{c.explanation}</td>
+                      </tr>
+                      {openCap === c.id && (
+                        <tr className="bg-white/[0.02]">
+                          <td colSpan={5} className="px-2 py-2">
+                            <dl aria-label={`${c.name} details`} className="grid grid-cols-[10rem_1fr] gap-x-3 gap-y-1 text-xs">
+                              <dt>Reason code</dt><dd>{c.code ?? 'none'}</dd>
+                              <dt>Source</dt><dd>{c.source ?? 'none'}</dd>
+                              <dt>Inherited from</dt><dd>{c.inheritance_source ?? 'none'}</dd>
+                              <dt>Conditions</dt><dd>{c.conditions ? JSON.stringify(c.conditions) : 'none'}</dd>
+                              <dt>Approval</dt><dd>{c.approval?.required ? 'required' : 'not required'}</dd>
+                              <dt>Grant validity</dt>
+                              <dd>{c.validity ? `until ${c.validity.expires_at.slice(0, 16)}, uses left ${c.validity.uses_left ?? 'unlimited'}` : 'none'}</dd>
+                              <dt>Last used</dt><dd>{c.last_used?.slice(0, 16) ?? 'never'}</dd>
+                            </dl>
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
                   ))}
                 </tbody>
               </table>
@@ -276,6 +315,7 @@ export function GovernanceAccess() {
 
       {tab === 'grants' && (
         <Card>
+          <GrantForm agents={agents.data?.items ?? []} />
           <div className="mb-3">{reasonField}</div>
           {(grants.data?.items ?? []).map((g) => (
             <div key={g.id} className="flex items-center justify-between border-t border-white/[0.06] py-2 text-sm">

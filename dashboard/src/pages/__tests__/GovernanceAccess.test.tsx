@@ -14,7 +14,8 @@ const cap = (over: Record<string, unknown>) => ({
   state: 'allowed', explanation: 'Runs.', ...over,
 });
 const CAPS = [
-  cap({ id: 'tool.http-request', name: 'HTTP request' }),
+  cap({ id: 'tool.http-request', name: 'HTTP request', tool_name: 'http-request', code: 'DEFAULT_ALLOW',
+    source: 'default policy' }),
   cap({ id: 'computer.browser', name: 'Browser control', category: 'computer_use',
     support: 'unsupported', state: 'unsupported', explanation: 'Not preventable.' }),
 ];
@@ -54,7 +55,7 @@ describe('GovernanceAccess', () => {
     mount();
     const row = await screen.findByTestId('cap-computer.browser');
     expect(within(row).getByText('Not enforceable')).toBeInTheDocument();
-    expect(within(row).queryByRole('button')).toBeNull();
+    expect(within(row).getAllByRole('button').map((b) => b.textContent)).toEqual(['Browser control']);
     expect(within(row).queryByRole('switch')).toBeNull();
     expect(within(row).queryByRole('checkbox')).toBeNull();
     expect(within(await screen.findByTestId('cap-tool.http-request')).getByText('Enforced'))
@@ -99,6 +100,43 @@ describe('GovernanceAccess', () => {
       expect(post).toHaveBeenCalledWith('/api/v1/governance/lockdown/release', {
         reason: 'drill is over', confirm: 'RELEASE LOCKDOWN',
       })
+    );
+  });
+
+  it('filters agents by search text and opens the explanation details', async () => {
+    mount();
+    fireEvent.change(await screen.findByLabelText('Search agents'), { target: { value: 'zzz' } });
+    expect(screen.getByRole('combobox', { name: 'Agent' })).toHaveValue('a1');
+    fireEvent.click(await screen.findByRole('button', { name: 'HTTP request' }));
+    const details = screen.getByLabelText('HTTP request details');
+    expect(details).toHaveTextContent('DEFAULT_ALLOW');
+    expect(details).toHaveTextContent('default policy');
+  });
+
+  it('validates the temporary grant form and posts exactly what was entered', async () => {
+    mount();
+    fireEvent.click(await screen.findByRole('button', { name: 'Grants' }));
+    const create = await screen.findByRole('button', { name: 'Create grant' });
+    expect(create).toBeDisabled();
+    expect(screen.getByLabelText('Grant form problems')).toHaveTextContent('Set an expiry');
+    await screen.findByRole('option', { name: 'HTTP request' });
+    fireEvent.change(screen.getByLabelText(/^Tool/), { target: { value: 'http-request' } });
+    fireEvent.change(screen.getByLabelText(/^Expires/), { target: { value: '2000-01-01T00:00' } });
+    expect(screen.getByLabelText('Grant form problems')).toHaveTextContent('Expiry must be in the future');
+    fireEvent.change(screen.getByLabelText(/^Expires/), { target: { value: '2999-01-01T00:00' } });
+    fireEvent.change(screen.getByLabelText(/^Session scope/), { target: { value: 'not-a-uuid' } });
+    expect(screen.getByLabelText('Grant form problems')).toHaveTextContent('Session scope must be');
+    fireEvent.change(screen.getByLabelText(/^Session scope/), { target: { value: '' } });
+    fireEvent.change(screen.getByLabelText('Grant reason'), { target: { value: 'ok' } });
+    expect(create).toBeDisabled();
+    fireEvent.change(screen.getByLabelText('Grant reason'), { target: { value: 'needed for the demo' } });
+    expect(create).toBeEnabled();
+    fireEvent.click(create);
+    await waitFor(() =>
+      expect(post).toHaveBeenCalledWith('/api/v1/governance/grants', expect.objectContaining({
+        agent_id: 'a1', tool_name: 'http-request', effect: 'allow', session_id: null,
+        reason: 'needed for the demo',
+      }))
     );
   });
 
