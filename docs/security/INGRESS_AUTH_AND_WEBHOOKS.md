@@ -63,11 +63,16 @@ The order is fixed. Nothing after a step runs if that step refuses.
 1. Rate limit, then a bounded body read (1 MB).
 2. Find the trigger and verify its secret. Every authentication failure is the
    same 401, whether the trigger is unknown, inactive or the secret is wrong.
-   The tenant comes from the trigger, never from the request.
+   The tenant comes from the trigger, never from the request. The lookup is one
+   exact-id read in `resolve_webhook_trigger_context` (see
+   [TENANT_SESSION_AUDIT.md](TENANT_SESSION_AUDIT.md)); its raw session is closed
+   before anything else happens, and every later tenant operation uses
+   `tenant_session(company_id)`.
 3. Validate the `Idempotency-Key`.
 4. Validate and parse the payload.
 5. Claim the delivery in the ledger.
-6. Reserve budget and call the agent (the existing `_call_llm` path).
+6. Reserve budget and call the agent (the existing `_call_llm` path), under the
+   processing timeout below.
 7. Record the execution and complete the claim in one transaction.
 
 No model call happens before authentication, validation, budget reservation and
@@ -107,6 +112,41 @@ Retention: a finished delivery replays for 24 hours, after which its row is
 deleted and the key can be used again. Expired rows are purged opportunistically
 when a new delivery is claimed.
 
+### Processing timeout
+
+The model run is bounded by `WEBHOOK_PROCESSING_TIMEOUT_SECONDS` (default 120).
+Before this limit existed nothing bounded it: the HTTP adapters use an httpx
+timeout of 120 s that applies to each connect, read, write and pool phase and not
+to the whole call, and the CLI adapters default to 600 s, which is longer than the
+lease.
+
+| Value | Seconds |
+|---|---|
+| Idempotency lease | 300 |
+| `WEBHOOK_PROCESSING_TIMEOUT_SECONDS` (default) | 120 |
+| Safety margin kept below the lease | 60 |
+| Largest accepted timeout | just under 240 |
+
+Startup refuses to run, with `WEBHOOK_TIMEOUT_NOT_BELOW_LEASE`, when the timeout
+plus the margin reaches the lease, and with `WEBHOOK_TIMEOUT_INVALID` when it is
+not positive. The margin covers recording the result, releasing the claim and
+clock skew between workers.
+
+When the limit expires the model task is cancelled and awaited, so it has stopped
+before the route answers: the CLI adapter terminates its process tree, the HTTP
+adapters abandon the request, and the budget hold is settled. The delivery is
+recorded as a failed execution with the fixed error `WEBHOOK_PROCESSING_TIMEOUT`
+(never a success) and the caller gets 504 `WEBHOOK_PROCESSING_TIMEOUT`. This is a
+model failure like any other: it is final for the key, so a retry with the same
+key replays the 504 with `Idempotent-Replay: true` and runs nothing, and the event
+runs again only under a new key. That is deliberate. A cancelled run may already
+have caused an effect, and re-running it under the same key could repeat it.
+
+A provider that raises its own timeout inside the limit is an ordinary failure
+(202 with outcome `failed`), not this one. Logs carry the stable code and nothing
+else. If the lease is lost anyway, completion is a compare-and-swap that fails
+for the stale worker, which then answers the in-flight 409 and records nothing.
+
 ### Crash recovery
 
 A claim is a 5-minute lease held in the record's `expires_at`. If the worker dies,
@@ -114,7 +154,9 @@ the lease expires and the next delivery with the same key takes it over. Takeove
 completion and release are compare-and-swap updates on the exact lease value, so
 a worker that stalled past its lease cannot record a second effect or complete
 the new owner's delivery. A stalled worker may still make its model call; its
-result is dropped. There is no lease heartbeat. If the database fails after the
+result is dropped. With the processing timeout a live worker finishes or is
+cancelled well inside its lease, so a stall past it now means a hung process, not
+a slow model. There is no lease heartbeat. If the database fails after the
 model call and before completion is recorded, the lease expires and the event
 runs again, so a model call can repeat in that narrow case.
 
@@ -191,6 +233,11 @@ and no Alembic revision. The head stays `e7a1c2d3f408`.
   failure, warning, and the forged `X-Company-Id` header.
 - `tests/test_webhook_intake.py`: authentication order, key rules, replay,
   conflict, concurrency, lease takeover, limits, injection fixtures, logging.
+- `tests/test_webhook_intake.py::TestPreTenantLookup` and `TestProcessingTimeout`:
+  the pre-tenant lookup (no caller-supplied company, no mutation, one raw session,
+  tenant sessions afterwards, no cross-tenant collision) and the timeout
+  (cancellation, stable 504, stale owner, retry, logs).
+- `tests/test_webhook_timeout_policy.py`: the timeout, margin and lease invariant.
 - `tests/test_webhook_idempotency_postgres.py` (PostgreSQL, in the
   `postgres-integration` job): forced RLS, cross-tenant isolation, racing
   identical deliveries, conflict, lease recovery with a stalled worker, and a

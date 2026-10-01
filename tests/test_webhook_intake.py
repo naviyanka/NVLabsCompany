@@ -13,6 +13,9 @@ once in the ledger, and the payload reaches the agent only as untrusted data.
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import dataclasses
+import inspect
 import json
 import logging
 import uuid
@@ -23,7 +26,7 @@ from unittest.mock import AsyncMock
 import httpx
 import pytest
 from fastapi import FastAPI
-from sqlalchemy import update
+from sqlalchemy import event, update
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlmodel import SQLModel, select
 
@@ -859,3 +862,403 @@ def test_generic_idempotency_middleware_leaves_webhooks_to_their_own_ledger() ->
     assert SELF_IDEMPOTENT_PATHS.match(f"/api/v1/webhooks/{uuid.uuid4()}")
     assert not SELF_IDEMPOTENT_PATHS.match("/api/v1/webhooks/a/b")
     assert not SELF_IDEMPOTENT_PATHS.match("/api/v1/companies")
+
+
+# ---------------------------------------------------------------------------
+# Pre-tenant trigger lookup
+# ---------------------------------------------------------------------------
+
+
+class RawSessionSpy:
+    """Counts raw ``async_session_factory`` sessions opened, and how many are open now."""
+
+    def __init__(self, factory) -> None:
+        self.factory = factory
+        self.opened = 0
+        self.open_now = 0
+
+    @contextlib.asynccontextmanager
+    async def __call__(self, *_a, **_k):
+        self.opened += 1
+        self.open_now += 1
+        try:
+            async with self.factory() as session:
+                yield session
+        finally:
+            self.open_now -= 1
+
+
+def spy_on_tenant_sessions(monkeypatch: pytest.MonkeyPatch) -> list[uuid.UUID]:
+    """Record the company of every ``tenant_session`` the route or ledger opens."""
+    seen: list[uuid.UUID] = []
+    real = wh.tenant_session
+
+    def wrapper(company_id):
+        seen.append(company_id)
+        return real(company_id)
+
+    monkeypatch.setattr(wh, "tenant_session", wrapper)
+    monkeypatch.setattr(ledger, "tenant_session", wrapper)
+    return seen
+
+
+async def add_tenant(factory, name: str) -> tuple[Company, Trigger, str]:
+    """Another company with its own agent and webhook trigger."""
+    secret = f"secret-for-{name}"
+    company = Company(name=name)
+    agent = Agent(company_id=company.id, name=f"{name}-agent", role="ops", model="m")
+    trigger = Trigger(
+        company_id=company.id,
+        agent_id=agent.id,
+        trigger_type="webhook",
+        name=f"{name}-trigger",
+        config={"inbound_secret": secret, "prompt": "p"},
+    )
+    async with factory() as session:
+        session.add_all([company, agent, trigger])
+        await session.commit()
+    return company, trigger, secret
+
+
+class TestPreTenantLookup:
+    """The one raw-session lookup derives the company from the trigger, nothing else."""
+
+    async def test_the_helper_takes_a_trigger_id_and_nothing_else(self) -> None:
+        params = inspect.signature(wh.resolve_webhook_trigger_context).parameters
+        assert list(params) == ["trigger_id"]
+
+    async def test_a_caller_cannot_supply_or_override_the_company(
+        self, db, client, stub_llm
+    ) -> None:
+        factory, trigger, _agent = db
+        other_company, _other_trigger, _ = await add_tenant(factory, "other")
+        forged = str(other_company.id)
+
+        response = await client.post(
+            f"/api/v1/webhooks/{trigger.id}?company_id={forged}",
+            content=json.dumps({"company_id": forged, "tenant_id": forged}).encode(),
+            headers={
+                "X-Webhook-Secret": SECRET,
+                "Idempotency-Key": KEY,
+                "Content-Type": JSON_TYPE,
+                "X-Company-Id": forged,
+            },
+        )
+
+        assert response.status_code == 202
+        (execution,) = await executions(factory)
+        assert execution.company_id == trigger.company_id != other_company.id
+        rows = await records(factory)
+        assert [r.company_id for r in rows] == [trigger.company_id]
+        assert stub_llm[0]["agent_id"] == db[2].id
+
+    async def test_the_lookup_returns_only_its_own_company_context(self, db) -> None:
+        factory, trigger, agent = db
+        other_company, other_trigger, _ = await add_tenant(factory, "other")
+
+        mine = await wh.resolve_webhook_trigger_context(trigger.id)
+        theirs = await wh.resolve_webhook_trigger_context(other_trigger.id)
+
+        assert mine.company_id == trigger.company_id and mine.agent_id == agent.id
+        assert theirs.company_id == other_company.id
+        assert mine.inbound_secret == SECRET and theirs.inbound_secret != SECRET
+        assert mine.prompt == "Triage this alert" and mine.is_active
+        assert await wh.resolve_webhook_trigger_context(uuid.uuid4()) is None
+
+    async def test_the_result_is_an_immutable_plain_value(self, db) -> None:
+        _factory, trigger, _agent = db
+        ctx = await wh.resolve_webhook_trigger_context(trigger.id)
+
+        assert type(ctx) is wh.WebhookTriggerContext
+        assert not isinstance(ctx, SQLModel)
+        with pytest.raises(dataclasses.FrozenInstanceError):
+            ctx.company_id = uuid.uuid4()  # type: ignore[misc]
+        assert SECRET not in repr(ctx)
+
+    async def test_unknown_inactive_and_wrong_secret_fail_the_same_way(
+        self, db, client, stub_llm
+    ) -> None:
+        factory, trigger, _agent = db
+        async with factory() as session:
+            inactive = Trigger(
+                company_id=trigger.company_id,
+                agent_id=trigger.agent_id,
+                trigger_type="webhook",
+                name="off",
+                is_active=False,
+                config={"inbound_secret": SECRET},
+            )
+            session.add(inactive)
+            await session.commit()
+
+        unknown = await post(client, uuid.uuid4())
+        wrong_secret = await post(client, trigger.id, secret="nope")
+        off = await post(client, inactive.id)
+
+        for refused in (unknown, wrong_secret, off):
+            assert refused.status_code == 401 and refused.content == b""
+            assert str(trigger.company_id) not in refused.text
+        assert unknown.headers == wrong_secret.headers == off.headers
+        assert stub_llm == [] and await records(factory) == []
+        assert await executions(factory) == []
+
+    async def test_a_wrong_secret_fails_before_any_tenant_processing(
+        self, db, client, monkeypatch
+    ) -> None:
+        factory, trigger, _agent = db
+        seen = spy_on_tenant_sessions(monkeypatch)
+
+        response = await post(client, trigger.id, secret="wrong-secret-value")
+
+        assert response.status_code == 401
+        assert seen == [], "a tenant session was opened for an unauthenticated caller"
+
+    async def test_the_raw_lookup_performs_no_mutation(self, db) -> None:
+        factory, trigger, _agent = db
+        statements: list[str] = []
+        engine = factory.kw["bind"].sync_engine
+
+        def record(_conn, _cursor, statement, *_rest) -> None:
+            statements.append(statement)
+
+        event.listen(engine, "before_cursor_execute", record)
+        try:
+            await wh.resolve_webhook_trigger_context(trigger.id)
+            await wh.resolve_webhook_trigger_context(uuid.uuid4())
+        finally:
+            event.remove(engine, "before_cursor_execute", record)
+
+        assert len(statements) == 2
+        assert all(s.lstrip().upper().startswith("SELECT") for s in statements), statements
+        assert all("FROM triggers" in s for s in statements)
+        assert await records(factory) == [] and await executions(factory) == []
+
+    async def test_the_route_opens_no_raw_session_after_the_lookup(
+        self, db, client, stub_llm, monkeypatch
+    ) -> None:
+        factory, trigger, _agent = db
+        raw = RawSessionSpy(factory)
+        monkeypatch.setattr(wh, "async_session_factory", raw)
+        import nexus.api.routes.chat as chat
+
+        open_during_model: list[int] = []
+
+        async def model(agent, system_prompt, message, history, **kwargs):
+            open_during_model.append(raw.open_now)
+            return ("handled", "test-model", 1)
+
+        monkeypatch.setattr(chat, "_call_llm", model)
+
+        first = await post(client, trigger.id, {"a": 1})
+        replay = await post(client, trigger.id, {"a": 1})
+        conflict = await post(client, trigger.id, {"a": 2})
+
+        assert (first.status_code, replay.status_code, conflict.status_code) == (202, 202, 409)
+        assert raw.opened == 3, "exactly one raw lookup per request, none after it"
+        assert raw.open_now == 0
+        assert open_during_model == [0], "the raw session was still open during the model call"
+
+    async def test_idempotency_and_downstream_data_use_the_tenant_session(
+        self, db, client, stub_llm, monkeypatch
+    ) -> None:
+        factory, trigger, _agent = db
+        seen = spy_on_tenant_sessions(monkeypatch)
+
+        response = await post(client, trigger.id, {"a": 1})
+
+        assert response.status_code == 202
+        # claim, agent read, completion (execution record + idempotency completion).
+        assert len(seen) >= 3 and set(seen) == {trigger.company_id}
+        (execution,) = await executions(factory)
+        (record,) = await records(factory)
+        assert execution.company_id == record.company_id == trigger.company_id
+
+    async def test_two_tenants_never_collide_on_one_key(self, db, client, stub_llm) -> None:
+        factory, trigger, _agent = db
+        other_company, other_trigger, other_secret = await add_tenant(factory, "other")
+
+        mine = await post(client, trigger.id, {"who": "mine"})
+        theirs = await post(client, other_trigger.id, {"who": "theirs"}, secret=other_secret)
+        again = await post(client, trigger.id, {"who": "mine"})
+
+        # Same Idempotency-Key, different payloads, different tenants: no conflict.
+        assert mine.status_code == theirs.status_code == 202
+        assert again.headers["idempotent-replay"] == "true"
+        assert again.json() == mine.json() != theirs.json()
+        assert len(stub_llm) == 2
+        assert {r.company_id for r in await records(factory)} == {
+            trigger.company_id,
+            other_company.id,
+        }
+        # One tenant's secret never opens another tenant's trigger.
+        cross = await post(client, other_trigger.id, {"who": "x"}, secret=SECRET)
+        assert cross.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# Processing timeout
+# ---------------------------------------------------------------------------
+
+
+class TestProcessingTimeout:
+    """The model run is bounded, cancelled on expiry, and never recorded as success."""
+
+    @pytest.fixture
+    def short_timeout(self, monkeypatch: pytest.MonkeyPatch) -> float:
+        value = 0.05
+        monkeypatch.setattr(wh.settings, "webhook_processing_timeout_seconds", value)
+        return value
+
+    @staticmethod
+    def hanging_provider(monkeypatch, *, before_hang=None):
+        """A fake provider that never finishes and reports its own cancellation."""
+        import nexus.api.routes.chat as chat
+
+        state = {"calls": 0, "cancelled": False, "ticks": 0}
+
+        async def provider(agent, system_prompt, message, history, **kwargs):
+            state["calls"] += 1
+            if before_hang is not None:
+                await before_hang()
+            try:
+                while True:  # stands in for a tool loop that keeps acting
+                    state["ticks"] += 1
+                    await asyncio.sleep(0.005)
+            except asyncio.CancelledError:
+                state["cancelled"] = True
+                raise
+
+        monkeypatch.setattr(chat, "_call_llm", provider)
+        return state
+
+    async def test_a_run_under_the_timeout_succeeds(self, db, client, stub_llm, monkeypatch):
+        factory, trigger, _agent = db
+        monkeypatch.setattr(wh.settings, "webhook_processing_timeout_seconds", 30)
+
+        response = await post(client, trigger.id, {"a": 1})
+
+        assert response.status_code == 202 and response.json()["outcome"] == "success"
+        (row,) = await executions(factory)
+        assert row.status == "success"
+
+    async def test_a_run_over_the_timeout_is_cancelled_with_a_stable_response(
+        self, db, client, short_timeout, monkeypatch
+    ) -> None:
+        factory, trigger, _agent = db
+        state = self.hanging_provider(monkeypatch)
+
+        response = await post(client, trigger.id, {"secret-marker": "payload-needle-77"})
+
+        assert response.status_code == 504
+        body = response.json()
+        assert body["code"] == wh.TIMEOUT_CODE and body["outcome"] == "failed"
+        assert "payload-needle-77" not in response.text and KEY not in response.text
+        assert state["cancelled"], "the model task was not cancelled"
+        (row,) = await executions(factory)
+        assert row.status == "failed" and row.error == wh.TIMEOUT_CODE and row.result is None
+        (record,) = await records(factory)
+        assert record.state == "complete" and record.status_code == 504
+
+    async def test_nothing_keeps_acting_after_the_route_answers(
+        self, db, client, short_timeout, monkeypatch
+    ) -> None:
+        _factory, trigger, _agent = db
+        state = self.hanging_provider(monkeypatch)
+
+        await post(client, trigger.id, {"a": 1})
+        ticks = state["ticks"]
+        await asyncio.sleep(0.05)
+
+        assert state["ticks"] == ticks, "the provider task kept running after the timeout"
+
+    async def test_a_providers_own_timeout_is_an_ordinary_failure(
+        self, db, client, monkeypatch
+    ) -> None:
+        factory, trigger, _agent = db
+        monkeypatch.setattr(wh.settings, "webhook_processing_timeout_seconds", 30)
+        import nexus.api.routes.chat as chat
+
+        monkeypatch.setattr(chat, "_call_llm", AsyncMock(side_effect=TimeoutError("upstream")))
+
+        response = await post(client, trigger.id)
+
+        assert response.status_code == 202 and response.json()["outcome"] == "failed"
+        (row,) = await executions(factory)
+        assert row.error != wh.TIMEOUT_CODE
+
+    async def test_a_timed_out_owner_cannot_complete_over_a_new_owner(
+        self, db, client, short_timeout, monkeypatch
+    ) -> None:
+        factory, trigger, _agent = db
+        payload = {"a": 1}
+        taken: dict[str, Any] = {}
+
+        async def lease_lapses_and_another_worker_takes_over() -> None:
+            # Deterministic fake clock: the lease runs out while the model hangs.
+            async with factory() as session:
+                await session.execute(
+                    update(IdempotencyRecord).values(
+                        expires_at=ledger._now() - timedelta(seconds=1)
+                    )
+                )
+                await session.commit()
+            taken["fresh"] = await ledger.begin(
+                trigger.company_id, trigger.id, KEY, wp.payload_hash(payload)
+            )
+
+        self.hanging_provider(monkeypatch, before_hang=lease_lapses_and_another_worker_takes_over)
+
+        response = await post(client, trigger.id, payload)
+
+        assert taken["fresh"].outcome is ledger.Outcome.CLAIMED
+        assert response.status_code == 409
+        assert response.json()["code"] == "WEBHOOK_REQUEST_IN_FLIGHT"
+        assert await executions(factory) == [], "the stale owner recorded an effect"
+        (record,) = await records(factory)
+        assert record.state == "in_flight", "the stale owner completed the new owner's claim"
+        assert await ledger.finish(
+            trigger.company_id, taken["fresh"].claim, AsyncMock(), 202, {"who": "fresh"}
+        )
+
+    async def test_a_retry_after_a_timeout_replays_it_and_a_new_key_runs_again(
+        self, db, client, short_timeout, stub_llm, monkeypatch
+    ) -> None:
+        factory, trigger, _agent = db
+        import nexus.api.routes.chat as chat
+
+        state = self.hanging_provider(monkeypatch)
+        first = await post(client, trigger.id, {"a": 1})
+        assert first.status_code == 504
+
+        # Documented contract: a failed run is final for its key, so a retry
+        # replays the stored timeout and the agent is not run a second time.
+        retry = await post(client, trigger.id, {"a": 1})
+        assert retry.status_code == 504 and retry.headers["idempotent-replay"] == "true"
+        assert retry.json() == first.json()
+        assert state["calls"] == 1 and len(await executions(factory)) == 1
+
+        # A new key is a new delivery and runs normally.
+        async def ok(agent, system_prompt, message, history, **kwargs):
+            return ("handled", "test-model", 1)
+
+        monkeypatch.setattr(chat, "_call_llm", ok)
+        monkeypatch.setattr(wh.settings, "webhook_processing_timeout_seconds", 30)
+        fresh = await post(client, trigger.id, {"a": 1}, key="delivery-0002-abcdef")
+        assert fresh.status_code == 202 and fresh.json()["outcome"] == "success"
+        assert sorted(r.status for r in await executions(factory)) == ["failed", "success"]
+
+    async def test_timeout_logs_hold_only_a_code_and_no_payload_or_key(
+        self, db, client, short_timeout, caplog, monkeypatch
+    ) -> None:
+        _factory, trigger, _agent = db
+        self.hanging_provider(monkeypatch)
+        key = "timeout-key-needle-5151"
+        payload = {"marker": "timeout-payload-needle-8"}
+
+        with caplog.at_level(logging.DEBUG, logger="nexus"):
+            await post(client, trigger.id, payload, key=key)
+
+        logged = "\n".join(r.getMessage() for r in caplog.records if r.name.startswith("nexus"))
+        assert wh.TIMEOUT_CODE in logged
+        for needle in (SECRET, key, "timeout-payload-needle-8", wp.payload_hash(payload)):
+            assert needle not in logged, f"{needle!r} was logged"

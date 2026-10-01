@@ -24,6 +24,42 @@ class ConfigurationError(RuntimeError):
         self.code = code
 
 
+# Time kept between the end of a webhook's model run and the end of its lease:
+# recording the result, releasing the claim, and clock skew between workers.
+WEBHOOK_TIMEOUT_MARGIN_SECONDS = 60.0
+
+
+def webhook_timeout_refusal(timeout_seconds: float, lease_seconds: float) -> str | None:
+    """Stable code when the webhook timeout cannot fit inside the lease, else ``None``.
+
+    The timeout must be positive and, with the safety margin, strictly below the
+    lease. Otherwise a run could outlive its claim and a second worker could take
+    the delivery over while the first is still acting.
+    """
+    if not 0 < timeout_seconds or timeout_seconds != timeout_seconds:
+        return "WEBHOOK_TIMEOUT_INVALID"
+    if timeout_seconds + WEBHOOK_TIMEOUT_MARGIN_SECONDS >= lease_seconds:
+        return "WEBHOOK_TIMEOUT_NOT_BELOW_LEASE"
+    return None
+
+
+def enforce_webhook_timeout_policy() -> None:
+    """Refuse to start when the webhook timeout does not fit inside the lease."""
+    from nexus.communication.webhook_idempotency import LEASE
+
+    code = webhook_timeout_refusal(
+        settings.webhook_processing_timeout_seconds, LEASE.total_seconds()
+    )
+    if code is None:
+        return
+    raise ConfigurationError(
+        code,
+        "WEBHOOK_PROCESSING_TIMEOUT_SECONDS must be positive and, with a "
+        f"{WEBHOOK_TIMEOUT_MARGIN_SECONDS:.0f}s safety margin, below the "
+        f"{LEASE.total_seconds():.0f}s webhook idempotency lease.",
+    )
+
+
 def enforce_auth_policy() -> None:
     """Refuse to start when ``AUTH_ENABLED=false`` is not allowed in this environment.
 

@@ -21,7 +21,8 @@ delivery is claimed in ``idempotency_records`` (see
 replays the first answer and runs nothing, and the same key with another payload
 is refused. The payload is delivered to the model as untrusted data in a fixed
 envelope (see ``nexus.communication.webhook_payload``). No database transaction
-is open while the model runs. Payloads, secrets, idempotency keys and headers are
+is open while the model runs, and the model run has a hard outer timeout well
+inside the idempotency lease. Payloads, secrets, idempotency keys and headers are
 never logged.
 """
 
@@ -32,7 +33,7 @@ import contextlib
 import logging
 import re
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from fastapi import APIRouter, Request, Response, status
@@ -54,12 +55,16 @@ from nexus.communication.webhook_server import (
     RATE_LIMIT,
     WebhookServer,
 )
+from nexus.config import settings
 from nexus.database import async_session_factory, tenant_session
 from nexus.memory.safety import redact_text
 from nexus.models._time import utcnow
 from nexus.models.trigger import Trigger, TriggerExecution
 
 logger = logging.getLogger(__name__)
+
+# Stable code for a run the outer timeout cancelled; never carries provider text.
+TIMEOUT_CODE = "WEBHOOK_PROCESSING_TIMEOUT"
 
 router = APIRouter(tags=["webhooks"])
 
@@ -123,6 +128,66 @@ async def _read_body(request: Request) -> bytes | None:
     return b"".join(chunks)
 
 
+@dataclass(frozen=True)
+class WebhookTriggerContext:
+    """What the route may know about a trigger: plain values, no ORM object."""
+
+    trigger_id: uuid.UUID
+    company_id: uuid.UUID
+    agent_id: uuid.UUID
+    name: str
+    trigger_type: str
+    is_active: bool
+    prompt: str
+    inbound_secret: str | None = field(default=None, repr=False)
+
+
+async def resolve_webhook_trigger_context(
+    trigger_id: uuid.UUID,
+) -> WebhookTriggerContext | None:
+    """Find one trigger by its exact id, before any tenant is known.
+
+    This is the only raw ``async_session_factory`` use in the route, and the
+    tenant guard allowlists exactly this function. The company is derived *from
+    the trigger row*; a caller can neither supply nor override it. ``triggers`` is
+    not row-level-security covered, so the lookup cannot be bound to a tenant first.
+    It reads one row by primary key and only the columns below, lists nothing,
+    writes nothing, and the session is closed before this returns. The caller
+    still has to authenticate the trigger's secret before it may use the result;
+    every later tenant read or write goes through ``tenant_session(company_id)``.
+    """
+    async with async_session_factory() as lookup:
+        row = (
+            await lookup.execute(
+                select(
+                    Trigger.id,
+                    Trigger.company_id,
+                    Trigger.agent_id,
+                    Trigger.name,
+                    Trigger.trigger_type,
+                    Trigger.is_active,
+                    Trigger.config,
+                ).where(Trigger.id == trigger_id)
+            )
+        ).one_or_none()
+    if row is None:
+        return None
+    config: dict[str, Any] = row.config or {}
+    secret = config.get("inbound_secret")
+    return WebhookTriggerContext(
+        trigger_id=row.id,
+        company_id=row.company_id,
+        agent_id=row.agent_id,
+        name=row.name,
+        trigger_type=row.trigger_type,
+        is_active=bool(row.is_active),
+        prompt=str(
+            config.get("prompt", config.get("message", f"Handle inbound webhook: {row.name}"))
+        ),
+        inbound_secret=str(secret) if secret else None,
+    )
+
+
 @router.post("/api/v1/webhooks/{trigger_id}", include_in_schema=True)
 async def receive_webhook(trigger_id: str, request: Request) -> Response:
     """Fire a webhook trigger from an external service.
@@ -162,27 +227,20 @@ async def receive_webhook(trigger_id: str, request: Request) -> Response:
         server.verify_secret(provided, None)
         return _refused()
 
-    # A short session of its own: nothing stays open once the row is read.
-    async with async_session_factory() as lookup:
-        trigger = (
-            await lookup.execute(select(Trigger).where(Trigger.id == parsed_id))
-        ).scalar_one_or_none()
+    trigger = await resolve_webhook_trigger_context(parsed_id)
 
     bucket = str(parsed_id) if trigger is not None else UNKNOWN_BUCKET
     if not server.allow_request(bucket, PER_ENDPOINT_RATE_LIMIT):
         return Response(status_code=status.HTTP_429_TOO_MANY_REQUESTS, content="")
 
-    config: dict[str, Any] = (trigger.config or {}) if trigger is not None else {}
-    secret = config.get("inbound_secret")
-
     # verify_secret compares against a decoy when the endpoint is absent, so the
     # timing of an unknown trigger matches that of a wrong secret.
     endpoint = None
-    if trigger is not None and secret:
+    if trigger is not None and trigger.inbound_secret:
         from nexus.communication.webhook_types import WebhookEndpoint
 
         endpoint = WebhookEndpoint(
-            id=str(parsed_id), name=trigger.name, secret=str(secret)
+            id=str(parsed_id), name=trigger.name, secret=trigger.inbound_secret
         )
 
     if not server.verify_secret(provided, endpoint):
@@ -213,7 +271,7 @@ async def receive_webhook(trigger_id: str, request: Request) -> Response:
         return _error(exc.status, exc.code, str(exc))
     request_hash = payload_hash(payload)
 
-    begun = await ledger.begin(trigger.company_id, parsed_id, key, request_hash)
+    begun = await ledger.begin(trigger.company_id, trigger.trigger_id, key, request_hash)
     if begun.outcome is ledger.Outcome.BUSY:
         # No waiting: the caller retries and gets the recorded result.
         return _in_flight()
@@ -235,17 +293,28 @@ async def receive_webhook(trigger_id: str, request: Request) -> Response:
     try:
         ran = await _run_trigger(trigger, envelope)
         execution_id = uuid.uuid4()
-        answer = {
-            "execution_id": str(execution_id),
-            "outcome": ran.status,
-            "status": "accepted",
-        }
+        if ran.timed_out:
+            reply_status = status.HTTP_504_GATEWAY_TIMEOUT
+            answer = {
+                "code": TIMEOUT_CODE,
+                "detail": "The agent did not finish inside the processing limit",
+                "execution_id": str(execution_id),
+                "outcome": ran.status,
+                "status": "timeout",
+            }
+        else:
+            reply_status = status.HTTP_202_ACCEPTED
+            answer = {
+                "execution_id": str(execution_id),
+                "outcome": ran.status,
+                "status": "accepted",
+            }
 
         async def effect(session: AsyncSession) -> None:
             session.add(
                 TriggerExecution(
                     id=execution_id,
-                    trigger_id=trigger.id,
+                    trigger_id=trigger.trigger_id,
                     company_id=trigger.company_id,
                     status=ran.status,
                     result=ran.result,
@@ -255,12 +324,12 @@ async def receive_webhook(trigger_id: str, request: Request) -> Response:
             )
             await session.execute(
                 update(Trigger)
-                .where(Trigger.id == trigger.id)
+                .where(Trigger.id == trigger.trigger_id)
                 .values(last_fired_at=ran.finished_at)
             )
 
         recorded = await ledger.finish(
-            trigger.company_id, claim, effect, status.HTTP_202_ACCEPTED, answer
+            trigger.company_id, claim, effect, reply_status, answer
         )
     except BaseException:
         # Cancelled or an infrastructure failure before anything was recorded:
@@ -272,7 +341,7 @@ async def receive_webhook(trigger_id: str, request: Request) -> Response:
     if not recorded:
         # Our lease expired and another worker took the delivery over.
         return _in_flight()
-    return JSONResponse(status_code=status.HTTP_202_ACCEPTED, content=answer)
+    return JSONResponse(status_code=reply_status, content=answer)
 
 
 def _in_flight() -> JSONResponse:
@@ -290,9 +359,10 @@ class _Ran:
     result: dict[str, Any] | None
     error: str | None
     finished_at: Any
+    timed_out: bool = False
 
 
-async def _run_trigger(trigger: Trigger, envelope: str | None) -> _Ran:
+async def _run_trigger(trigger: WebhookTriggerContext, envelope: str | None) -> _Ran:
     """Run the trigger's agent against the inbound payload; no transaction is held.
 
     Mirrors how the scheduler fires an agent-based trigger. The agent runs with
@@ -317,24 +387,28 @@ async def _run_trigger(trigger: Trigger, envelope: str | None) -> _Ran:
     if agent is None:
         return _Ran("failed", None, f"Agent {trigger.agent_id} not found", utcnow())
 
-    config = trigger.config or {}
-    prompt = config.get(
-        "prompt", config.get("message", f"Handle inbound webhook: {trigger.name}")
-    )
+    prompt = trigger.prompt
     if envelope is not None:
         prompt = f"{prompt}\n\n{envelope}"
 
+    # Hard outer bound, strictly inside the idempotency lease (checked at
+    # startup). Expiry cancels the model task and waits for it to unwind, so a
+    # cancelled run cannot keep acting after the route has answered.
     try:
         system_prompt = _build_system_prompt(agent)
-        response_text, model_used, tokens_used = await _call_llm(
-            agent, system_prompt, prompt, []
-        )
-    except Exception as exc:  # noqa: BLE001 - the caller gets 202 regardless
-        # The class name only: a provider error can echo the prompt, payload included.
+        async with asyncio.timeout(settings.webhook_processing_timeout_seconds) as limit:
+            response_text, model_used, tokens_used = await _call_llm(
+                agent, system_prompt, prompt, []
+            )
+    except TimeoutError as exc:
+        if not limit.expired():  # the provider's own timeout, an ordinary failure
+            return _failed(trigger, exc)
         logger.warning(
-            "Inbound webhook for trigger %s failed: %s", trigger.id, type(exc).__name__
+            "Inbound webhook for trigger %s timed out: %s", trigger.trigger_id, TIMEOUT_CODE
         )
-        return _Ran("failed", None, redact_text(str(exc))[0][:1000], utcnow())
+        return _Ran("failed", None, TIMEOUT_CODE, utcnow(), timed_out=True)
+    except Exception as exc:  # noqa: BLE001 - the caller gets 202 regardless
+        return _failed(trigger, exc)
 
     logger.info("Inbound webhook fired trigger '%s'", trigger.name)
     return _Ran(
@@ -343,3 +417,11 @@ async def _run_trigger(trigger: Trigger, envelope: str | None) -> _Ran:
         None,
         utcnow(),
     )
+
+
+def _failed(trigger: WebhookTriggerContext, exc: Exception) -> _Ran:
+    # The class name only: a provider error can echo the prompt, payload included.
+    logger.warning(
+        "Inbound webhook for trigger %s failed: %s", trigger.trigger_id, type(exc).__name__
+    )
+    return _Ran("failed", None, redact_text(str(exc))[0][:1000], utcnow())

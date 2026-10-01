@@ -38,6 +38,10 @@ class Settings(BaseSettings):
     nexus_env: str = ""
     # Development only: acknowledges that AUTH_ENABLED=false trusts any caller.
     nexus_allow_insecure_auth_disabled: bool = False
+    # Hard cap on one inbound webhook's model run. It must finish, with room to
+    # record the result, before the 300 s idempotency lease lapses, so startup
+    # refuses a value that is not below the lease minus a safety margin.
+    webhook_processing_timeout_seconds: float = 120.0
     session_cookie_name: str = "nv_session"
     csrf_cookie_name: str = "nv_csrf"
     # 7 days. Sessions are DB-backed, absolute expiry stored in the
