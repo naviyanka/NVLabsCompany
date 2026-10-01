@@ -224,4 +224,3 @@ class TestSemantics:
         assert eff["org.ceo_request_hire"]["state"] == "temporarily_allowed"
         assert eff["org.ceo_request_hire"]["validity"]["uses_left"] is None
         assert eff["org.ceo_record_decision"]["state"] == "temporarily_denied"
-
