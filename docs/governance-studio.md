@@ -198,9 +198,23 @@ use. The Grants tab has a form to create a temporary grant (one enforceable tool
 an optional session scope and a reason). The form checks the inputs before it posts; the server
 still enforces the expiry limits and the approval rules. A viewer sees every screen but none of the write controls: lockdown, isolation, grant forms and
 actions, draft editing, publish, rollback, preset drafts and cancel are hidden, and the page says it
-is view only. The controls follow the signed-in role (`GET /auth/me`) and stay hidden until it is
-known. This only shapes the screen; the server still answers 403 `HUMAN_ADMIN_REQUIRED` to every
-change a non-administrator attempts.
+is view only.
+
+### Who may change governance
+
+`GET /api/v1/governance/me` is the one answer, and it returns only `{"can_write": bool}`. The server
+computes it from the session principal alone: a human whose role, read from their membership on every
+request, is `admin`. `require_admin_human` (every write route) and `/me` call the same predicate,
+`errors.can_write`, so the screen and the API cannot disagree. A deactivated user, a removed
+membership or a session for a company the user does not belong to resolves to no principal, so `/me`
+and every write answer `401`. Nothing the client sends (headers, query, body, the role in `GET
+/auth/me`) changes the answer. A non-administrator who attempts a change still gets `403
+HUMAN_ADMIN_REQUIRED`.
+
+The dashboard asks `/me` on every mount and window focus, never caches it, and keys it by company and
+user, so logout, a company switch or a different user asks again. Every write control and dialog is
+rendered only on a `true` answer. While the answer is loading, or if it fails, every control stays off
+(a failure also says the permission could not be confirmed). Read views stay available.
 
 ## Not in v1
 
