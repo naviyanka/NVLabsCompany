@@ -6,7 +6,7 @@ import { Badge } from '@/components/common/Badge';
 import { apiClient } from '@/api/client';
 import {
   BASE, PAGE, ConfirmModal, Field, Findings, Pager, RuleDiff, StateLine, errorText, inputClass,
-  isConflict, useCanEdit, type Affects, type Finding, type RuleDiffData,
+  AffectedCapabilities, isConflict, useCanEdit, type Affects, type Finding, type RuleDiffData,
 } from './shared';
 
 interface VersionRow {
@@ -69,6 +69,7 @@ function RollbackDialog({ number, onClose }: { number: number; onClose: () => vo
           </p>
           <section aria-label="Exact rule changes"><h3 className="mb-1 text-sm font-medium">Exact rule changes</h3><RuleDiff diff={p.diff} /></section>
           <p className="text-sm">Affects {scope(p.affects)}.</p>
+          <AffectedCapabilities ids={p.affects.capability_ids} />
           <Findings items={p.findings} title="Risk findings in the target version" />
         </>
       )}
@@ -105,6 +106,7 @@ function Detail({ number, onClose, onRollback }: { number: number; onClose: () =
             <RuleDiff diff={d.diff_from_previous} />
           </section>
           <p className="text-sm">Affected: {scope(d.affects)}.</p>
+          <AffectedCapabilities ids={d.affects.capability_ids} />
         </div>
       )}
       <div className="mt-3 flex gap-2">

@@ -28,6 +28,19 @@ adds nothing beside this path:
 | `display_only` | Shown for information. No control. |
 | `unsupported` | Not preventable today (all computer-use items). Shown as "Not enforceable", never as a toggle. |
 
+### Capability names and descriptions
+
+The backend is the only source of capability text (`capability_text.py`). Every entry carries
+`display_name` (a verb-led action), `description` (one or two plain sentences), `limitations` and
+`examples`, next to the unchanged technical `id`. `GET /governance/catalog` and the effective-access
+response return them; effective access also returns `plain_explanation`, a plain-language reading of
+the stable reason `code` (for example `DEFAULT_DENY`). Policy rules, grants, the simulator and the
+audit log keep using the technical id and tool name, and a display name is never an authorization
+key. A capability with no entry gets a humanized id, "Description unavailable" and its real
+support level. `tests/golden_governance_catalog.json` pins the technical fields of all 44 entries.
+The dashboard shows name, then description, then the id in muted monospace with a copy control, and
+keeps the reason code and engine message under the details.
+
 ## Decision precedence
 
 Every surface (runtime `guarded_call`, the effective-access matrix, the simulator and the preset
@@ -189,7 +202,7 @@ risk findings. Task and resource scopes are not enforceable either.
 Autonomy presets, Runtime, Grants and Audit. Revoke, isolate, release, publish, rollback and
 lockdown each ask for confirmation. Lists are paginated (`limit` up to 100, 20 in the UI) with
 loading, empty and error states. State is always text as well as colour, tabs and dialogs are
-keyboard reachable, and wide tables scroll inside their card. No secret reference, raw prompt or
+keyboard reachable, and long text wraps inside the table. No secret reference, raw prompt or
 raw policy internals are shown.
 
 The agent picker has a search box. Selecting a capability name in the matrix opens its details:

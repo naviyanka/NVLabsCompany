@@ -2,9 +2,9 @@ import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/common/Button';
 import { apiClient } from '@/api/client';
-import { BASE, Field, errorText, inputClass, type AgentRow } from './shared';
+import { BASE, CapName, CopyId, Field, errorText, inputClass, withMeta, type AgentRow, type CapMeta } from './shared';
 
-interface Cap { id: string; name: string; support: string; tool_name: string | null }
+interface Cap extends CapMeta { support: string; tool_name: string | null }
 interface Created { status: string }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -25,11 +25,12 @@ export function GrantForm({ agents }: { agents: AgentRow[] }) {
     enabled: !!agent,
     queryFn: () => apiClient.get<{ capabilities: Cap[] }>(`${BASE}/agents/${agent}/effective-access`),
   });
-  const tools = (caps.data?.capabilities ?? []).filter((c) => c.support === 'enforced' && c.tool_name);
+  const tools = (caps.data?.capabilities ?? []).filter((c) => c.support === 'enforced' && c.tool_name).map(withMeta);
+  const chosen = tools.find((c) => c.tool_name === tool);
 
   const expiry = expires ? new Date(expires) : null;
   const problems = [
-    !tool && 'Choose a tool.',
+    !tool && 'Choose a capability.',
     (!expiry || Number.isNaN(expiry.getTime())) ? 'Set an expiry.' : expiry.getTime() <= Date.now() && 'Expiry must be in the future.',
     session && !UUID.test(session.trim()) && 'Session scope must be a session id (UUID) or empty.',
     reason.trim().length < 5 && 'Give a reason of at least 5 characters.',
@@ -62,9 +63,14 @@ export function GrantForm({ agents }: { agents: AgentRow[] }) {
         <Field name="Tool" hint="One enforceable tool; patterns are not accepted.">
           <select className={inputClass} value={tool} onChange={(e) => setTool(e.target.value)}>
             <option value="">Select a tool</option>
-            {tools.map((c) => <option key={c.id} value={c.tool_name!}>{c.name}</option>)}
+            {tools.map((c) => <option key={c.id} value={c.tool_name!}>{c.display_name} ({c.id})</option>)}
           </select>
         </Field>
+        {chosen && (
+          <div aria-label="Selected tool" className="flex min-w-[12rem] flex-1 flex-col gap-1 text-sm">
+            <CapName cap={chosen} /> <CopyId id={chosen.id} />
+          </div>
+        )}
         <Field name="Effect">
           <select className={inputClass} value={effect} onChange={(e) => setEffect(e.target.value as 'allow' | 'deny')}>
             <option value="allow">Allow</option>

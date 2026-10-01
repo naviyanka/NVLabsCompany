@@ -35,10 +35,14 @@ const draft = (over: Record<string, unknown> = {}) => ({
   loosens: false, findings: [], ...over,
 });
 const CATALOG = [
-  { id: 'tool.http-request', name: 'HTTP request', category: 'tools', support: 'enforced',
+  { id: 'tool.http-request', name: 'HTTP request', display_name: 'Make an HTTP Request',
+    description: 'Sends a request to a web address. It can reach outside services.',
+    category: 'tools', support: 'enforced',
     tool_name: 'http-request', risk: 'write', explicit_allow_required: false,
     scope_schema: { conditions: ['tool_name', 'agent_id'] } },
-  { id: 'computer.browser', name: 'Browser control', category: 'computer_use', support: 'unsupported',
+  { id: 'computer.browser', name: 'Browser control', display_name: 'Control a Web Browser',
+    description: 'Drives a browser. NEXUS cannot currently enforce this.',
+    category: 'computer_use', support: 'unsupported',
     tool_name: null, risk: 'write', explicit_allow_required: false },
 ];
 const DECISION = {
@@ -96,7 +100,7 @@ function respond(path: string): unknown {
       rules: [rule({ name: 'autonomy:a1:deny' })],
       capability_diff: { changes: [{ capability_id: 'tool.http-request', name: 'HTTP request', risk: 'write',
         before: 'allow', after: 'deny', code: 'POLICY_DENY' }],
-      excluded: [{ capability_id: 'computer.browser', name: 'Browser control', label: 'Not enforceable' }] } };
+      excluded: [{ capability_id: 'computer.browser', name: 'Browser control', display_name: 'Control a Web Browser', label: 'Not enforceable' }] } };
   }
   if (path.endsWith('/grants')) return { items: grants };
   return { items: [] };
@@ -141,7 +145,7 @@ describe('Governance Studio', () => {
       mount();
       await tab('Simulator');
       expect(screen.getByRole('note')).toHaveTextContent(/calls no tool, spends no temporary grant/i);
-      await screen.findByRole('option', { name: /Browser control \(not enforceable\)/ });
+      await screen.findByRole('option', { name: /Control a Web Browser.*not enforceable/ });
       fireEvent.change(screen.getByLabelText('Policy to test'), { target: { value: 'd1' } });
       fireEvent.change(screen.getByLabelText('Capability'), { target: { value: 'tool.http-request' } });
       fireEvent.click(screen.getByRole('button', { name: 'Simulate' }));
@@ -160,7 +164,7 @@ describe('Governance Studio', () => {
     it('offers only catalogue choices, a session and a policy: no free JSON or code', async () => {
       const { container } = mount();
       await tab('Simulator');
-      await screen.findByRole('option', { name: /HTTP request/ });
+      await screen.findByRole('option', { name: /Make an HTTP Request/ });
       expect(container.querySelector('textarea')).toBeNull();
       expect(screen.getAllByRole('textbox')).toHaveLength(1);
       expect(screen.getByLabelText(/Session \(optional\)/)).toBeInTheDocument();
@@ -170,7 +174,7 @@ describe('Governance Studio', () => {
     it('refuses a session that is not an id', async () => {
       mount();
       await tab('Simulator');
-      await screen.findByRole('option', { name: /HTTP request/ });
+      await screen.findByRole('option', { name: /Make an HTTP Request/ });
       fireEvent.change(screen.getByLabelText(/Session \(optional\)/), { target: { value: 'not-an-id' } });
       expect(screen.getByRole('button', { name: 'Simulate' })).toBeDisabled();
       expect(screen.getByRole('alert')).toHaveTextContent('valid id');
@@ -216,9 +220,9 @@ describe('Governance Studio', () => {
       mount();
       await tab('Policy');
       fireEvent.click(await screen.findByRole('button', { name: /Open draft: Freeze outbound HTTP/ }));
-      const box = await screen.findByRole('checkbox', { name: /Browser control/ }).catch(() => null);
+      const box = await screen.findByRole('checkbox', { name: /Control a Web Browser/ }).catch(() => null);
       expect(box).toBeNull();
-      const http = await screen.findByRole('checkbox', { name: /HTTP request/ });
+      const http = await screen.findByRole('checkbox', { name: /Make an HTTP Request/ });
       expect(http).toBeChecked();
     });
   });
@@ -335,7 +339,7 @@ describe('Governance Studio', () => {
       fireEvent.click(await screen.findByRole('button', { name: 'Preview Advisory' }));
       const dialog = await screen.findByRole('dialog');
       expect(await within(dialog).findByRole('table', { name: 'Capability changes' })).toHaveTextContent('HTTP request');
-      expect(within(dialog).getByText(/Browser control: Not enforceable/)).toBeInTheDocument();
+      expect(within(dialog).getByText(/Control a Web Browser \(computer\.browser\): Not enforceable/)).toBeInTheDocument();
       expect(dialog).toHaveTextContent('never bypasses role, designation or an existing explicit deny');
       const go = within(dialog).getByRole('button', { name: 'Create policy draft' });
       expect(go).toBeDisabled();

@@ -11,7 +11,10 @@ import { PolicyDrafts } from '@/components/governance/PolicyDrafts';
 import { PolicyVersions } from '@/components/governance/PolicyVersions';
 import { PresetsPanel } from '@/components/governance/PresetsPanel';
 import { GrantForm } from '@/components/governance/GrantForm';
-import { BASE, PAGE, ConfirmModal, Pager, StateLine, errorText, label, usePermission } from '@/components/governance/shared';
+import {
+  BASE, PAGE, ConfirmModal, CopyId, Pager, StateLine, errorText, firstSentence, label,
+  usePermission, useToolText, withMeta,
+} from '@/components/governance/shared';
 
 export const LOCKDOWN_PHRASE = 'LOCKDOWN';
 export const RELEASE_PHRASE = 'RELEASE LOCKDOWN';
@@ -19,6 +22,11 @@ export const RELEASE_PHRASE = 'RELEASE LOCKDOWN';
 interface Capability {
   id: string;
   name: string;
+  display_name?: string;
+  description?: string;
+  limitations?: string | null;
+  examples?: string[];
+  plain_explanation?: string;
   category: string;
   risk: string;
   support: 'enforced' | 'approval_only' | 'display_only' | 'unsupported';
@@ -43,7 +51,9 @@ interface Grant {
 }
 interface Attempt { id: string; agent_id: string; status: string; cancel_requested: boolean }
 interface Turn { id: string; agent_id: string; status: string; cancel_requested: boolean }
-interface AuditItem { id: string; action: string; actor: string | null; at: string | null }
+interface AuditItem {
+  id: string; action: string; actor: string | null; at: string | null; details?: Record<string, unknown> | null;
+}
 
 const STATE_VARIANT: Record<string, BadgeVariant> = {
   allowed: 'success',
@@ -83,6 +93,8 @@ export function GovernanceAccess() {
   const [auditOffset, setAuditOffset] = useState(0);
   const [agentQuery, setAgentQuery] = useState('');
   const [openCap, setOpenCap] = useState<string | null>(null);
+  const [capQuery, setCapQuery] = useState('');
+  const toolText = useToolText();
 
   const agents = useQuery({
     queryKey: ['gov', 'agents'],
@@ -131,7 +143,12 @@ export function GovernanceAccess() {
   const reasonOk = reason.trim().length >= 5;
   const need = locked ? RELEASE_PHRASE : LOCKDOWN_PHRASE;
   const isolated = restrictions.data?.isolated_agents.find((r) => r.agent_id === selected);
-  const caps = access.data?.capabilities ?? [];
+  const nameOf = (c: Capability) => withMeta(c).display_name;
+  const descOf = (c: Capability) => withMeta(c).description;
+  const needle = capQuery.trim().toLowerCase();
+  // Search is display only: it matches what a person might type, never decides access.
+  const caps = (access.data?.capabilities ?? []).filter((c) =>
+    !needle || [nameOf(c), descOf(c), c.id, c.category, label(c.category)].some((t) => t.toLowerCase().includes(needle)));
   const byCategory = caps.reduce<Record<string, Capability[]>>((acc, c) => {
     (acc[c.category] ??= []).push(c);
     return acc;
@@ -198,6 +215,9 @@ export function GovernanceAccess() {
             <input aria-label="Search agents" type="search" placeholder="Search agents"
               className="rounded-[6px] bg-transparent border border-white/[0.12] px-3 py-2 text-sm"
               value={agentQuery} onChange={(e) => setAgentQuery(e.target.value)} />
+            <input aria-label="Search capabilities" type="search" placeholder="Search capabilities"
+              className="min-w-[16rem] rounded-[6px] bg-transparent border border-white/[0.12] px-3 py-2 text-sm"
+              value={capQuery} onChange={(e) => setCapQuery(e.target.value)} />
             <select aria-label="Agent" className="rounded-[6px] bg-[#141416] border border-white/[0.12] px-3 py-2 text-sm"
               value={selected} onChange={(e) => setAgentId(e.target.value)}>
               {(agents.data?.items ?? [])
@@ -239,36 +259,46 @@ export function GovernanceAccess() {
           {Object.entries(byCategory).map(([category, rows]) => (
             <section key={category} className="mb-6">
               <h2 className="mb-2 text-sm font-medium uppercase tracking-wide text-[#A8A8AB]">{label(category)}</h2>
-              <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <table className="w-full table-fixed text-sm">
                 <caption className="sr-only">{label(category)} capabilities</caption>
                 <thead>
                   <tr className="text-left text-[#A8A8AB]">
-                    <th scope="col" className="py-1">Capability</th><th scope="col">Risk</th>
-                    <th scope="col">Support</th><th scope="col">Now</th><th scope="col">Why</th>
+                    <th scope="col" className="w-[38%] py-1">Capability</th><th scope="col" className="w-[8%]">Risk</th>
+                    <th scope="col" className="w-[12%]">Support</th><th scope="col" className="w-[14%]">Now</th>
+                    <th scope="col" className="w-[28%]">Why</th>
                   </tr>
                 </thead>
                 <tbody>
                   {rows.map((c) => (
                     <Fragment key={c.id}>
-                      <tr data-testid={`cap-${c.id}`} className="border-t border-white/[0.06] align-top">
-                        <td className="py-2">
-                          <button type="button" className="text-left underline decoration-dotted"
+                      <tr data-testid={`cap-${c.id}`} className="border-t border-white/[0.06] align-top break-words [overflow-wrap:anywhere]">
+                        <td className="py-2 pr-2">
+                          <button type="button" className="text-left font-medium underline decoration-dotted"
                             aria-expanded={openCap === c.id}
+                            aria-label={`${nameOf(c)}, ${label(c.state)}, ${c.risk} risk, ${SUPPORT_LABEL[c.support]}`}
                             onClick={() => setOpenCap(openCap === c.id ? null : c.id)}>
-                            {c.name}
+                            {nameOf(c)}
                           </button>
+                          <span className="block text-xs text-[#A8A8AB]">{firstSentence(descOf(c))}</span>
+                          <code className="block font-mono text-[11px] text-[#8A8A8E]">{c.id}</code>
                         </td>
                         <td>{c.risk}</td>
                         <td>{SUPPORT_LABEL[c.support]}</td>
                         <td><Badge variant={STATE_VARIANT[c.state] ?? 'neutral'}>{label(c.state)}</Badge></td>
-                        <td className="text-[#A8A8AB]">{c.explanation}</td>
+                        <td className="text-[#A8A8AB]">{c.plain_explanation ?? c.explanation}</td>
                       </tr>
                       {openCap === c.id && (
                         <tr className="bg-white/[0.02]">
                           <td colSpan={5} className="px-2 py-2">
-                            <dl aria-label={`${c.name} details`} className="grid grid-cols-[10rem_1fr] gap-x-3 gap-y-1 text-xs">
+                            <dl aria-label={`${nameOf(c)} details`}
+                              className="grid grid-cols-[10rem_1fr] gap-x-3 gap-y-1 break-words text-xs [overflow-wrap:anywhere]">
+                              <dt>What it does</dt><dd>{descOf(c)}</dd>
+                              {c.limitations && <><dt>Limits</dt><dd>{c.limitations}</dd></>}
+                              {!!c.examples?.length && <><dt>Examples</dt><dd>{c.examples.join('; ')}</dd></>}
+                              <dt>Technical ID</dt>
+                              <dd><code className="font-mono">{c.id}</code> <CopyId id={c.id} /></dd>
                               <dt>Reason code</dt><dd>{c.code ?? 'none'}</dd>
+                              <dt>Engine message</dt><dd>{c.explanation}</dd>
                               <dt>Source</dt><dd>{c.source ?? 'none'}</dd>
                               <dt>Inherited from</dt><dd>{c.inheritance_source ?? 'none'}</dd>
                               <dt>Conditions</dt><dd>{c.conditions ? JSON.stringify(c.conditions) : 'none'}</dd>
@@ -284,9 +314,11 @@ export function GovernanceAccess() {
                   ))}
                 </tbody>
               </table>
-              </div>
             </section>
           ))}
+          {!!needle && !caps.length && !access.isLoading && (
+            <p role="status" className="text-sm text-[#A8A8AB]">No capability matches “{capQuery.trim()}”.</p>
+          )}
           <StateLine loading={access.isLoading} error={access.error} emptyText="" />
         </Card>
       )}
@@ -337,7 +369,7 @@ export function GovernanceAccess() {
           {canEdit && <div className="mb-3">{reasonField}</div>}
           {(grants.data?.items ?? []).map((g) => (
             <div key={g.id} className="flex items-center justify-between border-t border-white/[0.06] py-2 text-sm">
-              <span>{g.effect} {g.tool_name} · {label(g.status)} · until {g.expires_at.slice(0, 16)} · by {g.requested_by}</span>
+              <span className="min-w-0 break-words">{g.effect} {toolText(g.tool_name)} · {label(g.status)} · until {g.expires_at.slice(0, 16)} · by {g.requested_by}</span>
               <span className="flex gap-2">
                 {canEdit && g.status === 'pending_approval' && (
                   <>
@@ -353,7 +385,7 @@ export function GovernanceAccess() {
                   <Button size="xs" variant="danger" disabled={!reasonOk}
                     onClick={() => setConfirm({
                       title: 'Revoke temporary grant', action: 'Revoke grant',
-                      text: `${g.effect} ${g.tool_name} stops applying at once.`,
+                      text: `${g.effect} ${toolText(g.tool_name)} stops applying at once.`,
                       path: `/grants/${g.id}/revoke`, body: { reason },
                     })}>
                     Revoke
@@ -372,7 +404,8 @@ export function GovernanceAccess() {
         <Card>
           {(audit.data?.items ?? []).map((i) => (
             <div key={i.id} className="flex justify-between border-t border-white/[0.06] py-2 text-sm">
-              <span>{i.action.replace('governance.', '')}</span>
+              <span className="min-w-0 break-words">{i.action.replace('governance.', '')}
+                {typeof i.details?.tool_name === 'string' && <> · {toolText(i.details.tool_name)}</>}</span>
               <span className="text-[#A8A8AB]">{i.actor} · {i.at?.slice(0, 19)}</span>
             </div>
           ))}

@@ -5,16 +5,14 @@ import { Button } from '@/components/common/Button';
 import { Badge } from '@/components/common/Badge';
 import { apiClient } from '@/api/client';
 import {
-  BASE, DecisionBadge, Field, Findings, StateLine, inputClass, label,
-  type AgentRow, type Finding, type Rule,
+  BASE, CapName, CopyId, DecisionBadge, Field, Findings, StateLine, inputClass, label, withMeta,
+  type AgentRow, type CapMeta, type Finding, type Rule,
 } from './shared';
 
-interface Capability {
-  id: string; name: string; category: string; support: string;
-  scope_schema?: { conditions?: string[] };
-}
+interface Capability extends CapMeta { name: string; category: string; support: string }
 interface Decision {
-  state: string; decision: string; code: string; explanation: string; source: string | null;
+  state: string; decision: string; code: string; explanation: string; plain_explanation?: string;
+  source: string | null;
   approval: { required?: boolean; level?: number } | null; backend_support: string;
   steps: { label: string; result: string }[]; blockers: string[];
   validity: { expires_at: string; uses_left: number | null } | null;
@@ -28,9 +26,16 @@ function DecisionView({ title, d }: { title: string; d: Decision }) {
   return (
     <section aria-label={title} className="space-y-2 rounded-[8px] border border-white/[0.08] p-3">
       <h3 className="flex flex-wrap items-center gap-2 text-sm font-medium">
-        {title} <DecisionBadge value={d.decision} /> <code>{d.code}</code>
+        {title} <DecisionBadge value={d.decision} />
       </h3>
-      <p className="text-sm">{d.explanation}</p>
+      <p className="text-sm">{d.plain_explanation ?? d.explanation}</p>
+      <details className="text-xs text-[#A8A8AB]">
+        <summary className="cursor-pointer">Technical details</summary>
+        <dl className="mt-1 grid grid-cols-[max-content_1fr] gap-x-3 gap-y-1 break-words [overflow-wrap:anywhere]">
+          <dt>Reason code</dt><dd><code>{d.code}</code></dd>
+          <dt>Engine message</dt><dd>{d.explanation}</dd>
+        </dl>
+      </details>
       <dl className="grid grid-cols-[max-content_1fr] gap-x-3 gap-y-1 text-sm">
         <dt className="text-[#A8A8AB]">Decided by</dt><dd>{d.source ?? 'no rule matched'}</dd>
         <dt className="text-[#A8A8AB]">Approval</dt>
@@ -73,7 +78,7 @@ export function SimulatorPanel({ agents, defaultAgentId }: { agents: AgentRow[];
     queryKey: ['gov', 'drafts', 'open'],
     queryFn: () => apiClient.get<{ items: DraftRow[] }>(`${BASE}/drafts`, { status: 'draft', limit: 50 }),
   });
-  const caps = catalog.data?.capabilities ?? [];
+  const caps = (catalog.data?.capabilities ?? []).map(withMeta);
   const agent = agentId || defaultAgentId;
   const capability = caps.find((c) => c.id === (capId || caps[0]?.id));
   const draft = drafts.data?.items.find((d) => d.id === draftId);
@@ -112,7 +117,7 @@ export function SimulatorPanel({ agents, defaultAgentId }: { agents: AgentRow[];
               <optgroup key={cat} label={label(cat)}>
                 {rows.map((c) => (
                   <option key={c.id} value={c.id}>
-                    {c.name}{c.support === 'unsupported' ? ' (not enforceable)' : ''}
+                    {c.display_name} ({c.id}){c.support === 'unsupported' ? ' (not enforceable)' : ''}
                   </option>
                 ))}
               </optgroup>
@@ -139,6 +144,15 @@ export function SimulatorPanel({ agents, defaultAgentId }: { agents: AgentRow[];
           </Button>
         </div>
       </form>
+      {capability && (
+        <div aria-label="Selected capability" className="mb-3 flex flex-wrap items-start gap-2 text-sm">
+          <CapName cap={capability} />
+          <CopyId id={capability.id} />
+          {capability.support === 'unsupported' && (
+            <Badge variant="neutral">Not enforceable: NEXUS cannot currently enforce this capability.</Badge>
+          )}
+        </div>
+      )}
       {!!capability?.scope_schema?.conditions?.length && (
         <p className="mb-3 text-xs text-[#A8A8AB]">
           Policy conditions the engine can match for this capability: {capability.scope_schema.conditions.map(label).join(', ')}.

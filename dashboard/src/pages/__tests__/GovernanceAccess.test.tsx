@@ -17,13 +17,16 @@ vi.mock('@/api/client', () => ({
 }));
 
 const cap = (over: Record<string, unknown>) => ({
-  id: 'x', name: 'X', category: 'tools', risk: 'write', support: 'enforced',
-  state: 'allowed', explanation: 'Runs.', ...over,
+  id: 'x', name: 'X', display_name: 'X', description: 'Does X. It has a second sentence.',
+  category: 'tools', risk: 'write', support: 'enforced', state: 'allowed', explanation: 'Runs.',
+  plain_explanation: 'Nothing restricts this, so it runs.', ...over,
 });
 const CAPS = [
-  cap({ id: 'tool.http-request', name: 'HTTP request', tool_name: 'http-request', code: 'DEFAULT_ALLOW',
+  cap({ id: 'tool.http-request', name: 'HTTP request', display_name: 'Make an HTTP Request',
+    description: 'Sends a web request. It can reach outside services.', tool_name: 'http-request', code: 'DEFAULT_ALLOW',
     source: 'default policy' }),
-  cap({ id: 'computer.browser', name: 'Browser control', category: 'computer_use',
+  cap({ id: 'computer.browser', name: 'Browser control', display_name: 'Control a Web Browser',
+    description: 'Drives a browser. NEXUS cannot currently enforce this.', category: 'computer_use',
     support: 'unsupported', state: 'unsupported', explanation: 'Not preventable.' }),
 ];
 
@@ -64,7 +67,7 @@ describe('GovernanceAccess', () => {
     mount();
     const row = await screen.findByTestId('cap-computer.browser');
     expect(within(row).getByText('Not enforceable')).toBeInTheDocument();
-    expect(within(row).getAllByRole('button').map((b) => b.textContent)).toEqual(['Browser control']);
+    expect(within(row).getAllByRole('button').map((b) => b.textContent)).toEqual(['Control a Web Browser']);
     expect(within(row).queryByRole('switch')).toBeNull();
     expect(within(row).queryByRole('checkbox')).toBeNull();
     expect(within(await screen.findByTestId('cap-tool.http-request')).getByText('Enforced'))
@@ -116,8 +119,8 @@ describe('GovernanceAccess', () => {
     mount();
     fireEvent.change(await screen.findByLabelText('Search agents'), { target: { value: 'zzz' } });
     expect(screen.getByRole('combobox', { name: 'Agent' })).toHaveValue('a1');
-    fireEvent.click(await screen.findByRole('button', { name: 'HTTP request' }));
-    const details = screen.getByLabelText('HTTP request details');
+    fireEvent.click(await screen.findByRole('button', { name: /Make an HTTP Request/ }));
+    const details = screen.getByLabelText('Make an HTTP Request details');
     expect(details).toHaveTextContent('DEFAULT_ALLOW');
     expect(details).toHaveTextContent('default policy');
   });
@@ -128,7 +131,7 @@ describe('GovernanceAccess', () => {
     const create = await screen.findByRole('button', { name: 'Create grant' });
     expect(create).toBeDisabled();
     expect(screen.getByLabelText('Grant form problems')).toHaveTextContent('Set an expiry');
-    await screen.findByRole('option', { name: 'HTTP request' });
+    await screen.findByRole('option', { name: /Make an HTTP Request/ });
     fireEvent.change(screen.getByLabelText(/^Tool/), { target: { value: 'http-request' } });
     fireEvent.change(screen.getByLabelText(/^Expires/), { target: { value: '2000-01-01T00:00' } });
     expect(screen.getByLabelText('Grant form problems')).toHaveTextContent('Expiry must be in the future');

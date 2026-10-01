@@ -2,14 +2,14 @@ import { useQuery } from '@tanstack/react-query';
 import { Button } from '@/components/common/Button';
 import { Badge } from '@/components/common/Badge';
 import { apiClient } from '@/api/client';
-import { BASE, Field, inputClass, type AgentRow, type Rule } from './shared';
+import { BASE, Field, firstSentence, inputClass, type AgentRow, type Rule } from './shared';
 
 interface Capability {
-  id: string; name: string; tool_name: string | null; support: string; risk: string;
-  explicit_allow_required: boolean;
+  id: string; name: string; display_name?: string; description?: string; tool_name: string | null;
+  support: string; risk: string; explicit_allow_required: boolean;
 }
 
-interface Option { value: string; text: string; disabled?: boolean; note?: string }
+interface Option { value: string; text: string; disabled?: boolean; note?: string; detail?: string; id?: string }
 
 function CheckList({
   legend, options, selected, onChange, empty,
@@ -29,7 +29,11 @@ function CheckList({
           <label key={o.value} className="flex items-center gap-2">
             <input type="checkbox" checked={selected.includes(o.value)} disabled={o.disabled}
               onChange={() => toggle(o.value)} />
-            <span>{o.text}</span>
+            <span className="min-w-0 break-words [overflow-wrap:anywhere]">
+              <span>{o.text}</span>
+              {o.detail && <span className="block text-xs text-[#A8A8AB]">{o.detail}</span>}
+              <code className="block font-mono text-[11px] text-[#8A8A8E]">{o.id ?? o.value}</code>
+            </span>
             {o.note && <Badge variant="neutral">{o.note}</Badge>}
           </label>
         ))}
@@ -66,7 +70,9 @@ export function RuleEditor({
     .filter((c) => c.tool_name)
     .map((c) => ({
       value: c.tool_name as string,
-      text: c.name,
+      text: c.display_name ?? c.name,
+      id: c.id,
+      detail: c.description ? firstSentence(c.description) : undefined,
       disabled: c.support === 'unsupported',
       note: c.support === 'unsupported' ? 'Not enforceable' : c.explicit_allow_required ? 'explicit allow only' : undefined,
     }));

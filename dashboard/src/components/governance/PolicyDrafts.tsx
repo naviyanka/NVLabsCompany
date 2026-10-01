@@ -6,7 +6,7 @@ import { Badge } from '@/components/common/Badge';
 import { apiClient } from '@/api/client';
 import { RuleEditor, newRule } from './RuleEditor';
 import {
-  BASE, PAGE, CapabilityDiff, ConfirmModal, Field, Findings, Pager, RuleDiff, StateLine,
+  BASE, PAGE, AffectedCapabilities, CapabilityDiff, ConfirmModal, Field, Findings, Pager, RuleDiff, StateLine,
   errorText, inputClass, isConflict, useCanEdit,
   type AgentRow, type Affects, type CapDiffData, type Finding, type Rule, type RuleDiffData,
 } from './shared';
@@ -70,6 +70,7 @@ function PublishDialog({
         {draft.affects.capability_ids.length} capabilit{draft.affects.capability_ids.length === 1 ? 'y' : 'ies'}.
         {draft.loosens && <> <Badge variant="warning">LOOSENS ACCESS</Badge></>}
       </p>
+      <AffectedCapabilities ids={draft.affects.capability_ids} />
       <Field name="Simulator summary for agent">
         <select className={inputClass} value={agentId} onChange={(e) => setAgentId(e.target.value)}>
           {agents.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
