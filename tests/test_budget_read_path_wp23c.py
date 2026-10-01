@@ -133,7 +133,17 @@ async def test_agent_usage_scoped_to_calling_company(db):
     assert resp.event_count == 0
 
 
-async def test_usage_honors_window_kind(db):
+@pytest.fixture
+def mid_month(monkeypatch):
+    """Pin both clocks to the 15th: "yesterday" is otherwise last month on the 1st."""
+    import sys
+
+    fixed = datetime(2026, 6, 15, 12, 0, 0)
+    monkeypatch.setattr(sys.modules[__name__], "_utcnow", lambda: fixed)
+    monkeypatch.setattr("nexus.api.routes.budgets.utcnow", lambda: fixed)
+
+
+async def test_usage_honors_window_kind(db, mid_month):
     """B5 second half: the window is not hard-coded monthly."""
     company_id, agent_id, _ = await _seed(db)
     yesterday = _utcnow() - timedelta(days=1)
