@@ -1004,7 +1004,7 @@ async def test_a_session_without_a_tenant_cannot_mutate_tenant_rows(app_role):
 
 
 @pytest.mark.parametrize(
-    "path, body, title",
+    "path, body",
     [
         (
             "/api/v1/channels/slack/events",
@@ -1012,19 +1012,17 @@ async def test_a_session_without_a_tenant_cannot_mutate_tenant_rows(app_role):
                 "type": "event_callback",
                 "event": {"type": "app_mention", "text": "hi", "user": "U1"},
             },
-            "Slack mention from U1",
         ),
         (
             "/api/v1/channels/telegram/webhook",
             {"message": {"text": "/task write the report", "chat": {"id": 7}}},
-            "write the report",
         ),
     ],
 )
-async def test_channel_webhooks_write_into_the_callers_company(
-    app_role, monkeypatch, path, body, title
+async def test_legacy_channel_webhooks_create_no_task_in_any_company(
+    app_role, monkeypatch, path, body
 ):
-    """Slack and Telegram tasks land in the caller's company under RLS."""
+    """Legacy Slack and Telegram ingress is disabled: no Task lands in any tenant."""
     import httpx
 
     from nexus.config import settings
@@ -1038,12 +1036,12 @@ async def test_channel_webhooks_write_into_the_callers_company(
         transport=httpx.ASGITransport(app=app), base_url="http://test"
     ) as client:
         response = await client.post(path, json=body, headers={"X-Company-Id": str(caller)})
-    assert response.status_code == 200
+    assert response.status_code == 410
+    assert response.json()["code"] == "LEGACY_CHANNEL_INGRESS_DISABLED"
 
-    async with tenant_session(caller) as db:
-        assert (await db.execute(sa.select(Task.title))).scalars().all() == [title]
-    async with tenant_session(other) as db:
-        assert (await db.execute(sa.select(Task))).scalars().all() == []
+    for company in (caller, other):
+        async with tenant_session(company) as db:
+            assert (await db.execute(sa.select(Task))).scalars().all() == []
 
 
 async def test_hiring_races_hold_limits_and_hire_once(app_role, monkeypatch):

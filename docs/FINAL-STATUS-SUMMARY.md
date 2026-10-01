@@ -36,7 +36,7 @@
 | **Governance & Safety** | ✅ Completed | Pre-execution cost checks, kill switches, persistent circuit breakers, audit rollback |
 | **Evolution Framework** | ✅ Completed | Failure alchemy, gVisor container sandbox, A/B test prompt split testing |
 | **Enterprise Security** | ✅ Completed | SCIM 2.0 provisioning, SSO SAML/OAuth2, encrypted Secret store, RBAC, tenant guard |
-| **Integrations** | ✅ Completed | Telegram bot, Slack webhook event queue, GitHub repo mapping & PR review |
+| **Integrations** | ✅ Completed | Outbound Telegram and Slack notifications (legacy inbound Telegram and Slack commands are disabled), webhook event queue, GitHub repo mapping & PR review |
 
 ---
 
