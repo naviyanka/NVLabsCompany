@@ -6,6 +6,16 @@ on:
     tags: ['v*.*.*']
   pull_request:
     branches: [main]
+  # Weekly full build and scan, so a docs-only streak cannot hide drift in base images.
+  schedule:
+    - cron: '17 3 * * 1'
+  # Manual run; always the full build. See docs/CI_SELECTIVE_BUILDS.md.
+  workflow_dispatch:
+    inputs:
+      force_full:
+        description: 'Always true: a manual run performs the full multi-arch build and scan'
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -104,11 +114,58 @@ jobs:
 
   # ============================================================================
   # 3. Multi-Architecture Container Build & Vulnerability Scan
+  #
+  # classify -> image-build (skipped for documentation-only PRs) -> build-and-scan.
+  # build-and-scan is the required check: it always runs and decides pass/fail from
+  # the results of the other two. A skipped image-build alone never satisfies it.
   # ============================================================================
-  build-and-scan:
-    name: Multi-Arch Build & Vulnerability Scan
-    needs: [security-and-lint, helm-validation]
+  classify:
+    name: Classify Changes
     runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      docs_only: ${{ steps.classify.outputs.docs_only }}
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # The classifier comes from the PR base, so a PR cannot loosen its own
+      # classification; editing it is a non-documentation change anyway. No
+      # classifier on the base (or any failure) means a full build.
+      - name: Classify changed paths
+        id: classify
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          FORCE_FULL: ${{ inputs.force_full }}
+        run: |
+          script="$RUNNER_TEMP/ci_changes.py"
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            if ! git show "${BASE_SHA}:scripts/ci_changes.py" > "$script"; then
+              echo "docs_only=false" >> "$GITHUB_OUTPUT"
+              echo "full build (no trusted classifier on the PR base)"
+              exit 0
+            fi
+          else
+            cp scripts/ci_changes.py "$script"
+          fi
+          python3 "$script" classify
+
+  image-build:
+    name: Multi-Arch Image Build (internal)
+    needs: [classify, security-and-lint, helm-validation]
+    if: needs.classify.outputs.docs_only != 'true'
+    runs-on: ubuntu-latest
+    # Successful runs take 12-14 minutes in total. A hung QEMU or BuildKit step
+    # must fail the required check instead of running to the 6 hour default.
+    timeout-minutes: 60
+    env:
+      BUILDKIT_PROGRESS: plain
     steps:
       - name: Checkout Source Code
         uses: actions/checkout@v4
@@ -120,7 +177,7 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Log in to GitHub Container Registry
-        if: github.event_name != 'pull_request'
+        if: github.event_name == 'push'
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
@@ -166,11 +223,12 @@ jobs:
 
       - name: Build & Push Backend Multi-Arch Image (amd64/arm64)
         uses: docker/build-push-action@v5
+        timeout-minutes: 30
         with:
           context: .
           file: Dockerfile.prod
           platforms: linux/amd64,linux/arm64
-          push: ${{ github.event_name != 'pull_request' }}
+          push: ${{ github.event_name == 'push' }}
           tags: ${{ steps.meta-backend.outputs.tags }}
           labels: ${{ steps.meta-backend.outputs.labels }}
           cache-from: type=gha
@@ -195,12 +253,42 @@ jobs:
 
       - name: Build & Push Frontend Multi-Arch Image (amd64/arm64)
         uses: docker/build-push-action@v5
+        timeout-minutes: 30
         with:
           context: ./dashboard
           file: dashboard/Dockerfile.prod
           platforms: linux/amd64,linux/arm64
-          push: ${{ github.event_name != 'pull_request' }}
+          push: ${{ github.event_name == 'push' }}
           tags: ${{ steps.meta-frontend.outputs.tags }}
           labels: ${{ steps.meta-frontend.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      # BuildKit's own log names the platform and stage that hung or crashed.
+      - name: Build diagnostics
+        if: failure() || cancelled()
+        run: |
+          docker buildx ls || true
+          df -h / || true
+          for c in $(docker ps -a --filter name=buildx_buildkit -q); do
+            docker logs --tail 300 "$c" || true
+          done
+
+  build-and-scan:
+    name: Multi-Arch Build & Vulnerability Scan
+    needs: [classify, image-build]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Required gate
+        env:
+          CLASSIFY_RESULT: ${{ needs.classify.result }}
+          DOCS_ONLY: ${{ needs.classify.outputs.docs_only }}
+          BUILD_RESULT: ${{ needs.image-build.result }}
+        run: python3 scripts/ci_changes.py gate

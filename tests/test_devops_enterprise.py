@@ -286,7 +286,8 @@ class TestContainerSecurityAudit:
         content = dockerfile.read_text(encoding="utf-8")
 
         # Multi-stage verification
-        from_stages = re.findall(r"FROM\s+(\S+)\s+AS\s+(\S+)", content, re.IGNORECASE)
+        # (a FROM may carry --platform=$BUILDPLATFORM before the image)
+        from_stages = re.findall(r"FROM\s+(?:--\S+\s+)?(\S+)\s+AS\s+(\S+)", content, re.IGNORECASE)
         assert len(from_stages) >= 2, "Frontend Dockerfile must have multi-stage build"
 
         # Non-root unprivileged NGINX

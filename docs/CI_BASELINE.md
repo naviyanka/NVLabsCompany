@@ -8,7 +8,7 @@ reproduced locally with the same versions.
 | Tool | Version | Where it is set |
 |---|---|---|
 | Python | 3.12 (CI resolves 3.12.x) | `actions/setup-python` in every workflow; `python:3.12-slim` in `Dockerfile` and `Dockerfile.prod` |
-| Node | 22.23.1 | `node-version` in `test.yml` (frontend and api-parity) and `playwright.yml`; `node:22.23.1-alpine` in the dashboard Dockerfiles |
+| Node | 22.23.1 | `node-version` in `test.yml` (frontend and api-parity) and `playwright.yml`; `node:22.23.1-alpine` in the dashboard Dockerfiles (the production builder stage runs on `$BUILDPLATFORM`) |
 | Node range | `^22.22.2` | `engines` in `package.json` and `dashboard/package.json` |
 | npm | 10.9.x (ships with Node 22.23.1) | The lockfiles were synced with npm 10.9.8 |
 | SQLModel | `>=0.0.39,<0.0.45` | `pyproject.toml` |
@@ -73,7 +73,9 @@ the same range.
 |---|---|
 | Security & Static Analysis | `python scripts/ruff_ratchet.py`, `bandit -r src/ -ll -q`, hadolint on `Dockerfile.prod` and `dashboard/Dockerfile.prod` (failure threshold `error`) |
 | Helm & Kubeconform | `helm lint deploy/helm/nexus`, `helm template nexus deploy/helm/nexus > output/manifests.yaml`, then `kubeconform -strict -summary -kubernetes-version 1.31.0` against the default schemas plus the datreeio CRDs catalogue |
-| Multi-Arch Build & Scan | Builds `Dockerfile.prod` and `dashboard/Dockerfile.prod`, scans them with Trivy, and pushes them on non-PR events only |
+| Classify Changes | `python scripts/ci_changes.py classify` decides whether a PR is documentation-only |
+| Multi-Arch Image Build (internal) | Builds `Dockerfile.prod` and `dashboard/Dockerfile.prod`, scans them with Trivy, and pushes them on `push` events only (60 min timeout); skipped for documentation-only PRs |
+| Multi-Arch Build & Vulnerability Scan | The required check. Always runs; passes when the build passed, or when a documentation-only change correctly skipped it. See [CI_SELECTIVE_BUILDS.md](CI_SELECTIVE_BUILDS.md) |
 
 ## Running the checks locally
 
