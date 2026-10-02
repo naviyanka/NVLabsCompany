@@ -371,6 +371,11 @@ def tool_support(agent: Agent) -> tuple[bool, str | None]:
 
         reason = hermes_provider.unavailable_reason()
         return (True, None) if reason is None else (False, f"CEO_TOOLS_UNSUPPORTED: {reason}")
+    if agent.adapter_type == "azure-openai-native":
+        from nexus.adapters import azure_openai_native
+
+        reason = azure_openai_native.unavailable_reason()
+        return (True, None) if reason is None else (False, f"CEO_TOOLS_UNSUPPORTED: {reason}")
     if agent.adapter_type == "cli":
         registry = get_cli_registry()
         info = registry.get_backend(registry.resolve_backend_id(backend))
@@ -393,12 +398,18 @@ async def status(db: Any, company_id: uuid.UUID) -> dict[str, Any]:
         from nexus.adapters import hermes_provider
 
         native = hermes_provider.status()
+    azure = None
+    if ceo is not None and ceo.adapter_type == "azure-openai-native":
+        from nexus.adapters import azure_openai_native
+
+        azure = azure_openai_native.status()
     return {
         "company_id": str(company_id),
         "ceo": ceo and {**ms.agent_ref(ceo), "backend": org_snapshot._backend(ceo)},
         "ceo_tools_available": available,
         "ceo_tools_unavailable_reason": reason,
         "hermes_native": native,
+        "azure_openai_native": azure,
         "snapshot": {k: snap[k] for k in (
             "version", "generated_at", "payload_hash", "freshness", "last_refresh_error")},
         "pending_approvals": (payload.get("approvals") or {}).get("items", []),

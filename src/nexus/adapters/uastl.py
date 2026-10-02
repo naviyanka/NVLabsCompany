@@ -105,6 +105,17 @@ PROVIDERS: dict[str, dict[str, Any]] = {
         "supports_tools": True,
         "models": [],
     },
+    # Azure OpenAI streaming with native, server-governed tool calls (ADR 0006).
+    # Endpoint, deployment and auth come from operator settings (azure_openai_*).
+    # Not the legacy non-streaming "azure_openai" adapter, which is unfit for governed tools.
+    "azure-openai-native": {
+        "registry_key": "azure_openai_native",
+        "env_key": None,
+        "default_model": "",
+        "supports_streaming": True,
+        "supports_tools": True,
+        "models": [],
+    },
     # Claude Code dedicated subprocess adapter
     "claude_code": {
         "registry_key": "claude_code",

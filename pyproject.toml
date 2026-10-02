@@ -59,6 +59,11 @@ otel = [
     "opentelemetry-instrumentation-fastapi>=0.48b0",
     "opentelemetry-instrumentation-httpx>=0.48b0",
 ]
+# Entra bearer-token auth for the Azure OpenAI governed provider (ADR 0006). Optional:
+# the provider reports AZURE_OPENAI_IDENTITY_SDK_MISSING until it is installed.
+azure = [
+    "azure-identity>=1.17.0",
+]
 dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",

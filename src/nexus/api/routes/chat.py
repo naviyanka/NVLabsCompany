@@ -1055,8 +1055,16 @@ async def _call_llm(
     # below on purpose: that block catches Exception broadly and answers in
     # character, which would turn a budget refusal into a friendly message and let
     # the call proceed anyway.
-    reservation_id = await _reserve_budget(
-        agent, system_prompt, user_message, history, config, session_id=session_id
+    # A self-metering adapter reserves and settles every streamed round itself;
+    # a second hold here would count the same call twice.
+    from nexus.services.streaming_budget import SELF_METERED
+
+    reservation_id = (
+        None
+        if registry_key in SELF_METERED
+        else await _reserve_budget(
+            agent, system_prompt, user_message, history, config, session_id=session_id
+        )
     )
     # Filled in only on a billed call; the finally below releases the hold when
     # it stays zero, so every exit path settles exactly once.
@@ -1152,6 +1160,8 @@ async def _call_llm(
         }
         if temperature is not None:
             payload["temperature"] = temperature
+        if turn_id is not None and registry_key in SELF_METERED:
+            payload["turn_id"] = str(turn_id)  # identity for the adapter's budget log
 
         from nexus.observability.metrics import record_llm_metrics
         from nexus.observability.tracing import record_llm_usage, start_llm_span
@@ -1398,28 +1408,53 @@ async def _stream_llm(
 
     execution.update(adapter=registry_key, backend=config.get("backend"))
     model_used = config.get("model", "unknown")
-    session = await adapter.create_session(agent.id, {**config, "system_prompt": system_prompt})
-    if context is None:
-        session.context = ExecutionContext.for_agent(
-            agent, source="chat", session_id=session_id, adapter=registry_key, model=model_used
-        )
-    else:
-        session.context = replace(
-            context, agent_id=agent.id, session_id=session_id, adapter=registry_key,
-            model=model_used,
-        )
-    preset = execution.get("execution_id")
-    task_id = uuid.UUID(preset) if preset else uuid.uuid4()
-    execution["execution_id"] = str(task_id)
+    # Streaming is metered like any other call: hold before the request, settle or
+    # release however the stream ends. Raised outside the try so a refusal reaches the caller.
+    reservation_id = await _reserve_budget(
+        agent, system_prompt, prompt, history, config, session_id=session_id
+    )
     text = ""
     try:
-        request = {"prompt": prompt, "max_tokens": 4096}
-        async for chunk in adapter.stream_execute(session, task_id, request):
-            text += chunk
-            on_chunk(chunk)
+        session = await adapter.create_session(agent.id, {**config, "system_prompt": system_prompt})
+        if context is None:
+            session.context = ExecutionContext.for_agent(
+                agent, source="chat", session_id=session_id, adapter=registry_key, model=model_used
+            )
+        else:
+            session.context = replace(
+                context, agent_id=agent.id, session_id=session_id, adapter=registry_key,
+                model=model_used,
+            )
+        preset = execution.get("execution_id")
+        task_id = uuid.UUID(preset) if preset else uuid.uuid4()
+        execution["execution_id"] = str(task_id)
+        try:
+            request = {"prompt": prompt, "max_tokens": 4096}
+            async for chunk in adapter.stream_execute(session, task_id, request):
+                text += chunk
+                on_chunk(chunk)
+        finally:
+            with anyio.CancelScope(shield=True):
+                await adapter.terminate(session)
     finally:
+        # The stream reports no usage, so settle on a conservative estimate once any
+        # text arrived (a cancelled or failed stream is not free); release when none did.
+        from nexus.models_router.pricing import TokenSplit, estimate_cost_usd
+
+        in_chars = len(system_prompt) + len(prompt) + sum(
+            len(str(msg.get("text", ""))) for msg in history[-10:]
+        )
+        in_tokens, out_tokens = in_chars // 3 + 1, len(text) // 3 + 1
+        cents = max(1, round(estimate_cost_usd(model_used, TokenSplit(in_tokens, out_tokens)) * 100))
         with anyio.CancelScope(shield=True):
-            await adapter.terminate(session)
+            await _settle_budget(
+                reservation_id,
+                cost_cents=cents if text else 0,
+                company_id=agent.company_id,
+                input_tokens=in_tokens if text else 0,
+                output_tokens=out_tokens if text else 0,
+                model=model_used,
+            )
     return text, model_used, len(text.split()) * 2  # rough estimate
 
 

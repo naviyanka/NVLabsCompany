@@ -45,6 +45,7 @@ class AdapterRegistry:
         from nexus.adapters.openai_adapter import OpenAIAdapter
         from nexus.adapters.hermes_adapter import HermesAdapter
         from nexus.adapters.hermes_provider import HermesProviderAdapter
+        from nexus.adapters.azure_openai_native import AzureOpenAINativeAdapter
 
         self.register_adapter("openai", OpenAIAdapter)
         self.register_adapter("anthropic", AnthropicAdapter)
@@ -56,6 +57,7 @@ class AdapterRegistry:
         self.register_adapter("http", HTTPAdapter)
         self.register_adapter("mcp", MCPAgentAdapter)
         self.register_adapter("azure_openai", AzureOpenAIAdapter)
+        self.register_adapter("azure_openai_native", AzureOpenAINativeAdapter)
         self.register_adapter("bedrock", BedrockAdapter)
         self.register_adapter("google_gemini", GoogleGeminiAdapter)
 
