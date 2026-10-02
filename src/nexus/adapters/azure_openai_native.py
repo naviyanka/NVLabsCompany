@@ -39,14 +39,22 @@ from nexus.runtime.adapter import AgentSession, TaskResult
 CODE = "AZURE_OPENAI"
 REGISTRY_KEY = "azure_openai_native"
 
-# Microsoft Learn publishes two Entra scopes for Azure OpenAI and they disagree
-# (checked 2026-10-02): "Azure OpenAI v1 API" and the managed-identity page say
-# https://ai.azure.com/.default, "switching-endpoints" says
-# https://cognitiveservices.azure.com/.default. The operator must pick one; exactly
-# the configured scope is requested, never a second as a fallback, and none is
-# assumed. See docs/azure-openai-provider.md.
-TOKEN_SCOPES = ("https://ai.azure.com/.default", "https://cognitiveservices.azure.com/.default")
-HOST_SUFFIXES = (".openai.azure.com", ".services.ai.azure.com", ".cognitiveservices.azure.com")
+# Endpoint families (docs/azure-openai-provider.md has the per-page evidence table).
+# Only the Azure OpenAI resource family is supported: its example pages show the
+# implemented /openai/v1/chat/completions transport. A Foundry project endpoint is a
+# different family and no page shows a v1 chat example for it, so it stays disabled.
+RESOURCE = "openai_resource"  # https://<name>.openai.azure.com
+FOUNDRY = "foundry_project"  # https://<name>.services.ai.azure.com
+FAMILY_SUFFIXES = {RESOURCE: ".openai.azure.com", FOUNDRY: ".services.ai.azure.com"}
+SUPPORTED_FAMILIES = (RESOURCE,)
+
+# The Entra scope is derived from the endpoint family, never configured. None means
+# unresolved: for the resource family + /openai/v1 Microsoft Learn still disagrees
+# (checked 2026-10-02: cognitiveservices.azure.com/.default on "How to switch between
+# OpenAI and Azure OpenAI endpoints" ms.date 2026-08-24, ai.azure.com/.default on three
+# other pages). Entra stays unavailable until the approved live probe settles it; then
+# set exactly one value here. No fallback to a second scope.
+ENTRA_SCOPES: dict[str, str | None] = {RESOURCE: None}
 
 MAX_ITERATIONS = 8
 MAX_CALLS = 16
@@ -78,8 +86,17 @@ def _is_loopback(host: str) -> bool:
         return False
 
 
-def _endpoint() -> str:
-    """The operator's endpoint: a public Azure resource over https, or loopback for tests."""
+def _family_of(host: str) -> str | None:
+    if _is_loopback(host):  # the existing SSRF policy's explicit loopback allowance (tests)
+        return RESOURCE
+    for family, suffix in FAMILY_SUFFIXES.items():
+        if host.endswith(suffix) and len(host) > len(suffix):
+            return family
+    return None
+
+
+def _classify() -> tuple[str, str]:
+    """The operator's endpoint and its family: a public Azure OpenAI resource over https."""
     from nexus.governance.ssrf_protection import guard_url
 
     raw = settings.azure_openai_endpoint.strip().rstrip("/")
@@ -91,15 +108,24 @@ def _endpoint() -> str:
         host = (parts.hostname or "").lower()
         if parts.username or parts.password or parts.query or parts.fragment:
             raise ValueError
-        if _is_loopback(host):  # the existing SSRF policy's explicit loopback allowance
-            return raw
-        resource = [s for s in HOST_SUFFIXES if host.endswith(s) and len(host) > len(s)]
-        if parts.scheme != "https" or parts.path or parts.port not in (None, 443) or not resource:
+        family = _family_of(host)
+        if family is None:
+            raise ValueError
+        if not _is_loopback(host) and (
+            parts.scheme != "https" or parts.path or parts.port not in (None, 443)
+        ):
             raise ValueError
     except ValueError:
-        message = f"{CODE}_ENDPOINT_INVALID: https Azure resource endpoint required"
+        message = f"{CODE}_ENDPOINT_INVALID: https Azure OpenAI resource endpoint required"
         raise ProviderError(message) from None
-    return raw
+    if family not in SUPPORTED_FAMILIES:
+        message = f"{CODE}_ENDPOINT_FAMILY_UNSUPPORTED: only *.openai.azure.com is supported"
+        raise ProviderError(message)
+    return raw, family
+
+
+def _endpoint() -> str:
+    return _classify()[0]
 
 
 def _deployment() -> str:
@@ -154,8 +180,9 @@ def _secret() -> str | None:
 def _identity_sdk() -> bool:
     if _token_source is not None:
         return True
-    try:
-        return importlib.util.find_spec("azure.identity.aio") is not None
+    try:  # aiohttp is the async transport azure.identity.aio needs to build a credential
+        found = (importlib.util.find_spec(m) for m in ("azure.identity.aio", "aiohttp"))
+        return all(spec is not None for spec in found)
     except ImportError:
         return False
 
@@ -168,11 +195,11 @@ def _auth() -> str:
 
 
 def _scope() -> str:
-    scope = settings.azure_openai_token_scope.strip()
-    if not scope:
-        raise ProviderError(f"{CODE}_TOKEN_SCOPE_UNSET: operator must choose a documented scope")
-    if scope not in TOKEN_SCOPES:
-        raise ProviderError(f"{CODE}_TOKEN_SCOPE_INVALID: not a documented Azure OpenAI scope")
+    """The Entra scope derived from the validated endpoint family; never operator text."""
+    scope = ENTRA_SCOPES.get(_classify()[1])
+    if scope is None:
+        message = f"{CODE}_ENTRA_SCOPE_UNRESOLVED: no verified Entra scope for this endpoint family"
+        raise ProviderError(message)
     return scope
 
 
@@ -208,15 +235,20 @@ def status() -> dict[str, Any]:
         return True
 
     auth = settings.azure_openai_auth.strip().lower()
+    try:
+        family: str | None = _classify()[1]
+    except ProviderError:
+        family = None
     return {
         "enabled": settings.azure_openai_enabled,
         "endpoint_valid": ok(_endpoint),
+        "endpoint_family": family,
         "deployment_configured": ok(_deployment),
         "model_configured": ok(_model_id),
         "api_version": settings.azure_openai_api_version,
         "auth": auth if auth in ("entra", "key") else "invalid",
-        "token_scope": settings.azure_openai_token_scope or None,
-        "token_scope_valid": ok(_scope),
+        "entra_scope": ENTRA_SCOPES.get(family) if family else None,
+        "entra_scope_resolved": ok(_scope),
         "identity_sdk": _identity_sdk(),
         "credential_reference_present": bool(_secret()) if auth == "key" else None,
         "timeout_seconds": settings.azure_openai_timeout_seconds,

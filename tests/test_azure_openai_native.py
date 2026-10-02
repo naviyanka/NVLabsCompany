@@ -46,6 +46,8 @@ pytestmark = pytest.mark.employee_work
 
 KEY = "az-key-not-a-real-key-456"
 TOKEN = "entra-token-not-real-789"
+# The real scope is unresolved (ao.ENTRA_SCOPES), so entra-path tests pin a fake one.
+TEST_SCOPE = "https://scope.test.invalid/.default"
 DEPLOYMENT = "ceo-deployment"
 MODEL = "gpt-4o"
 
@@ -175,7 +177,7 @@ def azure(monkeypatch):
     monkeypatch.setattr(settings, "azure_openai_model", MODEL)
     monkeypatch.setattr(settings, "azure_openai_api_version", "v1")
     monkeypatch.setattr(settings, "azure_openai_auth", "entra")
-    monkeypatch.setattr(settings, "azure_openai_token_scope", ao.TOKEN_SCOPES[0])
+    monkeypatch.setitem(ao.ENTRA_SCOPES, ao.RESOURCE, TEST_SCOPE)
     monkeypatch.setattr(settings, "azure_openai_timeout_seconds", 20.0)
     monkeypatch.setattr(settings, "azure_openai_max_retries", 2)
     monkeypatch.setattr(ao, "_token_source", token_source)
@@ -229,7 +231,7 @@ class TestStreaming:
         assert req["body"]["stream_options"] == {"include_usage": True}
         assert req["body"]["max_completion_tokens"] == ao.MAX_TOKENS and "max_tokens" not in req["body"]
         assert "tools" not in req["body"]
-        assert azure.scopes == [ao.TOKEN_SCOPES[0]]
+        assert azure.scopes == [TEST_SCOPE]
 
     async def test_a_split_utf8_character_and_split_json_are_reassembled(self, azure, db, c):  # noqa: F811
         text = "héllo wörld 🙂 ünï"
@@ -591,7 +593,9 @@ class TestCancellationAndTimeout:
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await task
-        assert gl.TEXT_DELTA not in [e.type for e in seen]  # an unfinished round is never released as text
+        # A tool-free call releases text as it arrives; the cancel ends the turn with no completion.
+        assert [e.text for e in seen if e.type == gl.TEXT_DELTA] == ["a", "b"]
+        assert seen[-1].type == gl.CANCELLED and gl.COMPLETED not in [e.type for e in seen]
 
     async def test_cancel_before_a_tool_runs_no_tool(self, azure, db, c):  # noqa: F811
         await _appoint(c, c["chief"])
@@ -686,33 +690,54 @@ class TestSecretsAndEndpoint:
         result, _ = await run(db, c["acme_agy"])
         assert "AZURE_OPENAI_ENDPOINT_INVALID" in result.error and fake.requests == [] and azure.scopes == []
 
-    @pytest.mark.parametrize("endpoint", ["https://res.openai.azure.com", "https://res.services.ai.azure.com/",
-                                          "https://res.cognitiveservices.azure.com"])
-    def test_public_azure_endpoint_shapes_are_accepted(self, azure, monkeypatch, endpoint):
+    def test_the_azure_openai_resource_endpoint_is_accepted(self, azure, monkeypatch):
+        monkeypatch.setattr(settings, "azure_openai_endpoint", "https://res.openai.azure.com/")
+        assert ao._classify() == ("https://res.openai.azure.com", ao.RESOURCE)
+
+    @pytest.mark.parametrize("endpoint", ["https://res.services.ai.azure.com", "https://res.services.ai.azure.com/"])
+    async def test_a_foundry_project_endpoint_is_disabled_with_a_stable_reason(self, azure, db, c, monkeypatch, endpoint):  # noqa: F811
+        fake = azure([text_response("x")])
         monkeypatch.setattr(settings, "azure_openai_endpoint", endpoint)
-        assert ao._endpoint() == endpoint.rstrip("/")
+        assert ao._family_of("res.services.ai.azure.com") == ao.FOUNDRY
+        assert ao.unavailable_reason().startswith("AZURE_OPENAI_ENDPOINT_FAMILY_UNSUPPORTED")
+        result, _ = await run(db, c["acme_agy"])
+        assert "AZURE_OPENAI_ENDPOINT_FAMILY_UNSUPPORTED" in result.error
+        assert fake.requests == [] and azure.scopes == []
+
+    def test_a_cognitiveservices_host_is_not_a_known_endpoint_family(self, azure, monkeypatch):
+        monkeypatch.setattr(settings, "azure_openai_endpoint", "https://res.cognitiveservices.azure.com")
+        assert ao.unavailable_reason().startswith("AZURE_OPENAI_ENDPOINT_INVALID")
 
 
 class TestTokenScope:
-    def test_the_scope_is_exactly_one_of_the_two_documented_values(self):
-        # Microsoft Learn (accessed 2026-10-02): "Azure OpenAI v1 API" and "Authenticate with managed identity"
-        # document https://ai.azure.com/.default; "switching-endpoints" documents the cognitiveservices scope.
-        assert ao.TOKEN_SCOPES == ("https://ai.azure.com/.default", "https://cognitiveservices.azure.com/.default")
+    """The Entra scope is derived from the endpoint family; it is never operator text."""
 
-    def test_no_scope_is_assumed_by_default(self):
-        assert Settings.model_fields["azure_openai_token_scope"].default == ""
+    def test_there_is_no_scope_setting_to_choose_from(self):
+        assert not [n for n in Settings.model_fields if n.startswith("azure") and "scope" in n]
 
-    async def test_an_unset_or_unknown_scope_fails_closed_without_a_token_request(self, azure, db, c, monkeypatch):  # noqa: F811
+    def test_the_resource_family_scope_is_unresolved_until_the_live_probe(self):
+        # Microsoft Learn still disagrees for *.openai.azure.com + /openai/v1 (accessed 2026-10-02):
+        # cognitiveservices.azure.com/.default vs ai.azure.com/.default. Nothing is guessed.
+        assert ao.ENTRA_SCOPES == {ao.RESOURCE: None}
+        assert ao.SUPPORTED_FAMILIES == (ao.RESOURCE,)
+
+    async def test_unresolved_scope_makes_entra_unavailable_with_no_request_or_token(self, azure, db, c, monkeypatch):  # noqa: F811
         fake = azure([text_response("x")])
-        for value, code in [("", "AZURE_OPENAI_TOKEN_SCOPE_UNSET"), ("https://evil/.default", "AZURE_OPENAI_TOKEN_SCOPE_INVALID"),
-                            ("https://ai.azure.com", "AZURE_OPENAI_TOKEN_SCOPE_INVALID")]:
-            monkeypatch.setattr(settings, "azure_openai_token_scope", value)
-            result, _ = await run(db, c["acme_agy"])
-            assert code in result.error
+        monkeypatch.setitem(ao.ENTRA_SCOPES, ao.RESOURCE, None)
+        assert ao.unavailable_reason().startswith("AZURE_OPENAI_ENTRA_SCOPE_UNRESOLVED")
+        result, _ = await run(db, c["acme_agy"])
+        assert "AZURE_OPENAI_ENTRA_SCOPE_UNRESOLVED" in result.error
         assert fake.requests == [] and azure.scopes == []
 
-    async def test_only_the_configured_scope_is_requested_with_no_fallback(self, azure, db, c, monkeypatch):  # noqa: F811
-        monkeypatch.setattr(settings, "azure_openai_token_scope", ao.TOKEN_SCOPES[1])
+    async def test_key_mode_is_the_development_path_while_the_scope_is_unresolved(self, azure, db, c, monkeypatch):  # noqa: F811
+        monkeypatch.setitem(ao.ENTRA_SCOPES, ao.RESOURCE, None)
+        monkeypatch.setattr(settings, "azure_openai_auth", "key")
+        monkeypatch.setenv("NEXUS_SECRET_AZURE_OPENAI_API_KEY", KEY)
+        fake = azure([text_response("dev ok")])
+        result, _ = await run(db, c["acme_agy"])
+        assert result.success and fake.requests[0]["api_key"] == KEY and azure.scopes == []
+
+    async def test_only_the_derived_scope_is_requested_with_no_fallback(self, azure, db, c, monkeypatch):  # noqa: F811
         asked = []
 
         async def failing(scope):
@@ -722,7 +747,7 @@ class TestTokenScope:
         monkeypatch.setattr(ao, "_token_source", failing)
         fake = azure([text_response("x")])
         result, _ = await run(db, c["acme_agy"])
-        assert asked == [ao.TOKEN_SCOPES[1]] and fake.requests == []
+        assert asked == [TEST_SCOPE] and fake.requests == []
         assert result.error.startswith("AZURE_OPENAI_AUTH_FAILED") and "AADSTS" not in result.error
 
 
@@ -730,7 +755,7 @@ class TestDoctor:
     def test_the_provider_is_off_by_default_and_nothing_is_assumed(self):
         fields = Settings.model_fields
         assert fields["azure_openai_enabled"].default is False
-        for name in ("azure_openai_endpoint", "azure_openai_deployment", "azure_openai_model", "azure_openai_token_scope"):
+        for name in ("azure_openai_endpoint", "azure_openai_deployment", "azure_openai_model"):
             assert fields[name].default == ""
 
     @pytest.mark.parametrize("name,value,code", [
@@ -742,7 +767,7 @@ class TestDoctor:
         ("azure_openai_model", "", "AZURE_OPENAI_MODEL_MISSING"),
         ("azure_openai_api_version", "a b", "AZURE_OPENAI_API_VERSION_INVALID"),
         ("azure_openai_auth", "password", "AZURE_OPENAI_AUTH_INVALID"),
-        ("azure_openai_token_scope", "", "AZURE_OPENAI_TOKEN_SCOPE_UNSET"),
+        ("azure_openai_endpoint", "https://res.services.ai.azure.com", "AZURE_OPENAI_ENDPOINT_FAMILY_UNSUPPORTED"),
         ("azure_openai_timeout_seconds", 0.0, "AZURE_OPENAI_TIMEOUT_INVALID"),
         ("azure_openai_timeout_seconds", 99999.0, "AZURE_OPENAI_TIMEOUT_INVALID"),
     ])
@@ -771,7 +796,8 @@ class TestDoctor:
         fake = azure([])
         before = len(await _rows(db, CostEvent)), len(await _rows(db, ToolInvocation)), len(await _rows(db, AuditLog))
         shown = ao.status()
-        assert shown["available"] is True and shown["auth"] == "entra" and shown["token_scope"] == ao.TOKEN_SCOPES[0]
+        assert shown["available"] is True and shown["auth"] == "entra" and shown["entra_scope"] == TEST_SCOPE
+        assert shown["endpoint_family"] == ao.RESOURCE and shown["entra_scope_resolved"] is True
         assert shown["endpoint_valid"] and shown["deployment_configured"] and shown["model_configured"]
         assert TOKEN not in json.dumps(shown) and fake.requests == [] and azure.scopes == []
         assert (len(await _rows(db, CostEvent)), len(await _rows(db, ToolInvocation)), len(await _rows(db, AuditLog))) == before

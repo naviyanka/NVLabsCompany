@@ -127,9 +127,8 @@ class Settings(BaseSettings):
     azure_openai_api_version: str = "v1"
     # "entra" (bearer token) or "key" (development only, via the secret backend).
     azure_openai_auth: str = "entra"
-    # No default on purpose: Microsoft Learn documents two scopes. See
-    # docs/azure-openai-provider.md. Only an exact documented value is accepted.
-    azure_openai_token_scope: str = ""
+    # No scope setting: the Entra scope is derived from the validated endpoint family
+    # in adapters/azure_openai_native.py (docs/azure-openai-provider.md).
     azure_openai_secret_ref: str = "azure_openai_api_key"
     # Hard outer timeout for one whole turn, in seconds.
     azure_openai_timeout_seconds: float = 120.0
