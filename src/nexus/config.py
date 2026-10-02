@@ -134,6 +134,23 @@ class Settings(BaseSettings):
     azure_openai_timeout_seconds: float = 120.0
     azure_openai_max_retries: int = 2
 
+    # Azure Speech STT/TTS provider (nexus.voice.azure_speech, ADR 0006). Operator-only,
+    # never from agent config. Off by default; any missing or invalid value fails closed.
+    # Entra only: there is no key setting, no scope setting and no Hinglish switch
+    # (docs/azure-speech-provider.md).
+    azure_speech_enabled: bool = False
+    # https://<custom-subdomain>.cognitiveservices.azure.com (Entra needs a custom subdomain)
+    azure_speech_endpoint: str = ""
+    # The resource's region (data stays there); the custom subdomain does not encode it.
+    azure_speech_region: str = ""
+    # Approved voices only: hi-IN Swara/Madhur, en-IN Neerja/Prabhat.
+    azure_speech_voice_hi: str = "hi-IN-SwaraNeural"
+    azure_speech_voice_en: str = "en-IN-NeerjaNeural"
+    # Bounded seconds; zero, negative, NaN and out-of-range values are rejected.
+    azure_speech_connect_timeout_seconds: float = 3.0
+    azure_speech_tts_first_audio_timeout_seconds: float = 4.0
+    azure_speech_stt_final_timeout_seconds: float = 5.0
+
     # API Keys
     openai_api_key: str = ""
     anthropic_api_key: str = ""
