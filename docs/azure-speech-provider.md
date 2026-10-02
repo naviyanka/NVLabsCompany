@@ -55,7 +55,7 @@ The scope is derived in code and is not configurable: `https://cognitiveservices
 Speech SDK itself requests exactly that scope from a `token_credential`. `_ScopedCredential` wraps one cached
 `DefaultAzureCredential`, refuses any other scope (`AZURE_SPEECH_SCOPE_REJECTED`), forwards no extra
 arguments, stores no token, and maps any failure to a sanitized `AZURE_SPEECH_AUTH_FAILED`. There is no second
-scope, key path or runtime probing. Live validation of this scope is recorded under "Live acceptance".
+scope, key path or runtime probing. The scope was validated live for recognition and synthesis (see "Live acceptance").
 
 ## Language modes
 
@@ -140,3 +140,23 @@ Fakes only, no network (`tests/voice_fakes.py`): `tests/test_azure_speech_provid
 scope, STT/TTS sessions, cancel, retries, timeouts, leaks) and `tests/test_voice_provider_contract.py`
 (contract parity of the fake and Azure providers, plus an offline real-SDK construction smoke that is skipped
 when the extra is not installed).
+
+## Live acceptance
+
+One live run on 2026-10-02 (region `centralindia`, S0 pay-as-you-go, SDK 1.52.0, Entra only, one request of the
+approved scope) made 41 provider calls: 20 TTS (including one cancellation) and 21 STT (19 explicit-language
+round trips and two Auto). All succeeded with no retry and no error. Sanitized results are in
+`docs/testing/evidence/azure-speech-provider/ACCEPTANCE.md`. They settle the open questions this document
+carried:
+
+- The custom-subdomain endpoint without a trailing slash works for both STT and TTS.
+- The service accepts headerless 16 kHz mono 16-bit PCM as STT input.
+- The Entra scope above works for the data plane (recognition and synthesis), not only for the voices list.
+- Explicit Hindi returned `hi-IN` transcripts that matched the synthetic text, and Auto identified `en-IN` and
+  `hi-IN` correctly. Latency was inside the default timeouts (STT final after `finish`: p50 1.35 s, max 2.0 s;
+  TTS first audio: p50 0.36 s, max 2.55 s on the first, cold request).
+- Cancellation stopped at the first chunk with no late audio and no replacement synthesis.
+
+Not shown by that run: Linux (`libasound2` on `python:3.12-slim` is still unverified), credentials other than the
+Azure CLI one, and the billed quantities (the estimated cost of about ₹3.4 is from usage events at pessimistic
+rates, not from billing data).
