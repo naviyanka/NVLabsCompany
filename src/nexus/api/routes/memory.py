@@ -4,13 +4,14 @@ import hashlib
 import json
 import uuid
 from datetime import datetime
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import APIRouter, Header, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from nexus.api.deps import CurrentCompanyId, CurrentPrincipal, DbSession
+from nexus.auth.middleware import COMPANY_NOT_FOUND
 from nexus.memory.ingest import (
     MemoryContext,
     MemoryInput,
@@ -71,6 +72,22 @@ class MemoryResponse(BaseModel):
     trust_state: str | None = None
     memory_type: str | None = None
     supersedes_id: uuid.UUID | None = None
+
+
+def get_memory_company_id(company_id: uuid.UUID, principal: CurrentPrincipal) -> uuid.UUID:
+    """The ``{company_id}`` of a company-scoped memory route, only if it is the caller's.
+
+    Unlike ``PathCompanyId`` (403), a company that is not the caller's is a 404 with a fixed
+    body, whether it exists or not. Nothing is queried for it, so the answer cannot differ.
+    The auth middleware gives the same answer for these URLs; this is the check that remains
+    when authentication is disabled.
+    """
+    if company_id != principal.company_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=COMPANY_NOT_FOUND)
+    return company_id
+
+
+MemoryCompanyId = Annotated[uuid.UUID, Depends(get_memory_company_id)]
 
 
 def principal_actor(principal: Any) -> str:

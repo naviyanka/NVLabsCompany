@@ -7,7 +7,8 @@ from collections import defaultdict
 from fastapi import APIRouter
 from sqlalchemy import select
 
-from nexus.api.deps import DbSession, PathCompanyId
+from nexus.api.deps import DbSession
+from nexus.api.routes.memory import MemoryCompanyId
 from nexus.models.memory import PROMPT_STATUSES, MemoryRecord
 
 router = APIRouter(tags=["memory"])
@@ -15,15 +16,16 @@ router = APIRouter(tags=["memory"])
 
 @router.get("/api/v1/companies/{company_id}/memory/graph")
 async def get_memory_graph(
-    company_id: PathCompanyId,
+    company_id: MemoryCompanyId,
     db: DbSession,
 ) -> dict[str, Any]:
     """Build a graph visualization from memory records.
 
-    ``PathCompanyId`` rather than a bare ``uuid.UUID``: the company in the URL is
+    ``MemoryCompanyId`` rather than a bare ``uuid.UUID``: the company in the URL is
     validated against the authenticated principal, so a caller cannot read another
-    tenant's graph by editing the path. The auth middleware already rejects that
-    for this URL shape, but it falls open when ``auth_enabled`` is false, and the
+    tenant's graph by editing the path; a foreign or unknown company is one 404. The
+    auth middleware already rejects that for this URL shape, but it falls open when
+    ``auth_enabled`` is false, and the
     vault subgraph now carries note titles and vault-relative paths — so the check
     belongs on the route too rather than only in front of it.
 

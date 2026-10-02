@@ -8,8 +8,9 @@ from fastapi import APIRouter, HTTPException, Query, status
 from pydantic import BaseModel
 from sqlalchemy import func, select, update
 
-from nexus.api.deps import CurrentCompanyId, CurrentPrincipal, DbSession, PathCompanyId
+from nexus.api.deps import CurrentCompanyId, CurrentPrincipal, DbSession
 from nexus.api.routes.memory import (
+    MemoryCompanyId,
     audit_memory_review,
     is_memory_reviewer,
     principal_actor,
@@ -40,7 +41,7 @@ class MemoryUpdate(BaseModel):
 
 @router.get("/api/v1/companies/{company_id}/memory")
 async def list_all_memories(
-    company_id: PathCompanyId, db: DbSession, principal: CurrentPrincipal,
+    company_id: MemoryCompanyId, db: DbSession, principal: CurrentPrincipal,
     agent_id: uuid.UUID | None = None, scope: str | None = None,
     tier: str | None = None, importance_min: float | None = None,
     state: str | None = Query(default=None, alias="status"),
@@ -99,7 +100,7 @@ async def list_all_memories(
 
 
 @router.get("/api/v1/companies/{company_id}/memory/stats")
-async def memory_stats(company_id: PathCompanyId, db: DbSession) -> dict[str, Any]:
+async def memory_stats(company_id: MemoryCompanyId, db: DbSession) -> dict[str, Any]:
     """Memory statistics for active memory: totals, by tier, by scope, avg importance; plus counts by status (all states)."""
     live = (MemoryRecord.company_id == company_id, MemoryRecord.status.in_(PROMPT_STATUSES))
     total = await db.execute(select(func.count(MemoryRecord.id)).where(*live))
@@ -274,7 +275,7 @@ async def archive_memory_route(
 
 
 @router.get("/api/v1/companies/{company_id}/memory/health")
-async def memory_health(company_id: PathCompanyId, db: DbSession) -> dict[str, Any]:
+async def memory_health(company_id: MemoryCompanyId, db: DbSession) -> dict[str, Any]:
     """Memory health for active memory: stale count, low relevance count."""
     cutoff = utcnow() - timedelta(days=90)
     live = (MemoryRecord.company_id == company_id, MemoryRecord.status.in_(PROMPT_STATUSES))

@@ -22,8 +22,9 @@ from sqlalchemy import delete, select
 
 from nexus.api.routes import memory as agent_routes
 from nexus.api.routes import memory_global as global_routes
+from nexus.api.routes import memory_graph as graph_routes
 from nexus.api.routes import organization as org_routes
-from nexus.auth.middleware import AuthenticationMiddleware
+from nexus.auth.middleware import AuthenticationMiddleware, rejection_for
 from nexus.auth.principal import Principal
 from nexus.auth.sessions import create_session
 from nexus.auth.users import create_user
@@ -38,8 +39,14 @@ SECRET = "closed-secret-text"
 CEO = "/api/v1/organization/ceo"
 
 
-@pytest.fixture
-async def world(factory, t):  # noqa: F811
+@pytest.fixture(params=("route", "middleware"))
+async def world(request, factory, t):  # noqa: F811
+    """The routes behind the real session resolver, with or without the middleware's policy.
+
+    ``route`` leaves the route's own checks as the only guard (authentication disabled);
+    ``middleware`` also applies ``rejection_for`` first, as the deployed stack does.
+    """
+    enforce_in_middleware = request.param == "middleware"
     tokens: dict[str, str] = {}
     ids: dict[str, uuid.UUID] = {}
     async with factory() as db:
@@ -81,20 +88,25 @@ async def world(factory, t):  # noqa: F811
     }
     resolver = AuthenticationMiddleware(None)  # type: ignore[arg-type]
     app = FastAPI()
-    for router in (agent_routes.router, global_routes.router, org_routes.ceo_router):
+    for router in (agent_routes.router, global_routes.router, graph_routes.router,
+                   org_routes.ceo_router):
         app.include_router(router)
 
     @app.middleware("http")
     async def authenticate(request: Request, call_next):
         if (kind := request.headers.get("x-test-principal")) in injected:
-            request.state.principal = injected[kind]
-            return await call_next(request)
-        token = request.cookies.get("nv_session", "")
-        async with factory() as db:
-            principal = await resolver._principal_from_cookie(db, token) if token else None
-            await db.commit()
+            principal = injected[kind]
+        else:
+            token = request.cookies.get("nv_session", "")
+            async with factory() as db:
+                principal = await resolver._principal_from_cookie(db, token) if token else None
+                await db.commit()
         if principal is not None:
             request.state.principal = principal
+        if enforce_in_middleware and (
+            rejection := rejection_for(request.url.path, principal)
+        ) is not None:
+            return rejection
         return await call_next(request)
 
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
@@ -126,6 +138,7 @@ async def world(factory, t):  # noqa: F811
         call.agent, call.rows, call.acme, call.other = agent, rows, t["acme"], t["other"]
         call.deactivate, call.remove_membership = deactivate, remove_membership
         call.review_audits = review_audits
+        call.factory, call.engine = factory, factory.kw["bind"]
         yield call
 
 
@@ -244,7 +257,7 @@ async def test_nothing_the_client_sends_makes_it_a_reviewer(world):
 async def test_a_reviewer_of_another_company_sees_nothing_of_this_one(world):
     url = f"/api/v1/companies/{world.acme}/memory?status=archived"
     r = await world("outsider", url)
-    assert r.status_code == 403  # the path company is not theirs
+    assert r.status_code == 404  # the path company is not theirs: concealed, not 403
     own = await world("outsider", f"/api/v1/companies/{world.other}/memory?status=archived")
     assert own.status_code == 200 and own.json() == []
     agent = await world("outsider", f"/api/v1/agents/{world.agent}/memory?status=archived")
@@ -255,7 +268,7 @@ async def test_a_reviewer_of_another_company_sees_nothing_of_this_one(world):
     assert executive.json() == []
     for stats in ("stats", "health"):
         assert (await world("outsider", f"/api/v1/companies/{world.acme}/memory/{stats}")
-                ).status_code == 403
+                ).status_code == 404
 
 
 async def test_an_inactive_user_is_refused_at_once(world):

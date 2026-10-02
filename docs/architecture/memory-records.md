@@ -134,7 +134,7 @@ Candidate and closed content is reachable only through a human review path, neve
 - `GET /api/v1/memory/{id}`: an active row is served to any caller in the company. A non-active row is `404` for a non-reviewer, the same answer as an unknown or foreign id, so the route is no oracle for closed memory.
 - `GET /ceo/memory?include_closed=true` is the executive review path: reviewer only (`403`), through `ceo_service.review_recall`. The default call uses the active-only `recall`.
 - **Audit:** every review read writes one `memory.review_read` audit row with the actor, the view (`agent_list:<state>`, `company_list:<state>`, `executive_list:all`, `detail:<state>`), a count and the memory ids. Never content.
-- **Tenancy:** every query filters on the authenticated company. The company routes use `PathCompanyId`, so a path company other than the caller's is `403`. A foreign memory id is `404`.
+- **Tenancy:** every query filters on the authenticated company. The company routes (`/companies/{company_id}/memory`, `/stats`, `/health`, `/graph`) conceal the tenant: any path company other than the caller's, whether it exists or not, gets the same `404` with the stable code `COMPANY_NOT_FOUND` and a fixed message. The decision compares the path with the caller's own company and never reads the path company, so nothing (rows, counts, ids, names, audit entries) can tell the cases apart. It is enforced in the auth middleware and again by the `MemoryCompanyId` route dependency; the global `PathCompanyId` (`403`) is unchanged for every other company route. A human admin's authority stops at their own company. A foreign memory id (`/memory/{id}`) is `404`.
 - **Aggregates:** `/memory/stats` and `/memory/health` return counts only, scoped to the company; `by_status` counts every state but carries no content.
 - No new dashboard or acceptance workflow. Accepting a candidate is deferred (see below).
 
@@ -143,7 +143,7 @@ Candidate and closed content is reachable only through a human review path, neve
 - The default list no longer returns candidates (client change since the previous phase: pass `?status=candidate`).
 - A non-active `?status=` is now `403` for a non-admin caller (it was open to any company member).
 - `GET /memory/{id}` of a non-active row is `404` for a non-admin.
-- `/companies/{company_id}/memory*` with a company other than the caller's is `403` instead of an empty or foreign-scoped answer.
+- `/companies/{company_id}/memory*` with a company other than the caller's, existing or not, is `404 COMPANY_NOT_FOUND` instead of an empty or foreign-scoped answer.
 - `include_closed` is gone from the CEO memory tool schema; a call that sends it is rejected. The operator REST flag is unchanged for a human admin.
 
 `PATCH /api/v1/memory/{id}` edits `importance` and `tier` only on a live row; a closed row returns `409 MEMORY_INVALID_TRANSITION` and is left as it was. A content change appends a superseding record.
