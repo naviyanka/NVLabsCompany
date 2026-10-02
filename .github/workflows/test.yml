@@ -47,7 +47,9 @@ jobs:
           python-version: '3.12'
           cache: 'pip'
       # otel: tests/test_observability_enterprise.py asserts on real spans.
-      - run: pip install -e ".[dev,otel]"
+      # speech: tests/test_voice_provider_contract.py builds real Azure Speech SDK objects
+      # (offline) so a broken native wheel on Linux/3.12 fails CI, not production.
+      - run: pip install -e ".[dev,otel,speech]"
         working-directory: .
       - run: pytest tests/ --ignore=tests/test_postgres_integration.py --ignore=tests/test_memory_rls_postgres.py --ignore=tests/test_memory_ingest_postgres.py --ignore=tests/test_governance_postgres.py --ignore=tests/test_governance_acceptance_postgres.py --ignore=tests/test_webhook_idempotency_postgres.py --ignore=tests/test_db_role_separation_postgres.py --ignore=tests/test_memory_evidence_postgres.py -x --tb=short -q
         env:
