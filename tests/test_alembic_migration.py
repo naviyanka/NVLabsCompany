@@ -73,6 +73,8 @@ EXPECTED_TABLES = {
     "meeting_minutes",
     "meeting_participants",
     "meetings",
+    "memory_evidence",
+    "memory_operations",
     "memory_records",
     "governance_grant_uses",
     "governance_policy_drafts",
@@ -243,6 +245,71 @@ class TestChainExecution:
         cfg.set_main_option("sqlalchemy.url", f"sqlite+aiosqlite:///{db_file.as_posix()}")
         command.upgrade(cfg, "head")
         command.downgrade(cfg, "-1")
+        command.upgrade(cfg, "head")
+
+    def test_memory_evidence_triggers_hold_on_a_migrated_database(self, tmp_path) -> None:
+        """Evidence rows are append-only and cannot name another company's memory.
+
+        Tests build tables with create_all, which has no triggers: only the migration
+        creates them, so this is the SQLite proof (the PostgreSQL one is in
+        test_memory_evidence_postgres.py). Downgrading one step removes them again.
+        """
+        import uuid
+
+        from sqlalchemy import text
+        from sqlalchemy.exc import DatabaseError
+
+        from nexus.models.memory import MemoryRecord
+
+        db_file = tmp_path / "chain.db"
+        url = f"sqlite:///{db_file.as_posix()}"
+        cfg = Config("alembic.ini")
+        cfg.set_main_option("sqlalchemy.url", f"sqlite+aiosqlite:///{db_file.as_posix()}")
+        command.upgrade(cfg, "head")
+
+        acme, other, memory = (str(uuid.uuid4()) for _ in range(3))
+        insert = text(
+            "INSERT INTO memory_evidence (id, company_id, memory_id, evidence_kind, source_type,"
+            " source_id, reason_code, grade, source_digest, policy_version, idempotency_key,"
+            " created_by, created_at) VALUES (:id, :c, :m, 'chat_turn', 'chat_turn', 's', '',"
+            " 'none', 'd', 'memory-evidence-v1', :k, 'user:u', CURRENT_TIMESTAMP)"
+        )
+        engine = create_engine(url)
+        with engine.begin() as conn:
+            conn.execute(
+                MemoryRecord.__table__.insert().values(
+                    id=uuid.UUID(memory),
+                    company_id=uuid.UUID(acme),
+                    agent_id=uuid.uuid4(),
+                    scope="l2_agent",
+                    content="x",
+                    status="active",
+                )
+            )
+        # SQLite stores a UUID as 32 hex digits, so raw SQL must spell it that way.
+        hexed = {name: uuid.UUID(v).hex for name, v in (("c", acme), ("m", memory), ("o", other))}
+        row = {"id": uuid.uuid4().hex, "c": hexed["c"], "m": hexed["m"], "k": "k1"}
+        with engine.begin() as conn:
+            conn.execute(insert, row)
+        for statement, params in (
+            ("UPDATE memory_evidence SET grade = 'verify'", {}),
+            ("DELETE FROM memory_evidence", {}),
+            (insert.text, {**row, "id": uuid.uuid4().hex, "c": hexed["o"], "k": "k2"}),  # foreign
+        ):
+            with pytest.raises(DatabaseError), engine.begin() as conn:
+                conn.execute(text(statement), params)
+        with engine.connect() as conn:
+            assert conn.execute(text("SELECT count(*) FROM memory_evidence")).scalar() == 1
+        engine.dispose()
+
+        command.downgrade(cfg, "-1")
+        engine = create_engine(url)
+        with engine.connect() as conn:
+            left = conn.execute(
+                text("SELECT name FROM sqlite_master WHERE name LIKE 'trg_memory_%'")
+            ).fetchall()
+        engine.dispose()
+        assert not left, left
         command.upgrade(cfg, "head")
 
     def test_migrated_schema_matches_the_models(self, tmp_path) -> None:
