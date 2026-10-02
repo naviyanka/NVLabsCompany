@@ -213,6 +213,18 @@ jobs:
           load: true
           tags: nexus-api-scan:latest
 
+      # The exact production image must import the Azure Entra SDK (a runtime
+      # dependency, ADR 0006) and still ship the provider disabled. No network.
+      - name: Import-smoke Azure provider runtime (Backend)
+        run: |
+          docker run --rm --network none nexus-api-scan:latest python -c "
+          import aiohttp, azure.identity.aio
+          from nexus.adapters import azure_openai_native as m
+          assert m._identity_sdk()
+          assert m.unavailable_reason().startswith('AZURE_OPENAI_DISABLED')
+          print('azure runtime ok')
+          "
+
       - name: Trivy Vulnerability Scan (Backend)
         uses: aquasecurity/trivy-action@master
         with:
