@@ -162,27 +162,34 @@ async def test_a_foreign_admins_request_creates_no_review_audit_here(world, rout
 
 
 def test_every_company_memory_route_uses_the_concealing_dependency():
-    from nexus.api.routes import memory_global, memory_graph
+    from nexus.api.routes import memory_evidence, memory_global, memory_graph
     from nexus.main import app
 
     prefix = "/api/v1/companies/{company_id}/memory"
     found = {}
-    for router in (memory_global.router, memory_graph.router):
+    for router in (memory_global.router, memory_graph.router, memory_evidence.router):
         for route in router.routes:
             if route.path.startswith(prefix):
                 calls = [d.call for d in route.dependant.dependencies]
                 assert agent_routes.get_memory_company_id in calls, route.path
                 assert deps.get_scoped_company_id not in calls, route.path
-                found[route.path] = route.methods
+                found.setdefault(route.path, set()).update(route.methods)
     assert found == {
         f"{prefix}": {"GET"},
         f"{prefix}/stats": {"GET"},
         f"{prefix}/health": {"GET"},
         f"{prefix}/graph": {"GET"},
+        # Evidence and trust promotion for one memory: human administrators only.
+        f"{prefix}/{{memory_id}}/evidence": {"GET", "POST"},
+        f"{prefix}/{{memory_id}}/accept": {"POST"},
+        f"{prefix}/{{memory_id}}/trust/assert": {"POST"},
+        f"{prefix}/{{memory_id}}/trust/verify": {"POST"},
     }
-    # No create, update or archive lives under this prefix; a new route must be added here.
+    # Nothing else lives under this prefix; a new route must be added here.
     published = {p: set(v) for p, v in app.openapi()["paths"].items() if p.startswith(prefix)}
-    assert published == {p: {"get"} for p in found}
+    assert published == {p: {m.lower() for m in found[p]} for p in found}
+
+
 def test_only_the_memory_paths_conceal_other_company_paths_keep_the_403():
     mine, theirs = uuid.uuid4(), uuid.uuid4()
     me = Principal(kind="user", company_id=mine, role="admin", user_id=uuid.uuid4())
