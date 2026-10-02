@@ -1058,8 +1058,12 @@ async def _call_llm(
     # A self-metering adapter reserves and settles every streamed round itself;
     # a second hold here would count the same call twice.
     # Self-metering is a capability of the registered adapter type, not of agent config.
-    adapter_registry = AdapterRegistry()
-    self_metered = adapter_registry.is_self_metered(registry_key)
+    # A registry that cannot be built reserves as usual; the try below reports the failure.
+    try:
+        adapter_registry = AdapterRegistry()
+    except Exception:
+        adapter_registry = None
+    self_metered = adapter_registry is not None and adapter_registry.is_self_metered(registry_key)
 
     reservation_id = (
         None
@@ -1073,6 +1077,8 @@ async def _call_llm(
     spend: dict[str, Any] = {"cost_cents": 0, "input": 0, "output": 0, "model": None}
 
     try:
+        if adapter_registry is None:
+            adapter_registry = AdapterRegistry()
         adapter = adapter_registry.create_adapter(registry_key)
 
         # Hermes tool calls use same DB-backed ToolAccess, autonomy, approval,
