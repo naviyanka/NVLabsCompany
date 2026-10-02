@@ -18,7 +18,7 @@ from nexus.memory.ingest import (
     ingest_memory,
 )
 from nexus.memory.safety import redact_text, sanitize_value
-from nexus.models.memory import LIVE_STATUSES, MemoryRecord
+from nexus.models.memory import PROMPT_STATUSES, MemoryRecord
 
 
 @dataclass
@@ -180,6 +180,18 @@ class MemoryStore:
         key = self._cache_key(company_id, scope, scope_id)
         hot_entries = self._hot.get(key, [])
         if hot_entries:
+            # The cache outlives lifecycle changes: keep only entries still active in this company.
+            live = set(
+                (await self._db.execute(
+                    select(MemoryRecord.id).where(
+                        MemoryRecord.company_id == company_id,
+                        MemoryRecord.id.in_([e.id for e in hot_entries]),
+                        MemoryRecord.status.in_(PROMPT_STATUSES),
+                    )
+                )).scalars().all()
+            )
+            hot_entries = [e for e in hot_entries if e.id in live]
+        if hot_entries:
             for entry in hot_entries[:limit]:
                 record = MemoryRecord(
                     id=entry.id,
@@ -205,7 +217,7 @@ class MemoryStore:
                 .where(MemoryRecord.company_id == company_id)
                 .where(MemoryRecord.scope == scope)
                 .where(MemoryRecord.tier == "warm")
-                .where(MemoryRecord.status.in_(LIVE_STATUSES))
+                .where(MemoryRecord.status.in_(PROMPT_STATUSES))
             )
             if scope_id:
                 stmt = stmt.where(MemoryRecord.scope_id == scope_id)
@@ -265,6 +277,9 @@ class MemoryStore:
 
         record = await self._owned_record(company_id, memory_id)
         if record is not None:
+            if record.status not in PROMPT_STATUSES:
+                # A closed or unreviewed row is never warmed or cached for recall.
+                raise ValueError(f"Memory {memory_id} not found in any tier")
             if record.tier == "warm":
                 entry = MemoryEntry(
                     id=record.id,

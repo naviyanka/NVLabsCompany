@@ -22,7 +22,7 @@ from nexus.memory.ingest import (
 from nexus.memory.lifecycle import archive_memory, supersede_memory
 from nexus.memory.safety import MemoryRejected, sanitize_text
 from nexus.models._time import utcnow
-from nexus.models.memory import LIVE_STATUSES, MEMORY_STATUSES, MemoryRecord
+from nexus.models.memory import LIVE_STATUSES, MEMORY_STATUSES, PROMPT_STATUSES, MemoryRecord
 
 router = APIRouter(tags=["memory"])
 
@@ -41,7 +41,11 @@ async def list_all_memories(
     state: str | None = Query(default=None, alias="status"),
     limit: int = 50, offset: int = 0,
 ) -> list[dict[str, Any]]:
-    """List memories across agents for a company: live (candidate + active) unless ``status`` says otherwise."""
+    """List memories across agents for a company: ``active`` unless ``status`` names one state.
+
+    Candidates, archived, superseded and rejected rows appear only when requested with
+    ``?status=<state>`` (the review path). Before this, the default also listed candidates.
+    """
     if state is not None and state not in MEMORY_STATUSES:
         raise HTTPException(
             status_code=422,
@@ -49,7 +53,7 @@ async def list_all_memories(
         )
     stmt = select(MemoryRecord).where(MemoryRecord.company_id == company_id)
     stmt = stmt.where(
-        MemoryRecord.status == state if state else MemoryRecord.status.in_(LIVE_STATUSES)
+        MemoryRecord.status == (state or PROMPT_STATUSES[0])
     )
     if agent_id:
         stmt = stmt.where(MemoryRecord.agent_id == agent_id)
@@ -82,8 +86,8 @@ async def list_all_memories(
 
 @router.get("/api/v1/companies/{company_id}/memory/stats")
 async def memory_stats(company_id: uuid.UUID, db: DbSession) -> dict[str, Any]:
-    """Memory statistics for live memory: totals, by tier, by scope, avg importance; plus counts by status."""
-    live = (MemoryRecord.company_id == company_id, MemoryRecord.status.in_(LIVE_STATUSES))
+    """Memory statistics for active memory: totals, by tier, by scope, avg importance; plus counts by status (all states)."""
+    live = (MemoryRecord.company_id == company_id, MemoryRecord.status.in_(PROMPT_STATUSES))
     total = await db.execute(select(func.count(MemoryRecord.id)).where(*live))
     by_tier = await db.execute(
         select(MemoryRecord.tier, func.count(MemoryRecord.id)).where(*live).group_by(MemoryRecord.tier)
@@ -196,11 +200,25 @@ async def update_memory(
     except (MemoryRejected, MemoryOpError) as exc:
         raise http_error(exc) from exc
     if updates:
-        await db.execute(
+        # Scoring fields only, and only on a live row: a closed row stays as it was closed.
+        changed = await db.execute(
             update(MemoryRecord)
-            .where(MemoryRecord.id == memory_id, MemoryRecord.company_id == company_id)
-            .values(**updates, updated_at=utcnow())
+            .where(
+                MemoryRecord.id == memory_id,
+                MemoryRecord.company_id == company_id,
+                MemoryRecord.status.in_(LIVE_STATUSES),
+            )
+            .values(
+                importance=updates.get("importance", MemoryRecord.importance),
+                tier=updates.get("tier", MemoryRecord.tier),
+                updated_at=utcnow(),
+            )
         )
+        if changed.rowcount != 1:
+            raise HTTPException(
+                status_code=409,
+                detail={"code": "MEMORY_INVALID_TRANSITION", "message": "Closed memory cannot be edited"},
+            )
     return {"id": str(memory_id), "updated": True}
 
 
@@ -235,9 +253,9 @@ async def archive_memory_route(
 
 @router.get("/api/v1/companies/{company_id}/memory/health")
 async def memory_health(company_id: uuid.UUID, db: DbSession) -> dict[str, Any]:
-    """Memory health for live memory: stale count, low relevance count."""
+    """Memory health for active memory: stale count, low relevance count."""
     cutoff = utcnow() - timedelta(days=90)
-    live = (MemoryRecord.company_id == company_id, MemoryRecord.status.in_(LIVE_STATUSES))
+    live = (MemoryRecord.company_id == company_id, MemoryRecord.status.in_(PROMPT_STATUSES))
     stale = await db.execute(
         select(func.count(MemoryRecord.id)).where(*live, MemoryRecord.created_at < cutoff)
     )

@@ -44,6 +44,7 @@ class ManagerRef(_Args):
 class SearchMemory(_Args):
     query: str | None = Field(default=None, max_length=200)
     type: ceo_service.MemoryType | None = None
+    # Accepted for compatibility, ignored: tool output is model-visible, so it is active-only.
     include_closed: bool = False
     limit: int = Field(default=10, ge=1, le=ceo_service.SEARCH_MAX)
 
@@ -101,7 +102,7 @@ async def _approvals(db, company_id, ceo_id, args, actor, ctx):
 
 async def _search(db, company_id, ceo_id, args, actor, ctx):
     rows = await ceo_service.recall(db, company_id, query=args.query, type=args.type,
-                                    include_closed=args.include_closed, limit=args.limit)
+                                    include_closed=False, limit=args.limit)
     return [ceo_service.entry_view(r) for r in rows]
 
 

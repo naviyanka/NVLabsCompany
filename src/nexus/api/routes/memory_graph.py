@@ -8,7 +8,7 @@ from fastapi import APIRouter
 from sqlalchemy import select
 
 from nexus.api.deps import DbSession, PathCompanyId
-from nexus.models.memory import LIVE_STATUSES, MemoryRecord
+from nexus.models.memory import PROMPT_STATUSES, MemoryRecord
 
 router = APIRouter(tags=["memory"])
 
@@ -27,10 +27,13 @@ async def get_memory_graph(
     vault subgraph now carries note titles and vault-relative paths — so the check
     belongs on the route too rather than only in front of it.
 
+    Only ``active`` memories are drawn: the graph shows raw content, so candidates and
+    closed rows stay out of it.
+
     Returns nodes (one per memory), edges (derived from shared agent/scope/proximity),
     clusters (grouped by scope), and computed metrics.
     """
-    stmt = select(MemoryRecord).where(MemoryRecord.company_id == company_id, MemoryRecord.status.in_(LIVE_STATUSES)).order_by(MemoryRecord.created_at.desc())
+    stmt = select(MemoryRecord).where(MemoryRecord.company_id == company_id, MemoryRecord.status.in_(PROMPT_STATUSES)).order_by(MemoryRecord.created_at.desc())
     result = await db.execute(stmt)
     memories = list(result.scalars().all())
 

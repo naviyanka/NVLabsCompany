@@ -20,7 +20,7 @@ from nexus.memory.ingest import (
     ingest_memory,
 )
 from nexus.memory.safety import MemoryRejected
-from nexus.models.memory import LIVE_STATUSES, MEMORY_STATUSES, MemoryRecord
+from nexus.models.memory import MEMORY_STATUSES, PROMPT_STATUSES, MemoryRecord
 
 router = APIRouter(tags=["memory"])
 
@@ -199,7 +199,7 @@ async def search_memory(
     query: str = "",
     top_k: int = 10,
 ) -> Any:
-    """Search an agent's memories using BM25 retrieval."""
+    """Search an agent's memories using BM25 retrieval. Active memories only, never candidates."""
     from nexus.memory.retriever import search as bm25_search
 
     # Fetch agent's accessible memories
@@ -208,7 +208,7 @@ async def search_memory(
         .where(
             MemoryRecord.agent_id == agent_id,
             MemoryRecord.company_id == company_id,
-            MemoryRecord.status.in_(LIVE_STATUSES),
+            MemoryRecord.status.in_(PROMPT_STATUSES),
         )
         .order_by(MemoryRecord.importance.desc())
         .limit(1000)
@@ -250,7 +250,11 @@ async def list_agent_memories(
     limit: int = 100,
     offset: int = 0,
 ) -> Any:
-    """List memories for an agent. Live (candidate + active) unless ``status`` names one state."""
+    """List memories for an agent: ``active`` unless ``status`` names one state.
+
+    Candidates, archived, superseded and rejected rows appear only when requested with
+    ``?status=<state>`` (the review path). Before this, the default also listed candidates.
+    """
     if state is not None and state not in MEMORY_STATUSES:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -260,7 +264,7 @@ async def list_agent_memories(
         MemoryRecord.agent_id == agent_id, MemoryRecord.company_id == company_id
     )
     stmt = stmt.where(
-        MemoryRecord.status == state if state else MemoryRecord.status.in_(LIVE_STATUSES)
+        MemoryRecord.status == (state or PROMPT_STATUSES[0])
     )
     if scope:
         stmt = stmt.where(MemoryRecord.scope == scope)

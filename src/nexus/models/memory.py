@@ -11,7 +11,11 @@ from sqlmodel import Column, Field, SQLModel
 # Closed vocabularies, enforced by check constraints (not DB enums) so adding a value is
 # a plain migration. The migration keeps its own frozen copies.
 MEMORY_STATUSES = ("candidate", "active", "archived", "superseded", "rejected")
-LIVE_STATUSES = ("candidate", "active")  # what readers may recall
+# Review-visible: what an administrative list may show (candidates await review).
+LIVE_STATUSES = ("candidate", "active")
+# Prompt-visible: the only status any retrieval that feeds a model may return. Candidate,
+# archived, superseded and rejected rows never reach a prompt; filter in SQL, before LIMIT.
+PROMPT_STATUSES = ("active",)
 TRUST_STATES = ("untrusted", "asserted", "verified")
 MEMORY_TYPES = (
     "fact", "preference", "decision", "directive", "lesson", "procedure", "risk", "error",

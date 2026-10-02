@@ -13,6 +13,7 @@ which is exactly what a new worker does: nothing in-process carries over.
 import uuid
 
 import pytest
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlmodel import SQLModel
 
@@ -22,6 +23,7 @@ from nexus.memory.layered_persistent import L3_SCOPE, PersistentLayeredMemory
 from nexus.memory.promotion import PromotionCriteria
 from nexus.models.agent import Agent
 from nexus.models.company import Company
+from nexus.models.memory import MemoryRecord
 
 
 @pytest.fixture
@@ -79,8 +81,13 @@ class TestRememberResponse:
         memory = PersistentLayeredMemory(
             session_factory=patched_db, company_id=alpha.company_id
         )
-        facts = await memory.get_agent_facts(alpha.id)
-        assert any("staging deploy" in f.content for f in facts)
+        # Chat extraction is a candidate: stored, but not prompt-visible until reviewed.
+        assert not await memory.get_agent_facts(alpha.id)
+        async with patched_db() as session:
+            rows = (await session.execute(select(MemoryRecord))).scalars().all()
+        assert [(r.status, r.trust_state) for r in rows if "staging deploy" in r.content] == [
+            ("candidate", "untrusted")
+        ]
 
     async def test_reply_without_facts_stores_nothing(
         self, patched_db, company_and_agents
@@ -120,8 +127,12 @@ class TestContextSurvivesRestart:
         """Nothing in-process carries the fact; the database does."""
         _, alpha, _ = company_and_agents
         await chat_module._remember_response(
-            alpha, "I learned that the rate limiter buckets per minute."
+            alpha, "I learned that the cache warmer runs hourly."
         )
+        writer = PersistentLayeredMemory(
+            session_factory=patched_db, company_id=alpha.company_id
+        )
+        await writer.store_fact(alpha.id, "The rate limiter buckets per minute.")
 
         # A new store over the same database is what a restarted worker builds.
         restarted = PersistentLayeredMemory(
@@ -129,6 +140,8 @@ class TestContextSurvivesRestart:
         )
         context = await restarted.get_context_window(alpha.id)
         assert any("rate limiter" in line for line in context)
+        # The chat-extracted candidate is stored but waits for review: not in the window.
+        assert not any("cache warmer" in line for line in context)
 
     async def test_shared_knowledge_reaches_the_prompt(
         self, patched_db, company_and_agents

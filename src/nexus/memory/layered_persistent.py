@@ -42,7 +42,7 @@ from nexus.memory.layered import Fact, L1Summary, LayeredMemoryConfig, MemoryLay
 from nexus.memory.lifecycle import archive_memory
 from nexus.memory.promotion import PromotionCriteria, PromotionEngine
 from nexus.memory.safety import MAX_STRING
-from nexus.models.memory import LIVE_STATUSES, MemoryRecord
+from nexus.models.memory import LIVE_STATUSES, PROMPT_STATUSES, MemoryRecord
 
 L2_SCOPE = MemoryLayer.L2_AGENT.value
 L3_SCOPE = MemoryLayer.L3_SHARED.value
@@ -127,7 +127,7 @@ class PersistentLayeredMemory:
         ctx = MemoryContext(self.company_id, f"agent:{agent_id}")
         async with self.session_factory() as session:
             existing = list(
-                (await session.execute(self._l2_query(agent_id))).scalars().all()
+                (await session.execute(self._l2_query(agent_id, LIVE_STATUSES))).scalars().all()
             )
             if is_duplicate(
                 [_to_fact(r) for r in existing],
@@ -181,7 +181,11 @@ class PersistentLayeredMemory:
             if records:
                 await session.execute(
                     update(MemoryRecord)
-                    .where(MemoryRecord.id.in_([r.id for r in records]))
+                    .where(
+                        MemoryRecord.company_id == self.company_id,
+                        MemoryRecord.id.in_([r.id for r in records]),
+                        MemoryRecord.status.in_(PROMPT_STATUSES),
+                    )
                     .values(
                         access_count=MemoryRecord.access_count + 1,
                         last_accessed_at=datetime.now(UTC).replace(
@@ -204,7 +208,7 @@ class PersistentLayeredMemory:
                         select(MemoryRecord)
                         .where(MemoryRecord.company_id == self.company_id)
                         .where(MemoryRecord.scope == L2_SCOPE)
-                        .where(MemoryRecord.status.in_(LIVE_STATUSES))
+                        .where(MemoryRecord.status.in_(PROMPT_STATUSES))
                         .order_by(MemoryRecord.created_at.desc())
                     )
                 )
@@ -230,7 +234,7 @@ class PersistentLayeredMemory:
                         select(MemoryRecord)
                         .where(MemoryRecord.company_id == self.company_id)
                         .where(MemoryRecord.scope == L3_SCOPE)
-                        .where(MemoryRecord.status == "active")
+                        .where(MemoryRecord.status.in_(PROMPT_STATUSES))
                         .order_by(MemoryRecord.created_at.desc())
                         .limit(limit)
                     )
@@ -288,7 +292,11 @@ class PersistentLayeredMemory:
                 parent = (
                     await session.get(MemoryRecord, fact.record_id) if fact.record_id else None
                 )
-                if parent is None or parent.company_id != self.company_id:
+                if (
+                    parent is None
+                    or parent.company_id != self.company_id
+                    or parent.status not in PROMPT_STATUSES
+                ):
                     continue
                 if await self._promote(session, parent):
                     promoted.append(fact)
@@ -341,14 +349,18 @@ class PersistentLayeredMemory:
         )
         return result.created
 
-    def _l2_query(self, agent_id: uuid.UUID):
-        """Newest-first select of one agent's L2 rows in this company."""
+    def _l2_query(self, agent_id: uuid.UUID, statuses: tuple[str, ...] = PROMPT_STATUSES):
+        """Newest-first select of one agent's L2 rows in this company.
+
+        Defaults to prompt-visible rows (``active``). Only the write path's dedup and
+        capacity check ask for ``LIVE_STATUSES``, so unreviewed candidates still count.
+        """
         return (
             select(MemoryRecord)
             .where(MemoryRecord.company_id == self.company_id)
             .where(MemoryRecord.scope == L2_SCOPE)
             .where(MemoryRecord.agent_id == agent_id)
-            .where(MemoryRecord.status.in_(LIVE_STATUSES))
+            .where(MemoryRecord.status.in_(statuses))
             .order_by(MemoryRecord.created_at.desc())
         )
 
