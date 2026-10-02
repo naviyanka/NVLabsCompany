@@ -90,7 +90,7 @@ No production path deletes a `memory_records` row.
 | L3 (shared) | no eviction; promotion inherits the parent's status |
 | `MemoryStore.demote` / `archive_old` | writes the redacted cold file, then sets `tier=cold`; the PG row stays |
 | Cold restore | re-ingests through `ingest_memory` (`cold_archive` source) |
-| Maintenance (`orchestrator`) | decays `importance` only; never changes status, scope or tier, never deletes |
+| Maintenance (`orchestrator`) | decays `importance` of active rows only; never changes status, scope or tier, never deletes |
 | CEO supersede / resolve | `supersede_memory` / `archive_memory`, audited |
 | `delete(MemoryRecord)`, `db.delete(row)`, raw `DELETE FROM memory_records` | none in `src`; `tests/test_memory_write_path_guard.py` fails on any |
 
@@ -98,7 +98,58 @@ Exceptions: no code deletes a company's memory rows. `DELETE /companies/{id}` is
 
 ## Reads
 
-Readers select `LIVE_STATUSES` (candidate, active) in SQL before any `LIMIT`. Readers that feed prompts (agent recall and shared L3 knowledge in chat) read `active` rows only, so a candidate never reaches a prompt until something makes it active.
+Two lifecycle policies, both applied in SQL before ranking and `LIMIT`. Filtering closed rows in Python after the `LIMIT` is not allowed: a newer closed row would take the place of an active one and starve it.
+
+### Prompt-visible: `active` only
+
+`PROMPT_STATUSES = ("active",)` (`nexus.models.memory`). Any read whose result can reach a model returns active rows only. Candidate, archived, superseded and rejected rows never appear, and neither does their text, so a hostile string stored in a closed row cannot become a prompt injection.
+
+| Reader | Notes |
+|--------|-------|
+| `ceo_service.recall` (CEO executive context, snapshot view, `ceo_search_memory` tool) | Active by default. The tool's `include_closed` argument is accepted for compatibility but ignored: tool output is model-visible. |
+| `PersistentLayeredMemory.get_agent_facts`, `all_agent_facts`, `get_shared_knowledge`, `get_context_window` | L2 and L3. |
+| `chat._fetch_agent_memories`, shared knowledge in chat | Through the readers above. |
+| `MemoryStore.retrieve` (warm tier and hot cache) | Hot entries are re-checked against the database, so an entry closed after it was cached is dropped. |
+| `GET /agents/{id}/memory/search` | BM25 over active rows. |
+| `GET /companies/{id}/memory/graph` | Active rows. |
+
+`store_fact` still reads candidate and active rows for near-duplicate detection and the L2 capacity check (`LIVE_STATUSES`). That is a write-path concern: it stops the same unreviewed fact from being stored again. It never returns those rows to a caller.
+
+### Review-visible: explicit
+
+`LIVE_STATUSES = ("candidate", "active")` names what an administrative list may show, but the list endpoints now default to `active` and show anything else only when asked.
+
+- `GET /api/v1/agents/{id}/memory` and `GET /api/v1/companies/{id}/memory` accept `?status=<candidate|active|archived|superseded|rejected>`. Without it they return `active`. An unknown value is `422 MEMORY_STATUS_INVALID`.
+- **Contract change:** before this, the default listing also included candidates. A client that reviews candidates must now pass `?status=candidate`. Rows include `status` and `trust_state`.
+- `GET /ceo/memory` is the operator-only executive review path; `include_closed=true` shows every status.
+- Tenant isolation is unchanged: every query filters on the authenticated company.
+- No new dashboard or acceptance workflow. Accepting a candidate is deferred (see below).
+
+`PATCH /api/v1/memory/{id}` edits `importance` and `tier` only on a live row; a closed row returns `409 MEMORY_INVALID_TRANSITION` and is left as it was. A content change appends a superseding record.
+
+## Maintenance
+
+`orchestrator._memory_maintenance(db, company_id)` runs once per company per tick on the existing scheduler. It adds no polling loop.
+
+- Every statement filters on `company_id`; one company's tick cannot change another's rows.
+- Decay lowers `importance` by 5% (floor 0.1) for **active** rows not accessed in seven days.
+- **Candidates are not decayed.** An unreviewed row keeps its rank until it is accepted or rejected, and nothing recalls a candidate, so it is never legitimately "accessed". Archived, superseded and rejected rows are frozen.
+- Only `importance` changes. Status, trust, tier, scope, content and lifecycle columns are untouched.
+- The access counter update in `get_agent_facts` is tenant-scoped and also filters on `status`, so a read cannot touch or reactivate a closed row. Tier moves (`promote`, `demote`, `archive_old`) write `tier` and `updated_at` only; `promote` refuses a non-active row.
+- Known limitation: decay compounds on every tick for rows that stay unaccessed.
+
+## Write-path guard
+
+`tests/test_memory_write_path_guard.py` covers creation and deletion. `tests/test_memory_lifecycle_write_guard.py` covers lifecycle and trust. It scans `src/` and `scripts/` and fails when production code outside `nexus.memory.lifecycle`:
+
+- writes `status`, `trust_state`, `lifecycle_changed_at`, `lifecycle_changed_by` or `supersedes_id`, through `update(MemoryRecord).values(...)` (keyword, dict or `**` spread), attribute assignment, `setattr`, raw `UPDATE memory_records SET ...`, or a `MemoryRecord(...)` constructor outside ingest;
+- updates `MemoryRecord` outside the four scoring modules (orchestrator, layered memory, store, memory routes), without a `MemoryRecord.company_id` filter, or touches `importance`, `access_count` or `last_accessed_at` without a `MemoryRecord.status` filter.
+
+Tenant-scoped, lifecycle-safe updates to `access_count`, `last_accessed_at`, `importance`, `tier` and `updated_at` are allowed. Migration and backfill exceptions are listed in `MIGRATION_EXCEPTIONS` with a reason; it is empty because Alembic revisions are outside the scanned trees.
+
+## Verified learning is deferred
+
+Nothing here promotes a memory. There is no `candidate -> active` acceptance, no `untrusted -> asserted -> verified` change, no automatic promotion and no evidence metadata invented to justify one. `verified` and candidate acceptance need the future `memory_evidence` table, so a trust change can point at the source that supports it. Until then the only trust states a row ever has are the ones ingest assigns at insert.
 
 ## Migration
 
