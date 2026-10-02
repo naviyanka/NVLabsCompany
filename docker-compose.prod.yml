@@ -4,6 +4,10 @@
 #   .env.postgres    bootstrap superuser, read only by the postgres service
 #   .env.migration   MIGRATION_DATABASE_URL (nexus_migrator), read only by the migrate service
 #   .env.production  DATABASE_URL (nexus_app) and SYSTEM_DATABASE_URL, read by the runtime
+# LEGACY CARVE-OUT: .env.production also holds SYSTEM_DATABASE_URL (nexus_system, BYPASSRLS), so
+# the api, worker and scheduler can reach every tenant through the existing system_session
+# callers. That is not the intended final architecture; see "Deferred work: system-session
+# process isolation" in the runbook.
 # Roles are provisioned once, by an administrator, before the first start. See
 # docs/runbooks/database-roles.md. Nothing here creates roles or schema implicitly.
 services:

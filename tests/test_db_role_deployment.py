@@ -76,6 +76,19 @@ def test_the_app_secret_holds_the_application_credential_only():
     )
 
 
+def test_no_helm_template_carries_or_falls_back_to_a_system_credential():
+    # Helm injects no SYSTEM_DATABASE_URL today (a documented gap, see the runbook), so the
+    # chart must neither add one to a pod nor stand in the application URL for it.
+    for path in TEMPLATES.glob("*.yaml"):
+        text = _text(path)
+        assert "SYSTEM_DATABASE_URL" not in text, path.name
+        if path.name != "configmap.yaml":
+            assert ".Values.database.systemUser" not in text, path.name
+    secrets = _text(TEMPLATES / "secrets.yaml")
+    assert not re.search(r"SYSTEM", secrets)
+    assert not re.search(r"default[^\n]*DATABASE_URL", secrets), "no URL fallback"
+
+
 def test_migration_values_default_to_no_secret_and_a_distinct_role():
     values = yaml.safe_load(_text(CHART / "values.yaml"))
     assert values["migration"]["existingSecret"] == "", (
@@ -127,6 +140,7 @@ def test_helm_render_is_fail_closed_and_refuses_collapsed_identities():
     for d in docs:
         if d["kind"] == "Deployment":
             assert "MIGRATION_DATABASE_URL" not in yaml.safe_dump(d)
+    assert "SYSTEM_DATABASE_URL" not in ok.stdout, "the chart injects no system credential"
 
     refused = {
         "no migration secret": ("migration.existingSecret=",),
@@ -191,12 +205,33 @@ def test_prod_compose_keeps_the_credentials_apart():
     )
 
 
+def test_compose_system_credential_wiring_is_documented_not_accidental():
+    # The legacy carve-out exists today. While it does, the Compose file and the runbook must
+    # say so; this does not require the carve-out to stay, so the follow-up can remove it.
+    compose = _text(ROOT / "docker-compose.prod.yml")
+    runbook = _text(ROOT / "docs" / "runbooks" / "database-roles.md")
+    services = _compose("docker-compose.prod.yml")
+    env = _text(ROOT / ".env.production.example")
+    carries = re.search(r"(?m)^SYSTEM_DATABASE_URL=", env) is not None
+    for name in ("migrate", "postgres"):
+        assert "SYSTEM_DATABASE_URL" not in yaml.safe_dump(services[name]), name
+    if carries:
+        assert "LEGACY CARVE-OUT" in compose
+        assert "legacy carve-out" in runbook
+        assert "Deferred work: system-session process isolation" in runbook
+
+
 def test_env_examples_keep_the_credentials_apart():
     runtime = _text(ROOT / ".env.production.example")
     assert "MIGRATION_DATABASE_URL" not in re.sub(r"(?m)^#.*$", "", runtime)
     assert not re.search(r"(?m)^POSTGRES_PASSWORD=", runtime)
     assert re.search(rf"(?m)^DATABASE_URL=postgresql\+asyncpg://{APP_ROLE}:", runtime)
-    assert re.search(rf"(?m)^SYSTEM_DATABASE_URL=postgresql\+asyncpg://{SYSTEM_ROLE}:", runtime)
+    # The system credential is a documented legacy carve-out (see the runbook). It is allowed
+    # here only with its marker, and only as the system role; removing it later is fine.
+    system = re.search(r"(?m)^SYSTEM_DATABASE_URL=(.*)$", runtime)
+    if system:
+        assert system.group(1).startswith(f"postgresql+asyncpg://{SYSTEM_ROLE}:")
+        assert "LEGACY CARVE-OUT" in runtime
     assert "DATABASE_SYSTEM_URL" not in runtime, (
         "the variable the application reads is SYSTEM_DATABASE_URL"
     )
