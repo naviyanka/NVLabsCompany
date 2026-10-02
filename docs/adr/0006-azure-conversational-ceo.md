@@ -216,3 +216,7 @@ Still unresolved by design:
 1. The Azure OpenAI Entra token scope (PR 2 verifies it).
 2. Whether outbound calls need an application access policy or equivalent tenant policy (PR 11 verifies it).
 3. Whether the Azure OpenAI deployment is one global deployment or one per environment, and the data-residency region.
+
+## PR 2 implementation note (2026-10-02)
+
+The Azure OpenAI streaming provider is implemented behind `AZURE_OPENAI_ENABLED` (default false); see `docs/azure-openai-provider.md`. The two Microsoft Learn pages disagree on the Entra scope and no disposable authenticated probe has been run, so unresolved item 1 above stays open: the operator must choose one of the two documented scopes, only that scope is requested, and production enablement waits for the approved probe.
