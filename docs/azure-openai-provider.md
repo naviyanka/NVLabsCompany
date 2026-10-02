@@ -1,8 +1,8 @@
 # Azure OpenAI governed streaming provider
 
 ADR 0006, PR 2. Adapter type `azure-openai-native` (registry key `azure_openai_native`), in
-`src/nexus/adapters/azure_openai_native.py`. It is **off by default** and has had **no live acceptance**: no real Azure
-call, token request or model call was made while building it. Every test runs against a local fake server.
+`src/nexus/adapters/azure_openai_native.py`. It is **off by default**. Its automated tests run against a local fake server; the Entra scope was validated live (see
+"Derived scope") and one application-level acceptance call is recorded under "Live acceptance".
 
 ## What it is
 
@@ -68,20 +68,67 @@ internally consistent token scope for `/openai/v1/chat/completions` on that host
 
 The managed-identity page (ms.date 2026-08-04, `https://ai.azure.com/.default`) was cited earlier and not re-read.
 
-### Derived scope: unresolved, so Entra is unavailable
+### Derived scope: `https://ai.azure.com/.default`
 
 For the supported family (`*.openai.azure.com`) and the implemented path (`/openai/v1/chat/completions`), pages A, B, C
-and D all apply, and they **conflict**: A says `https://cognitiveservices.azure.com/.default`; B, C and D say
-`https://ai.azure.com/.default`. Nothing in them reconciles the two, so the code does not guess.
+and D all apply and they disagree: A shows `https://cognitiveservices.azure.com/.default`; B, C and D show
+`https://ai.azure.com/.default`. Documentation alone could not settle it, so a live probe did.
 
-- The scope is derived in code from the endpoint family (`ENTRA_SCOPES` in `azure_openai_native.py`). There is no
-  scope setting and an `AZURE_OPENAI_TOKEN_SCOPE` environment variable is ignored.
-- For the resource family the derived scope is currently `None`. Entra mode reports
-  `AZURE_OPENAI_ENTRA_SCOPE_UNRESOLVED`, requests no token and makes no network call.
-- There is no scope fallback. A token failure is `AZURE_OPENAI_AUTH_FAILED` and is never retried with another scope.
-- The only usable mode today is development **key** auth through a secret reference.
-- A live probe in the disposable Azure tenant must verify one scope before it is filled into `ENTRA_SCOPES` and Entra
-  is enabled for production. That probe has not been done.
+**Live probe, 2026-10-02.** One user principal, one tenant, one disposable Azure OpenAI resource in South India
+(`disableLocalAuth=true`, regional `Standard` `gpt-4.1-mini` deployment, role Cognitive Services OpenAI User at account
+scope). One minimal chat completion per candidate scope against `/openai/v1/chat/completions`:
+
+| Scope | Result | Token audience |
+|---|---|---|
+| `https://cognitiveservices.azure.com/.default` | HTTP 200, reply "OK" | `https://cognitiveservices.azure.com` |
+| `https://ai.azure.com/.default` | HTTP 200, reply "OK" | `https://ai.azure.com` |
+
+Both scopes worked. NEXUS deliberately selects `https://ai.azure.com/.default`: it matches the current Learn pages for
+this exact path and it is the service-specific audience rather than the shared Cognitive Services one. This page does not
+claim the other scope is invalid.
+
+- The scope is derived in code from the endpoint family (`ENTRA_SCOPES` in `azure_openai_native.py`). There is no scope
+  setting and no runtime probing, and an `AZURE_OPENAI_TOKEN_SCOPE` environment variable or an agent `adapter_config` value
+  is ignored.
+- Any endpoint outside the supported family (a Foundry `*.services.ai.azure.com` host, a `*.cognitiveservices.azure.com`
+  host, anything else) is rejected before a scope is derived and before any token is requested.
+- There is no scope fallback. A token failure is `AZURE_OPENAI_AUTH_FAILED` and is never retried with another scope; an
+  inference failure does not request a second token.
+- Entra mode is usable for the supported family. The provider is still off by default (`AZURE_OPENAI_ENABLED=false`).
+- **Not verified:** managed-identity and service-principal authentication (only a developer login was probed), other
+  tenants, other regions and other endpoint families.
+
+### Live acceptance (application level, 2026-10-02)
+
+One paid request through the real NEXUS adapter (not a raw HTTP probe), run from a temporary harness that was not
+committed. Azure was enabled only in that process's environment. The same resource as the probe above (South India,
+`disableLocalAuth=true`, deployment `probe-mini`, `gpt-4.1-mini`), the developer's existing Azure CLI login through the
+adapter's normal `DefaultAzureCredential` path, a throwaway SQLite database and no tools, company data or memory. Limits:
+input `Reply with exactly OK`, 16 output tokens, 30 s timeout, no retry, one provider request.
+
+| Check | Result |
+|---|---|
+| Scope requested | exactly `https://ai.azure.com/.default`, one token acquisition |
+| Request | one `POST /openai/v1/chat/completions`, `max_completion_tokens` 16, no `tools` |
+| Outcome | success; streamed text and final output both `OK` |
+| Latency | 3166 ms end to end |
+| Usage captured | 11 input tokens, 1 output token |
+| Budget | one hold reserved and settled once (`committed`, 1 cent, the smallest unit); no release |
+| Estimated cost | about INR 0.0006 at South India regional list prices; the repository price table maps `gpt-4.1*` to a higher price, so the recorded unit overestimates |
+| Token or credential in output, logs, audit rows or tool rows | none found (checked against the in-memory token) |
+| Tool invocations | 0 |
+
+Two earlier attempts of the same harness made no token request and no HTTP request (zero cost; the budget hold was
+released at 0): the shared test fixture used by the harness replaces `shutil.which`, so `AzureCliCredential` could not
+see `az`. That was a test-process problem and needed no production change.
+
+The sanitized record is `docs/testing/evidence/azure-openai-entra/ACCEPTANCE.md`. The latency is a single observation,
+not a benchmark. The 1-cent ledger amount is the internal minimum accounting unit, not the Azure retail charge.
+
+Not verified by this run: managed-identity and service-principal authentication (the call used an Azure CLI user
+credential), other tenants, other regions and other endpoint families. It is one request from one user principal.
+**Production enablement is a separate decision**, and managed identity still needs validation in the deployed
+environment.
 
 ### Runtime dependency
 
@@ -151,8 +198,8 @@ so a server that keeps trickling bytes still ends, reported as `AZURE_OPENAI_TIM
 ## Diagnostics (read-only)
 
 `azure_openai_native.status()` (also under `azure_openai_native` in the CEO status) reports the flag, endpoint shape,
-deployment, model, auth mode, endpoint family, derived Entra scope and whether it is resolved, identity-SDK presence, credential-reference presence, timeout and a stable
-`unavailable_reason`. It makes no request, asks for no token, calls no tool, creates no turn, writes nothing and shows no
+deployment, model, auth mode, endpoint family, the derived Entra scope and its selection basis (`live_validated`),
+identity-SDK presence, credential-reference presence, timeout and a stable `unavailable_reason`. It makes no request, asks for no token, calls no tool, creates no turn, writes nothing and shows no
 secret. A live probe is out of scope.
 
 ## Failure text
@@ -169,7 +216,6 @@ fails the turn fails; there is no fallback.
 
 ## Not done here
 
-Azure Speech (STT/TTS, ADR 0006 PR 3), browser voice, Teams, Telegram, attention and calling, migrations, live Azure
-resources and any real or paid call. There is **no production or live acceptance yet**, and a live Entra probe in the
-disposable Azure tenant is still required, to verify the token scope, before any rollout. Azure Speech will consume this
+Azure Speech (STT/TTS, ADR 0006 PR 3), browser voice, Teams, Telegram, attention and calling, migrations, and any Azure
+resource beyond the retained test account used above. There is **no production rollout**: managed-identity and service-principal authentication are unverified. Azure Speech will consume this
 provider's text events and needs the low-latency conversation strategy above to feel live.

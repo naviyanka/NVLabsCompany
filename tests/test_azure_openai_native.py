@@ -26,6 +26,7 @@ import pytest
 from nexus.adapters import azure_openai_native as ao
 from nexus.adapters import governed_loop as gl
 from nexus.adapters.azure_openai_native import AzureOpenAINativeAdapter
+from nexus.adapters.governed_loop import ProviderError
 from nexus.adapters.registry import AdapterRegistry
 from nexus.adapters.uastl import resolve_provider
 from nexus.config import Settings, settings
@@ -46,8 +47,8 @@ pytestmark = pytest.mark.employee_work
 
 KEY = "az-key-not-a-real-key-456"
 TOKEN = "entra-token-not-real-789"
-# The real scope is unresolved (ao.ENTRA_SCOPES), so entra-path tests pin a fake one.
-TEST_SCOPE = "https://scope.test.invalid/.default"
+# The live-validated scope for *.openai.azure.com, written out so a code change cannot move it silently.
+SCOPE = "https://ai.azure.com/.default"
 DEPLOYMENT = "ceo-deployment"
 MODEL = "gpt-4o"
 
@@ -177,7 +178,6 @@ def azure(monkeypatch):
     monkeypatch.setattr(settings, "azure_openai_model", MODEL)
     monkeypatch.setattr(settings, "azure_openai_api_version", "v1")
     monkeypatch.setattr(settings, "azure_openai_auth", "entra")
-    monkeypatch.setitem(ao.ENTRA_SCOPES, ao.RESOURCE, TEST_SCOPE)
     monkeypatch.setattr(settings, "azure_openai_timeout_seconds", 20.0)
     monkeypatch.setattr(settings, "azure_openai_max_retries", 2)
     monkeypatch.setattr(ao, "_token_source", token_source)
@@ -231,7 +231,7 @@ class TestStreaming:
         assert req["body"]["stream_options"] == {"include_usage": True}
         assert req["body"]["max_completion_tokens"] == ao.MAX_TOKENS and "max_tokens" not in req["body"]
         assert "tools" not in req["body"]
-        assert azure.scopes == [TEST_SCOPE]
+        assert azure.scopes == [SCOPE]
 
     async def test_a_split_utf8_character_and_split_json_are_reassembled(self, azure, db, c):  # noqa: F811
         text = "héllo wörld 🙂 ünï"
@@ -715,22 +715,40 @@ class TestTokenScope:
     def test_there_is_no_scope_setting_to_choose_from(self):
         assert not [n for n in Settings.model_fields if n.startswith("azure") and "scope" in n]
 
-    def test_the_resource_family_scope_is_unresolved_until_the_live_probe(self):
-        # Microsoft Learn still disagrees for *.openai.azure.com + /openai/v1 (accessed 2026-10-02):
-        # cognitiveservices.azure.com/.default vs ai.azure.com/.default. Nothing is guessed.
-        assert ao.ENTRA_SCOPES == {ao.RESOURCE: None}
+    def test_the_resource_family_derives_exactly_the_live_validated_scope(self):
+        assert ao.ENTRA_SCOPES == {ao.RESOURCE: SCOPE}
         assert ao.SUPPORTED_FAMILIES == (ao.RESOURCE,)
+        assert ao.ENTRA_SCOPE_BASIS == "live_validated"
 
-    async def test_unresolved_scope_makes_entra_unavailable_with_no_request_or_token(self, azure, db, c, monkeypatch):  # noqa: F811
-        fake = azure([text_response("x")])
-        monkeypatch.setitem(ao.ENTRA_SCOPES, ao.RESOURCE, None)
-        assert ao.unavailable_reason().startswith("AZURE_OPENAI_ENTRA_SCOPE_UNRESOLVED")
-        result, _ = await run(db, c["acme_agy"])
-        assert "AZURE_OPENAI_ENTRA_SCOPE_UNRESOLVED" in result.error
-        assert fake.requests == [] and azure.scopes == []
+    @pytest.mark.parametrize("endpoint", ["https://res.openai.azure.com", "https://res.openai.azure.com/"])
+    def test_a_supported_endpoint_derives_the_scope_and_is_available(self, azure, monkeypatch, endpoint):
+        azure([])
+        monkeypatch.setattr(settings, "azure_openai_endpoint", endpoint)
+        assert ao._scope() == SCOPE and ao.unavailable_reason() is None
 
-    async def test_key_mode_is_the_development_path_while_the_scope_is_unresolved(self, azure, db, c, monkeypatch):  # noqa: F811
-        monkeypatch.setitem(ao.ENTRA_SCOPES, ao.RESOURCE, None)
+    @pytest.mark.parametrize("endpoint", [
+        "https://res.services.ai.azure.com", "https://res.cognitiveservices.azure.com", "https://evil.example.com",
+    ])
+    def test_unsupported_families_never_derive_a_scope(self, azure, monkeypatch, endpoint):
+        azure([])
+        monkeypatch.setattr(settings, "azure_openai_endpoint", endpoint)
+        with pytest.raises(ProviderError):
+            ao._scope()
+        assert ao.status()["entra_scope"] is None and ao.status()["available"] is False
+
+    async def test_the_scope_never_comes_from_the_environment_or_the_agent(self, azure, db, c, monkeypatch):  # noqa: F811
+        monkeypatch.setenv("AZURE_OPENAI_TOKEN_SCOPE", "https://cognitiveservices.azure.com/.default")
+        fake = azure([text_response("ok")])
+        result, _ = await run(db, c["acme_agy"], config={"scope": "https://cognitiveservices.azure.com/.default"})
+        assert result.success and azure.scopes == [SCOPE] and len(fake.requests) == 1
+
+    def test_the_default_state_is_disabled_even_though_a_scope_is_known(self, monkeypatch):
+        monkeypatch.delenv("AZURE_OPENAI_ENABLED", raising=False)
+        assert Settings.model_fields["azure_openai_enabled"].default is False
+        monkeypatch.setattr(settings, "azure_openai_enabled", False)
+        assert ao.unavailable_reason().startswith("AZURE_OPENAI_DISABLED")
+
+    async def test_key_mode_requests_no_token_and_leaves_the_scope_alone(self, azure, db, c, monkeypatch):  # noqa: F811
         monkeypatch.setattr(settings, "azure_openai_auth", "key")
         monkeypatch.setenv("NEXUS_SECRET_AZURE_OPENAI_API_KEY", KEY)
         fake = azure([text_response("dev ok")])
@@ -747,8 +765,14 @@ class TestTokenScope:
         monkeypatch.setattr(ao, "_token_source", failing)
         fake = azure([text_response("x")])
         result, _ = await run(db, c["acme_agy"])
-        assert asked == [TEST_SCOPE] and fake.requests == []
+        assert asked == [SCOPE] and fake.requests == []  # no second scope is tried
         assert result.error.startswith("AZURE_OPENAI_AUTH_FAILED") and "AADSTS" not in result.error
+
+    async def test_an_inference_failure_does_not_retry_with_another_scope(self, azure, db, c):  # noqa: F811
+        fake = azure([Status(401)])
+        result, _ = await run(db, c["acme_agy"])
+        assert not result.success and len(fake.requests) == 1
+        assert azure.scopes == [SCOPE]  # one token for the one scope, nothing else
 
 
 class TestDoctor:
@@ -796,8 +820,8 @@ class TestDoctor:
         fake = azure([])
         before = len(await _rows(db, CostEvent)), len(await _rows(db, ToolInvocation)), len(await _rows(db, AuditLog))
         shown = ao.status()
-        assert shown["available"] is True and shown["auth"] == "entra" and shown["entra_scope"] == TEST_SCOPE
-        assert shown["endpoint_family"] == ao.RESOURCE and shown["entra_scope_resolved"] is True
+        assert shown["available"] is True and shown["auth"] == "entra" and shown["entra_scope"] == SCOPE
+        assert shown["endpoint_family"] == ao.RESOURCE and shown["entra_scope_basis"] == "live_validated"
         assert shown["endpoint_valid"] and shown["deployment_configured"] and shown["model_configured"]
         assert TOKEN not in json.dumps(shown) and fake.requests == [] and azure.scopes == []
         assert (len(await _rows(db, CostEvent)), len(await _rows(db, ToolInvocation)), len(await _rows(db, AuditLog))) == before
