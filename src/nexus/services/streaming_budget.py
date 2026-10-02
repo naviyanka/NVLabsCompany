@@ -29,9 +29,6 @@ logger = logging.getLogger(__name__)
 
 CHARS_PER_TOKEN = 3  # conservative: fewer chars per token means a higher estimate
 
-# Registry keys whose adapter meters every round itself; callers must not also reserve.
-SELF_METERED = frozenset({"azure_openai_native"})
-
 
 @dataclass
 class Hold:

@@ -4,36 +4,128 @@ Separate from test_azure_openai_native.py because the employee-work fixtures the
 ``chat._call_llm``; here the real function runs with its collaborators stubbed.
 """
 
+import asyncio
 import uuid
+from types import SimpleNamespace
 
 import pytest
 
+from nexus.adapters.base import BaseAdapter
+from nexus.adapters.registry import AdapterRegistry
 from nexus.api.routes import chat
 from nexus.models.agent import Agent
-from nexus.services.streaming_budget import SELF_METERED
+from nexus.runtime.adapter import TaskResult
+
+SELF_METERING = ["azure_openai_native"]
+# Every other default adapter type: the chat layer reserves for these, exactly once.
+METERED_BY_CHAT = [
+    k for k in AdapterRegistry().get_adapter_types() if k not in SELF_METERING
+]
 
 
-@pytest.mark.parametrize("key,reserves", [("azure_openai_native", False), ("anthropic", True)])
-async def test_self_metered_adapters_skip_the_chat_reservation(monkeypatch, key, reserves):
-    assert "azure_openai_native" in SELF_METERED and "anthropic" not in SELF_METERED
-    reserved = []
+class _Adapter:
+    """Stands in for any adapter. ``meters_budget`` is forged on purpose: it must change nothing."""
 
-    async def spy(*a, **kw):
-        reserved.append(1)
+    meters_budget = True
+
+    def __init__(self, outcome):
+        self.outcome = outcome
+
+    async def create_session(self, agent_id, config):
+        return SimpleNamespace(context=None, session_id=uuid.uuid4())
+
+    async def execute_task(self, session, task_id, payload):
+        if isinstance(self.outcome, BaseException):
+            raise self.outcome
+        return TaskResult(
+            task_id=task_id, agent_id=uuid.uuid4(), success=True, output="hi",
+            input_tokens=3, output_tokens=2,
+        )
+
+    async def terminate(self, session):
+        pass
+
+
+def _call(monkeypatch, key, outcome, config=None):
+    """Run the real ``chat._call_llm``; returns the reservation and settlement logs."""
+    log = {"reserved": 0, "settled": []}
+
+    async def reserve(*a, **kw):
+        log["reserved"] += 1
+        return "hold"
+
+    async def settle(rid, cost_cents, **kw):
+        log["settled"].append((rid, cost_cents))
 
     async def connection(agent):
         return None
 
-    monkeypatch.setattr(chat, "_reserve_budget", spy)
+    async def remember(*a, **kw):
+        return None
+
+    monkeypatch.setattr(chat, "_reserve_budget", reserve)
+    monkeypatch.setattr(chat, "_settle_budget", settle)
     monkeypatch.setattr(chat, "_resolve_connection", connection)
-    config = {"model": "m", "api_key": "k"}
-    monkeypatch.setattr(chat, "_resolve_adapter_type", lambda agent, conn: (key, config))
+    monkeypatch.setattr(chat, "_remember_response", remember)
+    cfg = {"model": "gpt-4o", "api_key": "k", **(config or {})}
+    monkeypatch.setattr(chat, "_resolve_adapter_type", lambda agent, conn: (key, cfg))
+    monkeypatch.setattr(
+        AdapterRegistry, "create_adapter", lambda self, k, config=None: _Adapter(outcome)
+    )
     agent = Agent(company_id=uuid.uuid4(), name="A", role="engineer", adapter_type=key)
-    try:
-        await chat._call_llm(agent, "sys", "hi", [])
-    except Exception:  # noqa: BLE001 -- only the reservation decision is under test
+    return log, chat._call_llm(agent, "sys", "hi", [])
+
+
+@pytest.mark.parametrize("key", SELF_METERING)
+async def test_a_self_metering_adapter_gets_no_chat_reservation(monkeypatch, key):
+    log, call = _call(monkeypatch, key, None)
+    text, _, tokens = await call
+    assert text == "hi" and tokens == 5
+    assert log["reserved"] == 0  # the adapter reserves and settles every round itself
+
+
+@pytest.mark.parametrize("key", METERED_BY_CHAT)
+@pytest.mark.parametrize("outcome", [None, RuntimeError("provider down"), asyncio.CancelledError()])
+async def test_every_other_adapter_reserves_once_and_always_settles_once(monkeypatch, key, outcome):
+    log, call = _call(monkeypatch, key, outcome)
+    if isinstance(outcome, asyncio.CancelledError):
+        with pytest.raises(asyncio.CancelledError):
+            await call
+    else:
+        await call  # a provider error is answered in character, not raised
+    assert log["reserved"] == 1
+    ((rid, cents),) = log["settled"]  # settled or released exactly once: never left open
+    assert rid == "hold" and (cents > 0) is (outcome is None)
+
+
+@pytest.mark.parametrize("key", METERED_BY_CHAT)
+async def test_a_forged_capability_cannot_skip_budgeting(monkeypatch, key):
+    # The adapter class claims meters_budget and the agent's config claims it too.
+    forged = {"meters_budget": True, "self_metered": True, "adapter_config": {"meters_budget": 1}}
+    log, call = _call(monkeypatch, key, None, config=forged)
+    await call
+    assert log["reserved"] == 1 and len(log["settled"]) == 1
+
+
+def test_self_metering_is_only_an_internal_registration():
+    registry = AdapterRegistry()
+    assert [k for k in registry.get_adapter_types() if registry.is_self_metered(k)] == SELF_METERING
+    assert registry.is_self_metered("unknown") is False
+
+    class Claims(BaseAdapter):  # claims the attribute but is registered without the capability
+        meters_budget = True
+
+    class Silent(BaseAdapter):
         pass
-    assert bool(reserved) is reserves
+
+    registry.register_adapter("claims", Claims)
+    assert registry.is_self_metered("claims") is False
+    with pytest.raises(TypeError):  # the capability needs the class to meter, not just a flag
+        registry.register_adapter("silent", Silent, self_metered=True)
+    registry.register_adapter("claims", Claims, self_metered=True)
+    assert registry.is_self_metered("claims") is True
+    registry.register_adapter("claims", Silent)  # re-registering drops the capability
+    assert registry.is_self_metered("claims") is False
 
 
 class _Stream:

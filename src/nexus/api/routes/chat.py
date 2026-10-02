@@ -1057,11 +1057,13 @@ async def _call_llm(
     # the call proceed anyway.
     # A self-metering adapter reserves and settles every streamed round itself;
     # a second hold here would count the same call twice.
-    from nexus.services.streaming_budget import SELF_METERED
+    # Self-metering is a capability of the registered adapter type, not of agent config.
+    adapter_registry = AdapterRegistry()
+    self_metered = adapter_registry.is_self_metered(registry_key)
 
     reservation_id = (
         None
-        if registry_key in SELF_METERED
+        if self_metered
         else await _reserve_budget(
             agent, system_prompt, user_message, history, config, session_id=session_id
         )
@@ -1071,7 +1073,6 @@ async def _call_llm(
     spend: dict[str, Any] = {"cost_cents": 0, "input": 0, "output": 0, "model": None}
 
     try:
-        adapter_registry = AdapterRegistry()
         adapter = adapter_registry.create_adapter(registry_key)
 
         # Hermes tool calls use same DB-backed ToolAccess, autonomy, approval,
@@ -1160,7 +1161,7 @@ async def _call_llm(
         }
         if temperature is not None:
             payload["temperature"] = temperature
-        if turn_id is not None and registry_key in SELF_METERED:
+        if turn_id is not None and self_metered:
             payload["turn_id"] = str(turn_id)  # identity for the adapter's budget log
 
         from nexus.observability.metrics import record_llm_metrics
