@@ -350,6 +350,7 @@ def test_test_workflow_jobs_are_unchanged():
         "postgres-integration",
         "frontend",
         "api-parity",
+        "speech-smoke",  # offline Azure Speech SDK / Linux container compatibility (ADR 0006 PR 3)
     }
 
 
