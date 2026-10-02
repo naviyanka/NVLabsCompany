@@ -80,6 +80,7 @@ tenant session.
 |---|---|---|
 | `auth/middleware.py::AuthenticationMiddleware._resolve` | discovery | Resolves the credential to a principal before the tenant is known |
 | `tools/mcp_server.py::authenticate` | discovery | Resolves the MCP API key before the tenant is known |
+| `api/routes/webhooks.py::resolve_webhook_trigger_context` | discovery | Pre-tenant webhook trigger lookup; derives the company from an authenticated trigger before `tenant_session` is possible. See below |
 | `governance/audit_persistent.py::PersistentAuditLogger._sessions` | system | Default only when no factory is passed. The one production constructor (`verify_audit_chain`) now passes a tenant factory. |
 | `runtime/checkpoint.py::save_checkpoint_nonblocking` | system | `execution_checkpoints` is not tenant-scoped |
 | `runtime/watchdog_service.py::_file_decision` | system | Decision queues are not tenant-scoped; the queue row carries `company_id` |
@@ -89,6 +90,32 @@ tenant session.
 | `auth/bootstrap.py::_main` | bootstrap | First-admin CLI, run before any tenant exists |
 | `demo/seed.py::_main` | bootstrap | Development seed CLI, run as the database owner |
 | `main.py::lifespan` | bootstrap | Default-company seed and budget flush (`companies`), kill switch and circuit breaker (global tables), secret backend (`stored_secrets`); none is tenant-scoped |
+
+### Webhook trigger lookup (`resolve_webhook_trigger_context`)
+
+`POST /api/v1/webhooks/{trigger_id}` is called by an external service with no
+session, so the only thing that names the tenant is the trigger. The route cannot
+open `tenant_session(company_id)` before it knows the company, and `triggers` is
+not under row-level security, so there is no tenant to bind first.
+
+- **Where:** `api/routes/webhooks.py::resolve_webhook_trigger_context`. It is the
+  only raw `async_session_factory` use there and the only entry the guard allows.
+  `receive_webhook` is not allowlisted, and the guard fails if a raw session
+  appears in it or in any other function.
+- **Query scope:** one `SELECT` by primary key on `triggers`, returning id,
+  company id, agent id, name, type, `is_active` and the config values it needs
+  (`inbound_secret`, prompt). The helper takes no `company_id`, lists nothing,
+  writes nothing and creates no task, goal, chat turn, tool invocation, memory or
+  workflow row. It returns a frozen value object (the secret is excluded from its
+  `repr`), never an ORM object or session, and the session is closed on return.
+- **Fail closed:** an unknown, inactive, wrong-type or wrong-secret trigger gets
+  the same bare 401 and reveals nothing about any tenant. The secret is checked
+  before the company is used for anything.
+- **After the lookup:** the idempotency claim, completion and release, the agent
+  read and the execution record all use `tenant_session(company_id)`. The raw
+  session is closed before the idempotency claim, prompt construction and the
+  model call.
+- **Tests:** `tests/test_webhook_intake.py::TestPreTenantLookup`.
 
 ## Audit writes
 

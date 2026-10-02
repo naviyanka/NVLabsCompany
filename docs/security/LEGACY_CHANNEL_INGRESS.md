@@ -82,12 +82,13 @@ injected an API key.
   to a destination configured in the workflow, and exposes no inbound path.
 - **Outbound Slack, Discord and webhook delivery**: `SlackChannel`,
   `DiscordChannel` and `WebhookChannel` in `nexus.communication.channels`.
-- **Per-trigger webhooks** at `POST /api/v1/webhooks/{trigger_id}`: unchanged.
+- **Per-trigger webhooks** at `POST /api/v1/webhooks/{trigger_id}`: still available, now
+  hardened (see [INGRESS_AUTH_AND_WEBHOOKS.md](INGRESS_AUTH_AND_WEBHOOKS.md); it requires an
+  `Idempotency-Key`).
   Each trigger has its own secret checked in constant time, a rate limit and a
   body cap, and it runs an admin-configured agent. It is a service integration,
-  not a human-sender channel, and it creates no Task, Goal or tool call. Remaining
-  gaps there (no replay protection, and the payload reaches an LLM prompt) are out
-  of scope for this change.
+  not a human-sender channel, and it creates no Task, Goal or tool call. Replay
+  protection and untrusted-payload handling for it are described in the note above.
 - **`ChannelRouter.handle_inbound`** persists a `Message` as an agent. No route
   calls it; a guard test keeps it that way.
 

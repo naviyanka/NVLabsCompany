@@ -37,6 +37,11 @@ ALLOWED: dict[str, tuple[str, str]] = {
         DISCOVERY,
         "resolves the MCP API key before the tenant is known",
     ),
+    "api/routes/webhooks.py::resolve_webhook_trigger_context": (
+        DISCOVERY,
+        "pre-tenant webhook trigger lookup; derives company from an authenticated "
+        "trigger before tenant_session is possible",
+    ),
     "governance/audit_persistent.py::PersistentAuditLogger._sessions": (
         SYSTEM,
         "default for chain verification and retention when no factory is given",

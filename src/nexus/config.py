@@ -29,9 +29,19 @@ class Settings(BaseSettings):
 
     # Authentication
     # When False, requests without a resolvable principal fall back to the
-    # legacy X-Company-Id header. Intended only as emergency escape hatch
-    # during rollout; production must leave True.
+    # X-Company-Id header, which makes every tenant impersonable. It is honoured
+    # only where ``auth_disabled_refusal`` allows it: "test", or "development"
+    # with the explicit acknowledgement below. Never in production or staging.
     auth_enabled: bool = True
+    # Runtime environment: "production", "staging", "development" or "test".
+    # Unset or unrecognised is treated as unsafe, so it cannot disable auth.
+    nexus_env: str = ""
+    # Development only: acknowledges that AUTH_ENABLED=false trusts any caller.
+    nexus_allow_insecure_auth_disabled: bool = False
+    # Hard cap on one inbound webhook's model run. It must finish, with room to
+    # record the result, before the 300 s idempotency lease lapses, so startup
+    # refuses a value that is not below the lease minus a safety margin.
+    webhook_processing_timeout_seconds: float = 120.0
     session_cookie_name: str = "nv_session"
     csrf_cookie_name: str = "nv_csrf"
     # 7 days. Sessions are DB-backed, absolute expiry stored in the
@@ -177,6 +187,36 @@ class Settings(BaseSettings):
     # Bounded verification logs, one root per company like worktree_root. Stored
     # references are relative to this root, never absolute.
     task_attempt_evidence_root: str = "./data/task_evidence/{company_id}"
+
+    @property
+    def environment(self) -> str:
+        """The normalised runtime environment name; empty when unset."""
+        return self.nexus_env.strip().lower()
+
+    def auth_disabled_refusal(self) -> str | None:
+        """Stable code when ``AUTH_ENABLED=false`` is not allowed here, else ``None``.
+
+        Enabled auth is never refused. Disabling it needs a known safe
+        environment: ``test``, or ``development`` plus the separately named
+        acknowledgement. Production, staging and anything unknown refuse.
+        """
+        if self.auth_enabled:
+            return None
+        env = self.environment
+        if env == "test":
+            return None
+        if env == "development":
+            if self.nexus_allow_insecure_auth_disabled:
+                return None
+            return "AUTH_DISABLED_NEEDS_ACKNOWLEDGEMENT"
+        if env in ("production", "staging"):
+            return "AUTH_DISABLED_FORBIDDEN_ENVIRONMENT"
+        return "AUTH_DISABLED_UNKNOWN_ENVIRONMENT"
+
+    @property
+    def auth_bypass_active(self) -> bool:
+        """Whether the X-Company-Id fallback may run: auth off *and* allowed."""
+        return not self.auth_enabled and self.auth_disabled_refusal() is None
 
     model_config = {
         "env_prefix": "",

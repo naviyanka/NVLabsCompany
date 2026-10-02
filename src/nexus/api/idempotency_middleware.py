@@ -22,7 +22,10 @@ MUTATING_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 MAX_BODY_CACHE_BYTES = 256 * 1024  # 256 KB
 # Chat turn POSTs dedupe on ChatTurn.idempotency_key and re-attach a retry to
 # the running turn; a cached (possibly empty, streamed) body would be wrong.
-SELF_IDEMPOTENT_PATHS = re.compile(r"^/api/v1/(agents/[^/]+/chat|sessions/[^/]+/messages)(/stream)?/?$")
+# Trigger webhooks keep their own tenant-and-trigger-scoped ledger, with a lease.
+SELF_IDEMPOTENT_PATHS = re.compile(
+    r"^/api/v1/(agents/[^/]+/chat|sessions/[^/]+/messages)(/stream)?/?$|^/api/v1/webhooks/[^/]+/?$"
+)
 
 
 def _canonical_json_hash(body_bytes: bytes) -> str:

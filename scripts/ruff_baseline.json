@@ -538,10 +538,6 @@
   "I001": 2,
   "UP017": 8
  },
- "src/nexus/api/routes/telegram_bot.py": {
-  "F541": 1,
-  "I001": 1
- },
  "src/nexus/api/routes/tools.py": {
   "E501": 1
  },
