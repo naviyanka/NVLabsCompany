@@ -41,7 +41,7 @@ from sqlalchemy.exc import IntegrityError
 from nexus.config import settings
 from nexus.memory.safety import MemoryRejected, render_memory_data, sanitize_value
 from nexus.models.agent import Agent
-from nexus.models.memory import PROMPT_STATUSES, MemoryRecord
+from nexus.models.memory import MEMORY_STATUSES, PROMPT_STATUSES, MemoryRecord
 from nexus.services import manager_service as ms
 from nexus.services import org_snapshot
 
@@ -565,27 +565,20 @@ async def remember(
     return record
 
 
-async def recall(
+async def _executive_rows(
     db: Any,
     company_id: uuid.UUID,
-    *,
-    query: str | None = None,
-    type: str | None = None,
-    include_closed: bool = False,
-    limit: int = SEARCH_MAX,
+    statuses: tuple[str, ...],
+    query: str | None,
+    type: str | None,
+    limit: int,
 ) -> list[MemoryRecord]:
-    """Newest first, one bounded query; only this company's executive scope.
-
-    The default is prompt-safe: only ``active`` rows, filtered (with ``type``) in SQL
-    before the LIMIT, so a newer closed row cannot push an active one out of the pool.
-    ``include_closed=True`` is the operator review path (every lifecycle status); it must
-    never feed a prompt or a model-callable tool.
-    """
+    """Newest first, one bounded query; status filtered in SQL before the LIMIT."""
     stmt = select(MemoryRecord).where(
-        MemoryRecord.company_id == company_id, MemoryRecord.scope == EXECUTIVE_SCOPE
+        MemoryRecord.company_id == company_id,
+        MemoryRecord.scope == EXECUTIVE_SCOPE,
+        MemoryRecord.status.in_(statuses),
     )
-    if not include_closed:
-        stmt = stmt.where(MemoryRecord.status.in_(PROMPT_STATUSES))
     if type is not None:
         stmt = stmt.where(MemoryRecord.memory_type == type)
     if query:
@@ -597,6 +590,38 @@ async def recall(
         )
     ).scalars().all()
     return list(rows)
+
+
+async def recall(
+    db: Any,
+    company_id: uuid.UUID,
+    *,
+    query: str | None = None,
+    type: str | None = None,
+    limit: int = SEARCH_MAX,
+) -> list[MemoryRecord]:
+    """Active executive memory only: the one read prompts and model-callable tools use.
+
+    Filtered (with ``type``) in SQL before the LIMIT, so a newer closed row cannot push an
+    active one out of the pool. It has no way to ask for another status.
+    """
+    return await _executive_rows(db, company_id, PROMPT_STATUSES, query, type, limit)
+
+
+async def review_recall(
+    db: Any,
+    company_id: uuid.UUID,
+    *,
+    query: str | None = None,
+    type: str | None = None,
+    limit: int = SEARCH_MAX,
+) -> list[MemoryRecord]:
+    """Every lifecycle status, for the human review route only.
+
+    Callers must have passed :func:`nexus.api.routes.memory.require_memory_reviewer`; this
+    must never feed a prompt or a model-callable tool.
+    """
+    return await _executive_rows(db, company_id, MEMORY_STATUSES, query, type, limit)
 
 
 # --- executive context --------------------------------------------------------

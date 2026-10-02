@@ -106,24 +106,45 @@ Two lifecycle policies, both applied in SQL before ranking and `LIMIT`. Filterin
 
 | Reader | Notes |
 |--------|-------|
-| `ceo_service.recall` (CEO executive context, snapshot view, `ceo_search_memory` tool) | Active by default. The tool's `include_closed` argument is accepted for compatibility but ignored: tool output is model-visible. |
+| `ceo_service.recall` (CEO executive context, snapshot view, `ceo_search_executive_memory` tool) | Active only; it has no lifecycle parameter. The tool schema has no `include_closed` (`additionalProperties: false`), so a model that sends it, forged or from a legacy prompt, gets `invalid arguments` before any query and before any audit. There is no fallback to an active-only answer for that call. |
 | `PersistentLayeredMemory.get_agent_facts`, `all_agent_facts`, `get_shared_knowledge`, `get_context_window` | L2 and L3. |
 | `chat._fetch_agent_memories`, shared knowledge in chat | Through the readers above. |
-| `MemoryStore.retrieve` (warm tier and hot cache) | Hot entries are re-checked against the database, so an entry closed after it was cached is dropped. |
+| `MemoryStore.retrieve` (warm tier and hot cache) | See "Hot cache" below: hot entries are re-checked against the database on every call. |
 | `GET /agents/{id}/memory/search` | BM25 over active rows. |
 | `GET /companies/{id}/memory/graph` | Active rows. |
 
 `store_fact` still reads candidate and active rows for near-duplicate detection and the L2 capacity check (`LIVE_STATUSES`). That is a write-path concern: it stops the same unreviewed fact from being stored again. It never returns those rows to a caller.
 
-### Review-visible: explicit
+### Hot cache
 
-`LIVE_STATUSES = ("candidate", "active")` names what an administrative list may show, but the list endpoints now default to `active` and show anything else only when asked.
+`MemoryStore` keeps a per-process hot tier (`_hot`). Nothing invalidates it when a lifecycle function runs, so the read does the check instead of the writer:
 
-- `GET /api/v1/agents/{id}/memory` and `GET /api/v1/companies/{id}/memory` accept `?status=<candidate|active|archived|superseded|rejected>`. Without it they return `active`. An unknown value is `422 MEMORY_STATUS_INVALID`.
-- **Contract change:** before this, the default listing also included candidates. A client that reviews candidates must now pass `?status=candidate`. Rows include `status` and `trust_state`.
-- `GET /ceo/memory` is the operator-only executive review path; `include_closed=true` shows every status.
-- Tenant isolation is unchanged: every query filters on the authenticated company.
+- The cache key is `<company_id>:<scope>:<scope_id>`, so two companies never share a key.
+- On **every** `retrieve`, not only when a key is warmed, the hot ids are re-queried with `company_id == caller` and `status IN PROMPT_STATUSES`. An entry that was archived, superseded or rejected, or that belongs to another company, is dropped from the answer.
+- A transition in one company changes only that company's rows; another company's cached entries are still served and untouched.
+
+Covered by `tests/test_memory_lifecycle_read_safety.py` (archive, supersede and reject through the real lifecycle functions after caching, repeated retrieves, cross-company isolation, an entry planted under another company's key).
+
+### Review-visible: human administrator only, audited
+
+Candidate and closed content is reachable only through a human review path, never through a model tool, an agent or run token, an API key or an ordinary member.
+
+- **Authority:** `routes.memory.is_memory_reviewer`, which is the Governance Studio write predicate `errors.can_write` (a human `admin` of the caller's own company). The principal is built server-side from the session, the user's active flag and the membership row on every request, so a deactivated user or a removed membership fails, and nothing in a request body or header can raise it. A dedicated Governance Studio memory-review capability is **deferred**; until it exists this is the narrowest existing human authority.
+- `GET /api/v1/agents/{id}/memory` and `GET /api/v1/companies/{id}/memory` take `?status=<candidate|active|archived|superseded|rejected>`. Without it, or with `active`, they return active rows for any caller. A non-active value is `403 MEMORY_REVIEW_FORBIDDEN` for a non-reviewer. An unknown value is `422 MEMORY_STATUS_INVALID`.
+- `GET /api/v1/memory/{id}`: an active row is served to any caller in the company. A non-active row is `404` for a non-reviewer, the same answer as an unknown or foreign id, so the route is no oracle for closed memory.
+- `GET /ceo/memory?include_closed=true` is the executive review path: reviewer only (`403`), through `ceo_service.review_recall`. The default call uses the active-only `recall`.
+- **Audit:** every review read writes one `memory.review_read` audit row with the actor, the view (`agent_list:<state>`, `company_list:<state>`, `executive_list:all`, `detail:<state>`), a count and the memory ids. Never content.
+- **Tenancy:** every query filters on the authenticated company. The company routes use `PathCompanyId`, so a path company other than the caller's is `403`. A foreign memory id is `404`.
+- **Aggregates:** `/memory/stats` and `/memory/health` return counts only, scoped to the company; `by_status` counts every state but carries no content.
 - No new dashboard or acceptance workflow. Accepting a candidate is deferred (see below).
+
+### Compatibility impact
+
+- The default list no longer returns candidates (client change since the previous phase: pass `?status=candidate`).
+- A non-active `?status=` is now `403` for a non-admin caller (it was open to any company member).
+- `GET /memory/{id}` of a non-active row is `404` for a non-admin.
+- `/companies/{company_id}/memory*` with a company other than the caller's is `403` instead of an empty or foreign-scoped answer.
+- `include_closed` is gone from the CEO memory tool schema; a call that sends it is rejected. The operator REST flag is unchanged for a human admin.
 
 `PATCH /api/v1/memory/{id}` edits `importance` and `tier` only on a live row; a closed row returns `409 MEMORY_INVALID_TRANSITION` and is left as it was. A content change appends a superseding record.
 

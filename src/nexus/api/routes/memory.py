@@ -21,6 +21,8 @@ from nexus.memory.ingest import (
 )
 from nexus.memory.safety import MemoryRejected
 from nexus.models.memory import MEMORY_STATUSES, PROMPT_STATUSES, MemoryRecord
+from nexus.services import manager_service as ms
+from nexus.services.governance_studio.errors import can_write
 
 router = APIRouter(tags=["memory"])
 
@@ -78,6 +80,42 @@ def principal_actor(principal: Any) -> str:
     if principal.run_id:
         return f"run:{principal.run_id}"
     return f"service:{principal.api_key_id or principal.label or 'unknown'}"
+
+
+def is_memory_reviewer(principal: Any) -> bool:
+    """Whether the server-resolved principal may read candidate or closed memory.
+
+    The Governance Studio write predicate (``errors.can_write``): a human administrator of
+    the caller's own company. The middleware builds the principal from the session, the
+    user's active flag and the membership row on every request, so an inactive user or a
+    removed membership never gets here. Run tokens, API keys and non-admin members never
+    qualify, and nothing a client sends can change that. A dedicated Governance Studio
+    memory-review capability is deferred; until it exists this is the narrowest existing
+    human authority.
+    """
+    return can_write(principal)
+
+
+def require_memory_reviewer(principal: Any) -> None:
+    """403 unless :func:`is_memory_reviewer`."""
+    if not is_memory_reviewer(principal):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "MEMORY_REVIEW_FORBIDDEN",
+                "message": "Candidate and closed memory is visible to a human administrator only",
+            },
+        )
+
+
+async def audit_memory_review(
+    db: Any, principal: Any, resource_id: uuid.UUID, view: str, ids: list[uuid.UUID]
+) -> None:
+    """Record a review read: who, which view, which ids. Never the memory content."""
+    await ms.audit(
+        db, principal.company_id, "memory.review_read", principal_actor(principal),
+        "memory", resource_id, view=view, count=len(ids), memory_ids=[str(i) for i in ids],
+    )
 
 
 def memory_response(record: MemoryRecord) -> MemoryResponse:
@@ -244,6 +282,7 @@ async def list_agent_memories(
     agent_id: uuid.UUID,
     db: DbSession,
     company_id: CurrentCompanyId,
+    principal: CurrentPrincipal,
     scope: str | None = None,
     tier: str | None = None,
     state: str | None = Query(default=None, alias="status"),
@@ -253,13 +292,18 @@ async def list_agent_memories(
     """List memories for an agent: ``active`` unless ``status`` names one state.
 
     Candidates, archived, superseded and rejected rows appear only when requested with
-    ``?status=<state>`` (the review path). Before this, the default also listed candidates.
+    ``?status=<state>``, the human review path: a human administrator only (403 otherwise),
+    audited with ids and status, never content. Before this, the default also listed
+    candidates.
     """
     if state is not None and state not in MEMORY_STATUSES:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail={"code": "MEMORY_STATUS_INVALID", "message": "Unknown memory status"},
         )
+    reviewing = state is not None and state not in PROMPT_STATUSES
+    if reviewing:
+        require_memory_reviewer(principal)
     stmt = select(MemoryRecord).where(
         MemoryRecord.agent_id == agent_id, MemoryRecord.company_id == company_id
     )
@@ -272,4 +316,9 @@ async def list_agent_memories(
         stmt = stmt.where(MemoryRecord.tier == tier)
     stmt = stmt.offset(offset).limit(limit).order_by(MemoryRecord.created_at.desc())
     result = await db.execute(stmt)
-    return [memory_response(m) for m in result.scalars().all()]
+    rows = list(result.scalars().all())
+    if reviewing:
+        await audit_memory_review(
+            db, principal, agent_id, f"agent_list:{state}", [m.id for m in rows]
+        )
+    return [memory_response(m) for m in rows]
