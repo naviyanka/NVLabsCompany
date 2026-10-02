@@ -801,9 +801,13 @@ async def _reserve_budget(
         from nexus.config import settings
 
         if settings.budget_fail_open:
-            logger.warning("Budget reservation failed, allowing call (fail-open): %s", exc)
+            logger.warning(
+                "Budget reservation failed, allowing call (fail-open): %s", type(exc).__name__
+            )
             return None
-        logger.error("Budget reservation failed, refusing call (fail-closed): %s", exc)
+        logger.error(
+            "Budget reservation failed, refusing call (fail-closed): %s", type(exc).__name__
+        )
         raise BudgetInfraUnavailable(
             "Budget ledger is unavailable and BUDGET_FAIL_OPEN is off"
         ) from exc
@@ -835,7 +839,9 @@ async def _link_cost_events(
         )
         await db.commit()
     except Exception as exc:  # noqa: BLE001 - attribution must not refuse a paid-for call
-        logger.warning("Could not link cost events to session %s: %s", session_id, exc)
+        logger.warning(
+            "Could not link cost events to session %s: %s", session_id, type(exc).__name__
+        )
 
 
 async def _settle_budget(
@@ -900,7 +906,13 @@ async def _settle_one(
     except Exception as exc:  # noqa: BLE001 - settlement must not break chat
         # The hold expires on its own, so a failure here overstates spend for
         # the TTL rather than losing the guardrail.
-        logger.warning("Budget settlement failed for %s: %s", reservation_id, exc)
+        logger.warning("Budget settlement failed for %s: %s", reservation_id, type(exc).__name__)
+
+
+PROVIDER_UNAVAILABLE_CODE = "PROVIDER_UNAVAILABLE"
+PROVIDER_UNAVAILABLE_MESSAGE = (
+    "I'm unable to reach the configured model provider right now. Please try again."
+)
 
 
 async def _call_llm(
@@ -1055,15 +1067,30 @@ async def _call_llm(
     # below on purpose: that block catches Exception broadly and answers in
     # character, which would turn a budget refusal into a friendly message and let
     # the call proceed anyway.
-    reservation_id = await _reserve_budget(
-        agent, system_prompt, user_message, history, config, session_id=session_id
+    # A self-metering adapter reserves and settles every streamed round itself;
+    # a second hold here would count the same call twice.
+    # Self-metering is a capability of the registered adapter type, not of agent config.
+    # A registry that cannot be built reserves as usual; the try below reports the failure.
+    try:
+        adapter_registry = AdapterRegistry()
+    except Exception:
+        adapter_registry = None
+    self_metered = adapter_registry is not None and adapter_registry.is_self_metered(registry_key)
+
+    reservation_id = (
+        None
+        if self_metered
+        else await _reserve_budget(
+            agent, system_prompt, user_message, history, config, session_id=session_id
+        )
     )
     # Filled in only on a billed call; the finally below releases the hold when
     # it stays zero, so every exit path settles exactly once.
     spend: dict[str, Any] = {"cost_cents": 0, "input": 0, "output": 0, "model": None}
 
     try:
-        adapter_registry = AdapterRegistry()
+        if adapter_registry is None:
+            adapter_registry = AdapterRegistry()
         adapter = adapter_registry.create_adapter(registry_key)
 
         # Hermes tool calls use same DB-backed ToolAccess, autonomy, approval,
@@ -1152,6 +1179,8 @@ async def _call_llm(
         }
         if temperature is not None:
             payload["temperature"] = temperature
+        if turn_id is not None and self_metered:
+            payload["turn_id"] = str(turn_id)  # identity for the adapter's budget log
 
         from nexus.observability.metrics import record_llm_metrics
         from nexus.observability.tracing import record_llm_usage, start_llm_span
@@ -1232,8 +1261,14 @@ async def _call_llm(
                     finish_reason="error",
                     model=model_name,
                 )
+                # result.error can carry provider-controlled text; neither the reply nor the
+                # log repeats it. The provider's doctor/status reports the sanitized cause.
+                logger.warning(
+                    "LLM call reported an error: code=%s adapter=%s agent=%s",
+                    PROVIDER_UNAVAILABLE_CODE, registry_key, agent.id,
+                )
                 return (
-                    f"[{agent.name}] Execution error: {result.error}",
+                    PROVIDER_UNAVAILABLE_MESSAGE,
                     config.get("model", "unknown"),
                     0,
                 )
@@ -1250,17 +1285,15 @@ async def _call_llm(
         # treated as a soft error and retried. Propagate it as a real refusal.
         raise
     except Exception as e:
-        logger.warning("LLM call failed for agent %s: %s", agent.id, e)
-        # Graceful fallback — respond in character without LLM
-        return (
-            f"[{agent.name} — {agent.title or agent.role}] "
-            f"I'm currently unable to connect to my LLM provider ({registry_key}). "
-            f"Error: {type(e).__name__}: {e}\n\n"
-            f"Once connected, I'll operate with these capabilities: "
-            f"{', '.join(agent.capabilities or ['general tasks'])}.",
-            "fallback",
-            0,
+        # The class only: the message and traceback of a provider or registry failure can
+        # carry credentials, URLs or response bodies.
+        logger.warning(
+            "LLM call failed: code=%s adapter=%s exc_class=%s agent=%s turn=%s execution=%s",
+            PROVIDER_UNAVAILABLE_CODE, registry_key, type(e).__name__, agent.id, turn_id,
+            (execution or {}).get("execution_id"),
         )
+        # A fixed, server-owned reply: deterministic, no model call, nothing from the failure.
+        return PROVIDER_UNAVAILABLE_MESSAGE, "fallback", 0
 
     finally:
         # Every exit above — success, provider error, in-character fallback,
@@ -1398,28 +1431,53 @@ async def _stream_llm(
 
     execution.update(adapter=registry_key, backend=config.get("backend"))
     model_used = config.get("model", "unknown")
-    session = await adapter.create_session(agent.id, {**config, "system_prompt": system_prompt})
-    if context is None:
-        session.context = ExecutionContext.for_agent(
-            agent, source="chat", session_id=session_id, adapter=registry_key, model=model_used
-        )
-    else:
-        session.context = replace(
-            context, agent_id=agent.id, session_id=session_id, adapter=registry_key,
-            model=model_used,
-        )
-    preset = execution.get("execution_id")
-    task_id = uuid.UUID(preset) if preset else uuid.uuid4()
-    execution["execution_id"] = str(task_id)
+    # Streaming is metered like any other call: hold before the request, settle or
+    # release however the stream ends. Raised outside the try so a refusal reaches the caller.
+    reservation_id = await _reserve_budget(
+        agent, system_prompt, prompt, history, config, session_id=session_id
+    )
     text = ""
     try:
-        request = {"prompt": prompt, "max_tokens": 4096}
-        async for chunk in adapter.stream_execute(session, task_id, request):
-            text += chunk
-            on_chunk(chunk)
+        session = await adapter.create_session(agent.id, {**config, "system_prompt": system_prompt})
+        if context is None:
+            session.context = ExecutionContext.for_agent(
+                agent, source="chat", session_id=session_id, adapter=registry_key, model=model_used
+            )
+        else:
+            session.context = replace(
+                context, agent_id=agent.id, session_id=session_id, adapter=registry_key,
+                model=model_used,
+            )
+        preset = execution.get("execution_id")
+        task_id = uuid.UUID(preset) if preset else uuid.uuid4()
+        execution["execution_id"] = str(task_id)
+        try:
+            request = {"prompt": prompt, "max_tokens": 4096}
+            async for chunk in adapter.stream_execute(session, task_id, request):
+                text += chunk
+                on_chunk(chunk)
+        finally:
+            with anyio.CancelScope(shield=True):
+                await adapter.terminate(session)
     finally:
+        # The stream reports no usage, so settle on a conservative estimate once any
+        # text arrived (a cancelled or failed stream is not free); release when none did.
+        from nexus.models_router.pricing import TokenSplit, estimate_cost_usd
+
+        in_chars = len(system_prompt) + len(prompt) + sum(
+            len(str(msg.get("text", ""))) for msg in history[-10:]
+        )
+        in_tokens, out_tokens = in_chars // 3 + 1, len(text) // 3 + 1
+        cents = max(1, round(estimate_cost_usd(model_used, TokenSplit(in_tokens, out_tokens)) * 100))
         with anyio.CancelScope(shield=True):
-            await adapter.terminate(session)
+            await _settle_budget(
+                reservation_id,
+                cost_cents=cents if text else 0,
+                company_id=agent.company_id,
+                input_tokens=in_tokens if text else 0,
+                output_tokens=out_tokens if text else 0,
+                model=model_used,
+            )
     return text, model_used, len(text.split()) * 2  # rough estimate
 
 

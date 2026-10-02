@@ -72,6 +72,10 @@ ALLOWED: dict[str, tuple[str, str]] = {
         SYSTEM,
         "reads the operator-configured provider key from the global secrets store; not tenant data",
     ),
+    "adapters/azure_openai_native.py::_secret": (
+        SYSTEM,
+        "reads the operator-configured dev key from the global secrets store; not tenant data",
+    ),
     "main.py::lifespan": (
         BOOTSTRAP,
         "default-company seed and budget flush (companies), kill switch and circuit breaker "

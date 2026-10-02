@@ -69,6 +69,9 @@ class FakeAdapter:
 
 
 class FakeRegistry:
+    def is_self_metered(self, name: str) -> bool:
+        return False
+
     def create_adapter(self, name, config=None):
         return FakeAdapter()
 

@@ -48,6 +48,12 @@ dependencies = [
     "pyyaml>=6.0",
     "temporalio>=1.7.0",
     "prometheus-client>=0.20.0",
+    # Entra bearer-token auth for the Azure OpenAI governed provider (ADR 0006). In the
+    # normal runtime so the production image can run it; the feature stays off by
+    # default (AZURE_OPENAI_ENABLED). azure.identity.aio needs aiohttp as its async
+    # transport (without it, building a credential raises ImportError).
+    "azure-identity>=1.26.0,<1.27",
+    "aiohttp>=3.10,<4",
 ]
 
 [project.optional-dependencies]

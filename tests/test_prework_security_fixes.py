@@ -134,7 +134,7 @@ async def test_call_llm_generic_error_falls_back_in_character():
         for p in patches:
             p.stop()
     assert model == "fallback"
-    assert "RuntimeError" in text
+    assert text == chat.PROVIDER_UNAVAILABLE_MESSAGE  # a fixed reply: nothing from the failure
 
 
 # --- Governance middleware time-window policy -----------------------------------

@@ -300,7 +300,10 @@ async def test_one_failing_cli_leaves_the_other_turn_intact(world):
 
     assert ok.status_code == 200 and ok.json()["backend_used"] == "agy"
     assert '"employee":"agy"' in ok.json()["message"]["text"]
-    assert failed.status_code >= 400 or "error" in failed.text.lower(), failed.text
+    # The failure is reported as the fixed server-owned reply, never the CLI's own output.
+    assert failed.status_code >= 400 or chat_routes.PROVIDER_UNAVAILABLE_MESSAGE in failed.text, (
+        failed.text
+    )
     assert "agy" not in failed.text
     assert [m[:2] for m in await _messages(world, world["agy"])] == [
         ("user", "now"), ("agent", ok.json()["message"]["text"])]

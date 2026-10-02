@@ -27,6 +27,9 @@ class AdapterRegistry:
         """
         self._adapters: dict[str, type[BaseAdapter]] = {}
         self._instances: dict[str, BaseAdapter] = {}
+        # Adapter types that meter every budget round themselves. Set only by trusted
+        # registration code below, never from agent config or an adapter attribute.
+        self._self_metered: set[str] = set()
 
         if auto_register:
             self._register_defaults()
@@ -45,6 +48,7 @@ class AdapterRegistry:
         from nexus.adapters.openai_adapter import OpenAIAdapter
         from nexus.adapters.hermes_adapter import HermesAdapter
         from nexus.adapters.hermes_provider import HermesProviderAdapter
+        from nexus.adapters.azure_openai_native import AzureOpenAINativeAdapter
 
         self.register_adapter("openai", OpenAIAdapter)
         self.register_adapter("anthropic", AnthropicAdapter)
@@ -56,20 +60,28 @@ class AdapterRegistry:
         self.register_adapter("http", HTTPAdapter)
         self.register_adapter("mcp", MCPAgentAdapter)
         self.register_adapter("azure_openai", AzureOpenAIAdapter)
+        self.register_adapter("azure_openai_native", AzureOpenAINativeAdapter, self_metered=True)
         self.register_adapter("bedrock", BedrockAdapter)
         self.register_adapter("google_gemini", GoogleGeminiAdapter)
 
     def register_adapter(
-        self, adapter_type: str, adapter_class: type[BaseAdapter]
+        self,
+        adapter_type: str,
+        adapter_class: type[BaseAdapter],
+        *,
+        self_metered: bool = False,
     ) -> None:
         """Register an adapter type with the registry.
 
         Args:
             adapter_type: The string identifier for the adapter type.
             adapter_class: The adapter class to register.
+            self_metered: The adapter reserves and settles budget for every round
+                itself, so callers must not reserve again. Internal registration only.
 
         Raises:
-            TypeError: If adapter_class is not a subclass of BaseAdapter.
+            TypeError: If adapter_class is not a subclass of BaseAdapter, or a
+                self-metered class does not declare ``meters_budget = True``.
         """
         if not (
             isinstance(adapter_class, type) and issubclass(adapter_class, BaseAdapter)
@@ -78,7 +90,16 @@ class AdapterRegistry:
                 f"adapter_class must be a subclass of BaseAdapter, "
                 f"got {adapter_class}"
             )
+        if self_metered and getattr(adapter_class, "meters_budget", False) is not True:
+            raise TypeError(f"{adapter_class.__name__} is not a self-metering adapter")
         self._adapters[adapter_type] = adapter_class
+        self._self_metered.discard(adapter_type)
+        if self_metered:
+            self._self_metered.add(adapter_type)
+
+    def is_self_metered(self, adapter_type: str) -> bool:
+        """True only for a type registered as self-metering; unknown types are not."""
+        return adapter_type in self._self_metered
 
     def create_adapter(
         self, adapter_type: str, config: dict[str, Any] | None = None
@@ -204,5 +225,6 @@ class AdapterRegistry:
         """
         if adapter_type in self._adapters:
             del self._adapters[adapter_type]
+            self._self_metered.discard(adapter_type)
             return True
         return False

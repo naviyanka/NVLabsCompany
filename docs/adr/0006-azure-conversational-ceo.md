@@ -216,3 +216,7 @@ Still unresolved by design:
 1. The Azure OpenAI Entra token scope (PR 2 verifies it).
 2. Whether outbound calls need an application access policy or equivalent tenant policy (PR 11 verifies it).
 3. Whether the Azure OpenAI deployment is one global deployment or one per environment, and the data-residency region.
+
+## PR 2 implementation note (2026-10-02)
+
+The Azure OpenAI streaming provider is implemented behind `AZURE_OPENAI_ENABLED` (default false); see `docs/azure-openai-provider.md`. Microsoft Learn disagrees on the Entra scope for the resource family (`*.openai.azure.com`) on `/openai/v1/`, and no disposable authenticated probe has been run, so unresolved item 1 above stays open. Only that family is supported; Foundry project endpoints (`*.services.ai.azure.com`) are disabled with a stable reason. The scope is derived in code from the endpoint family and is currently unresolved, so Entra is unavailable and development key auth (secret reference) is the only usable mode; there is no scope setting and no fallback. A live probe in the disposable tenant must verify one scope before Entra production enablement. `azure-identity` and `aiohttp` are pinned base dependencies, import-smoked on the production image in CI. Text is streamed progressively only for tool-free calls; a tool-capable round buffers its text until the round ends, so low-latency governed voice needs a later two-phase conversation strategy (not part of this PR).

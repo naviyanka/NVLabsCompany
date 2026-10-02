@@ -114,6 +114,26 @@ class Settings(BaseSettings):
     hermes_native_model: str = ""
     hermes_native_models: str = ""
 
+    # Azure OpenAI governed streaming provider (adapter_type "azure_openai_native",
+    # ADR 0006). Operator-only, never from agent config. Off by default; any missing
+    # value fails closed. The API key is never a setting: key auth reads a secret ref.
+    azure_openai_enabled: bool = False
+    azure_openai_endpoint: str = ""
+    # The deployment name is the wire "model"; the model id below only prices the budget.
+    azure_openai_deployment: str = ""
+    azure_openai_model: str = ""
+    # "v1" uses /openai/v1 (no api-version query); any other value selects the dated
+    # /openai/deployments/<deployment> route with that api-version.
+    azure_openai_api_version: str = "v1"
+    # "entra" (bearer token) or "key" (development only, via the secret backend).
+    azure_openai_auth: str = "entra"
+    # No scope setting: the Entra scope is derived from the validated endpoint family
+    # in adapters/azure_openai_native.py (docs/azure-openai-provider.md).
+    azure_openai_secret_ref: str = "azure_openai_api_key"
+    # Hard outer timeout for one whole turn, in seconds.
+    azure_openai_timeout_seconds: float = 120.0
+    azure_openai_max_retries: int = 2
+
     # API Keys
     openai_api_key: str = ""
     anthropic_api_key: str = ""
