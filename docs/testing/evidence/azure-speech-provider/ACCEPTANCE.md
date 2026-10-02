@@ -66,25 +66,53 @@ not read back.
 
 ## Latency
 
-The run used few samples, so percentiles are close to the maximum.
+Synthetic round trips only. The STT input was Azure-generated speech sent from a script, not microphone audio,
+so these numbers say nothing about microphone accuracy or about end-to-end conversational latency (browser,
+gateway, model and the whole turn). The samples are few, so p95 is the nearest-rank value and, at these sizes, equals
+or sits next to the maximum. `n` is the sample size for each row, and all times are in milliseconds.
 
-| Measure | n | p50 | max |
-|---|---|---|---|
-| Token acquisition (cold) | 1 | 2,323 ms | |
-| TTS first audio, English | 9 | 360 ms | 2,552 ms (first request, cold connection) |
-| TTS first audio, Hindi | 10 | 367 ms | 468 ms |
-| STT final after `finish`, explicit | 19 | 1,353 ms | 1,802 ms |
-| STT final after `finish`, Auto | 2 | | 2,017 ms |
-| `aclose` after TTS | 20 | | 109 ms |
+| Measure | n | p50 | p95 | max |
+|---|---|---|---|---|
+| TTS first audio, warm (completed requests after the first; excludes the cancellation request) | 18 | 360 | 468 | 468 |
+| TTS first audio, cold first request (English) | 1 | 2,552 | | 2,552 |
+| TTS first audio, cancellation request (first chunk, then cancelled) | 1 | 397 | | 397 |
+| STT final after `finish`, explicit language | 19 | 1,353 | 1,802 | 1,802 |
+| STT final after `finish`, Auto | 2 | 1,950 | not meaningful at n=2 | 2,016 |
+| STT final after `finish`, all sessions | 21 | 1,364 | 1,884 | 2,016 |
+| Token acquisition (cold, once) | 1 | 2,323 | | 2,323 |
+| `aclose` after TTS | 20 | | | 109 |
 
-All were inside the adapter defaults (connect 3 s, first audio 4 s, STT final 5 s). The one cold English
-first-audio of 2.55 s is the closest to its 4 s limit.
+By language (warm TTS, explicit STT): English TTS n=8, p50 360, p95 424; Hindi TTS n=10, p50 367, p95 468;
+English STT n=9, p50 1,353, p95 1,802; Hindi STT n=10, p50 1,350, p95 1,478.
+
+All were inside the adapter defaults (connect 3 s, first audio 4 s, STT final 5 s). The cold first English
+request at 2.55 s is the closest to its 4 s limit. The STT audio was sent as fast as the script could write it,
+not paced in real time, so "final after `finish`" is the tail wait after the last chunk, not a live-speech figure.
 
 ## What this run did not show
 
-- Linux. The run was on Windows, so the `libasound2` prerequisite on `python:3.12-slim` is still unverified.
+- A live Linux session. The run was on Windows. The Linux container smoke below covers loading and
+  construction only, with no connection.
 - `DefaultAzureCredential`. The harness used the Azure CLI credential, passed through the adapter's scoped
   credential wrapper. Managed identity and other chain members were not exercised.
 - Billing. The billed character and audio quantities were not read from Azure cost data.
 - Hinglish (gated, not requested), HD voices and the v2 text-stream endpoint (deferred), and any long-running or
   concurrent load.
+
+
+## Linux container smoke (no network, no Azure call)
+
+A separate offline follow-up, run after the live acceptance and not part of it. It made no Azure request and no
+token request. Image: `python:3.12-slim` (Debian 13, glibc), SDK 1.52.0 installed with `--only-binary`, run with
+`--network none` as a non-root user with a fake credential.
+
+| Architecture | Native wheel | Smoke |
+|---|---|---|
+| linux/amd64 | `py3-none-manylinux1_x86_64` | pass (also run in CI as `speech-smoke`) |
+| linux/arm64 | `py3-none-manylinux2014_aarch64` | pass once, locally, under QEMU emulation. Not run in CI. |
+
+Both runs: only loopback present, Speech disabled by default, no token requested, only the `core` and `kws`
+libraries loaded, no ALSA library loaded, no audio descriptor open, and no unresolved `ldd` dependency among the
+loaded libraries. `ldd` does report unresolved libraries for two SDK extensions that were not loaded:
+`extension.audio.sys` (`libasound.so.2`) and `extension.codec` (glib, GStreamer). No apt package was installed.
+This does not show that a live Linux session works. See `docs/azure-speech-provider.md`.

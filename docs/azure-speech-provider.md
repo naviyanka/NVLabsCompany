@@ -120,26 +120,82 @@ token, key or credential. It is not yet surfaced through `ceo_service.status`, w
 
 `pip install ".[speech]"` adds `azure-cognitiveservices-speech==1.52.0`.
 
-- **License.** Proprietary Microsoft license (not an OSI license). Review it before redistributing an image.
-- **Native wheels only.** The package ships `py3-none` wheels with native libraries for manylinux
-  (x86_64, aarch64), macOS and Windows, and no source distribution. It does not install on Alpine/musl.
-  The repository's images use Debian-based `python:3.12` images, which work.
-- **Python.** CI and the production images use Python 3.12 and run the SDK construction smoke
-  (`tests/test_voice_provider_contract.py`). Do not assume newer interpreters (for example the local 3.14)
+### Wheel audit (1.52.0)
+
+Published wheels are all `py3-none` (no CPython ABI tag, so CPython 3.12 is covered) and there is no source
+distribution:
+
+| Platform | Wheel tag | Native wheel |
+|---|---|---|
+| Linux amd64 | `py3-none-manylinux1_x86_64` | yes |
+| Linux arm64 | `py3-none-manylinux2014_aarch64` | yes |
+| macOS x86_64 / arm64 | `macosx_10_14_x86_64` / `macosx_11_0_arm64` | yes |
+| Windows amd64 / arm64 | `win_amd64` / `win_arm64` | yes |
+
+Both Linux architectures were installed separately on `python:3.12-slim` (Debian 13, glibc) and each resolved its
+own native wheel. There is no source build to fall back to, and the image installs with
+`pip install --only-binary azure-cognitiveservices-speech`, so a future release that drops a platform fails the
+build instead of attempting a silent build. The package does not install on Alpine/musl (no musllinux wheel).
+
+- **License.** Proprietary Microsoft license (classifier `License :: Other/Proprietary License`, not an OSI
+  license). The wheel ships `LICENSE.md`, `REDIST.txt` and `ThirdPartyNotices.md` under
+  `licenses/licensefiles/speech/` in its dist-info. Review them before redistributing an image.
+- **Native libraries and size.** About 7.6 MB: `core`, `extension.audio.sys`, `extension.codec`,
+  `extension.kws`, `extension.kws.ort` and two `libpal_azure_c_shared` variants. `core` and the PAL libraries
+  need only libc-family libraries, `libstdc++`, `libgcc_s` and `libuuid`, all present in `python:3.12-slim`.
+- **`libasound2` is not needed for the server-side stream path.** `extension.audio.sys` needs `libasound.so.2`
+  and `extension.codec` needs glib and GStreamer. Neither extension is loaded when the adapter feeds a push
+  stream of headerless PCM and synthesizes with no audio output (`audio_config=None`). The Linux smoke below
+  shows only `core` and `kws` loading, no ALSA library and no audio device. That is a statement about an
+  offline construction path. A live Linux connection was not run, so it is unproven for a real session, and
+  anything that uses a microphone, a speaker or a compressed audio format does need those libraries.
+  Microsoft's general Linux prerequisites list `libasound2` and `ca-certificates`; `ca-certificates` is already
+  in the slim image. The smoke image therefore installs no apt package. If a deployment hits an audio or codec
+  load error, add the smallest package for the named library (`libasound2` for ALSA) through the smoke
+  Dockerfile's `RUNTIME_APT` build argument and re-run the smoke.
+- **Python.** CI and the images use Python 3.12. Do not assume newer interpreters (for example a local 3.14)
   have a compatible wheel.
-- **Not in the default image.** `Dockerfile.prod` installs `.[otel]` and is unchanged. A Speech-enabled image
-  installs `.[otel,speech]`. Without the extra the provider reports `AZURE_SPEECH_SDK_MISSING`.
-  Microsoft documents `libasound2` and `ca-certificates` as Linux prerequisites of the SDK; `python:3.12-slim`
-  does not ship `libasound2`, so such an image must `apt-get install` it. This PR does not build a
-  Speech-enabled image, so that image path is documented and unverified here (CI runs on `ubuntu-latest`).
 - `azure-identity` is already a base dependency.
+
+### Not in the default image
+
+`Dockerfile.prod` installs `.[otel]` and is unchanged, so the normal multi-architecture image gate does not
+involve the Speech SDK. Without the extra the provider reports `AZURE_SPEECH_SDK_MISSING`.
+
+A Speech-enabled production image is a deployment decision and is not built here. To make one, change the
+install line in a copy of `Dockerfile.prod` to
+`pip install --no-cache-dir --only-binary azure-cognitiveservices-speech ".[otel,speech]"`, then build it for the
+architecture you run. Verified architecture: **linux/amd64** (the CI smoke runs on it). linux/arm64 has a native
+wheel and passed the same smoke once, locally, under QEMU emulation, but CI does not cover it, so multi-architecture
+Speech support is not claimed. If the Speech wheel ever disappears for an architecture, `--only-binary` fails that
+build with a clear pip error, and the Speech service should then run on amd64.
+
+### Linux container smoke (offline)
+
+`docker/speech-smoke/Dockerfile` installs the repo with the `speech` extra on `python:3.12-slim` (the build may use
+the network) and `scripts/speech_container_smoke.py` runs in it with the network disabled:
+
+```
+docker build -f docker/speech-smoke/Dockerfile -t nexus-speech-smoke .
+docker run --rm --network none nexus-speech-smoke
+# arm64, on a host with QEMU: add --platform linux/arm64 to both commands
+```
+
+The smoke imports the SDK and `nexus.voice.azure_speech`, checks that `status()` reports Speech disabled by
+default, and builds, without connecting, a `SpeechConfig` (fake endpoint, scoped fake credential), the 16 kHz mono
+push stream and recognizers (explicit `hi-IN` and Auto), and a synthesizer with the raw 24 kHz PCM output format
+and no audio output. It asserts that no token was requested, that only loopback exists, that no `AZURE_*`
+variable and no `/dev/snd` is present, that no audio descriptor is open, that ALSA was not loaded, and that
+`ldd` finds no unresolved dependency for any SDK library that actually loaded. It runs as `nobody`, and it fails
+("network is not disabled") if `--network none` is omitted. GitHub Actions runs it as the `speech-smoke` job. It
+makes no Azure call and holds no credential.
 
 ## Tests
 
 Fakes only, no network (`tests/voice_fakes.py`): `tests/test_azure_speech_provider.py` (configuration,
 scope, STT/TTS sessions, cancel, retries, timeouts, leaks) and `tests/test_voice_provider_contract.py`
 (contract parity of the fake and Azure providers, plus an offline real-SDK construction smoke that is skipped
-when the extra is not installed).
+when the extra is not installed). The backend suite runs with and without the SDK installed.
 
 ## Live acceptance
 
@@ -153,10 +209,13 @@ carried:
 - The service accepts headerless 16 kHz mono 16-bit PCM as STT input.
 - The Entra scope above works for the data plane (recognition and synthesis), not only for the voices list.
 - Explicit Hindi returned `hi-IN` transcripts that matched the synthetic text, and Auto identified `en-IN` and
-  `hi-IN` correctly. Latency was inside the default timeouts (STT final after `finish`: p50 1.35 s, max 2.0 s;
-  TTS first audio: p50 0.36 s, max 2.55 s on the first, cold request).
+  `hi-IN` correctly. Latency was inside the default timeouts. STT final after `finish` (explicit language, n=19): p50 1.35 s, p95
+  1.80 s, max 1.80 s. TTS first audio, warm (n=18): p50 0.36 s, p95 0.47 s, max 0.47 s. The cold first TTS request
+  (n=1) took 2.55 s. p95 here is nearest-rank on few samples, so it is close to the maximum. These are synthetic
+  round trips of Azure-generated speech sent from a script: they do not represent microphone accuracy or
+  end-to-end conversational latency.
 - Cancellation stopped at the first chunk with no late audio and no replacement synthesis.
 
-Not shown by that run: Linux (`libasound2` on `python:3.12-slim` is still unverified), credentials other than the
-Azure CLI one, and the billed quantities (the estimated cost of about ₹3.4 is from usage events at pessimistic
+Not shown by that run: Linux (it ran on Windows; the offline Linux container smoke above covers loading and
+construction only, not a live connection), credentials other than the Azure CLI one, and the billed quantities (the estimated cost of about ₹3.4 is from usage events at pessimistic
 rates, not from billing data).
