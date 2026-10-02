@@ -28,14 +28,21 @@ spec:
         - name: alembic-upgrade
           image: "{{ .Values.api.image.repository }}:{{ .Values.api.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.api.image.pullPolicy }}
-          command: ["alembic", "upgrade", "head"]
+          command: ["python", "-m", "nexus.db_migrate"]
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
+          # Not the application Secret: the job holds only the migrator credential.
           envFrom:
             - configMapRef:
                 name: {{ include "nexus.fullname" . }}-config
-            - secretRef:
-                name: {{ include "nexus.fullname" . }}-secrets
+          env:
+            - name: NEXUS_MIGRATION_ROLE
+              value: {{ .Values.migration.user | quote }}
+            - name: MIGRATION_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "migration.existingSecret is required" .Values.migration.existingSecret | quote }}
+                  key: {{ required "migration.secretKey is required" .Values.migration.secretKey | quote }}
           resources:
             {{- toYaml .Values.migration.resources | nindent 12 }}
 {{- end }}

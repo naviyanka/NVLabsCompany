@@ -1,37 +1,15 @@
--- Initialize database roles for NEXUS (WP-8, WP-16a)
--- PostgreSQL 16+ requires dedicated schema ownership & explicit grant structure.
--- NOTE: Scripts in /docker-entrypoint-initdb.d execute only on a fresh data directory.
+-- Local development bootstrap for docker-compose.yml (WP-8, WP-16a).
+--
+-- The role model lives in deploy/postgres/provision-roles.sql, which docker-compose.yml
+-- mounts at /opt/nexus-postgres. This file only supplies the throwaway local passwords
+-- that docker-compose.yml also uses, then runs that script. It is for local development:
+-- production provisioning supplies its own secrets (see docs/runbooks/database-roles.md).
+--
+-- Scripts in /docker-entrypoint-initdb.d execute only on a fresh data directory.
 -- Existing volumes require `docker compose down -v` to re-initialize.
 
--- 0. Extensions. Created here as bootstrap superuser so nexus_migrator never needs CREATE ON DATABASE.
-CREATE EXTENSION IF NOT EXISTS vector;
+SELECT set_config('nexus.migrator_password', 'nexus_migrator_pass', false);
+SELECT set_config('nexus.app_password', 'nexus_app_pass', false);
+SELECT set_config('nexus.system_password', 'nexus_system_pass', false);
 
--- 1. Migrator role: owns schema public, runs Alembic migrations
-CREATE ROLE nexus_migrator LOGIN PASSWORD 'nexus_migrator_pass';
-GRANT ALL ON SCHEMA public TO nexus_migrator;
-ALTER SCHEMA public OWNER TO nexus_migrator;
-
--- 2. System worker role: holds BYPASSRLS for cross-tenant discovery and maintenance
-CREATE ROLE nexus_system LOGIN PASSWORD 'nexus_system_pass' BYPASSRLS;
-GRANT USAGE ON SCHEMA public TO nexus_system;
-
--- 3. Application role: standard least-privilege, subject to RLS (NO BYPASSRLS)
-CREATE ROLE nexus_app LOGIN PASSWORD 'nexus_app_pass';
-GRANT USAGE ON SCHEMA public TO nexus_app;
-
--- 4. Default privileges for objects created in schema public by nexus_migrator
-ALTER DEFAULT PRIVILEGES FOR ROLE nexus_migrator IN SCHEMA public
-    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO nexus_app;
-
-ALTER DEFAULT PRIVILEGES FOR ROLE nexus_migrator IN SCHEMA public
-    GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO nexus_app;
-
-ALTER DEFAULT PRIVILEGES FOR ROLE nexus_migrator IN SCHEMA public
-    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO nexus_system;
-
-ALTER DEFAULT PRIVILEGES FOR ROLE nexus_migrator IN SCHEMA public
-    GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO nexus_system;
-
--- Grant permissions on any pre-existing tables/sequences in public
-GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO nexus_app, nexus_system;
-GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA public TO nexus_app, nexus_system;
+\i /opt/nexus-postgres/provision-roles.sql

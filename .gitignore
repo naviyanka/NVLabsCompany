@@ -21,6 +21,9 @@ ENV/
 
 # Environment
 .env
+.env.production
+.env.migration
+.env.postgres
 
 # OS
 .DS_Store

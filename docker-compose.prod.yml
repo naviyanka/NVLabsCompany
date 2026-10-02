@@ -1,9 +1,18 @@
+# Database roles: the schema is owned by nexus_migrator and the application runs as
+# nexus_app, which owns nothing and so cannot drop triggers, disable row level security
+# or alter policies. Three env files keep the credentials apart:
+#   .env.postgres    bootstrap superuser, read only by the postgres service
+#   .env.migration   MIGRATION_DATABASE_URL (nexus_migrator), read only by the migrate service
+#   .env.production  DATABASE_URL (nexus_app) and SYSTEM_DATABASE_URL, read by the runtime
+# Roles are provisioned once, by an administrator, before the first start. See
+# docs/runbooks/database-roles.md. Nothing here creates roles or schema implicitly.
 services:
   postgres:
-    image: postgres:16-alpine
+    # pgvector is required by the migrations.
+    image: pgvector/pgvector:pg16
     restart: unless-stopped
     env_file:
-      - .env.production
+      - .env.postgres
     volumes:
       - pgdata_prod:/var/lib/postgresql/data
     healthcheck:
@@ -69,6 +78,20 @@ services:
           cpus: "0.5"
           memory: 512M
 
+  # One-shot schema migration as nexus_migrator. It refuses to run when the roles are not
+  # provisioned as the runbook requires, and it never uses DATABASE_URL.
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile.prod
+    restart: "no"
+    command: ["python", "-m", "nexus.db_migrate"]
+    env_file:
+      - .env.migration
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   api:
     build:
       context: .
@@ -81,6 +104,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
       temporal:
@@ -112,6 +137,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
       temporal:
@@ -137,6 +164,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
     deploy:

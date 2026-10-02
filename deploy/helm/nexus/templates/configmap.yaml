@@ -1,3 +1,4 @@
+{{- include "nexus.validateDatabaseRoles" . }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -18,6 +19,7 @@ data:
   DATABASE_PORT: {{ .Values.database.port | quote }}
   DATABASE_NAME: {{ .Values.database.name | quote }}
   DATABASE_USER: {{ .Values.database.user | quote }}
+  DATABASE_SYSTEM_USER: {{ .Values.database.systemUser | quote }}
   DATABASE_SSLMODE: {{ .Values.database.sslMode | quote }}
   REDIS_HOST: {{ .Values.redis.host | quote }}
   REDIS_PORT: {{ .Values.redis.port | quote }}

@@ -79,6 +79,22 @@ def enforce_auth_policy() -> None:
     )
 
 
+def enforce_no_migration_credential() -> None:
+    """Refuse to start a runtime process that holds the migrator credential.
+
+    ``MIGRATION_DATABASE_URL`` belongs to the migration job alone. A runtime process that
+    can read it could connect as the schema owner and drop triggers or disable row level
+    security, which is exactly what the separate application role prevents. The message
+    names the variable, never its value.
+    """
+    if os.environ.get("MIGRATION_DATABASE_URL"):
+        raise ConfigurationError(
+            "MIGRATION_CREDENTIAL_IN_RUNTIME",
+            "MIGRATION_DATABASE_URL must be set only for the migration job, never for "
+            "the API, worker or scheduler.",
+        )
+
+
 async def validate_config() -> None:
     """Validate application configuration and log warnings.
 
