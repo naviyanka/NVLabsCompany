@@ -3,7 +3,7 @@
 **Status:** Proposed (draft PR). Documentation only; no implementation starts before this ADR is approved.
 **Date:** 2026-10-01
 **Baseline:** `main` at `5f5502d22e5159c65d81a66739ccaca030554426`
-**Amended:** 2026-10-01. The amendment resolves the open decisions of the first draft (Teams bot implementation, cost accounting, native calling, federation preview, telephony, merge ordering) and keeps the Azure OpenAI token scope and the outbound-call policy requirement explicitly unresolved.
+**Amended:** 2026-10-01. The amendment resolves the open decisions of the first draft (Teams bot implementation, cost accounting, native calling, federation preview, telephony, merge ordering) and keeps the outbound-call policy requirement explicitly unresolved. The Azure OpenAI token scope was resolved on 2026-10-02 (see "Still unresolved by design").
 
 ## Problem
 
@@ -213,7 +213,7 @@ Resolved by the 2026-10-01 amendment:
 
 Still unresolved by design:
 
-1. The Azure OpenAI Entra token scope (PR 2 verifies it).
+1. ~~The Azure OpenAI Entra token scope~~ **Resolved 2026-10-02:** for `*.openai.azure.com` on `/openai/v1/chat/completions`, NEXUS uses `https://ai.azure.com/.default`. Microsoft Learn pages disagree for that path, so one live probe tested both candidates (one user principal, one tenant, one South India resource): both `https://cognitiveservices.azure.com/.default` and `https://ai.azure.com/.default` returned HTTP 200. NEXUS deliberately selects `ai.azure.com` as the service-specific audience; this does not claim the other scope is invalid. There is no fallback, scope setting or runtime probing, and other endpoint families stay rejected. One application-level request through the adapter then succeeded (details in `docs/azure-openai-provider.md`, sanitized record in `docs/testing/evidence/azure-openai-entra/ACCEPTANCE.md`); production enablement remains a separate decision. **Still unverified:** managed-identity and service-principal authentication, other tenants, regions and endpoint families.
 2. Whether outbound calls need an application access policy or equivalent tenant policy (PR 11 verifies it).
 3. Whether the Azure OpenAI deployment is one global deployment or one per environment, and the data-residency region.
 

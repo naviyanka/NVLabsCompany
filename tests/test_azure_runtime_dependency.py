@@ -25,13 +25,12 @@ KEY = "az-key-not-a-real-key-456"
 
 @pytest.fixture
 def entra(monkeypatch):
-    """Enabled Entra mode on a loopback endpoint, with a fake scope (the real one is unresolved)."""
+    """Enabled Entra mode on a loopback endpoint."""
     monkeypatch.setattr(settings, "azure_openai_enabled", True)
     monkeypatch.setattr(settings, "azure_openai_endpoint", "http://127.0.0.1:9")
     monkeypatch.setattr(settings, "azure_openai_deployment", "dep")
     monkeypatch.setattr(settings, "azure_openai_model", "gpt-4o")
     monkeypatch.setattr(settings, "azure_openai_auth", "entra")
-    monkeypatch.setitem(ao.ENTRA_SCOPES, ao.RESOURCE, "https://scope.test.invalid/.default")
     monkeypatch.setattr(ao, "_token_source", None)  # the real SDK check, not a test injection
 
 
@@ -112,7 +111,7 @@ class TestEntraAvailability:
             __import__("sys").modules, "azure.identity.aio", None
         )  # import now fails
         with pytest.raises(ao.ProviderError, match="AZURE_OPENAI_IDENTITY_SDK_MISSING"):
-            await ao._entra_token("https://scope.test.invalid/.default")
+            await ao._entra_token(ao._scope())
         source = Path(ao.__file__).read_text(encoding="utf-8")
         assert (
             "subprocess" not in source and "ensurepip" not in source and "pip install" not in source

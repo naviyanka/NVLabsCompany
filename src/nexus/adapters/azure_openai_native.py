@@ -48,13 +48,13 @@ FOUNDRY = "foundry_project"  # https://<name>.services.ai.azure.com
 FAMILY_SUFFIXES = {RESOURCE: ".openai.azure.com", FOUNDRY: ".services.ai.azure.com"}
 SUPPORTED_FAMILIES = (RESOURCE,)
 
-# The Entra scope is derived from the endpoint family, never configured. None means
-# unresolved: for the resource family + /openai/v1 Microsoft Learn still disagrees
-# (checked 2026-10-02: cognitiveservices.azure.com/.default on "How to switch between
-# OpenAI and Azure OpenAI endpoints" ms.date 2026-08-24, ai.azure.com/.default on three
-# other pages). Entra stays unavailable until the approved live probe settles it; then
-# set exactly one value here. No fallback to a second scope.
-ENTRA_SCOPES: dict[str, str | None] = {RESOURCE: None}
+# The Entra scope is derived from the endpoint family, never configured. Microsoft Learn
+# disagrees for the resource family + /openai/v1, so the live probe of 2026-10-02 decided
+# it: both candidate scopes returned HTTP 200 on a South India resource, and NEXUS
+# deliberately selects ai.azure.com, the service-specific audience that the current docs
+# show for this exact path. No fallback to a second scope (docs/azure-openai-provider.md).
+ENTRA_SCOPES: dict[str, str] = {RESOURCE: "https://ai.azure.com/.default"}
+ENTRA_SCOPE_BASIS = "live_validated"
 
 MAX_ITERATIONS = 8
 MAX_CALLS = 16
@@ -196,11 +196,7 @@ def _auth() -> str:
 
 def _scope() -> str:
     """The Entra scope derived from the validated endpoint family; never operator text."""
-    scope = ENTRA_SCOPES.get(_classify()[1])
-    if scope is None:
-        message = f"{CODE}_ENTRA_SCOPE_UNRESOLVED: no verified Entra scope for this endpoint family"
-        raise ProviderError(message)
-    return scope
+    return ENTRA_SCOPES[_classify()[1]]  # _classify only returns SUPPORTED_FAMILIES
 
 
 def unavailable_reason() -> str | None:
@@ -248,7 +244,7 @@ def status() -> dict[str, Any]:
         "api_version": settings.azure_openai_api_version,
         "auth": auth if auth in ("entra", "key") else "invalid",
         "entra_scope": ENTRA_SCOPES.get(family) if family else None,
-        "entra_scope_resolved": ok(_scope),
+        "entra_scope_basis": ENTRA_SCOPE_BASIS if family in ENTRA_SCOPES else None,
         "identity_sdk": _identity_sdk(),
         "credential_reference_present": bool(_secret()) if auth == "key" else None,
         "timeout_seconds": settings.azure_openai_timeout_seconds,
