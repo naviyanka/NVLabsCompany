@@ -9,7 +9,10 @@ audit that agree.
 # ruff: noqa: F811 -- pytest fixtures imported from test_postgres_integration
 
 import asyncio
+import re
 import uuid
+from pathlib import Path
+from types import SimpleNamespace
 
 import alembic.command
 import alembic.config
@@ -17,8 +20,9 @@ import httpx
 import pytest
 import sqlalchemy as sa
 from fastapi import FastAPI, Request
+from sqlalchemy import make_url
 from sqlalchemy.exc import DBAPIError
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from nexus.api.routes import memory_evidence as routes
 from nexus.auth.principal import Principal
@@ -895,7 +899,10 @@ async def test_downgrading_one_revision_drops_only_the_evidence_tables_and_their
     finally:
         await asyncio.to_thread(alembic.command.upgrade, cfg, "head")
 
-    # Recreated tables carry no grants, as when the fixture first made the application role.
+    # This database was migrated as the superuser, so the recreated tables get no privileges
+    # for the fixture's application role. That is the fixture's setup, which grants once when it
+    # creates the role, not the deployment path: there the migrator role's default privileges
+    # grant them (see ``test_the_provisioned_application_role_reads_and_writes_evidence...``).
     async with world.engine.begin() as conn:
         await conn.execute(sa.text("GRANT ALL ON ALL TABLES IN SCHEMA public TO nexus_app"))
     assert await rows(world.engine, version) == [("b4d9f2a61c73",)]
@@ -910,3 +917,193 @@ async def test_downgrading_one_revision_drops_only_the_evidence_tables_and_their
             await db.execute(
                 sa.text("UPDATE memory_evidence SET grade = 'none' WHERE id = :e"), {"e": fresh}
             )
+
+# --- grant path: the application role through the real provisioning and migration path ---------
+
+INIT_ROLES = Path(__file__).parents[1] / "docker" / "postgres-init" / "01-init-roles.sql"
+PROVISIONED_ROLES = re.compile(r"CREATE ROLE (\w+) LOGIN PASSWORD '(\w+)'")
+
+
+@pytest.fixture
+async def provisioned(migrated_postgres_url, monkeypatch):
+    """A throwaway database set up the way ``docker-compose.yml`` does it.
+
+    The unmodified ``docker/postgres-init/01-init-roles.sql`` creates the roles and the
+    default privileges, and ``alembic upgrade head`` runs as its migrator role, as the
+    ``migrate`` service does. Only the role names get a random suffix, because roles are
+    shared by the whole server and the shared test database already owns ``nexus_app``.
+    Nothing here grants anything by hand.
+    """
+    suffix = uuid.uuid4().hex[:8]
+    base = make_url(migrated_postgres_url)
+    database = f"grantpath_{suffix}"
+    script = re.sub(
+        r"\bnexus_(migrator|app|system)\b", rf"nexus_\1_{suffix}",
+        INIT_ROLES.read_text(encoding="utf-8"),
+    )
+    passwords = dict(PROVISIONED_ROLES.findall(script))
+    migrator, app, system = (f"nexus_{r}_{suffix}" for r in ("migrator", "app", "system"))
+    uncommented = "\n".join(
+        line for line in script.splitlines() if not line.lstrip().startswith("--")
+    )
+    statements = [part.strip() for part in uncommented.split(";") if part.strip()]
+
+    def url(role=None):
+        u = base.set(database=database)
+        return u.set(username=role, password=passwords[role]) if role else u
+
+    server = create_async_engine(base, isolation_level="AUTOCOMMIT")
+    async with server.connect() as conn:
+        await conn.execute(sa.text(f'CREATE DATABASE "{database}"'))
+    owner = create_async_engine(url(), isolation_level="AUTOCOMMIT")
+    engines = [owner]
+    try:
+        async with owner.connect() as conn:
+            for statement in statements:
+                await conn.execute(sa.text(statement))
+        cfg = alembic.config.Config("alembic.ini")
+        cfg.set_main_option("sqlalchemy.url", url(migrator).render_as_string(hide_password=False))
+        await asyncio.to_thread(alembic.command.upgrade, cfg, "head")
+        engine = create_async_engine(url(app))
+        engines.append(engine)
+        monkeypatch.setattr(
+            "nexus.config.settings.database_url", url(app).render_as_string(hide_password=False)
+        )
+        monkeypatch.setattr(
+            "nexus.database.async_session_factory",
+            async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False),
+        )
+        yield SimpleNamespace(
+            cfg=cfg, owner=owner, app=app, migrator=migrator, system=system, engine=engine
+        )
+    finally:
+        for e in engines:
+            await e.dispose()
+        async with server.connect() as conn:
+            await conn.execute(sa.text(f'DROP DATABASE IF EXISTS "{database}" WITH (FORCE)'))
+            for role in (app, system, migrator):
+                await conn.execute(sa.text(f'DROP ROLE IF EXISTS "{role}"'))
+        await server.dispose()
+
+
+async def _grants(p, table):
+    return {
+        r[0] for r in await rows(
+            p.owner,
+            "SELECT privilege_type FROM information_schema.role_table_grants "
+            "WHERE grantee = :a AND table_name = :t",
+            a=p.app, t=table,
+        )
+    }
+
+
+async def _application_role_works_and_stays_confined(p, label):
+    """What ``nexus_app`` may and may not do with evidence, once the schema is provisioned."""
+    acme, other = uuid.uuid4(), uuid.uuid4()
+    async with AsyncSession(p.owner, expire_on_commit=False) as db:
+        db.add_all([Company(id=acme, name="Acme"), Company(id=other, name="Other")])
+        await db.flush()
+        admin = await create_user(
+            db, email=f"g-{acme}@example.com", password="x" * 14, company_id=acme, role="admin"
+        )
+        memory = MemoryRecord(
+            company_id=acme, scope="company", content=f"c-{uuid.uuid4()}", status="active"
+        )
+        db.add(memory)
+        await db.commit()
+    ctx = MemoryContext(acme, f"user:{admin.id}")
+    key = f"grant-path-{label}-{uuid.uuid4()}"
+
+    # The bound tenant writes canonical evidence and its ledger row, and reads them back.
+    async with tenant_session(acme) as db:
+        await ev.run_once(
+            db, ctx, key=key, operation="attach_evidence", memory_id=memory.id, digest="d" * 64,
+            effect=lambda: ev.attach_evidence(
+                db, ctx, memory.id, evidence_kind="human_attestation", source_id=None,
+                reason_code="reviewed_by_admin", idempotency_key=key,
+            ),
+        )
+        await db.commit()
+    async with tenant_session(acme) as db:
+        found = (await db.execute(sa.select(MemoryEvidence.id))).scalars().all()
+        ledger = (await db.execute(sa.select(MemoryOperation.idempotency_key))).scalars().all()
+    assert len(found) == 1 and ledger == [key], label
+    evidence_id = found[0]
+    before = await evidence_row(p.owner, evidence_id)
+
+    # Another tenant sees nothing and cannot write into this one.
+    async with tenant_session(other) as db:
+        for table in TABLES:
+            assert (await db.execute(sa.text(f"SELECT count(*) FROM {table}"))).scalar_one() == 0
+    insert = sa.text(
+        "INSERT INTO memory_evidence (id, company_id, memory_id, evidence_kind, source_type,"
+        " source_id, reason_code, grade, source_digest, policy_version, idempotency_key,"
+        " created_by, created_at) VALUES (:id, :c, :m, 'human_attestation', 'user', 'u',"
+        " 'reviewed_by_admin', 'assert', 'd', 'memory-evidence-v1', :k, 'user:u', now())"
+    )
+    params = {"c": acme, "m": memory.id}
+    # A forged row is refused by the row policy or by the same-company trigger (which cannot see
+    # a memory outside the bound tenant), never by a missing privilege, which would say
+    # "permission denied".
+    refused = "row-level security|memory of its own company"
+    async with tenant_session(other) as db:
+        with pytest.raises(DBAPIError, match=refused) as forged:
+            await db.execute(insert, {**params, "id": uuid.uuid4(), "k": "forged-by-other"})
+    assert "permission denied" not in str(forged.value)
+
+    # With no tenant bound the role reads nothing and cannot insert.
+    async with AsyncSession(p.engine) as db:
+        for table in TABLES:
+            assert (await db.execute(sa.text(f"SELECT count(*) FROM {table}"))).scalar_one() == 0
+        with pytest.raises(DBAPIError, match=refused) as forged:
+            await db.execute(insert, {**params, "id": uuid.uuid4(), "k": "forged-unbound"})
+    assert "permission denied" not in str(forged.value)
+
+    # The bound tenant still cannot change or remove what it wrote: the trigger fires, which
+    # also shows the role does hold the UPDATE and DELETE privileges.
+    for statement in (
+        "UPDATE memory_evidence SET grade = 'verify' WHERE id = :e",
+        "DELETE FROM memory_evidence WHERE id = :e",
+    ):
+        async with tenant_session(acme) as db:
+            with pytest.raises(DBAPIError, match="append-only"):
+                await db.execute(sa.text(statement), {"e": evidence_id})
+    assert await evidence_row(p.owner, evidence_id) == before
+
+    # The role is neither privileged nor an owner and is bound by FORCE RLS. It holds exactly
+    # the privileges that every other tenant table (memory_records) gets from the defaults.
+    attrs = await rows(
+        p.owner,
+        "SELECT rolbypassrls, rolsuper, rolcreaterole, rolcreatedb, "
+        "pg_has_role(rolname, :m, 'MEMBER') FROM pg_roles WHERE rolname = :a",
+        a=p.app, m=p.migrator,
+    )
+    assert attrs == [(False, False, False, False, False)]
+    owners = await rows(
+        p.owner,
+        "SELECT relname, relowner::regrole::text, relforcerowsecurity FROM pg_class "
+        "WHERE relname IN ('memory_evidence', 'memory_operations') ORDER BY relname",
+    )
+    assert owners == [(t, p.migrator, True) for t in TABLES]
+    canonical = await _grants(p, "memory_records")
+    assert canonical == {"SELECT", "INSERT", "UPDATE", "DELETE"}
+    for table in TABLES:
+        assert await _grants(p, table) == canonical, (label, table)
+
+
+async def test_the_provisioned_application_role_reads_and_writes_evidence_and_stays_confined(
+    provisioned,
+):
+    """Fresh deployment, then an upgrade from the previous revision, with real grants.
+
+    The second pass is downgrade one revision then upgrade, which is what upgrading from the
+    previous release does to these tables. The recreated tables get their privileges from
+    ``ALTER DEFAULT PRIVILEGES FOR ROLE nexus_migrator`` in the provisioning script, so
+    nothing is granted by hand between the passes.
+    """
+    p = provisioned
+    await _application_role_works_and_stays_confined(p, "fresh")
+    await asyncio.to_thread(alembic.command.downgrade, p.cfg, "-1")
+    assert await rows(p.owner, "SELECT to_regclass('memory_evidence') IS NULL") == [(True,)]
+    await asyncio.to_thread(alembic.command.upgrade, p.cfg, "head")
+    await _application_role_works_and_stays_confined(p, "upgraded")
