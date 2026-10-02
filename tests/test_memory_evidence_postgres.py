@@ -9,9 +9,7 @@ audit that agree.
 # ruff: noqa: F811 -- pytest fixtures imported from test_postgres_integration
 
 import asyncio
-import re
 import uuid
-from pathlib import Path
 from types import SimpleNamespace
 
 import alembic.command
@@ -24,6 +22,7 @@ from sqlalchemy import make_url
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from nexus import db_migrate
 from nexus.api.routes import memory_evidence as routes
 from nexus.auth.principal import Principal
 from nexus.auth.users import create_user
@@ -45,6 +44,7 @@ from nexus.models.memory import MemoryRecord
 from nexus.models.memory_evidence import MemoryEvidence, MemoryOperation
 from nexus.models.task import Task
 from nexus.models.task_attempt import TaskAttempt
+from tests.test_db_role_separation_postgres import Deployment, _create, _drop
 from tests.test_postgres_integration import (  # noqa: F401 -- fixtures
     app_role,
     app_user_postgres_url,
@@ -920,70 +920,45 @@ async def test_downgrading_one_revision_drops_only_the_evidence_tables_and_their
 
 # --- grant path: the application role through the real provisioning and migration path ---------
 
-INIT_ROLES = Path(__file__).parents[1] / "docker" / "postgres-init" / "01-init-roles.sql"
-PROVISIONED_ROLES = re.compile(r"CREATE ROLE (\w+) LOGIN PASSWORD '(\w+)'")
-
-
 @pytest.fixture
 async def provisioned(migrated_postgres_url, monkeypatch):
-    """A throwaway database set up the way ``docker-compose.yml`` does it.
+    """A throwaway database provisioned and migrated the way production does it.
 
-    The unmodified ``docker/postgres-init/01-init-roles.sql`` creates the roles and the
-    default privileges, and ``alembic upgrade head`` runs as its migrator role, as the
-    ``migrate`` service does. Only the role names get a random suffix, because roles are
-    shared by the whole server and the shared test database already owns ``nexus_app``.
+    ``deploy/postgres/provision-roles.sql`` creates the migrator, application and system
+    roles and the default privileges, and ``nexus.db_migrate`` (the production migration
+    entry point) runs ``alembic upgrade head`` as the migrator and refuses to finish unless
+    the application role owns nothing. Both come from the role separation tests, so this
+    fixture cannot drift from the real path. Only the role names are random, because roles
+    are shared by the whole server and the shared test database already owns ``nexus_app``.
     Nothing here grants anything by hand.
     """
-    suffix = uuid.uuid4().hex[:8]
-    base = make_url(migrated_postgres_url)
-    database = f"grantpath_{suffix}"
-    script = re.sub(
-        r"\bnexus_(migrator|app|system)\b", rf"nexus_\1_{suffix}",
-        INIT_ROLES.read_text(encoding="utf-8"),
-    )
-    passwords = dict(PROVISIONED_ROLES.findall(script))
-    migrator, app, system = (f"nexus_{r}_{suffix}" for r in ("migrator", "app", "system"))
-    uncommented = "\n".join(
-        line for line in script.splitlines() if not line.lstrip().startswith("--")
-    )
-    statements = [part.strip() for part in uncommented.split(";") if part.strip()]
-
-    def url(role=None):
-        u = base.set(database=database)
-        return u.set(username=role, password=passwords[role]) if role else u
-
-    server = create_async_engine(base, isolation_level="AUTOCOMMIT")
-    async with server.connect() as conn:
-        await conn.execute(sa.text(f'CREATE DATABASE "{database}"'))
-    owner = create_async_engine(url(), isolation_level="AUTOCOMMIT")
+    dep = Deployment(make_url(migrated_postgres_url))
+    await _create(dep)
+    owner = create_async_engine(dep.admin.set(database=dep.db), isolation_level="AUTOCOMMIT")
     engines = [owner]
     try:
-        async with owner.connect() as conn:
-            for statement in statements:
-                await conn.execute(sa.text(statement))
+        await db_migrate.run(dep.migrate_env())
         cfg = alembic.config.Config("alembic.ini")
-        cfg.set_main_option("sqlalchemy.url", url(migrator).render_as_string(hide_password=False))
-        await asyncio.to_thread(alembic.command.upgrade, cfg, "head")
-        engine = create_async_engine(url(app))
+        cfg.set_main_option("sqlalchemy.url", dep.sa_url(dep.migrator).replace("%", "%%"))
+        engine = create_async_engine(dep.url(dep.app))
         engines.append(engine)
-        monkeypatch.setattr(
-            "nexus.config.settings.database_url", url(app).render_as_string(hide_password=False)
-        )
+        monkeypatch.setattr("nexus.config.settings.database_url", dep.sa_url(dep.app))
         monkeypatch.setattr(
             "nexus.database.async_session_factory",
             async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False),
         )
         yield SimpleNamespace(
-            cfg=cfg, owner=owner, app=app, migrator=migrator, system=system, engine=engine
+            cfg=cfg,
+            owner=owner,
+            app=dep.app,
+            migrator=dep.migrator,
+            system=dep.system,
+            engine=engine,
         )
     finally:
         for e in engines:
             await e.dispose()
-        async with server.connect() as conn:
-            await conn.execute(sa.text(f'DROP DATABASE IF EXISTS "{database}" WITH (FORCE)'))
-            for role in (app, system, migrator):
-                await conn.execute(sa.text(f'DROP ROLE IF EXISTS "{role}"'))
-        await server.dispose()
+        await _drop(dep)
 
 
 async def _grants(p, table):
@@ -1089,6 +1064,61 @@ async def _application_role_works_and_stays_confined(p, label):
     assert canonical == {"SELECT", "INSERT", "UPDATE", "DELETE"}
     for table in TABLES:
         assert await _grants(p, table) == canonical, (label, table)
+
+    # The migrator owns the tables, their sequences and their trigger functions, and the
+    # application role owns nothing in the schema.
+    assert await rows(
+        p.owner,
+        "SELECT count(*) FROM pg_class c WHERE c.relnamespace = 'public'::regnamespace "
+        "AND c.relkind IN ('r', 'p', 'S', 'v', 'm') AND c.relowner::regrole::text <> :m",
+        m=p.migrator,
+    ) == [(0,)], label
+    assert await rows(
+        p.owner,
+        "SELECT count(*) FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace "
+        "AND p.proowner::regrole::text <> :m "
+        "AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.objid = p.oid AND d.deptype = 'e')",
+        m=p.migrator,
+    ) == [(0,)], label
+    assert await rows(
+        p.owner,
+        "SELECT count(*) FROM pg_trigger t JOIN pg_proc f ON f.oid = t.tgfoid "
+        "WHERE t.tgrelid::regclass::text = ANY(:t) AND NOT t.tgisinternal "
+        "AND f.proowner::regrole::text <> :m",
+        t=list(TABLES), m=p.migrator,
+    ) == [(0,)], label
+
+    # And it cannot remove a protection: not a trigger, a policy, FORCE RLS or a table.
+    triggers = await rows(
+        p.owner,
+        "SELECT tgrelid::regclass::text, tgname FROM pg_trigger "
+        "WHERE tgrelid::regclass::text = ANY(:t) AND NOT tgisinternal",
+        t=list(TABLES),
+    )
+    policies = await rows(
+        p.owner,
+        "SELECT tablename, policyname FROM pg_policies WHERE tablename = ANY(:t)",
+        t=list(TABLES),
+    )
+    assert triggers and policies, label
+    attacks = [f"ALTER TABLE {t} {action}" for t in TABLES for action in (
+        "DISABLE TRIGGER ALL", "DISABLE ROW LEVEL SECURITY", "NO FORCE ROW LEVEL SECURITY",
+        "ADD COLUMN smuggled integer",
+    )]
+    attacks += [f"DROP TRIGGER {n} ON {t}" for t, n in triggers]
+    attacks += [f"DROP POLICY {n} ON {t}" for t, n in policies]
+    attacks += [f"ALTER POLICY {n} ON {t} USING (true)" for t, n in policies]
+    attacks += [f"DROP TABLE {t}" for t in TABLES]
+    for statement in attacks:
+        async with AsyncSession(p.engine) as db:
+            with pytest.raises(DBAPIError, match="must be owner|permission denied"):
+                await db.execute(sa.text(statement))
+    assert await rows(
+        p.owner,
+        "SELECT relname, relrowsecurity, relforcerowsecurity FROM pg_class "
+        "WHERE relname = ANY(:t) ORDER BY relname",
+        t=list(TABLES),
+    ) == [(t, True, True) for t in TABLES], label
 
 
 async def test_the_provisioned_application_role_reads_and_writes_evidence_and_stays_confined(
