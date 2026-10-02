@@ -801,9 +801,13 @@ async def _reserve_budget(
         from nexus.config import settings
 
         if settings.budget_fail_open:
-            logger.warning("Budget reservation failed, allowing call (fail-open): %s", exc)
+            logger.warning(
+                "Budget reservation failed, allowing call (fail-open): %s", type(exc).__name__
+            )
             return None
-        logger.error("Budget reservation failed, refusing call (fail-closed): %s", exc)
+        logger.error(
+            "Budget reservation failed, refusing call (fail-closed): %s", type(exc).__name__
+        )
         raise BudgetInfraUnavailable(
             "Budget ledger is unavailable and BUDGET_FAIL_OPEN is off"
         ) from exc
@@ -835,7 +839,9 @@ async def _link_cost_events(
         )
         await db.commit()
     except Exception as exc:  # noqa: BLE001 - attribution must not refuse a paid-for call
-        logger.warning("Could not link cost events to session %s: %s", session_id, exc)
+        logger.warning(
+            "Could not link cost events to session %s: %s", session_id, type(exc).__name__
+        )
 
 
 async def _settle_budget(
@@ -900,7 +906,13 @@ async def _settle_one(
     except Exception as exc:  # noqa: BLE001 - settlement must not break chat
         # The hold expires on its own, so a failure here overstates spend for
         # the TTL rather than losing the guardrail.
-        logger.warning("Budget settlement failed for %s: %s", reservation_id, exc)
+        logger.warning("Budget settlement failed for %s: %s", reservation_id, type(exc).__name__)
+
+
+PROVIDER_UNAVAILABLE_CODE = "PROVIDER_UNAVAILABLE"
+PROVIDER_UNAVAILABLE_MESSAGE = (
+    "I'm unable to reach the configured model provider right now. Please try again."
+)
 
 
 async def _call_llm(
@@ -1249,8 +1261,14 @@ async def _call_llm(
                     finish_reason="error",
                     model=model_name,
                 )
+                # result.error can carry provider-controlled text; neither the reply nor the
+                # log repeats it. The provider's doctor/status reports the sanitized cause.
+                logger.warning(
+                    "LLM call reported an error: code=%s adapter=%s agent=%s",
+                    PROVIDER_UNAVAILABLE_CODE, registry_key, agent.id,
+                )
                 return (
-                    f"[{agent.name}] Execution error: {result.error}",
+                    PROVIDER_UNAVAILABLE_MESSAGE,
                     config.get("model", "unknown"),
                     0,
                 )
@@ -1267,17 +1285,15 @@ async def _call_llm(
         # treated as a soft error and retried. Propagate it as a real refusal.
         raise
     except Exception as e:
-        logger.warning("LLM call failed for agent %s: %s", agent.id, e)
-        # Graceful fallback — respond in character without LLM
-        return (
-            f"[{agent.name} — {agent.title or agent.role}] "
-            f"I'm currently unable to connect to my LLM provider ({registry_key}). "
-            f"Error: {type(e).__name__}: {e}\n\n"
-            f"Once connected, I'll operate with these capabilities: "
-            f"{', '.join(agent.capabilities or ['general tasks'])}.",
-            "fallback",
-            0,
+        # The class only: the message and traceback of a provider or registry failure can
+        # carry credentials, URLs or response bodies.
+        logger.warning(
+            "LLM call failed: code=%s adapter=%s exc_class=%s agent=%s turn=%s execution=%s",
+            PROVIDER_UNAVAILABLE_CODE, registry_key, type(e).__name__, agent.id, turn_id,
+            (execution or {}).get("execution_id"),
         )
+        # A fixed, server-owned reply: deterministic, no model call, nothing from the failure.
+        return PROVIDER_UNAVAILABLE_MESSAGE, "fallback", 0
 
     finally:
         # Every exit above — success, provider error, in-character fallback,

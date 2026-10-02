@@ -155,6 +155,13 @@ deployment, model, auth mode, endpoint family, derived Entra scope and whether i
 `unavailable_reason`. It makes no request, asks for no token, calls no tool, creates no turn, writes nothing and shows no
 secret. A live probe is out of scope.
 
+## Failure text
+
+A failed provider or registry call never repeats the failure's own text. `chat._call_llm` answers with one fixed,
+server-owned message (`PROVIDER_UNAVAILABLE_MESSAGE`) and a durable chat turn that raises stores `EXECUTION_ERROR` with that
+same message. Logs carry only the stable code, the adapter identifier, the exception class and the agent, turn and execution
+IDs: no message and no traceback. Use `status()` above for a sanitized diagnosis.
+
 ## Provider selection
 
 Explicit. OmniRoute and Hermes-native stay available and nothing switches between them and Azure automatically. If Azure

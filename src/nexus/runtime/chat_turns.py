@@ -1058,6 +1058,11 @@ class ChatTurnWorker:
                 error_message="Cancelled by request",
             )
         elif outcome == "error":
+            if not isinstance(value, HTTPException):
+                logger.warning(
+                    "chat turn %s failed: code=EXECUTION_ERROR exc_class=%s execution=%s",
+                    turn.id, type(value).__name__, execution.get("execution_id"),
+                )
             await finalize(
                 turn,
                 self.worker_id,
@@ -1121,9 +1126,13 @@ def _failure(exc: BaseException) -> dict[str, Any]:
             "error_message": "Budget ledger unavailable; the call was refused",
             "result": {"http_status": 503},
         }
+    from nexus.api.routes.chat import PROVIDER_UNAVAILABLE_MESSAGE
+
+    # The reply is the same fixed text a failed non-streaming call gets: the exception's
+    # message can carry provider-controlled text, so only its class is logged by the worker.
     return {
         "error_code": "EXECUTION_ERROR",
-        "error_message": f"{type(exc).__name__}: {exc}"[:500],
+        "error_message": PROVIDER_UNAVAILABLE_MESSAGE,
         "result": {"http_status": 500},
     }
 
