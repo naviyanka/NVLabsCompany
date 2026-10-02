@@ -10,10 +10,13 @@ A provider supplies a *transport*: an async iterator of OpenAI-style streamed
 chat-completion chunks. It supplies an optional *meter* (budget reserve and
 settle around every round) and an optional *callback* for :class:`Event`.
 
-Callback contract: events carry no channel or audio concepts, never tool
-arguments, and text deltas are released only once a round has proven to be the
-final answer (no ``tool_calls``, no tool-looking text). A callback that raises
-is dropped; it never skips cancellation, budget settlement or audit.
+Callback contract: events carry no channel or audio concepts and never tool
+arguments. Text deltas have two modes. A tool-free call (no tools offered) emits
+each delta as it arrives, because nothing can invalidate it. A tool-capable round
+holds its text, which a later native ``tool_call`` would discard, and releases it
+only when the round ends with no tool call; that release is buffered, not token
+streaming. A callback that raises is dropped; it never skips cancellation, budget
+settlement or audit.
 """
 
 from __future__ import annotations
@@ -34,6 +37,10 @@ logger = logging.getLogger(__name__)
 
 # Text that looks like a tool call is never executed; a response carrying it fails.
 TOOL_TEXT = re.compile(r"<\s*/?\s*tool_call|<\s*function_call|\"tool_calls\"\s*:", re.IGNORECASE)
+# Progressive release re-checks this many trailing characters so a marker split across
+# deltas is caught before the completing delta is released; the whole text is still
+# checked when the round ends.
+TOOL_TEXT_TAIL = 64
 
 TEXT_DELTA = "text_delta"
 TOOL_REQUESTED = "tool_requested"
@@ -280,17 +287,31 @@ async def _loop(
         if cancelled is not None and cancelled():
             raise ProviderError(f"{code}_CANCELLED: turn ended")
 
+    # Tool-free call: no tool can follow, so text is final the moment it arrives and is
+    # released progressively. Tool-capable round: text is provisional (a later native
+    # tool_call discards it), so it is held until the round ends.
+    progressive = not tools
+
     for round_no in range(limits.max_iterations):
         check_cancel()
         got = Assembler(limits)
         hold = await meter.begin(messages, tools) if meter else None
         started = False
+        sent, tail = 0, ""
         try:
             async with aclosing(transport(messages, tools)) as stream:
                 async for chunk in stream:
                     started = True
                     check_cancel()
                     got.feed(chunk)
+                    if progressive:
+                        for piece in got.content[sent:]:
+                            # Tool-looking text still fails the turn, before it is released.
+                            if TOOL_TEXT.search(tail + piece):
+                                raise ProviderError(f"{code}_TOOL_TEXT: tool call in message text")
+                            tail = (tail + piece)[-TOOL_TEXT_TAIL:]
+                            emit(Event(TEXT_DELTA, round=round_no, text=piece))
+                        sent = len(got.content)
         finally:
             if meter:
                 text_len = sum(map(len, got.content)) + sum(
@@ -307,8 +328,9 @@ async def _loop(
             raise ProviderError(f"{code}_TOOL_TEXT: tool call in message text")
         if not calls:
             check_cancel()
-            for piece in got.content:
-                emit(Event(TEXT_DELTA, round=round_no, text=piece))
+            if not progressive:  # a tool-capable round proved final only now
+                for piece in got.content:
+                    emit(Event(TEXT_DELTA, round=round_no, text=piece))
             messages.append({"role": "assistant", "content": text})
             return LoopResult(text, artifacts, usage, messages)
         # Native tool calls: this round's text is not an answer and is never emitted.
