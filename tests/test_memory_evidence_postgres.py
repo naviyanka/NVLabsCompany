@@ -576,3 +576,337 @@ async def test_cross_tenant_forged_ids_are_refused_and_leave_nothing(world, clie
     assert forged.json()["detail"]["code"] == "MEMORY_EVIDENCE_SOURCE_NOT_FOUND"
     assert await world.one(MemoryEvidence, company_id=world.acme) == []
     assert await world.one(MemoryOperation, company_id=world.acme) == []
+
+
+# --- retention: what deletion and downgrade do to evidence ---------------------------------
+
+FK_VIOLATION = "23503"
+EVIDENCE_FUNCTIONS = ("memory_evidence_append_only", "memory_evidence_same_company")
+CATALOG = {
+    "tables": "SELECT tablename FROM pg_tables WHERE schemaname = 'public'",
+    "indexes": "SELECT tablename, indexname FROM pg_indexes WHERE schemaname = 'public'",
+    "constraints": (
+        "SELECT conrelid::regclass::text, conname FROM pg_constraint "
+        "WHERE connamespace = 'public'::regnamespace"
+    ),
+    "triggers": "SELECT tgrelid::regclass::text, tgname FROM pg_trigger WHERE NOT tgisinternal",
+    "policies": "SELECT tablename, policyname FROM pg_policies WHERE schemaname = 'public'",
+    "functions": "SELECT proname FROM pg_proc WHERE pronamespace = 'public'::regnamespace",
+    "rls": (
+        "SELECT relname, relrowsecurity, relforcerowsecurity FROM pg_class "
+        "WHERE relnamespace = 'public'::regnamespace AND relkind = 'r'"
+    ),
+}
+
+
+def refusal(exc: DBAPIError) -> tuple[str, str | None]:
+    """The stable (SQLSTATE, constraint) of a refused statement; message text is not matched."""
+    return exc.orig.sqlstate, getattr(exc.orig.__cause__, "constraint_name", None)
+
+
+async def rows(engine, sql, **params):
+    async with engine.connect() as conn:
+        return [tuple(r) for r in (await conn.execute(sa.text(sql), params))]
+
+
+async def evidence_row(engine, evidence_id):
+    """The row with its physical identity (xmin, ctid): a rewrite would change it."""
+    return await rows(
+        engine, "SELECT xmin::text, ctid::text, * FROM memory_evidence WHERE id = :i",
+        i=evidence_id,
+    )
+
+
+async def residue(w):
+    """Evidence, ledger and audit rows of the main company."""
+    return [
+        (await rows(w.engine, f"SELECT count(*) FROM {t} WHERE company_id = :c", c=w.acme))[0][0]
+        for t in ("memory_evidence", "memory_operations", "audit_log")
+    ]
+
+
+def _session(w, as_role):
+    return AsyncSession(w.engine) if as_role == "owner" else tenant_session(w.acme)
+
+
+@pytest.mark.parametrize("as_role", ("owner", "tenant"))
+@pytest.mark.parametrize(
+    "statement",
+    (
+        "UPDATE memory_evidence SET grade = 'verify' WHERE id = :e",
+        "UPDATE memory_evidence SET created_by = 'user:forged' WHERE id = :e",
+        "DELETE FROM memory_evidence WHERE id = :e",
+    ),
+)
+async def test_direct_update_and_delete_of_evidence_are_refused_and_change_nothing(
+    world, app_role, statement, as_role
+):
+    m = await world.memory("active")
+    e = await attach_attestation(world, m)
+    before, base = await evidence_row(world.engine, e), await residue(world)
+    async with _session(world, as_role) as db:
+        # Work done earlier in the same transaction goes with the refused statement.
+        await ev.attach_evidence(
+            db, world.ctx, m.id, evidence_kind="human_attestation", source_id=None,
+            reason_code="reviewed_by_admin", idempotency_key=f"k-{uuid.uuid4()}",
+        )
+        with pytest.raises(DBAPIError, match="append-only"):
+            await db.execute(sa.text(statement), {"e": e})
+        await db.rollback()
+    assert await evidence_row(world.engine, e) == before
+    assert await residue(world) == base
+
+
+@pytest.mark.parametrize("as_role", ("owner", "tenant"))
+async def test_deleting_a_memory_with_evidence_is_refused_by_the_restrict_foreign_key(
+    world, app_role, as_role
+):
+    m = await world.memory("active")
+    e = await attach_attestation(world, m)
+    memory_before = await rows(world.engine, "SELECT * FROM memory_records WHERE id = :i", i=m.id)
+    evidence_before = await evidence_row(world.engine, e)
+    async with _session(world, as_role) as db:
+        with pytest.raises(DBAPIError) as refused:
+            await db.execute(sa.text("DELETE FROM memory_records WHERE id = :i"), {"i": m.id})
+        assert refusal(refused.value) == (FK_VIOLATION, "memory_evidence_memory_id_fkey")
+        await db.rollback()
+    assert await rows(world.engine, "SELECT * FROM memory_records WHERE id = :i", i=m.id) == (
+        memory_before
+    )
+    assert await evidence_row(world.engine, e) == evidence_before
+
+
+async def test_every_evidence_foreign_key_is_restrict(world):
+    keys = await rows(
+        world.engine,
+        "SELECT conrelid::regclass::text, conname, confrelid::regclass::text, confdeltype::text "
+        "FROM pg_constraint WHERE contype = 'f' AND conrelid::regclass::text = ANY(:t) "
+        "ORDER BY 1, 2", t=list(TABLES),
+    )
+    assert keys == [
+        ("memory_evidence", "memory_evidence_company_id_fkey", "companies", "r"),
+        ("memory_evidence", "memory_evidence_memory_id_fkey", "memory_records", "r"),
+        ("memory_operations", "memory_operations_company_id_fkey", "companies", "r"),
+        ("memory_operations", "memory_operations_memory_id_fkey", "memory_records", "r"),
+    ]
+
+
+async def _delete_company(w, company, as_role):
+    """Try to delete ``company``; return what the database refused with."""
+    async with _session(w, as_role) as db:
+        with pytest.raises(DBAPIError) as refused:
+            await db.execute(sa.text("DELETE FROM companies WHERE id = :c"), {"c": company})
+        await db.rollback()
+    return refusal(refused.value)
+
+
+async def _company_rows(w, company):
+    """Every row of ``company`` in the three tables a delete would have to remove."""
+    return {
+        t: await rows(w.engine, f"SELECT * FROM {t} WHERE {key} = :c ORDER BY id", c=company)
+        for t, key in (
+            ("companies", "id"), ("memory_records", "company_id"), ("memory_evidence", "company_id")
+        )
+    }
+
+
+async def _companys_foreign_keys(w):
+    """Every foreign key into ``companies``, as ``{name: (table, column)}``."""
+    return {
+        r[0]: (r[1], r[2]) for r in await rows(
+            w.engine,
+            "SELECT c.conname, c.conrelid::regclass::text, a.attname FROM pg_constraint c "
+            "JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = c.conkey[1] "
+            "WHERE c.contype = 'f' AND c.confrelid = 'companies'::regclass",
+        )
+    }
+
+
+async def _foreign_keys_with_rows(w, company):
+    """The foreign keys into ``companies`` that actually have a row for ``company``."""
+    return {
+        name for name, (table, column) in (await _companys_foreign_keys(w)).items()
+        if await rows(w.engine, f"SELECT 1 FROM {table} WHERE {column} = :c LIMIT 1", c=company)
+    }
+
+
+@pytest.mark.parametrize("as_role", ("owner", "tenant"))
+async def test_deleting_a_company_with_a_memory_and_evidence_is_refused(world, app_role, as_role):
+    """A company holding only a memory and its evidence cannot be deleted; nothing is lost.
+
+    ``blocker`` is whichever foreign key PostgreSQL fires first, and it need not be the
+    evidence one: the memory row, and the audit rows that creating the admin and the evidence
+    write, reference the company too. Observed on a freshly migrated database: it is
+    ``audit_log_company_id_fkey``. The test asserts only that the blocker is a foreign key
+    with a row for this company; the evidence foreign keys are RESTRICT in their own right
+    (``test_every_evidence_foreign_key_is_restrict``).
+    """
+    company = uuid.uuid4()
+    async with AsyncSession(world.engine) as db:
+        db.add(Company(id=company, name="Retained"))
+        await db.flush()
+        admin = await create_user(
+            db, email=f"r-{company}@example.com", password="x" * 14, company_id=company,
+            role="admin",
+        )
+        admin_id = admin.id
+        await db.commit()
+    m = await world.memory("active", company=company)
+    async with tenant_session(company) as db:
+        out = await ev.attach_evidence(
+            db, MemoryContext(company, f"user:{admin_id}"), m.id,
+            evidence_kind="human_attestation", source_id=None,
+            reason_code="reviewed_by_admin", idempotency_key=f"k-{uuid.uuid4()}",
+        )
+        await db.commit()
+    before = await _company_rows(world, company)
+    assert len(before["memory_evidence"]) == 1
+
+    sqlstate, blocker = await _delete_company(world, company, as_role)
+
+    assert sqlstate == FK_VIOLATION
+    holding = await _foreign_keys_with_rows(world, company)
+    assert {"memory_records_company_id_fkey", "memory_evidence_company_id_fkey"} <= holding
+    assert blocker in holding, (blocker, holding)
+    assert await _company_rows(world, company) == before
+    assert out["evidence_id"]
+
+
+async def test_deleting_the_main_company_is_refused_whatever_else_depends_on_it(world, app_role):
+    """The seeded company has agents, users and audit rows besides its memory and evidence."""
+    m = await world.memory("active")
+    await attach_attestation(world, m)
+    sqlstate, blocker = await _delete_company(world, world.acme, "owner")
+    assert sqlstate == FK_VIOLATION
+    assert (blocker is not None) and blocker.endswith("_fkey"), blocker
+    assert len(await world.one(MemoryEvidence, memory_id=m.id)) == 1
+    assert len(await rows(world.engine, "SELECT 1 FROM companies WHERE id = :c", c=world.acme)) == 1
+
+
+async def test_other_and_unbound_sessions_cannot_see_update_or_delete_evidence(world, app_role):
+    m = await world.memory("active")
+    e = await attach_attestation(world, m)
+    before = await evidence_row(world.engine, e)
+    memory_before = await rows(world.engine, "SELECT * FROM memory_records WHERE id = :i", i=m.id)
+    for session, unbound in ((tenant_session(world.other), False), (app_role(), True)):
+        async with session as db:
+            if unbound:  # no tenant bound: the policy hides every row
+                everything = await db.execute(sa.text("SELECT count(*) FROM memory_evidence"))
+                assert everything.scalar_one() == 0
+            mine = await db.execute(
+                sa.text("SELECT count(*) FROM memory_evidence WHERE id = :e"), {"e": e}
+            )
+            assert mine.scalar_one() == 0
+            for statement in (
+                "UPDATE memory_evidence SET grade = 'verify' WHERE id = :e",
+                "DELETE FROM memory_evidence WHERE id = :e",
+                "DELETE FROM memory_records WHERE id = :m",
+            ):
+                result = await db.execute(sa.text(statement), {"e": e, "m": m.id})
+                assert result.rowcount == 0, statement
+            await db.rollback()
+    assert await evidence_row(world.engine, e) == before
+    assert await rows(world.engine, "SELECT * FROM memory_records WHERE id = :i", i=m.id) == (
+        memory_before
+    )
+    flags = await rows(
+        world.engine,
+        "SELECT relname, relrowsecurity, relforcerowsecurity FROM pg_class "
+        "WHERE relname = ANY(:t) ORDER BY 1", t=list(TABLES),
+    )
+    assert flags == [("memory_evidence", True, True), ("memory_operations", True, True)]
+
+
+async def _catalog(engine):
+    return {key: set(await rows(engine, sql)) for key, sql in CATALOG.items()}
+
+
+def _belongs_to_evidence(row) -> bool:
+    return row[0] in TABLES or row[0] in EVIDENCE_FUNCTIONS
+
+
+async def test_downgrading_one_revision_drops_only_the_evidence_tables_and_their_history(
+    world, migrated_postgres_url
+):
+    """Evidence is not exported or kept: downgrading destroys it, with only M3-2's objects."""
+    m = await world.memory("active")
+    await attach_attestation(world, m)
+    async with tenant_session(world.acme) as db:
+        await ev.run_once(
+            db, world.ctx, key="downgrade-key-12345", operation="attach_evidence",
+            memory_id=m.id, digest="d" * 64,
+            effect=lambda: ev.attach_evidence(
+                db, world.ctx, m.id, evidence_kind="human_attestation", source_id=None,
+                reason_code="reviewed_by_admin", idempotency_key="downgrade-key-12345",
+            ),
+        )
+        await db.commit()
+    assert await rows(world.engine, "SELECT count(*) FROM memory_evidence WHERE company_id = :c",
+                      c=world.acme) == [(2,)]
+    assert await rows(world.engine, "SELECT count(*) FROM memory_operations WHERE company_id = :c",
+                      c=world.acme) == [(1,)]
+
+    kept = {t: await rows(world.engine, f"SELECT * FROM {t} ORDER BY id")
+            for t in ("companies", "memory_records", "audit_log")}
+    before = await _catalog(world.engine)
+    cfg = alembic.config.Config("alembic.ini")
+    cfg.set_main_option("sqlalchemy.url", migrated_postgres_url)
+    version = "SELECT version_num FROM alembic_version"
+    assert await rows(world.engine, version) == [("b4d9f2a61c73",)]
+
+    await asyncio.to_thread(alembic.command.downgrade, cfg, "-1")
+    try:
+        assert await rows(world.engine, version) == [("e7a1c2d3f408",)]
+        after = await _catalog(world.engine)
+        for key in CATALOG:
+            assert not after[key] - before[key], key  # nothing new appears
+            assert before[key] - after[key] == {
+                r for r in before[key] if _belongs_to_evidence(r)
+            }, key
+        removed = {key: before[key] - after[key] for key in CATALOG}
+        assert len(removed["tables"]) == 2
+        assert len(removed["policies"]) == 2
+        assert len(removed["triggers"]) == 4
+        assert len(removed["functions"]) == 2
+        assert {n for _, n in removed["indexes"]} >= {
+            "ix_memory_evidence_company_memory",
+            "ix_memory_evidence_company_source",
+            "ix_memory_operations_company_memory",
+            "uq_memory_evidence_source",
+            "uq_memory_evidence_idempotency",
+            "uq_memory_operations_key",
+        }
+        assert {n for _, n in removed["constraints"]} >= {
+            "ck_memory_evidence_kind",
+            "ck_memory_evidence_source_type",
+            "ck_memory_evidence_grade",
+            "ck_memory_operations_operation",
+            "memory_evidence_memory_id_fkey",
+            "memory_operations_company_id_fkey",
+        }
+        for t, snapshot in kept.items():  # everything that pre-dates M3-2 is untouched
+            assert await rows(world.engine, f"SELECT * FROM {t} ORDER BY id") == snapshot, t
+        gone = await rows(
+            world.engine,
+            "SELECT to_regclass('memory_evidence') IS NULL, "
+            "to_regclass('memory_operations') IS NULL",
+        )
+        assert gone == [(True, True)]  # the evidence history went with its tables
+    finally:
+        await asyncio.to_thread(alembic.command.upgrade, cfg, "head")
+
+    # Recreated tables carry no grants, as when the fixture first made the application role.
+    async with world.engine.begin() as conn:
+        await conn.execute(sa.text("GRANT ALL ON ALL TABLES IN SCHEMA public TO nexus_app"))
+    assert await rows(world.engine, version) == [("b4d9f2a61c73",)]
+    assert await _catalog(world.engine) == before  # triggers, policies, FORCE RLS all return
+    for t in TABLES:  # the upgrade does not bring the history back
+        assert await rows(world.engine, f"SELECT count(*) FROM {t}") == [(0,)]
+    for t, snapshot in kept.items():
+        assert await rows(world.engine, f"SELECT * FROM {t} ORDER BY id") == snapshot, t
+    fresh = await attach_attestation(world, m)  # and the rebuilt tables are append-only again
+    async with AsyncSession(world.engine) as db:
+        with pytest.raises(DBAPIError, match="append-only"):
+            await db.execute(
+                sa.text("UPDATE memory_evidence SET grade = 'none' WHERE id = :e"), {"e": fresh}
+            )

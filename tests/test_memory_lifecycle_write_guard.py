@@ -445,3 +445,72 @@ def test_evidence_guard_catches_bypasses():
 
 def test_migration_exceptions_stay_empty():
     assert MIGRATION_EXCEPTIONS == set()
+
+
+# --- retention: nothing hard-deletes evidence or the memories it references -----------------
+
+RETAINED_CLASSES = EVIDENCE_CLASSES | {"MemoryRecord"}
+RETAINED_TABLES = ("memory_records", *EVIDENCE_TABLES)
+RAW_REMOVAL_WORDS = ("delete from", "truncate", "drop table")
+
+
+def hard_delete_violations(source: str, rel: Path) -> list[str]:
+    """Every hard delete of a memory or its evidence in ``source`` (at ``rel``).
+
+    A module that handles these rows may not call ``delete(...)`` or ``session.delete(...)``,
+    and no string may hold SQL that deletes, truncates or drops their tables. Retiring a memory
+    is an archive in ``nexus.memory.lifecycle``. A route decorator such as
+    ``@router.delete("/path")`` takes a string and is not a delete.
+    """
+    tree = ast.parse(source)
+    parents = {c: p for p in ast.walk(tree) for c in ast.iter_child_nodes(p)}
+    handles = _mentions(tree, RETAINED_CLASSES)
+    found: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and _name(node.func) in {"delete", "sa_delete"}:
+            first = node.args[0] if node.args else None
+            route = isinstance(first, ast.Constant) and isinstance(first.value, str)
+            if handles and not route:
+                found.add(f"{rel}:{node.lineno}: hard delete in a module that handles memories")
+        if (
+            isinstance(node, ast.Constant)
+            and isinstance(node.value, str)
+            and not isinstance(parents.get(node), ast.Expr)
+        ):
+            sql = " ".join(node.value.lower().split())
+            if any(t in sql for t in RETAINED_TABLES) and any(w in sql for w in RAW_REMOVAL_WORDS):
+                found.add(f"{rel}:{node.lineno}: raw SQL removes memory or evidence rows")
+    return sorted(found)
+
+
+def test_no_production_path_hard_deletes_evidence_or_a_memory():
+    offenders = []
+    for rel, text in _scanned_sources():
+        if rel not in MIGRATION_EXCEPTIONS:
+            offenders += hard_delete_violations(text, rel)
+    assert not offenders, (
+        "evidence is retained and a memory is archived, never deleted (nexus.memory.lifecycle):\n"
+        + "\n".join(offenders)
+    )
+
+
+def test_hard_delete_guard_catches_bypasses():
+    other = Path("nexus/api/routes/evil.py")
+    bad = {
+        "session delete": "def f(db, m: MemoryRecord):\n    db.delete(m)\n",
+        "core delete": "def f(db):\n    db.execute(delete(MemoryRecord))\n",
+        "table delete": "def f(db):\n    db.execute(MemoryEvidence.__table__.delete())\n",
+        "raw delete": "Q = 'DELETE FROM memory_records WHERE id = 1'\n",
+        "raw truncate": "Q = 'TRUNCATE memory_evidence'\n",
+        "raw drop": "Q = 'drop table memory_operations'\n",
+    }
+    for name, source in bad.items():
+        assert hard_delete_violations(source, other), name
+    route = (
+        "@router.delete('/api/v1/memory/{memory_id}')\n"
+        "async def delete_memory(db):\n"
+        "    '''Retire a memory; nothing is deleted (delete from memory_records is refused).'''\n"
+        "    return archive(MemoryRecord)\n"
+    )
+    assert not hard_delete_violations(route, other)
+    assert not hard_delete_violations("def f(db, row):\n    db.delete(row)\n", other)
