@@ -72,7 +72,7 @@ the same range.
 | Job | Commands |
 |---|---|
 | Security & Static Analysis | `python scripts/ruff_ratchet.py`, `bandit -r src/ -ll -q`, hadolint on `Dockerfile.prod` and `dashboard/Dockerfile.prod` (failure threshold `error`) |
-| Helm & Kubeconform | `helm lint deploy/helm/nexus`, `helm template nexus deploy/helm/nexus > output/manifests.yaml`, then `kubeconform -strict -summary -kubernetes-version 1.31.0` against the default schemas plus the datreeio CRDs catalogue |
+| Helm & Kubeconform | `helm lint deploy/helm/nexus --set migration.existingSecret=nexus-migration-db`, `helm template nexus deploy/helm/nexus --set migration.existingSecret=nexus-migration-db > output/manifests.yaml`, then `kubeconform -strict -summary -kubernetes-version 1.31.0` against the default schemas plus the datreeio CRDs catalogue |
 | Classify Changes | `python scripts/ci_changes.py classify` decides whether a PR is documentation-only |
 | Multi-Arch Image Build (internal) | Builds `Dockerfile.prod` and `dashboard/Dockerfile.prod`, scans them with Trivy, and pushes them on `push` events only (60 min timeout); skipped for documentation-only PRs |
 | Multi-Arch Build & Vulnerability Scan | The required check. Always runs; passes when the build passed, or when a documentation-only change correctly skipped it. See [CI_SELECTIVE_BUILDS.md](CI_SELECTIVE_BUILDS.md) |

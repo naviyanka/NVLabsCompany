@@ -246,9 +246,8 @@ class TestHelmChartArchitecture:
         content = migration_file.read_text(encoding="utf-8")
         assert "helm.sh/hook" in content
         assert "pre-install,pre-upgrade" in content
-        assert "alembic" in content
-        assert "upgrade" in content
-        assert "head" in content
+        # The job runs `alembic upgrade head` through the migrator-only entry point.
+        assert "nexus.db_migrate" in content
 
 
 # ==============================================================================

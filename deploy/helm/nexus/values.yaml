@@ -183,6 +183,17 @@ temporal:
 
 migration:
   enabled: true
+  # The migration job connects as its own role, never as the application role. The role
+  # owns every schema object, so the application role (database.user) cannot ALTER or
+  # DROP tables, triggers, policies or row level security.
+  user: nexus_migrator
+  # Name of an existing Secret that holds the migrator connection URL. Required while the
+  # job is enabled: the chart never builds this URL, never falls back to DATABASE_URL and
+  # holds no password. A Helm pre-install/pre-upgrade hook runs before the chart's own
+  # resources exist, so the Secret must already be in the namespace (created by an
+  # external secret manager, an ExternalSecret outside this chart, or an operator).
+  existingSecret: ""
+  secretKey: MIGRATION_DATABASE_URL
   hook: "pre-install,pre-upgrade"
   hookDeletePolicy: "before-hook-creation,hook-succeeded"
   resources:

@@ -106,9 +106,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     import nexus.models  # noqa: F401 - register all models
     from nexus.config import settings
-    from nexus.config_validator import enforce_auth_policy, enforce_webhook_timeout_policy
+    from nexus.config_validator import (
+        enforce_auth_policy,
+        enforce_no_migration_credential,
+        enforce_webhook_timeout_policy,
+    )
     # Before the database or any route: a disallowed AUTH_ENABLED=false refuses to start.
     enforce_auth_policy()
+    # Likewise a runtime process that was handed the schema owner's credential.
+    enforce_no_migration_credential()
     # Likewise a webhook timeout that would outlive the idempotency lease.
     enforce_webhook_timeout_policy()
     from nexus.database import async_session_factory, engine, assert_role_rls_posture
