@@ -23,8 +23,12 @@ MAX_BODY_CACHE_BYTES = 256 * 1024  # 256 KB
 # Chat turn POSTs dedupe on ChatTurn.idempotency_key and re-attach a retry to
 # the running turn; a cached (possibly empty, streamed) body would be wrong.
 # Trigger webhooks keep their own tenant-and-trigger-scoped ledger, with a lease.
+# Memory evidence, candidate acceptance and trust promotion keep a ledger row in the same
+# transaction as the effect (memory_operations): the same key with another request is a
+# 409 there, where this middleware would answer 422.
 SELF_IDEMPOTENT_PATHS = re.compile(
     r"^/api/v1/(agents/[^/]+/chat|sessions/[^/]+/messages)(/stream)?/?$|^/api/v1/webhooks/[^/]+/?$"
+    r"|^/api/v1/companies/[^/]+/memory/[^/]+/(evidence|accept|trust/(assert|verify))/?$"
 )
 
 
