@@ -90,7 +90,7 @@ No production path deletes a `memory_records` row.
 | L3 (shared) | no eviction; promotion inherits the parent's status |
 | `MemoryStore.demote` / `archive_old` | writes the redacted cold file, then sets `tier=cold`; the PG row stays |
 | Cold restore | re-ingests through `ingest_memory` (`cold_archive` source) |
-| Maintenance (`orchestrator`) | decays `importance` only; never changes status, scope or tier, never deletes |
+| Maintenance (`orchestrator`) | decays `importance` of active rows only; never changes status, scope or tier, never deletes |
 | CEO supersede / resolve | `supersede_memory` / `archive_memory`, audited |
 | `delete(MemoryRecord)`, `db.delete(row)`, raw `DELETE FROM memory_records` | none in `src`; `tests/test_memory_write_path_guard.py` fails on any |
 
@@ -98,7 +98,79 @@ Exceptions: no code deletes a company's memory rows. `DELETE /companies/{id}` is
 
 ## Reads
 
-Readers select `LIVE_STATUSES` (candidate, active) in SQL before any `LIMIT`. Readers that feed prompts (agent recall and shared L3 knowledge in chat) read `active` rows only, so a candidate never reaches a prompt until something makes it active.
+Two lifecycle policies, both applied in SQL before ranking and `LIMIT`. Filtering closed rows in Python after the `LIMIT` is not allowed: a newer closed row would take the place of an active one and starve it.
+
+### Prompt-visible: `active` only
+
+`PROMPT_STATUSES = ("active",)` (`nexus.models.memory`). Any read whose result can reach a model returns active rows only. Candidate, archived, superseded and rejected rows never appear, and neither does their text, so a hostile string stored in a closed row cannot become a prompt injection.
+
+| Reader | Notes |
+|--------|-------|
+| `ceo_service.recall` (CEO executive context, snapshot view, `ceo_search_executive_memory` tool) | Active only; it has no lifecycle parameter. The tool schema has no `include_closed` (`additionalProperties: false`), so a model that sends it, forged or from a legacy prompt, gets `invalid arguments` before any query and before any audit. There is no fallback to an active-only answer for that call. |
+| `PersistentLayeredMemory.get_agent_facts`, `all_agent_facts`, `get_shared_knowledge`, `get_context_window` | L2 and L3. |
+| `chat._fetch_agent_memories`, shared knowledge in chat | Through the readers above. |
+| `MemoryStore.retrieve` (warm tier and hot cache) | See "Hot cache" below: hot entries are re-checked against the database on every call. |
+| `GET /agents/{id}/memory/search` | BM25 over active rows. |
+| `GET /companies/{id}/memory/graph` | Active rows. |
+
+`store_fact` still reads candidate and active rows for near-duplicate detection and the L2 capacity check (`LIVE_STATUSES`). That is a write-path concern: it stops the same unreviewed fact from being stored again. It never returns those rows to a caller.
+
+### Hot cache
+
+`MemoryStore` keeps a per-process hot tier (`_hot`). Nothing invalidates it when a lifecycle function runs, so the read does the check instead of the writer:
+
+- The cache key is `<company_id>:<scope>:<scope_id>`, so two companies never share a key.
+- On **every** `retrieve`, not only when a key is warmed, the hot ids are re-queried with `company_id == caller` and `status IN PROMPT_STATUSES`. An entry that was archived, superseded or rejected, or that belongs to another company, is dropped from the answer.
+- A transition in one company changes only that company's rows; another company's cached entries are still served and untouched.
+
+Covered by `tests/test_memory_lifecycle_read_safety.py` (archive, supersede and reject through the real lifecycle functions after caching, repeated retrieves, cross-company isolation, an entry planted under another company's key).
+
+### Review-visible: human administrator only, audited
+
+Candidate and closed content is reachable only through a human review path, never through a model tool, an agent or run token, an API key or an ordinary member.
+
+- **Authority:** `routes.memory.is_memory_reviewer`, which is the Governance Studio write predicate `errors.can_write` (a human `admin` of the caller's own company). The principal is built server-side from the session, the user's active flag and the membership row on every request, so a deactivated user or a removed membership fails, and nothing in a request body or header can raise it. A dedicated Governance Studio memory-review capability is **deferred**; until it exists this is the narrowest existing human authority.
+- `GET /api/v1/agents/{id}/memory` and `GET /api/v1/companies/{id}/memory` take `?status=<candidate|active|archived|superseded|rejected>`. Without it, or with `active`, they return active rows for any caller. A non-active value is `403 MEMORY_REVIEW_FORBIDDEN` for a non-reviewer. An unknown value is `422 MEMORY_STATUS_INVALID`.
+- `GET /api/v1/memory/{id}`: an active row is served to any caller in the company. A non-active row is `404` for a non-reviewer, the same answer as an unknown or foreign id, so the route is no oracle for closed memory.
+- `GET /ceo/memory?include_closed=true` is the executive review path: reviewer only (`403`), through `ceo_service.review_recall`. The default call uses the active-only `recall`.
+- **Audit:** every review read writes one `memory.review_read` audit row with the actor, the view (`agent_list:<state>`, `company_list:<state>`, `executive_list:all`, `detail:<state>`), a count and the memory ids. Never content.
+- **Tenancy:** every query filters on the authenticated company. The company routes (`/companies/{company_id}/memory`, `/stats`, `/health`, `/graph`) conceal the tenant: any path company other than the caller's, whether it exists or not, gets the same `404` with the stable code `COMPANY_NOT_FOUND` and a fixed message. The decision compares the path with the caller's own company and never reads the path company, so nothing (rows, counts, ids, names, audit entries) can tell the cases apart. It is enforced in the auth middleware and again by the `MemoryCompanyId` route dependency; the global `PathCompanyId` (`403`) is unchanged for every other company route. A human admin's authority stops at their own company. A foreign memory id (`/memory/{id}`) is `404`.
+- **Aggregates:** `/memory/stats` and `/memory/health` return counts only, scoped to the company; `by_status` counts every state but carries no content.
+- No new dashboard or acceptance workflow. Accepting a candidate is deferred (see below).
+
+### Compatibility impact
+
+- The default list no longer returns candidates (client change since the previous phase: pass `?status=candidate`).
+- A non-active `?status=` is now `403` for a non-admin caller (it was open to any company member).
+- `GET /memory/{id}` of a non-active row is `404` for a non-admin.
+- `/companies/{company_id}/memory*` with a company other than the caller's, existing or not, is `404 COMPANY_NOT_FOUND` instead of an empty or foreign-scoped answer.
+- `include_closed` is gone from the CEO memory tool schema; a call that sends it is rejected. The operator REST flag is unchanged for a human admin.
+
+`PATCH /api/v1/memory/{id}` edits `importance` and `tier` only on a live row; a closed row returns `409 MEMORY_INVALID_TRANSITION` and is left as it was. A content change appends a superseding record.
+
+## Maintenance
+
+`orchestrator._memory_maintenance(db, company_id)` runs once per company per tick on the existing scheduler. It adds no polling loop.
+
+- Every statement filters on `company_id`; one company's tick cannot change another's rows.
+- Decay lowers `importance` by 5% (floor 0.1) for **active** rows not accessed in seven days.
+- **Candidates are not decayed.** An unreviewed row keeps its rank until it is accepted or rejected, and nothing recalls a candidate, so it is never legitimately "accessed". Archived, superseded and rejected rows are frozen.
+- Only `importance` changes. Status, trust, tier, scope, content and lifecycle columns are untouched.
+- The access counter update in `get_agent_facts` is tenant-scoped and also filters on `status`, so a read cannot touch or reactivate a closed row. Tier moves (`promote`, `demote`, `archive_old`) write `tier` and `updated_at` only; `promote` refuses a non-active row.
+- Known limitation: decay compounds on every tick for rows that stay unaccessed.
+
+## Write-path guard
+
+`tests/test_memory_write_path_guard.py` covers creation and deletion. `tests/test_memory_lifecycle_write_guard.py` covers lifecycle and trust. It scans `src/` and `scripts/` and fails when production code outside `nexus.memory.lifecycle`:
+
+- writes `status`, `trust_state`, `lifecycle_changed_at`, `lifecycle_changed_by` or `supersedes_id`, through `update(MemoryRecord).values(...)` (keyword, dict or `**` spread), attribute assignment, `setattr`, raw `UPDATE memory_records SET ...`, or a `MemoryRecord(...)` constructor outside ingest;
+- updates `MemoryRecord` outside the four scoring modules (orchestrator, layered memory, store, memory routes), without a `MemoryRecord.company_id` filter, or touches `importance`, `access_count` or `last_accessed_at` without a `MemoryRecord.status` filter.
+
+Tenant-scoped, lifecycle-safe updates to `access_count`, `last_accessed_at`, `importance`, `tier` and `updated_at` are allowed. Migration and backfill exceptions are listed in `MIGRATION_EXCEPTIONS` with a reason; it is empty because Alembic revisions are outside the scanned trees.
+
+## Verified learning is deferred
+
+Nothing here promotes a memory. There is no `candidate -> active` acceptance, no `untrusted -> asserted -> verified` change, no automatic promotion and no evidence metadata invented to justify one. `verified` and candidate acceptance need the future `memory_evidence` table, so a trust change can point at the source that supports it. Until then the only trust states a row ever has are the ones ingest assigns at insert.
 
 ## Migration
 

@@ -23,6 +23,7 @@ from fastapi import APIRouter, HTTPException, Query, status
 from pydantic import BaseModel
 
 from nexus.api.deps import CurrentCompanyId, CurrentPrincipal, DbSession, require_permission
+from nexus.api.routes.memory import audit_memory_review, require_memory_reviewer
 from nexus.services import ceo_service, manager_service, org_snapshot
 
 router = APIRouter(prefix="/api/v1/organization/snapshot", tags=["organization"])
@@ -141,11 +142,19 @@ async def executive_memory(
     include_closed: bool = False,
     limit: int = Query(default=ceo_service.SEARCH_MAX, ge=1, le=ceo_service.SEARCH_MAX),
 ) -> list[dict[str, Any]]:
-    """Executive memory, newest first."""
+    """Executive memory, newest first: active only; ``include_closed=true`` is the review path.
+
+    The review path shows every lifecycle status and needs a human administrator (403
+    otherwise); it is audited with ids only. It is not a model tool: the CEO tool has no such
+    argument.
+    """
     _operator(principal)
-    rows = await ceo_service.recall(
-        db, company_id, query=query, type=type, include_closed=include_closed, limit=limit
-    )
+    if not include_closed:
+        rows = await ceo_service.recall(db, company_id, query=query, type=type, limit=limit)
+        return [ceo_service.entry_view(r) for r in rows]
+    require_memory_reviewer(principal)
+    rows = await ceo_service.review_recall(db, company_id, query=query, type=type, limit=limit)
+    await audit_memory_review(db, principal, company_id, "executive_list:all", [r.id for r in rows])
     return [ceo_service.entry_view(r) for r in rows]
 
 

@@ -698,7 +698,7 @@ def test_the_graph_route_validates_the_company_in_the_url() -> None:
     """
     import inspect
 
-    from nexus.api.deps import PathCompanyId
+    from nexus.api.routes.memory import MemoryCompanyId
 
     annotation = inspect.signature(get_memory_graph).parameters["company_id"].annotation
-    assert annotation is PathCompanyId
+    assert annotation is MemoryCompanyId

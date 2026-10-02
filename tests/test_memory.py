@@ -376,6 +376,7 @@ class TestMemoryStorePromoteDemote:
         mock_record.importance = 0.6
         mock_record.access_count = 3
         mock_record.tier = "warm"
+        mock_record.status = "active"
         mock_record.created_at = datetime.now(timezone.utc)
 
         mock_result = MagicMock()

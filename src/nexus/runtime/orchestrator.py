@@ -1090,15 +1090,18 @@ async def _memory_maintenance(db: AsyncSession, company_id: uuid.UUID) -> None:
     Every statement is filtered by ``company_id``; the tick runs once per company,
     so an unfiltered statement would mutate every tenant on every tick.
 
-    Decay reduces importance by 5% (floor 0.1) for memories not accessed in 7+
-    days. Known limitation: nothing updates ``last_accessed_at`` on read, so the
-    decay still compounds on every tick for the same rows.
+    Decay reduces importance by 5% (floor 0.1) for ``active`` memories not accessed in
+    7+ days. Only importance changes: never status, trust, tier or scope. Candidates
+    are not decayed (unreviewed rows keep their rank until accepted or rejected, and
+    nothing recalls them, so they are never "accessed"); archived, superseded and
+    rejected rows are frozen. Known limitation: the decay compounds on every tick for
+    the same rows until they are accessed again.
 
     Promotion (agent -> company scope) was removed: it moved private agent memory
     into shared scope with no verification. Verified promotion will be implemented
     separately; until then this function never changes scope or tier.
     """
-    from nexus.models.memory import MemoryRecord
+    from nexus.models.memory import PROMPT_STATUSES, MemoryRecord
     from sqlalchemy import update as sa_update
 
     # last_accessed_at is a naive TIMESTAMP column; asyncpg rejects an aware bind.
@@ -1108,6 +1111,7 @@ async def _memory_maintenance(db: AsyncSession, company_id: uuid.UUID) -> None:
         sa_update(MemoryRecord)
         .where(
             MemoryRecord.company_id == company_id,
+            MemoryRecord.status.in_(PROMPT_STATUSES),
             MemoryRecord.last_accessed_at != None,  # noqa: E711
             MemoryRecord.last_accessed_at < decay_cutoff,
             MemoryRecord.importance > 0.1,

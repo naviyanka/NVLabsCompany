@@ -44,7 +44,6 @@ class ManagerRef(_Args):
 class SearchMemory(_Args):
     query: str | None = Field(default=None, max_length=200)
     type: ceo_service.MemoryType | None = None
-    include_closed: bool = False
     limit: int = Field(default=10, ge=1, le=ceo_service.SEARCH_MAX)
 
 
@@ -101,7 +100,7 @@ async def _approvals(db, company_id, ceo_id, args, actor, ctx):
 
 async def _search(db, company_id, ceo_id, args, actor, ctx):
     rows = await ceo_service.recall(db, company_id, query=args.query, type=args.type,
-                                    include_closed=args.include_closed, limit=args.limit)
+                                    limit=args.limit)
     return [ceo_service.entry_view(r) for r in rows]
 
 
@@ -207,8 +206,10 @@ CEO_TOOLS: dict[str, ManagerTool] = {
         "read", (), _approvals,
     ),
     "ceo_search_executive_memory": ManagerTool(
-        "Search executive memory (directives, decisions, commitments, delegations, hires, "
-        "risks, outcomes), newest first. Memory is not status: the snapshot is.",
+        "Search active executive memory (directives, decisions, commitments, delegations, "
+        "hires, risks, outcomes), newest first. Only active memory is searched: candidate, "
+        "archived, superseded and rejected entries are never returned. Memory is not "
+        "status: the snapshot is.",
         "read", (), _search, SearchMemory,
     ),
     "ceo_delegate_task_to_manager": ManagerTool(

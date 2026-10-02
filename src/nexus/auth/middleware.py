@@ -85,6 +85,12 @@ PUBLIC_PATHS = frozenset({"/api/v1/auth", "/favicon.ico", "/api/v1/mcp/manager"}
 # membership of.
 _COMPANY_PATH_RE = re.compile(r"^/api/v1/companies/([0-9a-fA-F-]{36})(?:/|$)")
 
+# The company-scoped memory routes conceal the tenant: an existing foreign company, a company
+# that does not exist and one the caller cannot reach all answer with this one 404, so the
+# status cannot be used to enumerate companies. Every other company path keeps its 403.
+_MEMORY_COMPANY_PATH_RE = re.compile(r"^/api/v1/companies/[0-9a-fA-F-]{36}/memory(?:/|$)")
+COMPANY_NOT_FOUND = {"code": "COMPANY_NOT_FOUND", "message": "Company not found"}
+
 
 def is_public_path(path: str) -> bool:
     """Whether ``path`` is reachable without a credential."""
@@ -122,6 +128,8 @@ def rejection_for(path: str, principal: Principal | None) -> JSONResponse | None
         return None
 
     if requested_company_id != principal.company_id:
+        if _MEMORY_COMPANY_PATH_RE.match(path):
+            return JSONResponse(status_code=404, content={"detail": COMPANY_NOT_FOUND})
         # 403 rather than 404: the caller is authenticated and the company
         # probably exists, they simply have no standing in it.
         return JSONResponse(
