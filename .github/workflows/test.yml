@@ -57,6 +57,18 @@ jobs:
           AUTH_ENABLED: "false"
           NEXUS_ENV: test
 
+  # Offline Linux/container smoke for the optional Speech SDK: python:3.12-slim, `speech` extra,
+  # no apt packages, run with the network disabled. No Azure call, no token, no credentials.
+  speech-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the Speech smoke image
+        run: docker build -f docker/speech-smoke/Dockerfile -t nexus-speech-smoke .
+      - name: Run the smoke with the network disabled
+        run: docker run --rm --network none nexus-speech-smoke
+
   postgres-integration:
     runs-on: ubuntu-latest
     services:
