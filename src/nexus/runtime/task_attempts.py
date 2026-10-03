@@ -1394,7 +1394,9 @@ async def _prepare(attempt: TaskAttempt, worker_id: str) -> tuple[Any, Any, Any]
             turn_id = attempt.chat_turn_id
             if turn_id is None:
                 async with tenant_session(company_id) as db:
-                    failed = await _failed_checks(db, attempt) if attempt.attempt_number > 1 else []
+                    failed = (
+                        await _failed_checks(db, attempt) if attempt.attempt_number > 1 else []
+                    )
                     record = await _session_for(db, attempt, agent, task)
                     agent = await chat._load_agent(db, attempt.agent_id, company_id)
                     enqueued = await chat_turns.create_turn(
@@ -1908,7 +1910,11 @@ async def verify(attempt: TaskAttempt, spec: WorkSpec, turn: Any, worktree: Any)
         for item in criteria:
             check(f"criterion:{item['criterion']}", item["passed"], item["detail"])
         if spec.mode == "read_only":
-            changed = [p for p in await GitRunner(root).changed_paths() if _is_work(p)]
+            changed = [
+                p
+                for p in await GitRunner(root).changed_paths()
+                if _is_work(p)
+            ]
             check("read_only_worktree_clean", not changed, f"{len(changed)} changed paths")
             if spec.review_of_task_id is not None:
                 async with tenant_session(attempt.company_id) as db:
@@ -1918,7 +1924,11 @@ async def verify(attempt: TaskAttempt, spec: WorkSpec, turn: Any, worktree: Any)
                 reviewed_root = worktree_path(reviewed.company_id, reviewed.relative_path)
                 git = GitRunner(reviewed_root)
                 head = await git.resolve_commit("HEAD")
-                dirty = [p for p in await git.changed_paths() if _is_work(p)]
+                dirty = [
+                    p
+                    for p in await git.changed_paths()
+                    if _is_work(p)
+                ]
                 check(
                     "reviewed_worktree_unchanged",
                     head == reviewed.head_commit and not dirty,
@@ -2119,7 +2129,6 @@ class TaskAttemptWorker:
 
             root = worktree_path(worktree.company_id, worktree.relative_path)
         from nexus.runtime.git_runner import GitRunner
-
         interval = max(0.5, min(_settings().task_attempt_lease_seconds / 3, 5.0))
         deadline = (attempt.started_at or _now()) + timedelta(seconds=spec.timeout_seconds)
         poke = self._pokes.setdefault(attempt.id, asyncio.Event())

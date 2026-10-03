@@ -145,7 +145,9 @@ class TaskResponse(BaseModel):
     status_code=status.HTTP_201_CREATED,
     response_model=TaskResponse,
 )
-async def create_task(company_id: uuid.UUID, body: TaskCreate, db: DbSession) -> Any:
+async def create_task(
+    company_id: uuid.UUID, body: TaskCreate, db: DbSession
+) -> Any:
     """Create a new task in a company.
 
     If assigned_agent_id is not specified, uses AgentRouter to evaluate available
@@ -160,7 +162,9 @@ async def create_task(company_id: uuid.UUID, body: TaskCreate, db: DbSession) ->
             from nexus.models.agent import Agent
             from nexus.orchestration.router import AgentCandidate, AgentRouter
 
-            stmt = select(Agent).where(Agent.company_id == company_id, Agent.status == "active")
+            stmt = select(Agent).where(
+                Agent.company_id == company_id, Agent.status == "active"
+            )
             res = await db.execute(stmt)
             agents = list(res.scalars().all())
 
@@ -172,8 +176,12 @@ async def create_task(company_id: uuid.UUID, body: TaskCreate, db: DbSession) ->
                         skills=a.capabilities or [],
                         current_workload=0,
                         max_concurrent=5,
-                        budget_remaining_cents=(a.budget_monthly_cents - a.spent_monthly_cents),
-                        performance_score=((a.performance_score or 50) / 100.0),
+                        budget_remaining_cents=(
+                            a.budget_monthly_cents - a.spent_monthly_cents
+                        ),
+                        performance_score=(
+                            (a.performance_score or 50) / 100.0
+                        ),
                         status=a.status,
                     )
                     for a in agents
@@ -206,18 +214,10 @@ async def create_task(company_id: uuid.UUID, body: TaskCreate, db: DbSession) ->
 
     # Audit: task created
     from nexus.governance.audit_service import record_audit
-
     await record_audit(
-        company_id,
-        "task.created",
-        actor_type="user",
-        resource_type="task",
-        resource_id=str(task.id),
-        details={
-            "title": task.title,
-            "priority": task.priority,
-            "assigned_agent_id": str(assigned_id) if assigned_id else None,
-        },
+        company_id, "task.created",
+        actor_type="user", resource_type="task", resource_id=str(task.id),
+        details={"title": task.title, "priority": task.priority, "assigned_agent_id": str(assigned_id) if assigned_id else None},
         db=db,
     )
 
@@ -353,13 +353,9 @@ async def update_task_status(
 
     # Audit: task status changed
     from nexus.governance.audit_service import record_audit
-
     await record_audit(
-        company_id,
-        "task.status_changed",
-        actor_type="user",
-        resource_type="task",
-        resource_id=str(task_id),
+        company_id, "task.status_changed",
+        actor_type="user", resource_type="task", resource_id=str(task_id),
         details={
             "new_status": body.status,
             "title": task.title,
@@ -369,6 +365,7 @@ async def update_task_status(
     )
 
     return task
+
 
 
 class SubtaskCreate(BaseModel):
@@ -402,70 +399,33 @@ async def list_subtasks(task_id: uuid.UUID, db: DbSession, company_id: CurrentCo
 async def get_task_stats(company_id: uuid.UUID, db: DbSession) -> dict[str, Any]:
     """Task statistics: counts by status, priority, top agents."""
     from sqlalchemy import func
-
     total = await db.execute(select(func.count(Task.id)).where(Task.company_id == company_id))
-    by_status = await db.execute(
-        select(Task.status, func.count(Task.id))
-        .where(Task.company_id == company_id)
-        .group_by(Task.status)
-    )
-    by_priority = await db.execute(
-        select(Task.priority, func.count(Task.id))
-        .where(Task.company_id == company_id)
-        .group_by(Task.priority)
-    )
+    by_status = await db.execute(select(Task.status, func.count(Task.id)).where(Task.company_id == company_id).group_by(Task.status))
+    by_priority = await db.execute(select(Task.priority, func.count(Task.id)).where(Task.company_id == company_id).group_by(Task.priority))
     top_agents = await db.execute(
-        select(Task.assigned_agent_id, func.count(Task.id))
-        .where(Task.company_id == company_id, Task.assigned_agent_id != None)
-        .group_by(Task.assigned_agent_id)
-        .order_by(func.count(Task.id).desc())
-        .limit(5)
+        select(Task.assigned_agent_id, func.count(Task.id)).where(Task.company_id == company_id, Task.assigned_agent_id != None)
+        .group_by(Task.assigned_agent_id).order_by(func.count(Task.id).desc()).limit(5)
     )
-    return {
-        "total": total.scalar() or 0,
-        "by_status": dict(by_status.all()),
-        "by_priority": dict(by_priority.all()),
-        "top_agents": [{"agent_id": str(a), "count": c} for a, c in top_agents.all()],
-    }
+    return {"total": total.scalar() or 0, "by_status": dict(by_status.all()), "by_priority": dict(by_priority.all()), "top_agents": [{"agent_id": str(a), "count": c} for a, c in top_agents.all()]}
 
 
-@router.post(
-    "/api/v1/tasks/{task_id}/subtasks",
-    status_code=status.HTTP_201_CREATED,
-    response_model=TaskResponse,
-)
-async def create_subtask(
-    task_id: uuid.UUID, body: TaskCreate, db: DbSession, company_id: CurrentCompanyId
-) -> Any:
+@router.post("/api/v1/tasks/{task_id}/subtasks", status_code=status.HTTP_201_CREATED, response_model=TaskResponse)
+async def create_subtask(task_id: uuid.UUID, body: TaskCreate, db: DbSession, company_id: CurrentCompanyId) -> Any:
     """Create a subtask under a parent task."""
     await _refuse_work_owned(db, company_id, task_id)
-    subtask = Task(
-        company_id=company_id,
-        parent_task_id=task_id,
-        title=body.title,
-        description=body.description,
-        priority=body.priority or 0,
-        assigned_agent_id=body.assigned_agent_id,
-        work_spec=_work_spec(body.work_spec),
-    )
+    subtask = Task(company_id=company_id, parent_task_id=task_id, title=body.title, description=body.description, priority=body.priority or 0, assigned_agent_id=body.assigned_agent_id, work_spec=_work_spec(body.work_spec))
     db.add(subtask)
     await db.flush()
     return subtask
 
 
 @router.post("/api/v1/tasks/{task_id}/reassign", response_model=TaskResponse)
-async def reassign_task(
-    task_id: uuid.UUID, body: TaskAssign, db: DbSession, company_id: CurrentCompanyId
-) -> Any:
+async def reassign_task(task_id: uuid.UUID, body: TaskAssign, db: DbSession, company_id: CurrentCompanyId) -> Any:
     """Reassign task to a different agent. Work is reassigned through its lifecycle."""
     await _refuse_work_owned(db, company_id, task_id)
     await _require_agent(db, company_id, body.agent_id)
     await _refuse_if_attempt_active(db, company_id, task_id, body.agent_id)
-    stmt = (
-        update(Task)
-        .where(Task.id == task_id, Task.company_id == company_id)
-        .values(assigned_agent_id=body.agent_id, updated_at=datetime.now(timezone.utc))
-    )
+    stmt = update(Task).where(Task.id == task_id, Task.company_id == company_id).values(assigned_agent_id=body.agent_id, updated_at=datetime.now(timezone.utc))
     await db.execute(stmt)
     result = await db.execute(select(Task).where(Task.id == task_id, Task.company_id == company_id))
     task = result.scalar_one_or_none()
@@ -481,7 +441,9 @@ async def cancel_task(
     """Cancel a task, its sub-tasks and the employee's open attempts. Completed work stays."""
     from nexus.services import work_service
 
-    task, _ = await work_service.cancel_work(db, company_id, task_id, actor=principal.display_name)
+    task, _ = await work_service.cancel_work(
+        db, company_id, task_id, actor=principal.display_name
+    )
     return task
 
 
@@ -514,16 +476,11 @@ async def decompose_task(
         from nexus.api.routes.chat import _call_llm, _build_system_prompt
 
         # Find an agent to use as the LLM brain for planning
-        agent_stmt = (
-            select(Agent)
-            .where(Agent.company_id == company_id, Agent.status.in_(["active", "ready"]))
-            .limit(1)
-        )
+        agent_stmt = select(Agent).where(Agent.company_id == company_id, Agent.status.in_(["active", "ready"])).limit(1)
         a_res = await db.execute(agent_stmt)
         agent = a_res.scalar_one_or_none()
 
         if agent:
-
             async def llm_fn(prompt: str) -> str:
                 text, _, _ = await _call_llm(
                     agent, _build_system_prompt(agent), prompt, [], principal=principal
@@ -560,14 +517,12 @@ async def decompose_task(
         )
         db.add(subtask_record)
         await db.flush()
-        created.append(
-            {
-                "id": str(subtask_record.id),
-                "title": subtask_record.title,
-                "status": subtask_record.status,
-                "dependencies": [str(d) for d in st.dependencies],
-            }
-        )
+        created.append({
+            "id": str(subtask_record.id),
+            "title": subtask_record.title,
+            "status": subtask_record.status,
+            "dependencies": [str(d) for d in st.dependencies],
+        })
 
     await db.commit()
 
