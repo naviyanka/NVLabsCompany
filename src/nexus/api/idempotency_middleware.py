@@ -25,9 +25,11 @@ MAX_BODY_CACHE_BYTES = 256 * 1024  # 256 KB
 # Trigger webhooks keep their own tenant-and-trigger-scoped ledger, with a lease.
 # Memory evidence, candidate acceptance and trust promotion keep a ledger row in the same
 # transaction as the effect (memory_operations): the same key with another request is a
-# 409 there, where this middleware would answer 422.
+# 409 there, where this middleware would answer 422. Work-order creation keys its own row
+# (work_service.create_work_order), so a replay survives a restart.
 SELF_IDEMPOTENT_PATHS = re.compile(
     r"^/api/v1/(agents/[^/]+/chat|sessions/[^/]+/messages)(/stream)?/?$|^/api/v1/webhooks/[^/]+/?$"
+    r"|^/api/v1/work/?$"
     r"|^/api/v1/companies/[^/]+/memory/[^/]+/(evidence|accept|trust/(assert|verify))/?$"
 )
 

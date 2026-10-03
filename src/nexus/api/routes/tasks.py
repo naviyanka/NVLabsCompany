@@ -53,6 +53,41 @@ async def _refuse_if_attempt_active(
         )
 
 
+# Only the work lifecycle (nexus.services.work_service) may move work into these.
+_WORK_ONLY_STATUSES = {"completed", "failed", "cancelled", "in_review", "delegated"}
+
+
+async def _is_work(db: Any, company_id: uuid.UUID, task_id: uuid.UUID) -> bool:
+    """A work task, a work order delegated or in review, or the parent of a work task."""
+    row = (
+        await db.execute(
+            select(Task.work_spec, Task.status).where(
+                Task.id == task_id, Task.company_id == company_id
+            )
+        )
+    ).first()
+    if row is None:
+        return False
+    if row.work_spec or row.status in ("delegated", "in_review"):
+        return True
+    child = await db.execute(
+        select(Task.id)
+        .where(
+            Task.parent_task_id == task_id,
+            Task.company_id == company_id,
+            Task.work_spec.is_not(None),
+        )
+        .limit(1)
+    )
+    return child.first() is not None
+
+
+async def _require_agent(db: Any, company_id: uuid.UUID, agent_id: uuid.UUID) -> None:
+    from nexus.services import manager_service as ms
+
+    await ms.get_agent(db, company_id, agent_id)
+
+
 class TaskAssign(BaseModel):
     """Request body for assigning a task."""
 
@@ -215,6 +250,7 @@ async def assign_task(
     task_id: uuid.UUID, body: TaskAssign, db: DbSession, company_id: CurrentCompanyId
 ) -> Any:
     """Assign a task to an agent."""
+    await _require_agent(db, company_id, body.agent_id)
     await _refuse_if_attempt_active(db, company_id, task_id, body.agent_id)
     stmt = (
         update(Task)
@@ -242,23 +278,19 @@ async def update_task_status(
 ) -> Any:
     """Update the status of a task.
 
-    A work task cannot be marked completed here: only an attempt whose
-    verification passed completes it (nexus.runtime.task_attempts).
+    Work cannot be completed, failed, cancelled or put in review here: only an attempt
+    whose verification passed completes it (nexus.runtime.task_attempts,
+    nexus.services.work_service).
     """
-    if body.status == "completed":
-        spec = (
-            await db.execute(
-                select(Task.work_spec).where(Task.id == task_id, Task.company_id == company_id)
-            )
-        ).scalar_one_or_none()
-        if spec:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail={
-                    "code": "WORK_TASK_REQUIRES_VERIFIED_ATTEMPT",
-                    "message": "A work task completes only through a verified attempt",
-                },
-            )
+    if body.status in _WORK_ONLY_STATUSES and await _is_work(db, company_id, task_id):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "WORK_TASK_REQUIRES_VERIFIED_ATTEMPT",
+                "message": "Work moves to this status only through its lifecycle: "
+                "a verified attempt, the review route or the cancel route",
+            },
+        )
     values: dict[str, Any] = {
         "status": body.status,
         "updated_at": datetime.now(timezone.utc),
@@ -371,6 +403,7 @@ async def create_subtask(task_id: uuid.UUID, body: TaskCreate, db: DbSession, co
 @router.post("/api/v1/tasks/{task_id}/reassign", response_model=TaskResponse)
 async def reassign_task(task_id: uuid.UUID, body: TaskAssign, db: DbSession, company_id: CurrentCompanyId) -> Any:
     """Reassign task to a different agent."""
+    await _require_agent(db, company_id, body.agent_id)
     await _refuse_if_attempt_active(db, company_id, task_id, body.agent_id)
     stmt = update(Task).where(Task.id == task_id, Task.company_id == company_id).values(assigned_agent_id=body.agent_id, updated_at=datetime.now(timezone.utc))
     await db.execute(stmt)
@@ -385,18 +418,12 @@ async def reassign_task(task_id: uuid.UUID, body: TaskAssign, db: DbSession, com
 async def cancel_task(
     task_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId, principal: CurrentPrincipal
 ) -> Any:
-    """Cancel a task, and the employee's active attempt on it."""
-    from nexus.runtime import task_attempts
+    """Cancel a task, its sub-tasks and the employee's open attempts. Completed work stays."""
+    from nexus.services import work_service
 
-    active = await task_attempts._active(db, company_id, task_id)
-    if active is not None:
-        await task_attempts.cancel_attempt(db, company_id, task_id, active.id, principal)
-    stmt = update(Task).where(Task.id == task_id, Task.company_id == company_id).values(status="cancelled", completed_at=datetime.now(timezone.utc), updated_at=datetime.now(timezone.utc))
-    await db.execute(stmt)
-    result = await db.execute(select(Task).where(Task.id == task_id, Task.company_id == company_id))
-    task = result.scalar_one_or_none()
-    if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
+    task, _ = await work_service.cancel_work(
+        db, company_id, task_id, actor=principal.display_name
+    )
     return task
 
 
