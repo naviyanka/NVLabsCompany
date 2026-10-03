@@ -263,6 +263,18 @@ class WorkSpec(BaseModel):
         return self
 
 
+WORK_ORDER_KIND = "work_order"
+
+
+def is_work_order_spec(raw: Any) -> bool:
+    """The one place that reads the work-order marker (``{"kind": "work_order"}``).
+
+    A ``WorkSpec`` forbids the ``kind`` key, so only the work service can write it. Anything
+    else, an unknown kind or a non-dict included, is not a work order.
+    """
+    return isinstance(raw, dict) and raw.get("kind") == WORK_ORDER_KIND
+
+
 def parse_work_spec(raw: Any) -> WorkSpec:
     """Validate a stored or submitted work spec (422 INVALID_WORK_SPEC)."""
     try:
@@ -415,8 +427,20 @@ def _sha256(path: Path) -> str:
 # ---------------------------------------------------------------------------
 
 
-def attempt_view(a: TaskAttempt) -> dict[str, Any]:
-    """The API shape of an attempt. No absolute paths, no environment."""
+SUMMARY_VIEW_CHARS = 500
+
+
+def bounded_summary(text: str | None) -> str | None:
+    """A stored deliverable cut to a summary: what a model or tool may be shown."""
+    return text[:SUMMARY_VIEW_CHARS] if text else text
+
+
+def attempt_view(a: TaskAttempt, *, full: bool = False) -> dict[str, Any]:
+    """The API shape of an attempt. No absolute paths, no environment.
+
+    ``output_summary`` is cut to :data:`SUMMARY_VIEW_CHARS` unless ``full``: only a route that
+    has checked ``work_service.can_view_work_deliverable`` passes it, never a model tool.
+    """
 
     def iso(value: datetime | None) -> str | None:
         return value.isoformat() if value else None
@@ -449,7 +473,7 @@ def attempt_view(a: TaskAttempt) -> dict[str, Any]:
         "started_at": iso(a.started_at),
         "completed_at": iso(a.completed_at),
         "updated_at": iso(a.updated_at),
-        "output_summary": a.output_summary,
+        "output_summary": a.output_summary if full else bounded_summary(a.output_summary),
         "completion_reason": a.completion_reason,
         "error_code": a.error_code,
         "error": a.error,
@@ -612,6 +636,8 @@ async def start_attempt(
     task = await _load_task(db, company_id, task_id)
     if not task.work_spec:
         raise _error(422, "TASK_NOT_WORK", "The task has no work spec")
+    if is_work_order_spec(task.work_spec):
+        raise _error(409, "WORK_ORDER_NOT_EXECUTABLE", "A work order is delegated, not executed")
     spec = parse_work_spec(task.work_spec)
     if idempotency_key:
         existing = await _by_key(db, company_id, task_id, idempotency_key)
@@ -1370,9 +1396,7 @@ async def _prepare(attempt: TaskAttempt, worker_id: str) -> tuple[Any, Any, Any]
             turn_id = attempt.chat_turn_id
             if turn_id is None:
                 async with tenant_session(company_id) as db:
-                    failed = (
-                        await _failed_checks(db, attempt) if attempt.attempt_number > 1 else []
-                    )
+                    failed = await _failed_checks(db, attempt) if attempt.attempt_number > 1 else []
                     record = await _session_for(db, attempt, agent, task)
                     agent = await chat._load_agent(db, attempt.agent_id, company_id)
                     enqueued = await chat_turns.create_turn(
@@ -1886,11 +1910,7 @@ async def verify(attempt: TaskAttempt, spec: WorkSpec, turn: Any, worktree: Any)
         for item in criteria:
             check(f"criterion:{item['criterion']}", item["passed"], item["detail"])
         if spec.mode == "read_only":
-            changed = [
-                p
-                for p in await GitRunner(root).changed_paths()
-                if _is_work(p)
-            ]
+            changed = [p for p in await GitRunner(root).changed_paths() if _is_work(p)]
             check("read_only_worktree_clean", not changed, f"{len(changed)} changed paths")
             if spec.review_of_task_id is not None:
                 async with tenant_session(attempt.company_id) as db:
@@ -1900,11 +1920,7 @@ async def verify(attempt: TaskAttempt, spec: WorkSpec, turn: Any, worktree: Any)
                 reviewed_root = worktree_path(reviewed.company_id, reviewed.relative_path)
                 git = GitRunner(reviewed_root)
                 head = await git.resolve_commit("HEAD")
-                dirty = [
-                    p
-                    for p in await git.changed_paths()
-                    if _is_work(p)
-                ]
+                dirty = [p for p in await git.changed_paths() if _is_work(p)]
                 check(
                     "reviewed_worktree_unchanged",
                     head == reviewed.head_commit and not dirty,
@@ -2104,6 +2120,7 @@ class TaskAttemptWorker:
 
             root = worktree_path(worktree.company_id, worktree.relative_path)
         from nexus.runtime.git_runner import GitRunner
+
         interval = max(0.5, min(_settings().task_attempt_lease_seconds / 3, 5.0))
         deadline = (attempt.started_at or _now()) + timedelta(seconds=spec.timeout_seconds)
         poke = self._pokes.setdefault(attempt.id, asyncio.Event())

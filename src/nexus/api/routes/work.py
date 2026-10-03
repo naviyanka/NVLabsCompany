@@ -97,17 +97,14 @@ async def create_work(
     return {"id": str(task.id), "status": task.status, "created": created}
 
 
-def _reads_deliverable(principal: Any) -> bool:
-    """A person reviewing work sees the deliverable; a run token (an agent) never does."""
-    return principal.kind != "run"
-
-
 @router.get("/api/v1/work", dependencies=READ)
 async def list_work(
     db: DbSession, company_id: CurrentCompanyId, principal: CurrentPrincipal
 ) -> dict[str, Any]:
     """Live work: open first, then the most recent closed. Read from stored state."""
-    return await work_service.status(db, company_id, with_deliverable=_reads_deliverable(principal))
+    return await work_service.status(
+        db, company_id, with_deliverable=work_service.can_view_work_deliverable(principal)
+    )
 
 
 @router.get("/api/v1/work/{work_id}", dependencies=READ)
@@ -115,7 +112,10 @@ async def get_work(
     work_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId, principal: CurrentPrincipal
 ) -> dict[str, Any]:
     snapshot = await work_service.status(
-        db, company_id, work_id, with_deliverable=_reads_deliverable(principal)
+        db,
+        company_id,
+        work_id,
+        with_deliverable=work_service.can_view_work_deliverable(principal),
     )
     if not snapshot["work"]:
         raise _not_found(work_id)
@@ -165,7 +165,10 @@ async def review_work(
         reviewer_agent_id=None,
         retry=body.retry,
     )
-    return {"changed": changed, "attempt": attempt_view(attempt)}
+    return {
+        "changed": changed,
+        "attempt": attempt_view(attempt, full=work_service.can_view_work_deliverable(principal)),
+    }
 
 
 @router.post("/api/v1/work/{work_id}/cancel", dependencies=WRITE)

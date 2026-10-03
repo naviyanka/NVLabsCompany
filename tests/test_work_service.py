@@ -15,6 +15,7 @@ import pytest
 from fastapi import FastAPI, HTTPException, Request
 
 from nexus.api.routes import chat as chat_routes
+from nexus.api.routes import task_attempts as attempt_routes
 from nexus.api.routes import tasks as task_routes
 from nexus.api.routes import work as work_routes
 from nexus.auth.principal import Principal
@@ -523,6 +524,7 @@ async def api(co):
     app = FastAPI()
     app.include_router(work_routes.router)
     app.include_router(task_routes.router)
+    app.include_router(attempt_routes.router)
 
     @app.middleware("http")
     async def as_principal(request: Request, call_next):
