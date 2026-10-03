@@ -51,7 +51,7 @@ jobs:
       # (offline) so a broken native wheel on Linux/3.12 fails CI, not production.
       - run: pip install -e ".[dev,otel,speech]"
         working-directory: .
-      - run: pytest tests/ --ignore=tests/test_postgres_integration.py --ignore=tests/test_memory_rls_postgres.py --ignore=tests/test_memory_ingest_postgres.py --ignore=tests/test_governance_postgres.py --ignore=tests/test_governance_acceptance_postgres.py --ignore=tests/test_webhook_idempotency_postgres.py --ignore=tests/test_db_role_separation_postgres.py --ignore=tests/test_memory_evidence_postgres.py -x --tb=short -q
+      - run: pytest tests/ --ignore=tests/test_postgres_integration.py --ignore=tests/test_memory_rls_postgres.py --ignore=tests/test_memory_ingest_postgres.py --ignore=tests/test_governance_postgres.py --ignore=tests/test_governance_acceptance_postgres.py --ignore=tests/test_webhook_idempotency_postgres.py --ignore=tests/test_db_role_separation_postgres.py --ignore=tests/test_memory_evidence_postgres.py --ignore=tests/test_work_execution_postgres.py -x --tb=short -q
         env:
           DATABASE_URL: sqlite+aiosqlite:///./test.db
           AUTH_ENABLED: "false"
@@ -100,7 +100,7 @@ jobs:
           alembic downgrade base
           alembic upgrade head
       - name: Run Postgres Integration Tests
-        run: pytest tests/test_postgres_integration.py tests/test_memory_rls_postgres.py tests/test_memory_ingest_postgres.py tests/test_governance_postgres.py tests/test_governance_acceptance_postgres.py tests/test_webhook_idempotency_postgres.py tests/test_db_role_separation_postgres.py tests/test_memory_evidence_postgres.py -v
+        run: pytest tests/test_postgres_integration.py tests/test_memory_rls_postgres.py tests/test_memory_ingest_postgres.py tests/test_governance_postgres.py tests/test_governance_acceptance_postgres.py tests/test_webhook_idempotency_postgres.py tests/test_db_role_separation_postgres.py tests/test_memory_evidence_postgres.py tests/test_work_execution_postgres.py -v
         env:
           # The app's own engine (IdempotencyMiddleware) reads DATABASE_URL.
           DATABASE_URL: postgresql+asyncpg://postgres:postgrespassword@localhost:5432/test
