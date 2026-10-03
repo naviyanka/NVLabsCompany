@@ -163,5 +163,7 @@ async def review_work(
 async def cancel_work(
     work_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId, principal: CurrentPrincipal
 ) -> dict[str, Any]:
-    task, changed = await work_service.cancel_work(db, company_id, work_id, actor=_human(principal))
+    actor = _human(principal)
+    await work_service.require_work(db, company_id, work_id)
+    task, changed = await work_service.cancel_work(db, company_id, work_id, actor=actor)
     return {"id": str(task.id), "status": task.status, "changed": changed}

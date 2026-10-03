@@ -112,8 +112,8 @@ async def _search(db, company_id, ceo_id, args, actor, ctx):
 
 async def _delegate(db, company_id, ceo_id, args, actor, ctx):
     task = await task_attempts._load_task(db, company_id, args.task_id)
-    if not task.work_spec:
-        # A plain work order: one durable hand-off to the manager, no attempt.
+    if work_service.is_work_order(task) or not task.work_spec:
+        # A work order (an ordinary task is refused there): one hand-off to the manager.
         task, created = await work_service.delegate_to_manager(
             db, company_id, ceo_id, args.manager_id, args.task_id, actor
         )

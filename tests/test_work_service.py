@@ -588,3 +588,86 @@ class TestRoutes:
                 assert res.status_code == 409, (state, res.text)
         assert (await _get(co, Task, task)).status == "in_review"
         assert (await _get(co, TaskAttempt, attempt)).status == "verifying"
+
+
+class TestOrdinaryTasksStayOutOfWork:
+    """An old top-level Task is not a work order: no stamp, no lifecycle, no work routes."""
+
+    async def _plain(self, co, **fields):
+        async with co["db"]() as s:
+            task = Task(company_id=co["acme"], title="Old ticket", **fields)
+            s.add(task)
+            await s.commit()
+            return task.id
+
+    async def test_work_orders_are_stamped_and_plain_tasks_are_not(self, co):
+        work = await _order(co)
+        plain = await self._plain(co)
+        assert work_service.is_work_order(await _get(co, Task, work))
+        assert not work_service.is_work_order(await _get(co, Task, plain))
+        assert (await _get(co, Task, plain)).work_spec is None
+
+    async def test_plain_tasks_do_not_appear_in_status(self, co):
+        plain = await self._plain(co)
+        work = await _order(co)
+        ids = {i["id"] for i in (await _status(co))["work"]}
+        assert ids == {str(work)}
+        assert await _code(_status(co, plain)) == 404
+
+    async def test_plain_task_cannot_be_delegated_or_assigned(self, co):
+        plain = await self._plain(co)
+        assert await _code(_delegate(co, plain)) == 404
+        # Even if someone set the manager on it directly, the manager cannot assign under it.
+        owned = await self._plain(co, assigned_agent_id=co["acme_lead"], status="delegated")
+        assert await _code(_assign(co, owned)) == 404
+        assert await _rows(co["db"], Task, Task.parent_task_id == owned) == []
+        assert (await _get(co, Task, plain)).status == "pending"
+
+    async def test_work_routes_treat_a_plain_task_as_missing(self, co, api):
+        plain = await self._plain(co)
+        body = {"manager_id": str(co["acme_lead"])}
+        assert (await api("GET", f"/api/v1/work/{plain}")).status_code == 404
+        assert (await api("POST", f"/api/v1/work/{plain}/cancel")).status_code == 404
+        assert (await api("POST", f"/api/v1/work/{plain}/delegate", body)).status_code == 404
+        listing = (await api("GET", "/api/v1/work")).json()
+        assert listing["work"] == []
+        row = await _get(co, Task, plain)
+        assert (row.status, row.assigned_agent_id) == ("pending", None)
+
+    async def test_plain_task_is_never_awaiting_review(self, co):
+        plain = await self._plain(co)
+        snap = await _status(co)
+        assert snap["metrics"]["awaiting_review"] == 0
+        async with co["db"]() as s:
+            assert (
+                await _code(
+                    work_service.review(
+                        s,
+                        co["acme"],
+                        plain,
+                        decision="verify",
+                        reason=None,
+                        actor="op",
+                        reviewer_agent_id=None,
+                    )
+                )
+                == 404
+            )
+
+    async def test_the_stamp_cannot_be_forged_through_the_task_routes(self, co, api):
+        url = f"/api/v1/companies/{co['acme']}/tasks"
+        res = await api("POST", url, {"title": "T", "work_spec": {"kind": "work_order"}})
+        assert res.status_code == 422, res.text
+        assert res.json()["detail"]["code"] == "INVALID_WORK_SPEC"
+
+    async def test_pending_work_order_cannot_be_finished_through_the_task_routes(self, co, api):
+        work = await _order(co)
+        for state in ("completed", "failed", "cancelled", "in_review", "delegated"):
+            res = await api("PUT", f"/api/v1/tasks/{work}/status", {"status": state})
+            assert res.status_code == 409, (state, res.text)
+        assert (await _get(co, Task, work)).status == "pending"
+
+    async def test_plain_task_keeps_the_generic_routes(self, co, api):
+        plain = await self._plain(co)
+        res = await api("PUT", f"/api/v1/tasks/{plain}/status", {"status": "completed"})
+        assert res.status_code == 200, res.text

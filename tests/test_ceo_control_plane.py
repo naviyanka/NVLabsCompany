@@ -409,6 +409,11 @@ class TestExecutiveContext:
                 await ceo_service.remember(
                     s, c["acme"], ceo_service.MemoryEntry(type="decision", content=f"d{i} " * 90),
                     recorded_by="user:x", origin="human")
+            order, _ = await work_service.create_work_order(
+                s, c["acme"], scope="human:op", actor="op", title="Quarterly report",
+                idempotency_key="k1")
+            order.assigned_agent_id = c["chief"]
+            s.add(order)
             await s.commit()
         generated = await snap.generate(c["acme"])
         statements = []
