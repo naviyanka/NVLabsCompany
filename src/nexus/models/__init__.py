@@ -39,6 +39,7 @@ from nexus.models.incident import Incident, IncidentAction, IncidentEvent
 from nexus.models.knowledge import ExperienceRecord, KnowledgeChunk, KnowledgePage
 from nexus.models.meeting import ActionItem, Meeting, MeetingMinutes, MeetingParticipant
 from nexus.models.memory import MemoryRecord
+from nexus.models.memory_evidence import MemoryEvidence, MemoryOperation
 from nexus.models.obsidian import ObsidianDocument, VaultWriteGrantRecord
 from nexus.models.plaza import PlazaPost
 from nexus.models.policy import Policy, PolicyRule, PolicyVersion
@@ -130,6 +131,8 @@ __all__ = [
     "ToolInvocation",
     "McpBinding",
     # Memory
+    "MemoryEvidence",
+    "MemoryOperation",
     "MemoryRecord",
     # Triggers
     "Trigger",

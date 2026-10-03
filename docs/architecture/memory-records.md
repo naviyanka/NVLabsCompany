@@ -64,7 +64,7 @@ Agents cannot set `verified`. Candidate memories never enter prompts.
 
 ## Lifecycle
 
-`archive_memory`, `reject_memory` and `supersede_memory` are tenant scoped, use a conditional update, and are deterministic under concurrency. Each records the actor and time, writes an audit event, and keeps content and provenance. Repeating an identical transition returns the current result.
+`accept_candidate`, `archive_memory`, `reject_memory` and `supersede_memory` (plus `assert_trust` and `verify_trust`, below) are tenant scoped, use a conditional update, and are deterministic under concurrency. Each records the actor and time, writes an audit event, and keeps content and provenance. Repeating an identical transition returns the current result.
 
 Stable error codes: `MEMORY_NOT_FOUND`, `MEMORY_ALREADY_ARCHIVED`, `MEMORY_INVALID_TRANSITION`, `MEMORY_SUPERSESSION_CONFLICT`, `MEMORY_IDEMPOTENCY_CONFLICT`.
 
@@ -136,7 +136,7 @@ Candidate and closed content is reachable only through a human review path, neve
 - **Audit:** every review read writes one `memory.review_read` audit row with the actor, the view (`agent_list:<state>`, `company_list:<state>`, `executive_list:all`, `detail:<state>`), a count and the memory ids. Never content.
 - **Tenancy:** every query filters on the authenticated company. The company routes (`/companies/{company_id}/memory`, `/stats`, `/health`, `/graph`) conceal the tenant: any path company other than the caller's, whether it exists or not, gets the same `404` with the stable code `COMPANY_NOT_FOUND` and a fixed message. The decision compares the path with the caller's own company and never reads the path company, so nothing (rows, counts, ids, names, audit entries) can tell the cases apart. It is enforced in the auth middleware and again by the `MemoryCompanyId` route dependency; the global `PathCompanyId` (`403`) is unchanged for every other company route. A human admin's authority stops at their own company. A foreign memory id (`/memory/{id}`) is `404`.
 - **Aggregates:** `/memory/stats` and `/memory/health` return counts only, scoped to the company; `by_status` counts every state but carries no content.
-- No new dashboard or acceptance workflow. Accepting a candidate is deferred (see below).
+- No dashboard for review. Accepting a candidate and promoting trust are API-only (see "Evidence and governed trust").
 
 ### Compatibility impact
 
@@ -168,13 +168,131 @@ Candidate and closed content is reachable only through a human review path, neve
 
 Tenant-scoped, lifecycle-safe updates to `access_count`, `last_accessed_at`, `importance`, `tier` and `updated_at` are allowed. Migration and backfill exceptions are listed in `MIGRATION_EXCEPTIONS` with a reason; it is empty because Alembic revisions are outside the scanned trees.
 
-## Verified learning is deferred
+The same file guards the evidence tables. It fails when production code:
 
-Nothing here promotes a memory. There is no `candidate -> active` acceptance, no `untrusted -> asserted -> verified` change, no automatic promotion and no evidence metadata invented to justify one. `verified` and candidate acceptance need the future `memory_evidence` table, so a trust change can point at the source that supports it. Until then the only trust states a row ever has are the ones ingest assigns at insert.
+- constructs `MemoryEvidence` or `MemoryOperation` anywhere but `nexus.memory.evidence`, or inserts, updates, deletes, assigns an immutable field of, or runs raw `INSERT`/`UPDATE`/`DELETE`/`TRUNCATE`/`DROP` on `memory_evidence` or `memory_operations` outside it;
+- selects either table without a `company_id` filter;
+- names `accept_candidate`, `assert_trust`, `verify_trust`, `attach_evidence`, `list_evidence`, `run_once` or `require_human_admin` outside the lifecycle module, the evidence module and the evidence routes;
+- adds a model tool whose schema takes `include_closed`, `status`, `trust_state`, `evidence_id`, `memory_id` or similar, or whose name pairs memory with evidence, trust, accept or verify;
+- adds a module that selects `MemoryRecord` without classifying it: a prompt reader must filter on `MemoryRecord.status` / `PROMPT_STATUSES`, and anything else must be a lifecycle module.
+
+## Evidence and governed trust
+
+Two orthogonal axes on every memory:
+
+- `status` decides **prompt eligibility**. Only `active` reaches a model.
+- `trust_state` records **evidence-backed trust**. `verified` is not prompt eligibility: a verified memory is still an ordinary memory that can be archived or superseded, and an `active` memory that was never verified is still served.
+
+```
+status:   candidate --accept--> active
+          candidate --reject--> rejected
+          candidate or active --archive--> archived
+          candidate or active --supersede--> superseded
+
+trust:    untrusted --assert--> asserted --verify--> verified      (no downgrade)
+```
+
+Accepting a candidate changes status only. Asserting or verifying changes trust only, and only on an `active` memory. The two are never combined silently. There is no trust downgrade: a wrong memory is corrected with archive, reject or supersede, and a successor starts as a new record with its own trust.
+
+### Transition matrix
+
+| Operation | From | To | Needs |
+|-----------|------|----|-------|
+| accept | status `candidate` | `active` | human admin |
+| assert | `active` + `untrusted` | `asserted` | human admin, evidence graded `assert` or `verify` |
+| verify | `active` + `asserted` | `verified` | human admin, evidence graded `verify` |
+
+Anything else is `409 MEMORY_INVALID_TRANSITION` (closed or superseded memory, wrong current state, a competing writer won). Memories that ingest already created as `asserted` (human and API origin, seeds) skip the assert step and can go straight to verify once active.
+
+### Evidence rows
+
+`memory_evidence` is durable, append-only and company scoped. A row holds ids and digests, never content:
+
+| Column | Meaning |
+|--------|---------|
+| `company_id`, `memory_id` | Owner and target; both `ON DELETE RESTRICT`. |
+| `evidence_kind`, `source_type`, `source_id` | What the evidence is and the exact source row (`user`, `chat_turn`, `tool_invocation`, `task_attempt`). `source_id` is a string because the source table varies. |
+| `reason_code` | Attestation reason from a fixed list; `''` otherwise. |
+| `grade` | `none`, `assert` or `verify`: what the evidence can support, derived by the server. |
+| `source_digest` | SHA-256 over the source's qualifying state (ids and flags, never content). |
+| `policy_version` | `memory-evidence-v1`. |
+| `created_by`, `created_at`, `idempotency_key` | Server-stamped actor, time and the caller's key. |
+
+Unique on `(company_id, memory_id, source_type, source_id, reason_code)`, so the same source cannot be attached twice, and on `(company_id, idempotency_key)`. A caller cannot supply company, grade, digest, actor, trust or any qualification outcome: the request schema rejects unknown fields and has no such fields. Rows are immutable: ORM `before_update`/`before_delete` listeners raise, and database triggers refuse `UPDATE` and `DELETE` even for the table owner or a superuser. `memory_operations` (the idempotency ledger below) is append-only the same way.
+
+### Qualification policy (`memory-evidence-v1`)
+
+| Evidence | Grade | Why |
+|----------|-------|-----|
+| `human_attestation`, reason `reviewed_by_admin` | `assert` | The attester is the calling administrator, re-read as an active admin of the company. It supports asserting, never verifying. |
+| `human_attestation`, reason `independently_verified_by_admin` | `verify` | An explicit statement by a named human administrator that they checked the claim independently. |
+| `chat_turn` | `none` | Provenance only. A turn proves who said what, never that it is true. ChatTurn evidence cannot verify truth, alone or combined. |
+| `tool_invocation` | `assert` if the run succeeded, a person approved it, access control allowed it and it completed; else `none` | A tool running proves the tool ran, not that its output is true. It can support asserting and never verifying. |
+| `task_attempt` | `verify` only if the stored verifier result passed: attempt `completed`, reason `goal`, no error, every recorded check passed; else `none` | The only existing durable record of deterministic completion proof. A task without a passed verification, or in another company, does not qualify. |
+
+Agent-authored text, an LLM opinion and the memory itself are not evidence, and no agent, chat extractor, tool response or background job can create evidence or promote trust: every route needs a human administrator and no model tool exposes any of it, so agents cannot self-verify. Anything ambiguous is `none` and is recorded as such.
+
+Evidence is **re-derived at transition time**. `requalify` reloads the source in the caller's company (locking it `FOR UPDATE` on PostgreSQL), recomputes the digest and grade, and refuses with `409 MEMORY_EVIDENCE_STALE` if the source changed or disappeared since it was attached. A stale transaction therefore cannot verify with evidence that became invalid before commit.
+
+### Authorization
+
+Every evidence and promotion route is for a human company administrator, the Governance Studio write predicate `errors.can_write`, then re-checked in the database where the write happens: the actor is `user:<id>`, the user is active, the membership exists and its role normalizes to `admin`. A viewer, member, agent, run token, API key, deactivated user or removed membership fails with `403 MEMORY_EVIDENCE_FORBIDDEN`, before any memory, evidence or source is looked up. The development-fallback principal has no user, so it cannot mutate. Evidence listing is human-admin only as well. The company in the path is the caller's own or a fixed `404 COMPANY_NOT_FOUND` (see "Review-visible"); a foreign memory or evidence id answers the same `404` as one that does not exist.
+
+### API
+
+All paths are under `/api/v1/companies/{company_id}/memory/{memory_id}`. Request bodies reject unknown fields. Responses carry ids and states only.
+
+| Method and path | Body | Result |
+|-----------------|------|--------|
+| `POST /evidence` | `evidence_kind`, `source_id` (not for an attestation), `reason_code` (attestation only) | `201` evidence view |
+| `GET /evidence` | none | `200 {"evidence": [...]}`, oldest first, audited |
+| `POST /accept` | none | `200` `{memory_id, status, trust_state, from_status}` |
+| `POST /trust/assert` | `evidence_id` | `200` `{memory_id, status, trust_state, from_trust_state, evidence_id}` |
+| `POST /trust/verify` | `evidence_id` | same shape |
+
+Stable error codes: `MEMORY_EVIDENCE_FORBIDDEN` (403), `MEMORY_NOT_FOUND`, `MEMORY_EVIDENCE_NOT_FOUND` and `MEMORY_EVIDENCE_SOURCE_NOT_FOUND` (404), `MEMORY_EVIDENCE_INVALID` (422), `MEMORY_EVIDENCE_DUPLICATE`, `MEMORY_EVIDENCE_NOT_QUALIFYING`, `MEMORY_EVIDENCE_STALE`, `MEMORY_INVALID_TRANSITION`, `MEMORY_ALREADY_ARCHIVED` and `MEMORY_IDEMPOTENCY_CONFLICT` (409), `IDEMPOTENCY_KEY_REQUIRED` and `IDEMPOTENCY_KEY_INVALID` (422). Evidence can be attached to a candidate or active memory; attaching it to a closed one is `MEMORY_INVALID_TRANSITION`. Promoting trust needs an `active` memory.
+
+### Idempotency and races
+
+Mutations require `Idempotency-Key` (8 to 128 characters of letters, digits and `. _ : -`). The generic idempotency middleware stands aside for these paths (it answers 422 on a payload mismatch; here the answer is 409). Each request writes one `memory_operations` row in the same savepoint as its effect. It is unique on `(company_id, idempotency_key)` and holds the operation, the memory id, a digest of operation, memory, actor and body, the actor and the result.
+
+- Same key, same request: the stored result is returned with `Idempotency-Replayed: true`. No second effect, no second audit row.
+- Same key, different request (another body, memory, actor or operation): `409 MEMORY_IDEMPOTENCY_CONFLICT`.
+- Concurrent identical requests: one wins the unique constraint; the others re-read the ledger and replay.
+- Transitions are tenant-scoped conditional `UPDATE`s checking the current status or trust. Accept vs reject, accept vs supersede, assert vs assert and verify vs archive or supersede have exactly one winner; the loser gets `MEMORY_INVALID_TRANSITION` and leaves no evidence, ledger or audit residue. There are no sleeps or polling loops.
+- The caller owns the transaction. The transition and its audit row commit or roll back together; a failed request leaves nothing behind.
+
+### RLS
+
+Both tables have row-level security enabled and forced, with a `tenant_isolation` policy on `company_id = nexus.company_id` (the existing `tenant_session` convention) for `USING` and `WITH CHECK`. An unbound session reads nothing and cannot insert, and the table owner is bound too. A same-company trigger refuses a row whose `memory_id` belongs to another company (a foreign key alone would accept it), on PostgreSQL and SQLite. Because that trigger fires before the policy check, a forged cross-company insert may be refused by either; both are refusals.
+
+### Audit
+
+All events are content-free: ids, states, kinds, grade, policy version, actor and idempotency key. They never carry memory, chat, tool arguments, deliverables or credentials.
+
+| Action | Details |
+|--------|---------|
+| `memory.evidence_attached` | evidence id, kind, source type and id, reason code, grade, policy version, idempotency key |
+| `memory.accepted` | from and to status, idempotency key |
+| `memory.trust_asserted`, `memory.trust_verified` | from and to trust state, evidence id, kind, source type, grade, policy version, idempotency key |
+| `memory.evidence_reviewed` | count and evidence ids |
+
+### Limitations and deferred work
+
+- `source_id` points at one of several tables, so it has no foreign key. The service validates it in the caller's company at attach and again at promotion, and the same-company trigger covers `memory_id` only.
+- Nothing downgrades trust, and nothing re-opens a verified memory automatically when its source later changes; correct it with archive, reject or supersede.
+- No retrieval-ranking change: trust does not influence recall order or eligibility.
+- No automatic learning or verification, no agent self-verification, no dashboard for evidence, no broader trust scoring.
+- Dev-fallback principals cannot mutate.
+- Evidence kinds beyond the four above (for example external documents or signed approvals) are not modeled.
 
 ## Migration
 
 `f1b7c9d2a508` follows `e7a1c2d3f407`. The backfill is deterministic: ordinary rows become `active`, metadata-marked untrusted candidates become `candidate`/`untrusted`, human and API rows become `asserted`, `memory_type` comes from metadata or scope (else `unknown`), and `content_hash` comes from stored content. Legacy rows get the key `legacy:<id>`. Source fields are filled only where the row itself names a real message or turn. Content is never rewritten, deleted or merged. Row-level security stays forced on PostgreSQL.
+
+`b4d9f2a61c73` follows `e7a1c2d3f408`. It creates `memory_evidence` and `memory_operations`, their indexes, constraints and triggers, and enables and forces RLS on PostgreSQL. It leaves every `memory_records` row and the status and trust constraints unchanged. Downgrade drops the policies, triggers, tables and the two trigger functions it created and nothing else. The downgrade destroys all evidence and idempotency history: nothing is exported, and a later upgrade recreates the tables empty. Privileges for the application role are not part of the migration. In the compose deployment `docker/postgres-init/01-init-roles.sql` sets `ALTER DEFAULT PRIVILEGES FOR ROLE nexus_migrator`, and the `migrate` service runs Alembic as that role, so the recreated tables are granted to `nexus_app` automatically (SELECT, INSERT, UPDATE and DELETE, the same as every other tenant table; the append-only triggers and forced RLS are what hold the evidence). A deployment that runs migrations as a different role, as the test database does, must provide its own default privileges or grants.
+
+While a memory has evidence, the foreign keys from `memory_evidence` and `memory_operations` to `memory_records` and `companies` are RESTRICT and the append-only triggers refuse UPDATE and DELETE, so that memory cannot be hard-deleted and neither can its company. PostgreSQL reports SQLSTATE 23503 for the memory (`memory_evidence_memory_id_fkey`). For a company the first constraint to fire is not necessarily an evidence one: on a freshly migrated database it is `audit_log_company_id_fkey`, because the company also has audit rows. SQLite refuses with an integrity error once `PRAGMA foreign_keys` is on, which each connection must enable.
 
 ## Not covered here
 

@@ -42,6 +42,7 @@ from nexus.api.routes.incidents import router as incidents_router
 from nexus.api.routes.knowledge import router as knowledge_router
 from nexus.api.routes.meetings import router as meetings_router
 from nexus.api.routes.memory import router as memory_router
+from nexus.api.routes.memory_evidence import router as memory_evidence_router
 from nexus.api.routes.memory_global import router as memory_global_router
 from nexus.api.routes.memory_graph import router as memory_graph_router
 from nexus.api.routes.nodes import router as nodes_router
@@ -557,6 +558,7 @@ app.include_router(api_keys_router)
 app.include_router(profile_router)
 app.include_router(audit_router)
 app.include_router(memory_global_router)
+app.include_router(memory_evidence_router)
 app.include_router(memory_graph_router)
 app.include_router(hr_router)
 app.include_router(departments_router)

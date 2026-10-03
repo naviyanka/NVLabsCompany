@@ -73,6 +73,8 @@ EXPECTED_TABLES = {
     "meeting_minutes",
     "meeting_participants",
     "meetings",
+    "memory_evidence",
+    "memory_operations",
     "memory_records",
     "governance_grant_uses",
     "governance_policy_drafts",
@@ -244,6 +246,187 @@ class TestChainExecution:
         command.upgrade(cfg, "head")
         command.downgrade(cfg, "-1")
         command.upgrade(cfg, "head")
+
+    def test_memory_evidence_triggers_hold_on_a_migrated_database(self, tmp_path) -> None:
+        """Evidence rows are append-only and cannot name another company's memory.
+
+        Tests build tables with create_all, which has no triggers: only the migration
+        creates them, so this is the SQLite proof (the PostgreSQL one is in
+        test_memory_evidence_postgres.py). Downgrading one step removes them again.
+        """
+        import uuid
+
+        from sqlalchemy import text
+        from sqlalchemy.exc import DatabaseError
+
+        from nexus.models.memory import MemoryRecord
+
+        db_file = tmp_path / "chain.db"
+        url = f"sqlite:///{db_file.as_posix()}"
+        cfg = Config("alembic.ini")
+        cfg.set_main_option("sqlalchemy.url", f"sqlite+aiosqlite:///{db_file.as_posix()}")
+        command.upgrade(cfg, "head")
+
+        acme, other, memory = (str(uuid.uuid4()) for _ in range(3))
+        insert = text(
+            "INSERT INTO memory_evidence (id, company_id, memory_id, evidence_kind, source_type,"
+            " source_id, reason_code, grade, source_digest, policy_version, idempotency_key,"
+            " created_by, created_at) VALUES (:id, :c, :m, 'chat_turn', 'chat_turn', 's', '',"
+            " 'none', 'd', 'memory-evidence-v1', :k, 'user:u', CURRENT_TIMESTAMP)"
+        )
+        engine = create_engine(url)
+        with engine.begin() as conn:
+            conn.execute(
+                MemoryRecord.__table__.insert().values(
+                    id=uuid.UUID(memory),
+                    company_id=uuid.UUID(acme),
+                    agent_id=uuid.uuid4(),
+                    scope="l2_agent",
+                    content="x",
+                    status="active",
+                )
+            )
+        # SQLite stores a UUID as 32 hex digits, so raw SQL must spell it that way.
+        hexed = {name: uuid.UUID(v).hex for name, v in (("c", acme), ("m", memory), ("o", other))}
+        row = {"id": uuid.uuid4().hex, "c": hexed["c"], "m": hexed["m"], "k": "k1"}
+        with engine.begin() as conn:
+            conn.execute(insert, row)
+        for statement, params in (
+            ("UPDATE memory_evidence SET grade = 'verify'", {}),
+            ("DELETE FROM memory_evidence", {}),
+            (insert.text, {**row, "id": uuid.uuid4().hex, "c": hexed["o"], "k": "k2"}),  # foreign
+        ):
+            with pytest.raises(DatabaseError), engine.begin() as conn:
+                conn.execute(text(statement), params)
+        with engine.connect() as conn:
+            assert conn.execute(text("SELECT count(*) FROM memory_evidence")).scalar() == 1
+        engine.dispose()
+
+        command.downgrade(cfg, "-1")
+        engine = create_engine(url)
+        with engine.connect() as conn:
+            left = conn.execute(
+                text("SELECT name FROM sqlite_master WHERE name LIKE 'trg_memory_%'")
+            ).fetchall()
+        engine.dispose()
+        assert not left, left
+        command.upgrade(cfg, "head")
+
+    def test_memory_evidence_is_retained_on_a_migrated_sqlite_database(self, tmp_path) -> None:
+        """Evidence is immutable, holds its memory and company, and a downgrade drops it.
+
+        SQLite enforces foreign keys only when asked, so every connection here turns the
+        pragma on and the test checks it took effect before relying on RESTRICT. SQLite and
+        PostgreSQL word these refusals differently, so only the exception class is asserted.
+        """
+        import uuid
+
+        from sqlalchemy import event, text
+        from sqlalchemy.exc import DatabaseError, IntegrityError
+
+        from nexus.models.company import Company
+        from nexus.models.memory import MemoryRecord
+
+        db_file = tmp_path / "retention.db"
+        url = f"sqlite:///{db_file.as_posix()}"
+        cfg = Config("alembic.ini")
+        cfg.set_main_option("sqlalchemy.url", f"sqlite+aiosqlite:///{db_file.as_posix()}")
+        command.upgrade(cfg, "head")
+
+        def connect() -> object:
+            engine = create_engine(url)
+
+            @event.listens_for(engine, "connect")
+            def _foreign_keys_on(dbapi_connection, _record) -> None:
+                dbapi_connection.execute("PRAGMA foreign_keys=ON")
+
+            return engine
+
+        acme, empty, kept, spare = (uuid.uuid4() for _ in range(4))
+        engine = connect()
+        with engine.connect() as conn:
+            assert conn.execute(text("PRAGMA foreign_keys")).scalar() == 1
+        with engine.begin() as conn:
+            for company in (acme, empty):
+                conn.execute(Company.__table__.insert().values(id=company, name=str(company)))
+            for memory in (kept, spare):
+                conn.execute(
+                    MemoryRecord.__table__.insert().values(
+                        id=memory,
+                        company_id=acme,
+                        scope="company",
+                        content="x",
+                        status="active",
+                        ingestion_key=str(memory),
+                    )
+                )
+            conn.execute(
+                text(
+                    "INSERT INTO memory_evidence (id, company_id, memory_id, evidence_kind,"
+                    " source_type, source_id, reason_code, grade, source_digest, policy_version,"
+                    " idempotency_key, created_by, created_at) VALUES (:id, :c, :m,"
+                    " 'human_attestation', 'user', 'u', 'reviewed_by_admin', 'assert', 'd',"
+                    " 'memory-evidence-v1', 'k1', 'user:u', CURRENT_TIMESTAMP)"
+                ),
+                {"id": uuid.uuid4().hex, "c": acme.hex, "m": kept.hex},
+            )
+
+        def rows(table: str) -> list:
+            with engine.connect() as conn:
+                return [tuple(r) for r in conn.execute(text(f"SELECT * FROM {table} ORDER BY id"))]
+
+        evidence = rows("memory_evidence")
+        assert len(evidence) == 1
+        for statement in (
+            "UPDATE memory_evidence SET grade = 'verify'",
+            "DELETE FROM memory_evidence",
+        ):
+            with pytest.raises(DatabaseError), engine.begin() as conn:
+                conn.execute(text(statement))
+            assert rows("memory_evidence") == evidence
+
+        # With foreign keys on, the memory and the company are held by their evidence ...
+        for table, key in (("memory_records", kept), ("companies", acme)):
+            with pytest.raises(IntegrityError), engine.begin() as conn:
+                conn.execute(text(f"DELETE FROM {table} WHERE id = :i"), {"i": key.hex})
+        assert rows("memory_evidence") == evidence
+        assert len(rows("memory_records")) == 2
+        assert len(rows("companies")) == 2
+        # ... while rows without evidence delete normally, so the evidence is what held them.
+        with engine.begin() as conn:
+            for table, key in (("memory_records", spare), ("companies", empty)):
+                gone = conn.execute(text(f"DELETE FROM {table} WHERE id = :i"), {"i": key.hex})
+                assert gone.rowcount == 1
+
+        # Downgrading one revision drops the evidence history with its tables and leaves the rest.
+        memories, companies = rows("memory_records"), rows("companies")
+        engine.dispose()
+        command.downgrade(cfg, "-1")
+        engine = connect()
+        with engine.connect() as conn:
+            left = conn.execute(
+                text(
+                    "SELECT name FROM sqlite_master WHERE name LIKE '%memory_evidence%'"
+                    " OR name LIKE '%memory_operations%'"
+                )
+            ).fetchall()
+        assert not left, left
+        assert rows("memory_records") == memories
+        assert rows("companies") == companies
+        engine.dispose()
+
+        command.upgrade(cfg, "head")
+        engine = connect()
+        assert rows("memory_evidence") == []  # nothing is exported or restored
+        with engine.connect() as conn:
+            triggers = conn.execute(
+                text(
+                    "SELECT count(*) FROM sqlite_master"
+                    " WHERE type = 'trigger' AND name LIKE 'trg_memory_%'"
+                )
+            ).scalar()
+        assert triggers == 6
+        engine.dispose()
 
     def test_migrated_schema_matches_the_models(self, tmp_path) -> None:
         """A database built only by migrations has every model table and column.
