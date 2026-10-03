@@ -104,10 +104,8 @@ async def audit(
         company_id,
         action,
         actor_type=(
-            "agent"
-            if actor.startswith(("agent:", "run:"))
-            else "system"
-            if actor.startswith("policy:")
+            "agent" if actor.startswith(("agent:", "run:"))
+            else "system" if actor.startswith("policy:")
             else "user"
         ),
         actor_id=actor,
@@ -150,12 +148,7 @@ async def delegate(
     # row. A second audit write here would contend with the woken worker for
     # the SQLite audit chain lock while holding the write lock.
     attempt, created = await task_attempts.start_attempt(
-        db,
-        company_id,
-        task_id,
-        principal,
-        agent_id=employee_id,
-        idempotency_key=key,
+        db, company_id, task_id, principal, agent_id=employee_id, idempotency_key=key,
         audit_details={"delegated_by": str(manager_id), "idempotency_key": key},
     )
     if not created:
@@ -215,12 +208,10 @@ async def latest_attempts(
         newest = newest.where(TaskAttempt.task_id.in_(task_ids))
     newest = newest.group_by(TaskAttempt.task_id).subquery()
     rows = await db.execute(
-        select(TaskAttempt)
-        .join(
+        select(TaskAttempt).join(
             newest,
             (TaskAttempt.task_id == newest.c.task_id) & (TaskAttempt.attempt_number == newest.c.n),
-        )
-        .where(TaskAttempt.company_id == company_id)
+        ).where(TaskAttempt.company_id == company_id)
     )
     return {a.task_id: a for a in rows.scalars().all()}
 
@@ -285,10 +276,8 @@ async def employee_status(db: Any, employee: Agent, now: datetime | None = None)
     )
 
     if active is not None:
-        state = (
-            "stale"
-            if _stale(active, now)
-            else ("queued" if active.status == "queued" else "working")
+        state = "stale" if _stale(active, now) else (
+            "queued" if active.status == "queued" else "working"
         )
     elif employee.status == "paused":
         state = "paused"
@@ -350,20 +339,14 @@ async def rollup(db: Any, company_id: uuid.UUID, manager_id: uuid.UUID) -> dict[
                 .order_by(Task.updated_at.desc(), Task.id)
                 .limit(MAX_TASKS)
             )
-        )
-        .scalars()
-        .all()
+        ).scalars().all()
         if names
         else []
     )
     latest = await latest_attempts(db, company_id, [t.id for t in tasks])
 
     work: dict[str, list[dict[str, Any]]] = {
-        "active": [],
-        "queued": [],
-        "completed": [],
-        "failed_blocked": [],
-        "stale": [],
+        "active": [], "queued": [], "completed": [], "failed_blocked": [], "stale": []
     }
     for task in tasks:
         attempt = latest.get(task.id)
@@ -418,16 +401,12 @@ async def task_evidence(
         raise _error(403, "NOT_A_DIRECT_REPORT", "The task is not assigned to a direct report")
     await require_report(db, company_id, manager_id, task.assigned_agent_id)
     attempts = (
-        (
-            await db.execute(
-                select(TaskAttempt)
-                .where(TaskAttempt.company_id == company_id, TaskAttempt.task_id == task_id)
-                .order_by(TaskAttempt.attempt_number.desc())
-            )
+        await db.execute(
+            select(TaskAttempt)
+            .where(TaskAttempt.company_id == company_id, TaskAttempt.task_id == task_id)
+            .order_by(TaskAttempt.attempt_number.desc())
         )
-        .scalars()
-        .all()
-    )
+    ).scalars().all()
     return {
         "task": {
             "id": str(task.id),

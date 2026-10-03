@@ -67,12 +67,8 @@ SPEC = {
     "verification": [{"command": "pytest", "paths": ["tests/test_calculator.py"]}],
     "acceptance_criteria": [
         {"kind": "file_exists", "path": "src/calculator.py"},
-        {
-            "kind": "pattern_count",
-            "path": "tests/test_calculator.py",
-            "pattern": "assert ",
-            "min_count": 3,
-        },
+        {"kind": "pattern_count", "path": "tests/test_calculator.py", "pattern": "assert ",
+         "min_count": 3},
         {"kind": "command_passes", "command": "pytest"},
     ],
 }
@@ -95,10 +91,7 @@ def report(state="completed", **extra):
 def _git(cwd: Path, *args: str) -> str:
     return subprocess.run(
         ["git", "-c", "user.name=t", "-c", "user.email=t@t", *args],
-        cwd=cwd,
-        check=True,
-        capture_output=True,
-        text=True,
+        cwd=cwd, check=True, capture_output=True, text=True,
     ).stdout.strip()
 
 
@@ -132,28 +125,12 @@ class Employee:
         _write(root, {"src/calculator.py": CALC, "tests/test_calculator.py": CALC_TESTS})
         return report(), 0
 
-    async def __call__(
-        self,
-        agent,
-        system_prompt,
-        prompt,
-        history,
-        *,
-        session_id=None,
-        context=None,
-        execution=None,
-        **kw,
-    ):
+    async def __call__(self, agent, system_prompt, prompt, history, *, session_id=None,
+                       context=None, execution=None, **kw):
         async with self.factory() as s:
             root = await session_workspace(s, agent.company_id, agent.id, session_id)
-        self.calls.append(
-            {
-                "agent": agent.id,
-                "root": root,
-                "prompt": prompt,
-                "mode": getattr(context, "work_mode", None),
-            }
-        )
+        self.calls.append({"agent": agent.id, "root": root, "prompt": prompt,
+                           "mode": getattr(context, "work_mode", None)})
         self.started.set()
         if self.during is not None:
             await self.during(root)
@@ -161,18 +138,10 @@ class Employee:
             await self.gate.wait()
         text, code = await self.behave(root, prompt)
         if execution is not None:
-            execution.update(
-                adapter="cli",
-                backend="claude",
-                cli={
-                    "type": "cli_execution",
-                    "adapter": "cli",
-                    "backend": "claude",
-                    "exit_code": code,
-                    "duration_ms": 5,
-                    "version": "fake",
-                },
-            )
+            execution.update(adapter="cli", backend="claude", cli={
+                "type": "cli_execution", "adapter": "cli", "backend": "claude",
+                "exit_code": code, "duration_ms": 5, "version": "fake",
+            })
         return text, "fake-model", 11
 
 
@@ -226,29 +195,12 @@ async def w(db, tmp_path):
             await s.flush()
             clone = _make_repo(tmp_path / "repos" / str(company.id) / "demo")
             repo = Repository(company_id=company.id, name="demo", url="u", local_path=str(clone))
-            claude = Agent(
-                company_id=company.id,
-                name="claude",
-                role="engineer",
-                adapter_type="cli",
-                adapter_config={"backend": "claude"},
-                model="",
-            )
-            agy = Agent(
-                company_id=company.id,
-                name="agy",
-                role="reviewer",
-                adapter_type="cli",
-                adapter_config={"backend": "agy"},
-                model="",
-            )
-            api = Agent(
-                company_id=company.id,
-                name="api",
-                role="engineer",
-                adapter_type="openai",
-                model="gpt-x",
-            )
+            claude = Agent(company_id=company.id, name="claude", role="engineer",
+                           adapter_type="cli", adapter_config={"backend": "claude"}, model="")
+            agy = Agent(company_id=company.id, name="agy", role="reviewer",
+                        adapter_type="cli", adapter_config={"backend": "agy"}, model="")
+            api = Agent(company_id=company.id, name="api", role="engineer",
+                        adapter_type="openai", model="gpt-x")
             s.add_all([repo, claude, agy, api])
             await s.flush()
             ids[key] = company.id
@@ -260,23 +212,14 @@ async def w(db, tmp_path):
 
 
 def _me(company_id, role="admin"):
-    return Principal(
-        kind="user",
-        company_id=company_id,
-        role=role,
-        user_id=uuid.uuid4(),
-        email="lead@example.test",
-    )
+    return Principal(kind="user", company_id=company_id, role=role, user_id=uuid.uuid4(),
+                     email="lead@example.test")
 
 
 async def _task(db, company_id, agent_id, repo_id, spec=None, title="Calculator"):
     async with db() as s:
-        task = Task(
-            company_id=company_id,
-            title=title,
-            assigned_agent_id=agent_id,
-            work_spec={**(spec or SPEC), "repository_id": str(repo_id)},
-        )
+        task = Task(company_id=company_id, title=title, assigned_agent_id=agent_id,
+                    work_spec={**(spec or SPEC), "repository_id": str(repo_id)})
         s.add(task)
         await s.commit()
     return task.id
@@ -309,13 +252,8 @@ async def _worktree(db, attempt):
 
 
 def _commits_with(root: Path, text: str) -> list[str]:
-    return [
-        c
-        for c in _git(
-            root, "log", "--all", "--format=%H", f"--grep={text}", "--fixed-strings"
-        ).splitlines()
-        if c
-    ]
+    return [c for c in _git(root, "log", "--all", "--format=%H", f"--grep={text}",
+                            "--fixed-strings").splitlines() if c]
 
 
 # ---------------------------------------------------------------------------
@@ -330,14 +268,9 @@ class TestCompletion:
         async def with_caches(root, prompt):
             # Running Python leaves caches behind; they are never work. Nor is
             # a CLI instruction file a killed earlier run could not remove.
-            _write(
-                root,
-                {
-                    "src/__pycache__/calculator.cpython-314.pyc": "x",
-                    ".pytest_cache/v/cache/nodeids": "[]",
-                    ".claude/CLAUDE.md": "# Stale instructions",
-                },
-            )
+            _write(root, {"src/__pycache__/calculator.cpython-314.pyc": "x",
+                          ".pytest_cache/v/cache/nodeids": "[]",
+                          ".claude/CLAUDE.md": "# Stale instructions"})
             return await db.emp.calculator(root, prompt)
 
         db.emp.behave = with_caches
@@ -511,15 +444,8 @@ class TestStart:
 
     async def test_racing_claims_have_one_winner(self, db, w):
         async with db() as s:
-            s.add(
-                TaskAttempt(
-                    company_id=w["acme"],
-                    task_id=w["task"],
-                    agent_id=w["acme_claude"],
-                    attempt_number=1,
-                    idempotency_key="x",
-                )
-            )
+            s.add(TaskAttempt(company_id=w["acme"], task_id=w["task"], agent_id=w["acme_claude"],
+                              attempt_number=1, idempotency_key="x"))
             await s.commit()
         (row,) = await _rows(db, TaskAttempt)
         won = await asyncio.gather(*(ta.claim(row.id, w["acme"], f"w{i}") for i in range(5)))
@@ -587,17 +513,8 @@ class TestStart:
 
     def test_work_spec_refuses_unsafe_paths_and_commands(self):
         base = {**SPEC, "repository_id": str(uuid.uuid4())}
-        for bad in (
-            "../x.py",
-            "/etc/passwd",
-            "C:\\x.py",
-            "\\\\srv\\share\\x",
-            ".nexus/r.json",
-            "-rf",
-            "a/../../b",
-            ".claude/settings.json",
-            "",
-        ):
+        for bad in ("../x.py", "/etc/passwd", "C:\\x.py", "\\\\srv\\share\\x", ".nexus/r.json",
+                    "-rf", "a/../../b", ".claude/settings.json", ""):
             with pytest.raises(ValidationError):
                 ta.WorkSpec.model_validate({**base, "deliverables": [bad]})
         for bad_step in ({"command": "bash", "paths": []}, {"command": "pytest", "argv": ["x"]}):
@@ -631,20 +548,9 @@ class TestProgress:
         monkeypatch.setattr(ta, "store_report", spy)
 
         async def during(root):
-            _write(
-                root,
-                {
-                    ".nexus/report.json": json.dumps(
-                        {
-                            "seq": 1,
-                            "state": "working",
-                            "summary": "writing add",
-                            "progress_percent": 40,
-                            "current_step": "src/calculator.py",
-                        }
-                    )
-                },
-            )
+            _write(root, {".nexus/report.json": json.dumps(
+                {"seq": 1, "state": "working", "summary": "writing add",
+                 "progress_percent": 40, "current_step": "src/calculator.py"})})
             ta.get_worker().poke(next(iter(ta.get_worker()._running)))
             await asyncio.wait_for(stored.wait(), 30)
 
@@ -660,11 +566,8 @@ class TestProgress:
         attempt, _ = await _start(db, w["acme"], w["task"])
         await ta.drain()
         async with db() as s:
-            await s.execute(
-                update(TaskAttempt)
-                .where(TaskAttempt.id == attempt.id)
-                .values(status="running", report_seq=0)
-            )
+            await s.execute(update(TaskAttempt).where(TaskAttempt.id == attempt.id)
+                            .values(status="running", report_seq=0))
             await s.commit()
         body = {"state": "working", "summary": "s"}
         assert await ta.store_report(attempt, 5, body, "progress")
@@ -721,12 +624,8 @@ class TestWorkspace:
         (outside / "secret.txt").write_text("s")
         _link(root / "escape", outside)
         assert ta.inside(root, "src/a.py") == root / "src" / "a.py"
-        for rel in (
-            "../outside/secret.txt",
-            "escape/secret.txt",
-            str(outside / "secret.txt"),
-            "src/../../outside",
-        ):
+        for rel in ("../outside/secret.txt", "escape/secret.txt", str(outside / "secret.txt"),
+                    "src/../../outside"):
             assert ta.inside(root, rel) is None
 
     async def test_linked_deliverable_fails_verification(self, db, w, tmp_path):
@@ -753,14 +652,10 @@ class TestWorkspace:
         calls = len(db.emp.calls)
         row = await _attempt(db, w["acme"], attempt.id)
         async with db() as s:
-            await s.execute(
-                update(AgentWorktree)
-                .where(AgentWorktree.id == row.worktree_id)
-                .values(status="archived")
-            )
-            await s.execute(
-                update(TaskAttempt).where(TaskAttempt.id == attempt.id).values(chat_turn_id=None)
-            )
+            await s.execute(update(AgentWorktree).where(AgentWorktree.id == row.worktree_id)
+                            .values(status="archived"))
+            await s.execute(update(TaskAttempt).where(TaskAttempt.id == attempt.id)
+                            .values(chat_turn_id=None))
             await s.commit()
         await ta.recover_company(w["acme"], ta._now() + LATER)
         ta.get_worker().wake(w["acme"])
@@ -773,11 +668,8 @@ class TestWorkspace:
         attempt = await _run(db, w["acme"], w["task"])
         row, _ = await _worktree(db, attempt)
         async with db() as s:
-            await s.execute(
-                update(AgentWorktree)
-                .where(AgentWorktree.id == row.id)
-                .values(status="created", session_id=attempt.session_id)
-            )
+            await s.execute(update(AgentWorktree).where(AgentWorktree.id == row.id)
+                            .values(status="created", session_id=attempt.session_id))
             await s.commit()
             with pytest.raises(WorktreeError):  # refused, never the main checkout
                 await session_workspace(s, w["acme"], w["acme_claude"], attempt.session_id)
@@ -785,29 +677,18 @@ class TestWorkspace:
     async def test_read_only_review_leaves_the_reviewed_work_alone(self, db, w):
         done = await _run(db, w["acme"], w["task"])
         reviewed, reviewed_root = await _worktree(db, done)
-        review = await _task(
-            db,
-            w["acme"],
-            w["acme_agy"],
-            w["acme_repo"],
-            title="Review",
-            spec={
-                "mode": "read_only",
-                "review_of_task_id": str(w["task"]),
-                "objective": "Review the calculator change.",
-                "acceptance_criteria": [{"kind": "report_contains", "text": "add"}],
-            },
-        )
+        review = await _task(db, w["acme"], w["acme_agy"], w["acme_repo"], title="Review", spec={
+            "mode": "read_only", "review_of_task_id": str(w["task"]),
+            "objective": "Review the calculator change.",
+            "acceptance_criteria": [{"kind": "report_contains", "text": "add"}],
+        })
 
         async def look(root, prompt):
             assert (root / "src" / "calculator.py").read_text() == CALC
             # Running the tests leaves caches; that is not writing.
             _write(root, {"tests/__pycache__/test_calculator.cpython-314.pyc": "x"})
-            return report(
-                summary="Reviewed add(): correct",
-                artifacts=[],
-                tests_run=["read tests/test_calculator.py"],
-            ), 0
+            return report(summary="Reviewed add(): correct", artifacts=[],
+                          tests_run=["read tests/test_calculator.py"]), 0
 
         db.emp.behave = look
         attempt = await _run(db, w["acme"], review)
@@ -820,17 +701,9 @@ class TestWorkspace:
 
     async def test_read_only_review_that_writes_fails(self, db, w):
         await _run(db, w["acme"], w["task"])
-        review = await _task(
-            db,
-            w["acme"],
-            w["acme_agy"],
-            w["acme_repo"],
-            title="Review",
-            spec={
-                "mode": "read_only",
-                "review_of_task_id": str(w["task"]),
-            },
-        )
+        review = await _task(db, w["acme"], w["acme_agy"], w["acme_repo"], title="Review", spec={
+            "mode": "read_only", "review_of_task_id": str(w["task"]),
+        })
 
         async def meddle(root, prompt):
             _write(root, {"src/calculator.py": BUGGY})
@@ -904,11 +777,8 @@ class TestRecovery:
         sha = effect.result["commit"]
         # Crash between the commit and the ledger update: the retry finds the trailer.
         async with db() as s:
-            await s.execute(
-                update(WorkEffect)
-                .where(WorkEffect.id == effect.id)
-                .values(status="pending", result=None)
-            )
+            await s.execute(update(WorkEffect).where(WorkEffect.id == effect.id)
+                            .values(status="pending", result=None))
             await s.commit()
         (root / "extra.txt").write_text("later")
         assert await ta.commit_work(attempt, row) == sha
@@ -919,16 +789,9 @@ class TestRecovery:
         self, db, w, tmp_path
     ):
         async def buggy(root, prompt):
-            _write(
-                root,
-                {
-                    "src/calculator.py": BUGGY,
-                    "tests/test_calculator.py": CALC_TESTS,
-                    ".nexus/report.json": json.dumps(
-                        {"seq": 1, "state": "working", "current_step": "first try"}
-                    ),
-                },
-            )
+            _write(root, {"src/calculator.py": BUGGY, "tests/test_calculator.py": CALC_TESTS,
+                          ".nexus/report.json": json.dumps(
+                              {"seq": 1, "state": "working", "current_step": "first try"})})
             return report(), 0
 
         stale: list[bool] = []
@@ -940,24 +803,17 @@ class TestRecovery:
         db.emp.behave = buggy
         first = await _run(db, w["acme"], w["task"])
         assert first.completion_reason == "verification_failed"
-        first_log = (
-            tmp_path
-            / "evidence"
-            / str(w["acme"])
-            / str(first.id)
-            / first.verification["commands"][0]["stdout"]["ref"]
-        ).read_text()
+        first_log = (tmp_path / "evidence" / str(w["acme"]) / str(first.id) /
+                     first.verification["commands"][0]["stdout"]["ref"]).read_text()
 
         db.emp.behave = fix
         async with db() as s:
-            second, created = await ta.retry_attempt(
-                s, w["acme"], w["task"], first.id, _me(w["acme"])
-            )
+            second, created = await ta.retry_attempt(s, w["acme"], w["task"], first.id,
+                                                     _me(w["acme"]))
         again = None
         async with db() as s:
-            again, created_again = await ta.retry_attempt(
-                s, w["acme"], w["task"], first.id, _me(w["acme"])
-            )
+            again, created_again = await ta.retry_attempt(s, w["acme"], w["task"], first.id,
+                                                          _me(w["acme"]))
         assert created and not created_again and again.id == second.id
         await ta.drain()
         second = await _attempt(db, w["acme"], second.id)
@@ -976,13 +832,8 @@ class TestRecovery:
         kept = await _attempt(db, w["acme"], first.id)
         assert kept.status == "failed" and kept.verification == first.verification
         assert kept.artifacts == first.artifacts
-        assert (
-            tmp_path
-            / "evidence"
-            / str(w["acme"])
-            / str(first.id)
-            / first.verification["commands"][0]["stdout"]["ref"]
-        ).read_text() == first_log
+        assert (tmp_path / "evidence" / str(w["acme"]) / str(first.id) /
+                first.verification["commands"][0]["stdout"]["ref"]).read_text() == first_log
         _, root = await _worktree(db, second)
         assert len(_commits_with(root, "Nexus-Effect")) == 1
         keys = [e.effect_key for e in await _rows(db, WorkEffect)]
@@ -1028,9 +879,7 @@ class TestRecovery:
         db.emp.gate.set()
         final = await _attempt(db, w["acme"], attempt.id)
         assert (final.status, final.completion_reason, final.error_code) == (
-            "failed",
-            "timeout",
-            "TIMEOUT",
+            "failed", "timeout", "TIMEOUT"
         )
 
     async def test_no_transaction_is_held_while_the_employee_works(self, db, w, tmp_path):
@@ -1062,7 +911,9 @@ class TestVerificationRunner:
         root = tmp_path / "wt"
         (root / "tests").mkdir(parents=True)
         (root / "tests" / "test_noisy.py").write_text(
-            "import os\n\ndef test_noisy():\n    print(os.getcwd() * 400)\n    assert False\n"
+            "import os\n\ndef test_noisy():\n"
+            "    print(os.getcwd() * 400)\n"
+            "    assert False\n"
         )
         evidence = tmp_path / "ev"
         evidence.mkdir()
@@ -1127,11 +978,8 @@ class TestHardening:
         rows = await _rows(db, AuditLog, AuditLog.company_id == w["acme"])
         (reply,) = [r for r in rows if r.action == "chat.response_generated"]
         assert (reply.resource_type, reply.resource_id) == ("chat", str(attempt.session_id))
-        assert all(
-            r.resource_id not in (None, "None")
-            for r in rows
-            if r.action.startswith(("chat.", "task.attempt"))
-        )
+        assert all(r.resource_id not in (None, "None") for r in rows
+                   if r.action.startswith(("chat.", "task.attempt")))
         assert all("None" not in (r.actor_id or "") for r in rows)
 
     def test_work_modes_map_only_to_cataloged_flags(self):
