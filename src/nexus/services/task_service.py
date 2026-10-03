@@ -270,19 +270,6 @@ class TaskService:
         await self._db.flush()
         return task
 
-    async def get_task(self, task_id: uuid.UUID) -> Task | None:
-        """Retrieve a single task by ID.
-
-        Args:
-            task_id: The task's unique identifier.
-
-        Returns:
-            The Task instance, or None if not found.
-        """
-        stmt = select(Task).where(Task.id == task_id)
-        result = await self._db.execute(stmt)
-        return result.scalar_one_or_none()
-
     async def list_tasks(
         self,
         company_id: uuid.UUID,

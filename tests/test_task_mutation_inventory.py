@@ -8,6 +8,7 @@ mutation cannot slip around the canonical services unseen.
 
 from __future__ import annotations
 
+import inspect
 import re
 from pathlib import Path
 
@@ -64,3 +65,13 @@ def test_task_service_has_no_unscoped_mutators():
     work guard. Nothing called them; they are gone so nothing can start to."""
     for name in ("assign_task", "update_status", "complete_task", "fail_task"):
         assert not hasattr(task_service.TaskService, name), name
+
+
+def test_task_service_reads_and_writes_need_company_context():
+    """``get_task(task_id)`` read any tenant's task by bare id and had no caller, so it was
+    deleted. A public TaskService method must take ``company_id`` (a reader must not be
+    reintroduced without one)."""
+    assert not hasattr(task_service.TaskService, "get_task")
+    for name, fn in inspect.getmembers(task_service.TaskService, inspect.isfunction):
+        if not name.startswith("_"):
+            assert "company_id" in inspect.signature(fn).parameters, name
