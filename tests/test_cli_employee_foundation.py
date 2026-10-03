@@ -373,6 +373,7 @@ async def world(tmp_path, monkeypatch, fake_path):
     principals = {
         "viewer": Principal(kind="user", company_id=acme.id, role="viewer", user_id=uuid.uuid4()),
         "manager": Principal(kind="user", company_id=acme.id, role="manager", user_id=uuid.uuid4()),
+        "admin": Principal(kind="user", company_id=acme.id, role="admin", user_id=uuid.uuid4()),
     }
     app = FastAPI()
     for router in (agent_routes.router, hiring_routes.router, provider_routes.router):
@@ -456,7 +457,12 @@ async def test_update_cannot_make_configuration_required_routable(world):
     url = f"/api/v1/companies/{world['acme']}/agents"
     r = await world["client"].post(url, json=_hire_body("claude", allow_unavailable_backend=True))
     agent_id = r.json()["id"]
+    # Status is authority: a manager is refused, and an administrator still meets the CLI guard.
     r = await world["client"].patch(f"/api/v1/agents/{agent_id}", json={"status": "idle"})
+    assert r.status_code == 403
+    r = await world["client"].patch(
+        f"/api/v1/agents/{agent_id}", json={"status": "idle"}, headers={"x-test-principal": "admin"}
+    )
     assert r.status_code == 422
 
 

@@ -490,8 +490,8 @@ class TestStart:
         assert exc.value.status_code == 404
         async with db() as s:
             for coro in (
-                attempt_routes.get_attempt(w["task"], attempt.id, s, w["other"]),
-                attempt_routes.list_attempts(w["task"], s, w["other"]),
+                attempt_routes.get_attempt(w["task"], attempt.id, s, w["other"], _me(w["other"])),
+                attempt_routes.list_attempts(w["task"], s, w["other"], _me(w["other"])),
                 attempt_routes.cancel_attempt(
                     w["task"], attempt.id, s, w["other"], _me(w["other"])
                 ),

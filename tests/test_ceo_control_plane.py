@@ -41,7 +41,7 @@ from nexus.models.task_attempt import TaskAttempt
 from nexus.models.tool import ToolPolicy
 from nexus.runtime import chat_turns
 from nexus.runtime import task_attempts as ta
-from nexus.services import ceo_service
+from nexus.services import ceo_service, work_service
 from nexus.services import org_snapshot as snap
 from nexus.services.session_service import get_or_create_default_session
 from nexus.tools import ceo_tools
@@ -409,6 +409,11 @@ class TestExecutiveContext:
                 await ceo_service.remember(
                     s, c["acme"], ceo_service.MemoryEntry(type="decision", content=f"d{i} " * 90),
                     recorded_by="user:x", origin="human")
+            order, _ = await work_service.create_work_order(
+                s, c["acme"], scope="human:op", actor="op", title="Quarterly report",
+                idempotency_key="k1")
+            order.assigned_agent_id = c["chief"]
+            s.add(order)
             await s.commit()
         generated = await snap.generate(c["acme"])
         statements = []
@@ -420,12 +425,15 @@ class TestExecutiveContext:
                 first = await ceo_service.chat_context(s, c["acme"], c["chief"])
             finally:
                 event.remove(engine, "before_cursor_execute", listen)
-        # Designation, snapshot, its state, bounded memory: no aggregation, no N+1.
-        assert len(statements) == 4, statements
+        # Designation, snapshot, its state, bounded memory, then the live work read
+        # (open, closed, children, latest attempts, names): no aggregation, no N+1.
+        assert len(statements) == 9, statements
         assert all(q.lstrip().upper().startswith("SELECT") for q in statements)
         assert first == await _context(db, c)
         assert first.startswith(ceo_service.CHAT_DIRECTIVE)
-        assert len(first) <= len(ceo_service.CHAT_DIRECTIVE) + 2 + ceo_service.CONTEXT_MAX_CHARS
+        live = first.index("Live work (from the database")
+        assert live <= len(ceo_service.CHAT_DIRECTIVE) + 2 + ceo_service.CONTEXT_MAX_CHARS + 2
+        assert len(first) - live <= work_service.DIGEST_MAX_CHARS + 300
         assert f"Organization snapshot v{generated['version']} hash " in first
         assert "freshness FRESH" in first and "WARNING" not in first
         entries = _memory_entries(first)

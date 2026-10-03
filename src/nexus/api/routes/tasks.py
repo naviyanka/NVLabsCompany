@@ -8,10 +8,22 @@ from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy import select, update
 
-from nexus.api.deps import CurrentCompanyId, CurrentPrincipal, DbSession
+from nexus.api.deps import (
+    CurrentCompanyId,
+    CurrentPrincipal,
+    DbSession,
+    PathCompanyId,
+    require_permission,
+)
 from nexus.models.task import RunCompletionReason, Task
+from nexus.services.task_service import TaskService, refuse_closed_parent, require_assignable_agent
 
 router = APIRouter(tags=["tasks"])
+
+# Every route names its permission (authentication alone is not enough). HTTP permissions come
+# from the caller's role, never from the tool-governance policy.
+READ_TASK = [require_permission("read", "task")]
+WRITE_TASK = [require_permission("write", "task")]
 
 
 class TaskCreate(BaseModel):
@@ -51,6 +63,54 @@ async def _refuse_if_attempt_active(
                 "message": "Cancel the active attempt before reassigning the task",
             },
         )
+
+
+# Only the work lifecycle (nexus.services.work_service) may move work into these.
+_WORK_ONLY_STATUSES = {"completed", "failed", "cancelled", "in_review", "delegated"}
+
+
+async def _is_work(db: Any, company_id: uuid.UUID, task_id: uuid.UUID) -> bool:
+    """A work task (a real ``WorkSpec``), a work order delegated or in review, or the parent of
+    a work task. Unrelated ``work_spec`` JSON on a legacy task does not make it work."""
+    from nexus.services import work_service
+
+    if await work_service.is_work_owned(db, company_id, task_id):
+        return True
+    row = (
+        await db.execute(
+            select(Task.work_spec, Task.status).where(
+                Task.id == task_id, Task.company_id == company_id
+            )
+        )
+    ).first()
+    if row is None:
+        return False
+    if work_service.is_work_spec(row.work_spec) or row.status in ("delegated", "in_review"):
+        return True
+    children = await db.execute(
+        select(Task.work_spec).where(
+            Task.parent_task_id == task_id,
+            Task.company_id == company_id,
+            Task.work_spec.is_not(None),
+        )
+    )
+    return any(work_service.is_work_spec(spec) for spec in children.scalars().all())
+
+
+async def _refuse_work_owned(db: Any, company_id: uuid.UUID, task_id: uuid.UUID | None) -> None:
+    """The work lifecycle owns work orders and their children (409 WORK_OWNED_BY_LIFECYCLE).
+
+    The answer names no id, and a missing, foreign or ordinary task is not refused here.
+    """
+    if task_id is None:
+        return
+    from nexus.services import work_service
+
+    work_service.refuse_if_work_owned(await work_service.is_work_owned(db, company_id, task_id))
+
+
+async def _require_agent(db: Any, company_id: uuid.UUID, agent_id: uuid.UUID) -> None:
+    await require_assignable_agent(db, company_id, agent_id)
 
 
 class TaskAssign(BaseModel):
@@ -94,9 +154,10 @@ class TaskResponse(BaseModel):
     "/api/v1/companies/{company_id}/tasks",
     status_code=status.HTTP_201_CREATED,
     response_model=TaskResponse,
+    dependencies=WRITE_TASK,
 )
 async def create_task(
-    company_id: uuid.UUID, body: TaskCreate, db: DbSession
+    company_id: PathCompanyId, body: TaskCreate, db: DbSession
 ) -> Any:
     """Create a new task in a company.
 
@@ -148,18 +209,17 @@ async def create_task(
         except Exception:
             pass  # Fall back to unassigned if routing scoring fails
 
-    task = Task(
-        company_id=company_id,
-        title=body.title,
-        description=body.description,
-        priority=body.priority,
+    # The service checks the parent and the agent against this company before it inserts.
+    task = await TaskService(db).create_task(
+        company_id,
+        body.title,
+        body.description,
+        body.priority,
         project_id=body.project_id,
         assigned_agent_id=assigned_id,
         parent_task_id=body.parent_task_id,
         work_spec=work_spec,
     )
-    db.add(task)
-    await db.flush()
 
     # Audit: task created
     from nexus.governance.audit_service import record_audit
@@ -176,9 +236,10 @@ async def create_task(
 @router.get(
     "/api/v1/companies/{company_id}/tasks",
     response_model=list[TaskResponse],
+    dependencies=READ_TASK,
 )
 async def list_tasks(
-    company_id: uuid.UUID,
+    company_id: PathCompanyId,
     db: DbSession,
     status_filter: str | None = None,
     completion_reason: str | None = None,
@@ -196,7 +257,7 @@ async def list_tasks(
     return list(result.scalars().all())
 
 
-@router.get("/api/v1/tasks/{task_id}", response_model=TaskResponse)
+@router.get("/api/v1/tasks/{task_id}", response_model=TaskResponse, dependencies=READ_TASK)
 async def get_task(task_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId) -> Any:
     """Get a task by ID."""
     stmt = select(Task).where(Task.id == task_id, Task.company_id == company_id)
@@ -210,11 +271,13 @@ async def get_task(task_id: uuid.UUID, db: DbSession, company_id: CurrentCompany
     return task
 
 
-@router.put("/api/v1/tasks/{task_id}/assign", response_model=TaskResponse)
+@router.put("/api/v1/tasks/{task_id}/assign", response_model=TaskResponse, dependencies=WRITE_TASK)
 async def assign_task(
     task_id: uuid.UUID, body: TaskAssign, db: DbSession, company_id: CurrentCompanyId
 ) -> Any:
-    """Assign a task to an agent."""
+    """Assign a task to an agent. Work is assigned by its manager through the work routes."""
+    await _refuse_work_owned(db, company_id, task_id)
+    await _require_agent(db, company_id, body.agent_id)
     await _refuse_if_attempt_active(db, company_id, task_id, body.agent_id)
     stmt = (
         update(Task)
@@ -236,29 +299,26 @@ async def assign_task(
     return task
 
 
-@router.put("/api/v1/tasks/{task_id}/status", response_model=TaskResponse)
+@router.put("/api/v1/tasks/{task_id}/status", response_model=TaskResponse, dependencies=WRITE_TASK)
 async def update_task_status(
     task_id: uuid.UUID, body: TaskStatusUpdate, db: DbSession, company_id: CurrentCompanyId
 ) -> Any:
     """Update the status of a task.
 
-    A work task cannot be marked completed here: only an attempt whose
-    verification passed completes it (nexus.runtime.task_attempts).
+    Work cannot be completed, failed, cancelled or put in review here: only an attempt
+    whose verification passed completes it (nexus.runtime.task_attempts,
+    nexus.services.work_service).
     """
-    if body.status == "completed":
-        spec = (
-            await db.execute(
-                select(Task.work_spec).where(Task.id == task_id, Task.company_id == company_id)
-            )
-        ).scalar_one_or_none()
-        if spec:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail={
-                    "code": "WORK_TASK_REQUIRES_VERIFIED_ATTEMPT",
-                    "message": "A work task completes only through a verified attempt",
-                },
-            )
+    if body.status in _WORK_ONLY_STATUSES and await _is_work(db, company_id, task_id):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "WORK_TASK_REQUIRES_VERIFIED_ATTEMPT",
+                "message": "Work moves to this status only through its lifecycle: "
+                "a verified attempt, the review route or the cancel route",
+            },
+        )
+    await _refuse_work_owned(db, company_id, task_id)
     values: dict[str, Any] = {
         "status": body.status,
         "updated_at": datetime.now(timezone.utc),
@@ -333,7 +393,9 @@ class ReassignBody(BaseModel):
     agent_id: uuid.UUID
 
 
-@router.get("/api/v1/tasks/{task_id}/subtasks", response_model=list[TaskResponse])
+@router.get(
+    "/api/v1/tasks/{task_id}/subtasks", response_model=list[TaskResponse], dependencies=READ_TASK
+)
 async def list_subtasks(task_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId) -> Any:
     """List subtasks for a given task."""
     stmt = (
@@ -345,8 +407,8 @@ async def list_subtasks(task_id: uuid.UUID, db: DbSession, company_id: CurrentCo
     return list(result.scalars().all())
 
 
-@router.get("/api/v1/companies/{company_id}/tasks/stats")
-async def get_task_stats(company_id: uuid.UUID, db: DbSession) -> dict[str, Any]:
+@router.get("/api/v1/companies/{company_id}/tasks/stats", dependencies=READ_TASK)
+async def get_task_stats(company_id: PathCompanyId, db: DbSession) -> dict[str, Any]:
     """Task statistics: counts by status, priority, top agents."""
     from sqlalchemy import func
     total = await db.execute(select(func.count(Task.id)).where(Task.company_id == company_id))
@@ -359,18 +421,26 @@ async def get_task_stats(company_id: uuid.UUID, db: DbSession) -> dict[str, Any]
     return {"total": total.scalar() or 0, "by_status": dict(by_status.all()), "by_priority": dict(by_priority.all()), "top_agents": [{"agent_id": str(a), "count": c} for a, c in top_agents.all()]}
 
 
-@router.post("/api/v1/tasks/{task_id}/subtasks", status_code=status.HTTP_201_CREATED, response_model=TaskResponse)
+@router.post("/api/v1/tasks/{task_id}/subtasks", status_code=status.HTTP_201_CREATED, response_model=TaskResponse, dependencies=WRITE_TASK)
 async def create_subtask(task_id: uuid.UUID, body: TaskCreate, db: DbSession, company_id: CurrentCompanyId) -> Any:
     """Create a subtask under a parent task."""
-    subtask = Task(company_id=company_id, parent_task_id=task_id, title=body.title, description=body.description, priority=body.priority or 0, assigned_agent_id=body.assigned_agent_id, work_spec=_work_spec(body.work_spec))
-    db.add(subtask)
-    await db.flush()
-    return subtask
+    work_spec = _work_spec(body.work_spec)
+    return await TaskService(db).create_task(
+        company_id,
+        body.title,
+        body.description,
+        body.priority or 0,
+        assigned_agent_id=body.assigned_agent_id,
+        parent_task_id=task_id,
+        work_spec=work_spec,
+    )
 
 
-@router.post("/api/v1/tasks/{task_id}/reassign", response_model=TaskResponse)
+@router.post("/api/v1/tasks/{task_id}/reassign", response_model=TaskResponse, dependencies=WRITE_TASK)
 async def reassign_task(task_id: uuid.UUID, body: TaskAssign, db: DbSession, company_id: CurrentCompanyId) -> Any:
-    """Reassign task to a different agent."""
+    """Reassign task to a different agent. Work is reassigned through its lifecycle."""
+    await _refuse_work_owned(db, company_id, task_id)
+    await _require_agent(db, company_id, body.agent_id)
     await _refuse_if_attempt_active(db, company_id, task_id, body.agent_id)
     stmt = update(Task).where(Task.id == task_id, Task.company_id == company_id).values(assigned_agent_id=body.agent_id, updated_at=datetime.now(timezone.utc))
     await db.execute(stmt)
@@ -381,26 +451,20 @@ async def reassign_task(task_id: uuid.UUID, body: TaskAssign, db: DbSession, com
     return task
 
 
-@router.post("/api/v1/tasks/{task_id}/cancel", response_model=TaskResponse)
+@router.post("/api/v1/tasks/{task_id}/cancel", response_model=TaskResponse, dependencies=WRITE_TASK)
 async def cancel_task(
     task_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId, principal: CurrentPrincipal
 ) -> Any:
-    """Cancel a task, and the employee's active attempt on it."""
-    from nexus.runtime import task_attempts
+    """Cancel a task, its sub-tasks and the employee's open attempts. Completed work stays."""
+    from nexus.services import work_service
 
-    active = await task_attempts._active(db, company_id, task_id)
-    if active is not None:
-        await task_attempts.cancel_attempt(db, company_id, task_id, active.id, principal)
-    stmt = update(Task).where(Task.id == task_id, Task.company_id == company_id).values(status="cancelled", completed_at=datetime.now(timezone.utc), updated_at=datetime.now(timezone.utc))
-    await db.execute(stmt)
-    result = await db.execute(select(Task).where(Task.id == task_id, Task.company_id == company_id))
-    task = result.scalar_one_or_none()
-    if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
+    task, _ = await work_service.cancel_work(
+        db, company_id, task_id, actor=principal.display_name
+    )
     return task
 
 
-@router.post("/api/v1/tasks/{task_id}/decompose")
+@router.post("/api/v1/tasks/{task_id}/decompose", dependencies=WRITE_TASK)
 async def decompose_task(
     task_id: uuid.UUID,
     db: DbSession,
@@ -414,11 +478,13 @@ async def decompose_task(
     """
     from nexus.orchestration.planner import TaskPlanner
 
+    await _refuse_work_owned(db, company_id, task_id)
     stmt = select(Task).where(Task.id == task_id, Task.company_id == company_id)
     result = await db.execute(stmt)
     task = result.scalar_one_or_none()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
+    refuse_closed_parent(task)
 
     # Try LLM-based planner first (better decomposition), fallback to heuristic
     description = f"{task.title}\n{task.description or ''}"

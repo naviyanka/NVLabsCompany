@@ -64,6 +64,7 @@ from nexus.api.routes.slack_events import router as slack_events_router
 from nexus.api.routes.sso import router as sso_router
 from nexus.api.routes.tasks import router as tasks_router
 from nexus.api.routes.task_attempts import router as task_attempts_router
+from nexus.api.routes.work import router as work_router
 from nexus.api.routes.managers import router as managers_router
 from nexus.api.routes.governance_studio import router as governance_studio_router
 from nexus.api.routes.organization import ceo_router as organization_ceo_router
@@ -517,6 +518,7 @@ app.include_router(control_router)
 app.include_router(agents_router)
 app.include_router(tasks_router)
 app.include_router(task_attempts_router)
+app.include_router(work_router)
 app.include_router(managers_router)
 app.include_router(organization_router)
 app.include_router(organization_ceo_router)

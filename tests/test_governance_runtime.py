@@ -53,7 +53,7 @@ async def _actions(factory) -> list[str]:  # noqa: F811
 
 
 async def _allowed(factory, t, risk="write", agent="a") -> bool:  # noqa: F811
-    tool = "manager_delegate_task" if risk == "write" else "ceo_list_managers"
+    tool = "msg-slack-send" if risk == "write" else "ceo_list_managers"
     async with factory() as db:
         return (
             await check_tool_access(

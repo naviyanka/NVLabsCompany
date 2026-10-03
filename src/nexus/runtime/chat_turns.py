@@ -498,6 +498,7 @@ async def finalize(
                 tokens_used,
                 turn.session_id,
                 execution_id=turn.execution_id,
+                previews=not turn.idempotency_key.startswith("attempt:"),
             )
         await _audit(
             db,

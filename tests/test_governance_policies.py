@@ -37,7 +37,7 @@ async def writes_allowed(factory, t) -> bool:  # noqa: F811
     async with factory() as db:
         return (
             await check_tool_access(
-                db, ctx(t), tool_name="manager_delegate_task", default_risk="write",
+                db, ctx(t), tool_name="msg-slack-send", default_risk="write",
                 enforcement="audit",
             )
         ).allowed

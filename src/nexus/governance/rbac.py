@@ -55,6 +55,7 @@ ROLE_MANAGER = Role(
         Permission(action="read", resource_type="*", resource_id="*"),
         Permission(action="write", resource_type="task", resource_id="*"),
         Permission(action="write", resource_type="agent", resource_id="*"),
+        Permission(action="write", resource_type="goal", resource_id="*"),
         Permission(action="write", resource_type="session", resource_id="*"),
         Permission(action="write", resource_type="mcp_binding", resource_id="*"),
         Permission(action="write", resource_type="pipeline", resource_id="*"),
@@ -73,6 +74,7 @@ ROLE_AGENT = Role(
     permissions=[
         Permission(action="read", resource_type="task", resource_id="*"),
         Permission(action="write", resource_type="task", resource_id="*"),
+        Permission(action="read", resource_type="goal", resource_id="*"),
         Permission(action="execute", resource_type="tool", resource_id="*"),
         Permission(action="read", resource_type="memory", resource_id="*"),
         Permission(action="write", resource_type="memory", resource_id="*"),

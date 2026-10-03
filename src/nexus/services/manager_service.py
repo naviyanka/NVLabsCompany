@@ -135,7 +135,12 @@ async def delegate(
 
     Returns ``(attempt, created)``. Commits.
     """
+    from nexus.services import work_service
+
     await require_report(db, company_id, manager_id, employee_id)
+    # Marked work belongs to the manager that owns its work order: nobody else may take over
+    # a failed or idle child, and nothing is written before this check.
+    await work_service.require_work_owner(db, company_id, task_id, manager_id)
     task = await task_attempts._load_task(db, company_id, task_id)
     if task.assigned_agent_id != employee_id:
         active = await task_attempts._active(db, company_id, task_id)
@@ -156,9 +161,16 @@ async def delegate(
     return attempt, created
 
 
+def awaiting_review(attempt: TaskAttempt) -> bool:
+    """A submitted deliverable no worker holds: only a manager's review moves it."""
+    return attempt.status == "verifying" and attempt.claimed_by is None
+
+
 def _stale(attempt: TaskAttempt, now: datetime) -> bool:
     if attempt.status not in ACTIVE_ATTEMPT_STATUSES:
         return False
+    if awaiting_review(attempt):
+        return False  # durable and waiting on a person, not on a worker
     if (
         attempt.status in LEASED_ATTEMPT_STATUSES
         and attempt.lease_expires_at is not None
@@ -220,7 +232,7 @@ def _attempt_ref(
         "task_title": titles.get(attempt.task_id),
         "attempt_number": attempt.attempt_number,
         "status": attempt.status,
-        "summary": attempt.output_summary,
+        "summary": task_attempts.bounded_summary(attempt.output_summary),
         "completion_reason": attempt.completion_reason,
         "error_code": attempt.error_code,
         "error": attempt.error,
@@ -356,7 +368,9 @@ async def rollup(db: Any, company_id: uuid.UUID, manager_id: uuid.UUID) -> dict[
                 "attempt_id": str(attempt.id) if attempt is not None else None,
                 "attempt_status": attempt.status if attempt is not None else None,
                 "error_code": attempt.error_code if attempt is not None else None,
-                "summary": attempt.output_summary if attempt is not None else None,
+                "summary": task_attempts.bounded_summary(attempt.output_summary)
+                if attempt is not None
+                else None,
                 "updated_at": _iso(attempt.updated_at if attempt is not None else task.updated_at),
             }
         )

@@ -142,6 +142,30 @@ def require_permission(
     return Depends(dependency)
 
 
+def principal_kinds(*kinds: str) -> Any:
+    """Admit only these principal kinds; any kind added later is denied by default."""
+
+    def kind_gate(principal: Annotated[Principal, Depends(get_principal)]) -> None:
+        if principal.kind not in kinds:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "code": "PRINCIPAL_KIND_FORBIDDEN",
+                    "message": "This caller may not use this route",
+                },
+            )
+
+    return Depends(kind_gate)
+
+
+def audit_actor(principal: Principal) -> dict[str, Any]:
+    """Audit attribution: a person is a user, anything else is named by its kind."""
+    return {
+        "actor_type": "user" if principal.kind == "user" else principal.kind,
+        "actor_id": str(principal.user_id or principal.agent_id or principal.api_key_id or ""),
+    }
+
+
 def require_admin(
     principal: Annotated[Principal, Depends(get_principal)],
 ) -> Principal:
