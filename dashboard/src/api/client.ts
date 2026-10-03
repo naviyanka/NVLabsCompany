@@ -54,6 +54,25 @@ function defaultHeaders(method: string): Record<string, string> {
   return headers;
 }
 
+/**
+ * Caller headers plus the mandatory ones. HTTP header names are case-insensitive, so a
+ * spread order is not enough: `x-csrf-token` next to `X-CSRF-Token` would both reach
+ * `fetch`, which joins them. Every caller name that matches a client-owned header (even
+ * one the client leaves out of this request) is dropped, whatever its casing or value,
+ * and the remaining caller names are de-duplicated case-insensitively (last one wins).
+ */
+function mergeHeaders(method: string, caller: Record<string, string | undefined> = {}): Record<string, string> {
+  const own = defaultHeaders(method);
+  const owned = new Set(['content-type', 'x-csrf-token', 'x-company-id']);
+  const kept = new Map<string, [string, string]>();
+  for (const [name, value] of Object.entries(caller)) {
+    const key = name.toLowerCase();
+    if (owned.has(key) || typeof value !== 'string') continue;
+    kept.set(key, [name, value]);
+  }
+  return { ...Object.fromEntries(kept.values()), ...own };
+}
+
 /** Headers and URL for a hand-rolled mutating `fetch` (a streamed POST): JSON, CSRF echo, dev tenant. */
 export function postHeaders(): Record<string, string> {
   return defaultHeaders('POST');
@@ -148,9 +167,9 @@ async function request<T>(method: string, path: string, options: RequestOptions 
   const resolvedPath = resolveCompanyPath(path);
   const response = await fetch(buildUrl(resolvedPath, options.params), {
     method,
-    // Mandatory headers win: a caller adds headers (an Idempotency-Key) but cannot drop
-    // the CSRF echo, the content type or the dev tenant.
-    headers: { ...options.headers, ...defaultHeaders(method) },
+    // A caller adds headers (an Idempotency-Key) but cannot replace or drop the CSRF echo,
+    // the content type or the dev tenant, in any casing.
+    headers: mergeHeaders(method, options.headers),
     // Sessions live in cookies, so they must ride along even cross-origin.
     credentials: 'include',
     body: options.body === undefined ? undefined : JSON.stringify(options.body),
