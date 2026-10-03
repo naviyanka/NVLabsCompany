@@ -26,6 +26,11 @@ _T: dict[str, tuple[str, str, str | None, tuple[str, ...]]] = {
         "Allows the CEO to assign an existing work task to a manager who reports to them. "
         "This queues a task attempt for that manager.",
         None, ()),
+    "org.ceo_get_work_status": (
+        "View Work Status",
+        "Allows the CEO to read the company's live work orders, their tasks, current attempts, "
+        "verification state, failures and verified results, straight from stored state.",
+        "Read-only: it never starts, changes or verifies work.", ()),
     "org.ceo_get_manager_status": (
         "View Manager Status",
         "Allows the CEO to read one manager's team status from the latest organization snapshot.",
@@ -61,6 +66,18 @@ _T: dict[str, tuple[str, str, str | None, tuple[str, ...]]] = {
         "delegations, hires, risks and outcomes), newest first.",
         "Memory is not status: the organization snapshot is the source of current status.", ()),
     # Organization: manager tools
+    "org.manager_assign_work": (
+        "Assign Work to a Direct Report",
+        "Allows a manager to create one task under a work order delegated to them and assign "
+        "it to a direct report, naming the deliverable expected. Repeating the request with "
+        "the same idempotency key does not create a duplicate.",
+        "Only direct reports, and only the manager's own delegated work orders.", ()),
+    "org.manager_review_work": (
+        "Verify or Reject Submitted Work",
+        "Allows a manager to verify or reject a deliverable submitted by one of their direct "
+        "reports. A rejection needs a reason and may allow one bounded retry.",
+        "A manager cannot review their own work, or work of anyone who does not report to them.",
+        ()),
     "org.manager_delegate_task": (
         "Delegate a Task to a Direct Report",
         "Allows a manager to assign an existing task to one of their direct reports. "

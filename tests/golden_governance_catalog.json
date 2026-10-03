@@ -138,6 +138,37 @@
     "name": "tool_binding_enforcement"
    }
   ],
+  "id": "org.ceo_get_work_status",
+  "name": "ceo_get_work_status",
+  "risk": "read",
+  "scope_schema": {
+   "conditions": [
+    "risk_level",
+    "tool_name",
+    "agent_id",
+    "time_of_day"
+   ]
+  },
+  "support": "enforced",
+  "tags": [],
+  "toggleable": true,
+  "tool_name": "ceo_get_work_status"
+ },
+ {
+  "approval_support": true,
+  "backends": [
+   "tool_policy",
+   "rbac",
+   "governance_overlay"
+  ],
+  "category": "organization",
+  "effect_class": "read",
+  "explicit_allow_required": false,
+  "feature_gates": [
+   {
+    "name": "tool_binding_enforcement"
+   }
+  ],
   "id": "org.ceo_list_managers",
   "name": "ceo_list_managers",
   "risk": "read",
@@ -279,6 +310,37 @@
   "tags": [],
   "toggleable": true,
   "tool_name": "ceo_search_executive_memory"
+ },
+ {
+  "approval_support": true,
+  "backends": [
+   "tool_policy",
+   "rbac",
+   "governance_overlay"
+  ],
+  "category": "organization",
+  "effect_class": "write",
+  "explicit_allow_required": false,
+  "feature_gates": [
+   {
+    "name": "tool_binding_enforcement"
+   }
+  ],
+  "id": "org.manager_assign_work",
+  "name": "manager_assign_work",
+  "risk": "write",
+  "scope_schema": {
+   "conditions": [
+    "risk_level",
+    "tool_name",
+    "agent_id",
+    "time_of_day"
+   ]
+  },
+  "support": "enforced",
+  "tags": [],
+  "toggleable": true,
+  "tool_name": "manager_assign_work"
  },
  {
   "approval_support": true,
@@ -467,6 +529,37 @@
   ],
   "toggleable": true,
   "tool_name": "manager_request_hire"
+ },
+ {
+  "approval_support": true,
+  "backends": [
+   "tool_policy",
+   "rbac",
+   "governance_overlay"
+  ],
+  "category": "organization",
+  "effect_class": "write",
+  "explicit_allow_required": false,
+  "feature_gates": [
+   {
+    "name": "tool_binding_enforcement"
+   }
+  ],
+  "id": "org.manager_review_work",
+  "name": "manager_review_work",
+  "risk": "write",
+  "scope_schema": {
+   "conditions": [
+    "risk_level",
+    "tool_name",
+    "agent_id",
+    "time_of_day"
+   ]
+  },
+  "support": "enforced",
+  "tags": [],
+  "toggleable": true,
+  "tool_name": "manager_review_work"
  },
  {
   "approval_support": true,
