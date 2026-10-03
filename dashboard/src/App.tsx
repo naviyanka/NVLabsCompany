@@ -27,6 +27,7 @@ import { Settings } from '@/pages/Settings';
 import { Setup } from '@/pages/Setup';
 import { Skills } from '@/pages/Skills';
 import { Tasks } from '@/pages/Tasks';
+import { Work } from '@/pages/Work';
 import { Tools } from '@/pages/Tools';
 import { Workflows } from '@/pages/Workflows';
 import { Workspace } from '@/pages/Workspace';
@@ -79,6 +80,7 @@ export default function App() {
               <Route path="/agents" element={<Agents />} />
               <Route path="/agents/:id" element={<AgentDetailPage />} />
               <Route path="/tasks" element={<Tasks />} />
+              <Route path="/work" element={<Work />} />
               <Route path="/pipelines" element={<Pipelines />} />
               <Route path="/organization" element={<Organization />} />
               <Route path="/goals" element={<Goals />} />

@@ -141,13 +141,14 @@ function buildUrl(path: string, params?: Record<string, string | number | boolea
 interface RequestOptions {
   params?: Record<string, string | number | boolean | undefined | null>;
   body?: unknown;
+  headers?: Record<string, string>;
 }
 
 async function request<T>(method: string, path: string, options: RequestOptions = {}): Promise<T> {
   const resolvedPath = resolveCompanyPath(path);
   const response = await fetch(buildUrl(resolvedPath, options.params), {
     method,
-    headers: defaultHeaders(method),
+    headers: { ...defaultHeaders(method), ...options.headers },
     // Sessions live in cookies, so they must ride along even cross-origin.
     credentials: 'include',
     body: options.body === undefined ? undefined : JSON.stringify(options.body),
@@ -160,8 +161,8 @@ export const apiClient = {
     return request<T>('GET', path, { params });
   },
 
-  post<T>(path: string, body?: unknown): Promise<T> {
-    return request<T>('POST', path, { body });
+  post<T>(path: string, body?: unknown, headers?: Record<string, string>): Promise<T> {
+    return request<T>('POST', path, { body, headers });
   },
 
   put<T>(path: string, body?: unknown): Promise<T> {
