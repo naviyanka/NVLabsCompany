@@ -187,6 +187,10 @@ class TestAssignAndReassign:
             for target in (work, child):
                 for method, path, body in _mutations(co, target):
                     res = await api(method, path, body, who=who)
+                    if who == "viewer":
+                        # No write:task, so the permission check answers before the work guard.
+                        assert res.status_code == 403, (who, path, res.text)
+                        continue
                     assert res.status_code == 409, (who, path, res.text)
                     assert res.json()["detail"]["code"] == LOCKED, (who, path)
         assert await _snapshot(co, work, child) == before

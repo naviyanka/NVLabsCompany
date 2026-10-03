@@ -8,10 +8,22 @@ from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy import select, update
 
-from nexus.api.deps import CurrentCompanyId, CurrentPrincipal, DbSession
+from nexus.api.deps import (
+    CurrentCompanyId,
+    CurrentPrincipal,
+    DbSession,
+    PathCompanyId,
+    require_permission,
+)
 from nexus.models.task import RunCompletionReason, Task
+from nexus.services.task_service import TaskService, refuse_closed_parent, require_assignable_agent
 
 router = APIRouter(tags=["tasks"])
+
+# Every route names its permission (authentication alone is not enough). HTTP permissions come
+# from the caller's role, never from the tool-governance policy.
+READ_TASK = [require_permission("read", "task")]
+WRITE_TASK = [require_permission("write", "task")]
 
 
 class TaskCreate(BaseModel):
@@ -98,9 +110,7 @@ async def _refuse_work_owned(db: Any, company_id: uuid.UUID, task_id: uuid.UUID 
 
 
 async def _require_agent(db: Any, company_id: uuid.UUID, agent_id: uuid.UUID) -> None:
-    from nexus.services import manager_service as ms
-
-    await ms.get_agent(db, company_id, agent_id)
+    await require_assignable_agent(db, company_id, agent_id)
 
 
 class TaskAssign(BaseModel):
@@ -144,16 +154,16 @@ class TaskResponse(BaseModel):
     "/api/v1/companies/{company_id}/tasks",
     status_code=status.HTTP_201_CREATED,
     response_model=TaskResponse,
+    dependencies=WRITE_TASK,
 )
 async def create_task(
-    company_id: uuid.UUID, body: TaskCreate, db: DbSession
+    company_id: PathCompanyId, body: TaskCreate, db: DbSession
 ) -> Any:
     """Create a new task in a company.
 
     If assigned_agent_id is not specified, uses AgentRouter to evaluate available
     agents in the company and auto-assign the highest-scoring candidate.
     """
-    await _refuse_work_owned(db, company_id, body.parent_task_id)
     assigned_id = body.assigned_agent_id
     work_spec = _work_spec(body.work_spec)
 
@@ -199,18 +209,17 @@ async def create_task(
         except Exception:
             pass  # Fall back to unassigned if routing scoring fails
 
-    task = Task(
-        company_id=company_id,
-        title=body.title,
-        description=body.description,
-        priority=body.priority,
+    # The service checks the parent and the agent against this company before it inserts.
+    task = await TaskService(db).create_task(
+        company_id,
+        body.title,
+        body.description,
+        body.priority,
         project_id=body.project_id,
         assigned_agent_id=assigned_id,
         parent_task_id=body.parent_task_id,
         work_spec=work_spec,
     )
-    db.add(task)
-    await db.flush()
 
     # Audit: task created
     from nexus.governance.audit_service import record_audit
@@ -227,9 +236,10 @@ async def create_task(
 @router.get(
     "/api/v1/companies/{company_id}/tasks",
     response_model=list[TaskResponse],
+    dependencies=READ_TASK,
 )
 async def list_tasks(
-    company_id: uuid.UUID,
+    company_id: PathCompanyId,
     db: DbSession,
     status_filter: str | None = None,
     completion_reason: str | None = None,
@@ -247,7 +257,7 @@ async def list_tasks(
     return list(result.scalars().all())
 
 
-@router.get("/api/v1/tasks/{task_id}", response_model=TaskResponse)
+@router.get("/api/v1/tasks/{task_id}", response_model=TaskResponse, dependencies=READ_TASK)
 async def get_task(task_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId) -> Any:
     """Get a task by ID."""
     stmt = select(Task).where(Task.id == task_id, Task.company_id == company_id)
@@ -261,7 +271,7 @@ async def get_task(task_id: uuid.UUID, db: DbSession, company_id: CurrentCompany
     return task
 
 
-@router.put("/api/v1/tasks/{task_id}/assign", response_model=TaskResponse)
+@router.put("/api/v1/tasks/{task_id}/assign", response_model=TaskResponse, dependencies=WRITE_TASK)
 async def assign_task(
     task_id: uuid.UUID, body: TaskAssign, db: DbSession, company_id: CurrentCompanyId
 ) -> Any:
@@ -289,7 +299,7 @@ async def assign_task(
     return task
 
 
-@router.put("/api/v1/tasks/{task_id}/status", response_model=TaskResponse)
+@router.put("/api/v1/tasks/{task_id}/status", response_model=TaskResponse, dependencies=WRITE_TASK)
 async def update_task_status(
     task_id: uuid.UUID, body: TaskStatusUpdate, db: DbSession, company_id: CurrentCompanyId
 ) -> Any:
@@ -383,7 +393,9 @@ class ReassignBody(BaseModel):
     agent_id: uuid.UUID
 
 
-@router.get("/api/v1/tasks/{task_id}/subtasks", response_model=list[TaskResponse])
+@router.get(
+    "/api/v1/tasks/{task_id}/subtasks", response_model=list[TaskResponse], dependencies=READ_TASK
+)
 async def list_subtasks(task_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId) -> Any:
     """List subtasks for a given task."""
     stmt = (
@@ -395,8 +407,8 @@ async def list_subtasks(task_id: uuid.UUID, db: DbSession, company_id: CurrentCo
     return list(result.scalars().all())
 
 
-@router.get("/api/v1/companies/{company_id}/tasks/stats")
-async def get_task_stats(company_id: uuid.UUID, db: DbSession) -> dict[str, Any]:
+@router.get("/api/v1/companies/{company_id}/tasks/stats", dependencies=READ_TASK)
+async def get_task_stats(company_id: PathCompanyId, db: DbSession) -> dict[str, Any]:
     """Task statistics: counts by status, priority, top agents."""
     from sqlalchemy import func
     total = await db.execute(select(func.count(Task.id)).where(Task.company_id == company_id))
@@ -409,17 +421,22 @@ async def get_task_stats(company_id: uuid.UUID, db: DbSession) -> dict[str, Any]
     return {"total": total.scalar() or 0, "by_status": dict(by_status.all()), "by_priority": dict(by_priority.all()), "top_agents": [{"agent_id": str(a), "count": c} for a, c in top_agents.all()]}
 
 
-@router.post("/api/v1/tasks/{task_id}/subtasks", status_code=status.HTTP_201_CREATED, response_model=TaskResponse)
+@router.post("/api/v1/tasks/{task_id}/subtasks", status_code=status.HTTP_201_CREATED, response_model=TaskResponse, dependencies=WRITE_TASK)
 async def create_subtask(task_id: uuid.UUID, body: TaskCreate, db: DbSession, company_id: CurrentCompanyId) -> Any:
     """Create a subtask under a parent task."""
-    await _refuse_work_owned(db, company_id, task_id)
-    subtask = Task(company_id=company_id, parent_task_id=task_id, title=body.title, description=body.description, priority=body.priority or 0, assigned_agent_id=body.assigned_agent_id, work_spec=_work_spec(body.work_spec))
-    db.add(subtask)
-    await db.flush()
-    return subtask
+    work_spec = _work_spec(body.work_spec)
+    return await TaskService(db).create_task(
+        company_id,
+        body.title,
+        body.description,
+        body.priority or 0,
+        assigned_agent_id=body.assigned_agent_id,
+        parent_task_id=task_id,
+        work_spec=work_spec,
+    )
 
 
-@router.post("/api/v1/tasks/{task_id}/reassign", response_model=TaskResponse)
+@router.post("/api/v1/tasks/{task_id}/reassign", response_model=TaskResponse, dependencies=WRITE_TASK)
 async def reassign_task(task_id: uuid.UUID, body: TaskAssign, db: DbSession, company_id: CurrentCompanyId) -> Any:
     """Reassign task to a different agent. Work is reassigned through its lifecycle."""
     await _refuse_work_owned(db, company_id, task_id)
@@ -434,7 +451,7 @@ async def reassign_task(task_id: uuid.UUID, body: TaskAssign, db: DbSession, com
     return task
 
 
-@router.post("/api/v1/tasks/{task_id}/cancel", response_model=TaskResponse)
+@router.post("/api/v1/tasks/{task_id}/cancel", response_model=TaskResponse, dependencies=WRITE_TASK)
 async def cancel_task(
     task_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId, principal: CurrentPrincipal
 ) -> Any:
@@ -447,7 +464,7 @@ async def cancel_task(
     return task
 
 
-@router.post("/api/v1/tasks/{task_id}/decompose")
+@router.post("/api/v1/tasks/{task_id}/decompose", dependencies=WRITE_TASK)
 async def decompose_task(
     task_id: uuid.UUID,
     db: DbSession,
@@ -467,6 +484,7 @@ async def decompose_task(
     task = result.scalar_one_or_none()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
+    refuse_closed_parent(task)
 
     # Try LLM-based planner first (better decomposition), fallback to heuristic
     description = f"{task.title}\n{task.description or ''}"

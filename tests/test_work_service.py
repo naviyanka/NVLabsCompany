@@ -512,6 +512,9 @@ async def api(co):
     principals = {
         "admin": _me(co["acme"]),
         "viewer": _me(co["acme"], role="viewer"),
+        "manager": _me(co["acme"], role="manager"),
+        "employee": _me(co["acme"], role="agent"),
+        "guest": _me(co["acme"], role="guest"),
         "outsider": _me(co["other"]),
         "run": Principal(
             kind="run",

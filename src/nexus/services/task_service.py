@@ -4,10 +4,70 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
+from fastapi import HTTPException, status
 from sqlalchemy import select, update, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from nexus.models.agent import Agent
 from nexus.models.task import Task
+
+# A parent in one of these cannot take new children.
+CLOSED_TASK_STATUSES = ("completed", "failed", "cancelled")
+# An agent in one of these cannot be given work (same set the attempt worker refuses).
+UNASSIGNABLE_AGENT_STATUSES = ("terminated", "archived", "paused")
+
+
+def _error(status_code: int, code: str, message: str) -> HTTPException:
+    return HTTPException(status_code=status_code, detail={"code": code, "message": message})
+
+
+def refuse_closed_parent(parent: Task) -> None:
+    """A completed, failed or cancelled task takes no new children (409)."""
+    if parent.status in CLOSED_TASK_STATUSES:
+        raise _error(
+            status.HTTP_409_CONFLICT, "PARENT_TASK_CLOSED", "The parent task is closed"
+        )
+
+
+async def require_parent(
+    db: AsyncSession, company_id: uuid.UUID, parent_task_id: uuid.UUID
+) -> Task:
+    """The open parent in this company, loaded by (company, id).
+
+    A foreign task and a missing one get the same 404 and the answer names no id. A
+    foreign-key check is never enough here: it sees every tenant's rows, RLS or not.
+    """
+    parent = (
+        await db.execute(
+            select(Task).where(Task.id == parent_task_id, Task.company_id == company_id)
+        )
+    ).scalar_one_or_none()
+    if parent is None:
+        raise _error(status.HTTP_404_NOT_FOUND, "PARENT_TASK_NOT_FOUND", "Parent task not found")
+    refuse_closed_parent(parent)
+    return parent
+
+
+async def require_assignable_agent(
+    db: AsyncSession, company_id: uuid.UUID, agent_id: uuid.UUID
+) -> Agent:
+    """The agent in this company that can take work, loaded by (company, id).
+
+    A foreign agent and a missing one get the same 404 (nothing about the foreign agent
+    is read, woken or changed); a paused, terminated or archived one gets 409.
+    """
+    agent = (
+        await db.execute(
+            select(Agent).where(Agent.id == agent_id, Agent.company_id == company_id)
+        )
+    ).scalar_one_or_none()
+    if agent is None:
+        raise _error(status.HTTP_404_NOT_FOUND, "AGENT_NOT_FOUND", "Agent not found")
+    if agent.status in UNASSIGNABLE_AGENT_STATUSES:
+        raise _error(
+            status.HTTP_409_CONFLICT, "AGENT_NOT_ASSIGNABLE", "The agent cannot take work"
+        )
+    return agent
 
 
 class TaskService:
@@ -29,6 +89,7 @@ class TaskService:
         project_id: uuid.UUID | None = None,
         assigned_agent_id: uuid.UUID | None = None,
         parent_task_id: uuid.UUID | None = None,
+        work_spec: dict[str, Any] | None = None,
     ) -> Task:
         """Create a new task.
 
@@ -40,10 +101,26 @@ class TaskService:
             project_id: Optional project this task belongs to.
             assigned_agent_id: Optional agent to assign immediately.
             parent_task_id: Optional parent task for subtask hierarchy.
+            work_spec: Optional, already validated, work spec.
 
         Returns:
             The newly created Task instance.
+
+        Raises:
+            HTTPException: 409 WORK_OWNED_BY_LIFECYCLE for a work order or work child
+                parent; 404 / 409 for a foreign, missing or closed parent; 404 / 409 for
+                a foreign, missing or unavailable agent. Nothing is inserted then.
+            There is no re-parent operation, so a new child cannot close a cycle.
         """
+        if parent_task_id is not None:
+            from nexus.services import work_service
+
+            work_service.refuse_if_work_owned(
+                await work_service.is_work_owned(self._db, company_id, parent_task_id)
+            )
+            await require_parent(self._db, company_id, parent_task_id)
+        if assigned_agent_id is not None:
+            await require_assignable_agent(self._db, company_id, assigned_agent_id)
         task = Task(
             company_id=company_id,
             title=title,
@@ -52,6 +129,7 @@ class TaskService:
             project_id=project_id,
             assigned_agent_id=assigned_agent_id,
             parent_task_id=parent_task_id,
+            work_spec=work_spec,
         )
         self._db.add(task)
         await self._db.flush()
