@@ -1384,14 +1384,20 @@ async def _record_chat_audit(
     tokens_used: int,
     session_id: uuid.UUID,
     execution_id: str | None = None,
+    previews: bool = True,
 ) -> None:
-    """Audit both sides of a turn and record its spend on the in-process tracker."""
+    """Audit both sides of a turn and record its spend on the in-process tracker.
+
+    ``previews=False`` (task-attempt turns) records sizes instead of text: a work
+    prompt and its deliverable never reach the audit log.
+    """
     from nexus.governance.audit_service import record_audit
 
     await record_audit(
         company_id, "chat.message_sent",
         actor_type="user", resource_type="agent", resource_id=str(agent_id),
-        details={"prompt_preview": prompt[:100], "model": model_used, "tokens": tokens_used, "session_id": str(session_id),
+        details={**({"prompt_preview": prompt[:100]} if previews else {"prompt_chars": len(prompt)}),
+                 "model": model_used, "tokens": tokens_used, "session_id": str(session_id),
                  "execution_id": execution_id},
         db=db,
     )
@@ -1399,7 +1405,10 @@ async def _record_chat_audit(
         company_id, "chat.response_generated",
         actor_type="agent", actor_id=str(agent_id),
         resource_type="chat", resource_id=str(session_id),
-        details={"model": model_used, "tokens": tokens_used, "response_preview": response_text[:100], "session_id": str(session_id),
+        details={"model": model_used, "tokens": tokens_used,
+                 **({"response_preview": response_text[:100]} if previews
+                    else {"response_chars": len(response_text)}),
+                 "session_id": str(session_id),
                  "execution_id": execution_id},
         db=db,
     )
