@@ -60,14 +60,19 @@ from nexus.tools.policy_engine import (
 # Tools that only an active allow ToolPolicy naming them exactly can permit:
 # never a ToolProfile default, a wildcard pattern or a risk-level rule. A
 # matching deny rule always wins, whatever its priority.
-EXPLICIT_ALLOW_ONLY = frozenset({
-    "manager_request_hire",
-    # CEO write tools (nexus.tools.ceo_tools.WRITE_TOOLS).
-    "ceo_delegate_task_to_manager",
-    "ceo_create_goal_or_work_order",
-    "ceo_record_decision",
-    "ceo_request_hire",
-})
+EXPLICIT_ALLOW_ONLY = frozenset(
+    {
+        "manager_request_hire",
+        # Work lifecycle: assigning starts a model run, reviewing decides a deliverable.
+        "manager_assign_work",
+        "manager_review_work",
+        # CEO write tools (nexus.tools.ceo_tools.WRITE_TOOLS).
+        "ceo_delegate_task_to_manager",
+        "ceo_create_goal_or_work_order",
+        "ceo_record_decision",
+        "ceo_request_hire",
+    }
+)
 
 
 def names_tool(conditions: dict[str, Any] | None, tool_name: str) -> bool:
@@ -205,11 +210,7 @@ async def check_tool_access(
     # Session: must be this agent's, in this company.
     if ctx is not None and ctx.session_id is not None:
         record = await db.get(AgentSessionRecord, ctx.session_id)
-        if (
-            record is None
-            or record.agent_id != ctx.agent_id
-            or record.company_id != ctx.company_id
-        ):
+        if record is None or record.agent_id != ctx.agent_id or record.company_id != ctx.company_id:
             problem("session", "session does not belong to this agent", hard=True)
         else:
             decision.session_id = record.id
@@ -274,13 +275,17 @@ async def _check_connection(
         # The adapter only knows the URL it dialled. Match it against this
         # company's registered connections; another tenant's are never seen.
         connection = (
-            await db.execute(
-                select(ToolConnection).where(
-                    ToolConnection.company_id == company_id,
-                    ToolConnection.endpoint_url == endpoint_url,
+            (
+                await db.execute(
+                    select(ToolConnection).where(
+                        ToolConnection.company_id == company_id,
+                        ToolConnection.endpoint_url == endpoint_url,
+                    )
                 )
             )
-        ).scalars().first()
+            .scalars()
+            .first()
+        )
     else:
         connection = None
 
@@ -313,7 +318,9 @@ async def _check_connection(
                     or_(*targets),
                 )
             )
-        ).scalars().all()
+        )
+        .scalars()
+        .all()
         if targets
         else []
     )
@@ -326,13 +333,17 @@ async def _check_connection(
         problem("binding", f"tool '{tool_name}' is disabled by a binding", hard=False)
 
     entry = (
-        await db.execute(
-            select(ToolCatalogEntry).where(
-                ToolCatalogEntry.connection_id == connection.id,
-                ToolCatalogEntry.tool_name == tool_name,
+        (
+            await db.execute(
+                select(ToolCatalogEntry).where(
+                    ToolCatalogEntry.connection_id == connection.id,
+                    ToolCatalogEntry.tool_name == tool_name,
+                )
             )
         )
-    ).scalars().first()
+        .scalars()
+        .first()
+    )
     if entry is None:
         problem("catalog", f"tool '{tool_name}' is not in the connection's catalog", hard=False)
         return
@@ -393,13 +404,17 @@ async def load_policy_inputs(
 
     fallback = "deny" if external else "allow"
     rows = (
-        await db.execute(
-            select(ToolPolicy).where(
-                ToolPolicy.company_id == company_id,
-                ToolPolicy.is_active == True,  # noqa: E712
+        (
+            await db.execute(
+                select(ToolPolicy).where(
+                    ToolPolicy.company_id == company_id,
+                    ToolPolicy.is_active == True,  # noqa: E712
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     rules = [
         PolicyRule(
             id=r.id,
