@@ -635,3 +635,65 @@ class TestFailures:
         reply = await admin.call("PUT", f"/api/v1/tasks/{task}/status", {"status": "completed"})
         assert reply.status_code == 409
         assert (await stack.one(Task, uuid.UUID(task))).status == "in_review"
+
+    async def test_cross_tenant_parent_and_agent_are_refused(self, stack):
+        a, b = await stack.seed("A"), await stack.seed("B")
+        admin = await stack.login(a["admin"])
+        async with stack.admin_db() as s:
+            theirs = Task(company_id=b["company"], title="Theirs")
+            s.add(theirs)
+            await s.commit()
+            foreign = theirs.id
+        before = len(await stack.rows(Task))
+        url = f"/api/v1/companies/{a['company']}/tasks"
+        for body in (
+            {"title": "x", "parent_task_id": str(foreign)},
+            {"title": "x", "assigned_agent_id": str(b["eve"])},
+        ):
+            assert (await admin.call("POST", url, body)).status_code == 404
+        sub = await admin.call("POST", f"/api/v1/tasks/{foreign}/subtasks", {"title": "x"})
+        assert sub.status_code == 404
+        leak = await admin.call("POST", f"/api/v1/companies/{b['company']}/tasks", {"title": "x"})
+        assert leak.status_code == 403
+        assert len(await stack.rows(Task)) == before
+
+    async def test_an_unrelated_manager_cannot_take_over_a_failed_work_child(self, stack):
+        a = await stack.seed("A")
+        admin = await stack.login(a["admin"])
+        _, task, attempt, _ = await _submit(stack, a, admin)
+        async with stack.admin_db() as s:
+            bo = Agent(
+                company_id=a["company"],
+                name="bo",
+                role="manager",
+                adapter_type="openai",
+                model="gpt-x",
+                manager_id=a["ceo"],
+            )
+            s.add(bo)
+            await s.flush()
+            zed = Agent(
+                company_id=a["company"],
+                name="zed",
+                role="analyst",
+                adapter_type="openai",
+                model="gpt-x",
+                manager_id=bo.id,
+            )
+            s.add(zed)
+            (await s.get(TaskAttempt, uuid.UUID(attempt))).status = "failed"
+            (await s.get(Task, uuid.UUID(task))).status = "failed"
+            await s.commit()
+            bo_id, zed_id = bo.id, zed.id
+        attempts = len(await stack.rows(TaskAttempt, TaskAttempt.task_id == uuid.UUID(task)))
+        with pytest.raises(Exception) as caught:
+            await manager_tools.call(
+                _ctx(a["company"], bo_id),
+                "manager_delegate_task",
+                {"task_id": task, "employee_id": str(zed_id)},
+            )
+        assert "404" in str(caught.value) or "not found" in str(caught.value).lower()
+        row = await stack.one(Task, uuid.UUID(task))
+        assert (row.status, row.assigned_agent_id) == ("failed", a["eve"])
+        after = await stack.rows(TaskAttempt, TaskAttempt.task_id == uuid.UUID(task))
+        assert len(after) == attempts
