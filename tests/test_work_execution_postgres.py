@@ -32,7 +32,8 @@ from nexus.models.agent import Agent
 from nexus.models.budget import BudgetPolicy
 from nexus.models.company import Company
 from nexus.models.governance import AuditLog
-from nexus.models.task import Task
+from nexus.models.repository import Repository
+from nexus.models.task import Goal, Project, Task
 from nexus.models.task_attempt import TaskAttempt
 from nexus.runtime import chat_turns
 from nexus.runtime import task_attempts as ta
@@ -697,3 +698,66 @@ class TestFailures:
         assert (row.status, row.assigned_agent_id) == ("failed", a["eve"])
         after = await stack.rows(TaskAttempt, TaskAttempt.task_id == uuid.UUID(task))
         assert len(after) == attempts
+
+    async def test_task_and_work_references_are_validated_by_company(self, stack):
+        """Foreign keys accept any tenant's row: the service must refuse it, and the same way
+        for a missing id. Nothing is written for a refused request."""
+        a, b = await stack.seed("A"), await stack.seed("B")
+        admin = await stack.login(a["admin"])
+        async with stack.admin_db() as s:
+            rows = {
+                "own_project": Project(company_id=a["company"], name="own"),
+                "foreign_project": Project(company_id=b["company"], name="theirs"),
+                "closed_project": Project(company_id=a["company"], name="done", status="archived"),
+                "own_goal": Goal(company_id=a["company"], title="own"),
+                "foreign_goal": Goal(company_id=b["company"], title="theirs"),
+                "closed_goal": Goal(company_id=a["company"], title="done", status="completed"),
+                "foreign_repo": Repository(
+                    company_id=b["company"], name="r", url="https://x.test/r"
+                ),
+            }
+            s.add_all(rows.values())
+            await s.commit()
+            ids = {name: row.id for name, row in rows.items()}
+        url = f"/api/v1/companies/{a['company']}/tasks"
+        before = (len(await stack.rows(Task)), len(await stack.rows(AuditLog)))
+
+        own = await admin.call("POST", url, {"title": "ok", "project_id": str(ids["own_project"])})
+        assert own.status_code == 201 and own.json()["project_id"] == str(ids["own_project"])
+        after_own = (len(await stack.rows(Task)), len(await stack.rows(AuditLog)))
+
+        answers = {}
+        for name, project in (
+            ("foreign", ids["foreign_project"]),
+            ("missing", uuid.uuid4()),
+        ):
+            res = await admin.call("POST", url, {"title": "x", "project_id": str(project)})
+            answers[name] = (res.status_code, res.text.replace(str(project), "<id>"))
+        assert answers["foreign"] == answers["missing"] and answers["foreign"][0] == 404
+        archived = str(ids["closed_project"])
+        closed = await admin.call("POST", url, {"title": "x", "project_id": archived})
+        assert closed.status_code == 409
+        spec = {"mode": "read_only", "repository_id": str(ids["foreign_repo"])}
+        repo = await admin.call("POST", url, {"title": "x", "work_spec": spec})
+        assert repo.status_code == 404
+
+        goals = {}
+        for name, goal in (("foreign", ids["foreign_goal"]), ("missing", uuid.uuid4())):
+            res = await admin.call(
+                "POST", "/api/v1/work", {"title": "T", "goal_id": str(goal)}, key=f"g-{name}"
+            )
+            goals[name] = (res.status_code, res.text.replace(str(goal), "<id>"))
+        assert goals["foreign"] == goals["missing"] and goals["foreign"][0] == 404
+        shut = await admin.call(
+            "POST", "/api/v1/work", {"title": "T", "goal_id": str(ids["closed_goal"])}, key="g-c"
+        )
+        assert shut.status_code == 409
+        assert (len(await stack.rows(Task)), len(await stack.rows(AuditLog))) == after_own
+        assert after_own[0] == before[0] + 1
+
+        linked = await admin.call(
+            "POST", "/api/v1/work", {"title": "T", "goal_id": str(ids["own_goal"])}, key="g-own"
+        )
+        assert linked.status_code == 201
+        assert (await stack.one(Task, uuid.UUID(linked.json()["id"]))).goal_id == ids["own_goal"]
+        assert (await stack.one(Project, ids["foreign_project"])).company_id == b["company"]

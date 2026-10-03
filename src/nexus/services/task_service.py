@@ -8,12 +8,16 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from nexus.models.agent import Agent
-from nexus.models.task import Task
+from nexus.models.repository import Repository
+from nexus.models.task import Goal, Project, Task
 
 # A parent in one of these cannot take new children.
 CLOSED_TASK_STATUSES = ("completed", "failed", "cancelled")
 # An agent in one of these cannot be given work (same set the attempt worker refuses).
 UNASSIGNABLE_AGENT_STATUSES = ("terminated", "archived", "paused")
+# A project or goal in one of these takes no new work.
+CLOSED_PROJECT_STATUSES = ("completed", "cancelled", "archived")
+CLOSED_GOAL_STATUSES = ("completed", "cancelled", "archived")
 
 
 def _error(status_code: int, code: str, message: str) -> HTTPException:
@@ -123,6 +127,79 @@ async def require_assignable_agent(
     return agent
 
 
+async def require_project(
+    db: AsyncSession, company_id: uuid.UUID, project_id: uuid.UUID
+) -> Project:
+    """The open project in this company, loaded by (company, id).
+
+    A foreign project and a missing one get the same 404; a completed, cancelled or archived
+    one gets 409. A foreign-key check would accept any tenant's project, so this is the check.
+    """
+    project = (
+        await db.execute(
+            select(Project).where(Project.id == project_id, Project.company_id == company_id)
+        )
+    ).scalar_one_or_none()
+    if project is None:
+        raise _error(status.HTTP_404_NOT_FOUND, "PROJECT_NOT_FOUND", "Project not found")
+    if project.status in CLOSED_PROJECT_STATUSES:
+        raise _error(status.HTTP_409_CONFLICT, "PROJECT_CLOSED", "The project is closed")
+    return project
+
+
+async def require_goal(db: AsyncSession, company_id: uuid.UUID, goal_id: uuid.UUID) -> Goal:
+    """The open goal in this company, loaded by (company, id): 404 foreign/missing, 409 closed."""
+    goal = (
+        await db.execute(select(Goal).where(Goal.id == goal_id, Goal.company_id == company_id))
+    ).scalar_one_or_none()
+    if goal is None:
+        raise _error(status.HTTP_404_NOT_FOUND, "GOAL_NOT_FOUND", "Goal not found")
+    if goal.status in CLOSED_GOAL_STATUSES:
+        raise _error(status.HTTP_409_CONFLICT, "GOAL_CLOSED", "The goal is closed")
+    return goal
+
+
+async def require_work_spec_references(
+    db: AsyncSession, company_id: uuid.UUID, work_spec: dict[str, Any] | None
+) -> None:
+    """A work spec's repository and reviewed task must belong to this company.
+
+    The attempt copies ``repository_id`` into a foreign-key column, which accepts any tenant's
+    repository and would answer a missing one with a database error instead of the 404.
+    """
+    if not work_spec:
+        return
+    repository_id = work_spec.get("repository_id")
+    if repository_id is not None:
+        repository = (
+            await db.execute(
+                select(Repository).where(
+                    Repository.id == uuid.UUID(str(repository_id)),
+                    Repository.company_id == company_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if repository is None:
+            raise _error(
+                status.HTTP_404_NOT_FOUND, "REPOSITORY_NOT_FOUND", "Repository not found"
+            )
+        if not repository.is_active:
+            raise _error(
+                status.HTTP_409_CONFLICT, "REPOSITORY_INACTIVE", "The repository is not active"
+            )
+    reviewed_id = work_spec.get("review_of_task_id")
+    if reviewed_id is not None:
+        reviewed = await db.scalar(
+            select(Task.id).where(
+                Task.id == uuid.UUID(str(reviewed_id)), Task.company_id == company_id
+            )
+        )
+        if reviewed is None:
+            raise _error(
+                status.HTTP_404_NOT_FOUND, "REVIEWED_TASK_NOT_FOUND", "Reviewed task not found"
+            )
+
+
 class TaskService:
     """Service layer for task CRUD operations and status management.
 
@@ -162,7 +239,9 @@ class TaskService:
         Raises:
             HTTPException: 409 WORK_OWNED_BY_LIFECYCLE for a work order or work child
                 parent; 404 / 409 for a foreign, missing or closed parent; 404 / 409 for
-                a foreign, missing or unavailable agent. Nothing is inserted then.
+                a foreign, missing or unavailable agent; 404 / 409 for a foreign, missing or
+                closed project; 404 / 409 for a foreign, missing or inactive work-spec
+                repository or a foreign reviewed task. Nothing is inserted then.
             There is no re-parent operation, so a new child cannot close a cycle.
         """
         if parent_task_id is not None:
@@ -174,6 +253,9 @@ class TaskService:
             await require_parent(self._db, company_id, parent_task_id)
         if assigned_agent_id is not None:
             await require_assignable_agent(self._db, company_id, assigned_agent_id)
+        if project_id is not None:
+            await require_project(self._db, company_id, project_id)
+        await require_work_spec_references(self._db, company_id, work_spec)
         task = Task(
             company_id=company_id,
             title=title,

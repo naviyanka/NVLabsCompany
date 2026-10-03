@@ -37,7 +37,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import aliased
 
 from nexus.models.agent import Agent
-from nexus.models.task import Goal, Task
+from nexus.models.task import Task
 from nexus.models.task_attempt import (
     ACTIVE_ATTEMPT_STATUSES,
     LEASED_ATTEMPT_STATUSES,
@@ -52,6 +52,7 @@ from nexus.runtime.task_attempts import (
     is_work_order_spec,
 )
 from nexus.services import manager_service as ms
+from nexus.services import task_service
 
 NAMESPACE = uuid.UUID("5d0b8f3e-6c1a-4f53-9a57-3e1f0c2b7a90")  # shared with the CEO tools
 CLOSED_STATUSES = ("completed", "cancelled")
@@ -225,11 +226,7 @@ async def create_work_order(
             )
         return existing, False
     if goal_id is not None:
-        goal = (
-            await db.execute(select(Goal).where(Goal.id == goal_id, Goal.company_id == company_id))
-        ).scalar_one_or_none()
-        if goal is None:
-            raise _error(404, "GOAL_NOT_FOUND", f"Goal {goal_id} not found")
+        await task_service.require_goal(db, company_id, goal_id)
     task = Task(
         id=new_id,
         company_id=company_id,
