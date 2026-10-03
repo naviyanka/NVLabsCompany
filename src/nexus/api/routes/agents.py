@@ -12,6 +12,7 @@ from nexus.api.deps import CurrentCompanyId, CurrentPrincipal, DbSession, requir
 from nexus.models.agent import Agent
 from nexus.realtime.publish import TOPOLOGY_CHANNEL, publish_event
 from nexus.services import ceo_service
+from nexus.services.task_service import TaskService
 
 router = APIRouter(tags=["agents"])
 
@@ -627,7 +628,6 @@ async def delegate_task(
     """
     from nexus.governance.audit_service import record_audit
     from nexus.models.communication import Message
-    from nexus.models.task import Task
 
     if principal.agent_id is not None and agent_id != principal.agent_id:
         raise HTTPException(
@@ -646,16 +646,13 @@ async def delegate_task(
         raise HTTPException(status_code=404, detail="Target agent not found")
 
     # Create the delegated task
-    task = Task(
-        company_id=company_id,
-        title=body.title,
-        description=body.description or f"Delegated from {source_agent.name}",
-        priority=body.priority,
+    task = await TaskService(db).create_task(
+        company_id,
+        body.title,
+        body.description or f"Delegated from {source_agent.name}",
+        body.priority,
         assigned_agent_id=body.target_agent_id,
-        status="pending",
     )
-    db.add(task)
-    await db.flush()
 
     # Send delegation message to target agent's inbox
     msg = Message(
