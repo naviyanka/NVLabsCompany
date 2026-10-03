@@ -148,7 +148,9 @@ async function request<T>(method: string, path: string, options: RequestOptions 
   const resolvedPath = resolveCompanyPath(path);
   const response = await fetch(buildUrl(resolvedPath, options.params), {
     method,
-    headers: { ...defaultHeaders(method), ...options.headers },
+    // Mandatory headers win: a caller adds headers (an Idempotency-Key) but cannot drop
+    // the CSRF echo, the content type or the dev tenant.
+    headers: { ...options.headers, ...defaultHeaders(method) },
     // Sessions live in cookies, so they must ride along even cross-origin.
     credentials: 'include',
     body: options.body === undefined ? undefined : JSON.stringify(options.body),
