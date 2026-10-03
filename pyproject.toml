@@ -65,6 +65,12 @@ otel = [
     "opentelemetry-instrumentation-fastapi>=0.48b0",
     "opentelemetry-instrumentation-httpx>=0.48b0",
 ]
+# Azure Speech STT/TTS (ADR 0006). Optional: the provider reports AZURE_SPEECH_SDK_MISSING
+# without it. Proprietary Microsoft license; native wheels only (glibc Linux, macOS, Windows),
+# so it does not install on Alpine/musl. See docs/azure-speech-provider.md.
+speech = [
+    "azure-cognitiveservices-speech==1.52.0",
+]
 dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",
