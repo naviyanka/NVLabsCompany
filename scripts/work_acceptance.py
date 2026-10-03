@@ -12,12 +12,28 @@ beyond pulling the image if it is missing.
     python scripts/work_acceptance.py
 
 Exit code 0 means every scenario passed.
+
+Safety properties (pinned by ``tests/test_work_acceptance_runner.py``):
+
+* The container gets no name, so it cannot collide with anyone else's. It carries a per-run
+  label, and its id is captured when it starts.
+* Cleanup removes only containers that are this run's: the captured id plus whatever carries
+  this run's label, and each is re-checked by inspecting its label before ``rm``. A container
+  that is not provably this run's is reported and left alone, never removed.
+* The database password never reaches a command line, a file or any output: docker reads it from
+  this process's environment (``-e POSTGRES_PASSWORD`` with no value), and every message that
+  could carry docker's or pytest's text is scrubbed of it first.
+* SIGINT, SIGTERM and (on Windows) SIGBREAK run the same cleanup as a normal exit.
+* SIGKILL, ``taskkill /F`` and a power loss cannot be handled by any process. A run killed that
+  way leaves its labelled ``--rm`` container running until it is stopped; find it with
+  ``docker ps -a --filter label=nexus-work-acceptance`` and remove it by id.
 """
 
 from __future__ import annotations
 
 import os
 import secrets
+import signal
 import subprocess
 import sys
 import tempfile
@@ -31,16 +47,61 @@ SUITE = "tests/test_work_execution_postgres.py"
 IMAGE = "pgvector/pgvector:pg16"
 
 
-def _docker(*args: str, check: bool = True) -> str:
-    """Run docker. A failure exits with docker's stderr only: ``check=True`` would put the
-    whole command line, including POSTGRES_PASSWORD, into a traceback."""
+LABEL_KEY = "nexus-work-acceptance"
+SECRET_ENV = "POSTGRES_PASSWORD"
+
+
+def _scrub(text: str, secret: str) -> str:
+    return text.replace(secret, "***") if secret else text
+
+
+def _docker(
+    *args: str, secret: str = "", check: bool = True, env: dict[str, str] | None = None
+) -> str:
+    """Run docker. A failure exits with docker's stderr only (scrubbed of ``secret``):
+    ``check=True`` would put the whole command line into a traceback."""
     try:
-        done = subprocess.run(["docker", *args], capture_output=True, text=True)
+        done = subprocess.run(["docker", *args], capture_output=True, text=True, env=env)
     except OSError:
         raise SystemExit("FAIL: docker is not available") from None
     if check and done.returncode:
-        raise SystemExit(f"FAIL: docker {args[0]} failed: {done.stderr.strip()[-300:]}")
+        detail = _scrub(done.stderr.strip()[-300:], secret)
+        raise SystemExit(f"FAIL: docker {args[0]} failed: {detail}")
     return done.stdout.strip()
+
+
+def _label_of(container: str) -> str:
+    """The container's run token, or "" when it is gone or unlabelled."""
+    return _docker(
+        "inspect", "-f", '{{index .Config.Labels "' + LABEL_KEY + '"}}', container, check=False
+    )
+
+
+def _cleanup(token: str, captured: set[str]) -> None:
+    """Remove this run's containers, by id, and only those provably this run's."""
+    label = f"{LABEL_KEY}={token}"
+    ids = captured | set(_docker("ps", "-aq", "--filter", f"label={label}", check=False).split())
+    for container in sorted(ids):
+        found = _label_of(container)
+        if found == token:
+            _docker("rm", "-f", "-v", container, check=False)
+        elif found:
+            print("WARNING: refusing to remove a container this run does not own")
+        # An empty label is a container that is already gone (``--rm``): nothing to do.
+
+
+def _install_signal_handlers() -> list[tuple[int, object]]:
+    """Turn a termination signal into SystemExit so ``finally`` runs the cleanup."""
+
+    def stop(signum: int, _frame: object) -> None:
+        raise SystemExit(128 + signum)
+
+    previous = []
+    for name in ("SIGINT", "SIGTERM", "SIGBREAK"):
+        number = getattr(signal, name, None)
+        if number is not None:
+            previous.append((number, signal.signal(number, stop)))
+    return previous
 
 
 def _wait_ready(name: str, seconds: int = 60) -> None:
@@ -84,15 +145,21 @@ def _report(junit: Path) -> int:
 
 
 def main() -> int:
-    # A per-run label is the ownership proof: cleanup removes only containers this run
-    # created, by id, never by a name another container could share.
-    label = f"nexus-work-acceptance={uuid.uuid4().hex}"
+    # A per-run label is the ownership proof; the captured id is what gets removed.
+    token = uuid.uuid4().hex
     password = secrets.token_hex(12)
+    captured: set[str] = set()
+    previous = _install_signal_handlers()
     try:
         name = _docker(
-            "run", "-d", "--rm", "--label", label, "-e", f"POSTGRES_PASSWORD={password}",
+            "run", "-d", "--rm", "--label", f"{LABEL_KEY}={token}", "-e", SECRET_ENV,
             "-p", "127.0.0.1::5432", IMAGE,
+            secret=password, env={**os.environ, SECRET_ENV: password},
         )  # fmt: skip
+        captured.add(name)
+        if _label_of(name) != token:
+            captured.discard(name)  # not provably ours: never touch it
+            raise SystemExit("FAIL: the started container is not this run's; refusing to use it")
         port = _docker("port", name, "5432/tcp").splitlines()[0].rsplit(":", 1)[1]
         _wait_ready(name)
         with tempfile.TemporaryDirectory(prefix="work-acceptance-") as tmp:
@@ -112,11 +179,16 @@ def main() -> int:
                 return 1
             code = _report(junit)
             return code or (1 if run.returncode else 0)
+    except SystemExit as stop:
+        if isinstance(stop.code, str):
+            raise SystemExit(_scrub(stop.code, password)) from None
+        raise
+    except Exception as exc:  # no traceback: a locals-bearing frame could name the password
+        raise SystemExit(f"FAIL: {type(exc).__name__}: {_scrub(str(exc), password)}") from None
     finally:
-        # Also catches a container created by a `docker run` that then failed to start.
-        owned = _docker("ps", "-aq", "--filter", f"label={label}", check=False).split()
-        if owned:
-            _docker("rm", "-f", "-v", *owned, check=False)
+        _cleanup(token, captured)
+        for number, handler in previous:
+            signal.signal(number, handler)  # type: ignore[arg-type]
 
 
 if __name__ == "__main__":
