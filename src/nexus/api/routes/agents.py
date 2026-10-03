@@ -1,24 +1,77 @@
 """Agent API endpoints - CRUD and lifecycle operations."""
 
 import uuid
-from datetime import timezone, datetime
+from datetime import datetime
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, status
-from pydantic import BaseModel, Field, computed_field
+from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel, ConfigDict, Field, computed_field
 from sqlalchemy import select, update
 
-from nexus.api.deps import CurrentCompanyId, CurrentPrincipal, DbSession, require_permission
+from nexus.api.deps import (
+    CurrentCompanyId,
+    CurrentPrincipal,
+    DbSession,
+    PathCompanyId,
+    audit_actor,
+    principal_kinds,
+    require_permission,
+)
+from nexus.auth.principal import Principal
+from nexus.models._time import utcnow
 from nexus.models.agent import Agent
 from nexus.realtime.publish import TOPOLOGY_CHANNEL, publish_event
 from nexus.services import ceo_service
+from nexus.services.governance_studio.errors import can_write
 from nexus.services.task_service import TaskService
+from nexus.tools.governance_overlay import active_restrictions
 
 router = APIRouter(tags=["agents"])
 
 # Statuses that must never be routed work: the employee exists but its
 # execution backend is not usable yet.
 CONFIGURATION_REQUIRED = "configuration_required"
+
+# Fields that decide what an agent may do or spend. Only a human company administrator changes
+# them, on every route that accepts an AgentUpdate. A new AgentUpdate field is authority unless
+# it is listed in PROFILE_FIELDS (the guard test fails until it is in one of the two).
+AUTHORITY_FIELDS = frozenset(
+    {"role", "status", "adapter_type", "model", "capabilities",
+     "budget_monthly_cents", "autonomy_policy"}
+)
+PROFILE_FIELDS = frozenset({"name", "title", "responsibilities", "objectives", "soul_description"})
+# A role containing one of these words makes a create an administrator decision.
+PRIVILEGED_ROLE_WORDS = ("ceo", "manager", "chief", "director", "head", "admin", "owner")
+# The only adapter settings a clone carries: the rest may hold connection details or secrets.
+CLONE_ADAPTER_KEYS = ("backend", "interactive", "use_worktree", "autonomy_mode", "extra_args")
+
+
+def _forbidden(code: str, message: str) -> HTTPException:
+    return HTTPException(status.HTTP_403_FORBIDDEN, detail={"code": code, "message": message})
+
+
+# Every non-GET agent route declares require_permission, and a principal-kind gate (or
+# heartbeat_principal): tests/test_agent_route_security walks the router and fails a route
+# that lacks either.
+WRITE_AGENT = [require_permission("write", "agent"), principal_kinds("user", "service")]
+
+
+def enforce_update_policy(principal: Principal, updates: dict[str, Any]) -> None:
+    """The one field policy for every route that applies an AgentUpdate (default deny).
+
+    A person writes agent profiles (the route already demands ``write:agent``); a run token,
+    an agent and an API key never use the generic update. Authority fields need a human
+    administrator of the caller's own company. Checked before any lookup, so the answer never
+    depends on whether the agent exists.
+    """
+    if not ceo_service.is_human(principal):
+        raise _forbidden("HUMAN_REQUIRED", "Only a person may edit an agent")
+    locked = sorted(AUTHORITY_FIELDS & set(updates))
+    if locked and not can_write(principal):
+        raise _forbidden(
+            "HUMAN_ADMIN_REQUIRED",
+            f"Only a human administrator may change {', '.join(locked)}",
+        )
 
 
 def normalize_cli_employee(
@@ -62,7 +115,7 @@ class AgentCreate(BaseModel):
     responsibilities: str | None = None
     objectives: str | None = None
     soul_description: str | None = None
-    budget_monthly_cents: int = 0
+    budget_monthly_cents: int = Field(default=0, ge=0)
     autonomy_policy: dict[str, Any] | None = None
     # Hire a CLI employee whose backend is not installed; it is stored as
     # ``configuration_required`` and receives no work until fixed.
@@ -70,7 +123,13 @@ class AgentCreate(BaseModel):
 
 
 class AgentUpdate(BaseModel):
-    """Request body for updating an agent."""
+    """Request body for updating an agent.
+
+    Identity and organisation (company, manager, CEO, department, team) are not fields: an
+    unknown key is a 422, never silently ignored.
+    """
+
+    model_config = ConfigDict(extra="forbid")
 
     name: str | None = None
     title: str | None = None
@@ -82,7 +141,7 @@ class AgentUpdate(BaseModel):
     responsibilities: str | None = None
     objectives: str | None = None
     soul_description: str | None = None
-    budget_monthly_cents: int | None = None
+    budget_monthly_cents: int | None = Field(default=None, ge=0)
     autonomy_policy: dict[str, Any] | None = None
 
 
@@ -133,11 +192,26 @@ class AgentResponse(BaseModel):
     "/api/v1/companies/{company_id}/agents",
     status_code=status.HTTP_201_CREATED,
     response_model=AgentResponse,
+    dependencies=WRITE_AGENT,
 )
 async def create_agent(
-    company_id: uuid.UUID, body: AgentCreate, db: DbSession
+    company_id: PathCompanyId, body: AgentCreate, db: DbSession, principal: CurrentPrincipal
 ) -> Any:
-    """Create a new agent in a company."""
+    """Create a new agent in the caller's company.
+
+    A CEO-, manager- or director-like role, any autonomy override and any budget are authority:
+    a human administrator decides them. The manager is server-chosen.
+    """
+    role = body.role.lower()
+    if (
+        any(word in role for word in PRIVILEGED_ROLE_WORDS)
+        or body.autonomy_policy
+        or body.budget_monthly_cents
+    ) and not can_write(principal):
+        raise _forbidden(
+            "HUMAN_ADMIN_REQUIRED",
+            "Only a human administrator may create a manager or set autonomy or budget",
+        )
     adapter_config, model = body.adapter_config, body.model
     status_override = None
     if body.adapter_type == "cli":
@@ -172,7 +246,7 @@ async def create_agent(
     from nexus.governance.audit_service import record_audit
     await record_audit(
         company_id, "agent.created",
-        actor_type="user", resource_type="agent", resource_id=str(agent.id),
+        **audit_actor(principal), resource_type="agent", resource_id=str(agent.id),
         details={
             "name": agent.name,
             "role": agent.role,
@@ -281,61 +355,113 @@ async def _guard_cli_update(
         updates["status"] = "idle"  # backend became usable
 
 
-@router.put("/api/v1/agents/{agent_id}", response_model=AgentResponse)
-async def update_agent(
-    agent_id: uuid.UUID, body: AgentUpdate, db: DbSession, company_id: CurrentCompanyId
-) -> Any:
-    """Update an agent."""
+async def apply_agent_update(
+    db: Any, principal: Principal, company_id: uuid.UUID, agent_id: uuid.UUID, body: AgentUpdate
+) -> Agent:
+    """The one implementation behind PUT, PATCH and the company-scoped PATCH.
+
+    Policy first (the answer does not depend on whether the agent exists), then a lookup by
+    ``(company_id, id)``: a foreign and a missing agent are the same 404. Only the validated
+    AgentUpdate fields are written, so company, manager and CEO never change here.
+    """
     updates = body.model_dump(exclude_unset=True)
     if not updates:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="No fields to update",
         )
-    await _guard_cli_update(db, agent_id, company_id, updates)
-    updates["updated_at"] = datetime.now(timezone.utc)
-    stmt = update(Agent).where(Agent.id == agent_id, Agent.company_id == company_id).values(**updates)
-    await db.execute(stmt)
-
-    result = await db.execute(select(Agent).where(Agent.id == agent_id, Agent.company_id == company_id))
-    agent = result.scalar_one_or_none()
+    if any(
+        updates.get(k, 0) is None for k in ("role", "status", "adapter_type", "budget_monthly_cents")
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "FIELD_NOT_NULLABLE", "message": "That field cannot be cleared"},
+        )
+    enforce_update_policy(principal, updates)
+    agent = (
+        await db.execute(select(Agent).where(Agent.id == agent_id, Agent.company_id == company_id))
+    ).scalar_one_or_none()
     if agent is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Agent {agent_id} not found",
         )
+    fields = sorted(updates)
+    await _guard_cli_update(db, agent_id, company_id, updates)
+    updates["updated_at"] = utcnow()
+    await db.execute(
+        update(Agent).where(Agent.id == agent_id, Agent.company_id == company_id).values(**updates)
+    )
+    agent = (
+        await db.execute(
+            select(Agent)
+            .where(Agent.id == agent_id, Agent.company_id == company_id)
+            .execution_options(populate_existing=True)
+        )
+    ).scalar_one()
+
+    from nexus.governance.audit_service import record_audit
+
+    await record_audit(
+        company_id, "agent.updated",
+        **audit_actor(principal), resource_type="agent", resource_id=str(agent_id),
+        details={"fields": fields}, db=db,
+    )
     return agent
 
 
-@router.patch("/api/v1/agents/{agent_id}", response_model=AgentResponse)
+@router.put(
+    "/api/v1/agents/{agent_id}",
+    response_model=AgentResponse,
+    dependencies=WRITE_AGENT,
+)
+async def update_agent(
+    agent_id: uuid.UUID,
+    body: AgentUpdate,
+    db: DbSession,
+    company_id: CurrentCompanyId,
+    principal: CurrentPrincipal,
+) -> Any:
+    """Update an agent."""
+    return await apply_agent_update(db, principal, company_id, agent_id, body)
+
+
+@router.patch(
+    "/api/v1/agents/{agent_id}",
+    response_model=AgentResponse,
+    dependencies=WRITE_AGENT,
+)
 async def patch_agent(
-    agent_id: uuid.UUID, body: AgentUpdate, db: DbSession, company_id: CurrentCompanyId
+    agent_id: uuid.UUID,
+    body: AgentUpdate,
+    db: DbSession,
+    company_id: CurrentCompanyId,
+    principal: CurrentPrincipal,
 ) -> Any:
     """Partial update an agent (PATCH semantics, same logic as PUT)."""
-    return await update_agent(agent_id, body, db, company_id)
+    return await apply_agent_update(db, principal, company_id, agent_id, body)
 
 
 @router.patch(
     "/api/v1/companies/{company_id}/agents/{agent_id}",
     response_model=AgentResponse,
+    dependencies=WRITE_AGENT,
 )
 async def patch_agent_company_scoped(
-    company_id: uuid.UUID, agent_id: uuid.UUID, body: AgentUpdate, db: DbSession
+    company_id: PathCompanyId,
+    agent_id: uuid.UUID,
+    body: AgentUpdate,
+    db: DbSession,
+    principal: CurrentPrincipal,
 ) -> Any:
     """Partial update via company-scoped path (dashboard compat)."""
-    updates = body.model_dump(exclude_unset=True)
-    if not updates:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="No fields to update",
-        )
-    await _guard_cli_update(db, agent_id, company_id, updates)
-    updates["updated_at"] = datetime.now(timezone.utc)
-    stmt = update(Agent).where(Agent.id == agent_id, Agent.company_id == company_id).values(**updates)
-    await db.execute(stmt)
+    return await apply_agent_update(db, principal, company_id, agent_id, body)
 
-    result = await db.execute(select(Agent).where(Agent.id == agent_id, Agent.company_id == company_id))
-    agent = result.scalar_one_or_none()
+
+async def _lifecycle_agent(db: Any, company_id: uuid.UUID, agent_id: uuid.UUID) -> Agent:
+    agent = (
+        await db.execute(select(Agent).where(Agent.id == agent_id, Agent.company_id == company_id))
+    ).scalar_one_or_none()
     if agent is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -344,16 +470,37 @@ async def patch_agent_company_scoped(
     return agent
 
 
-@router.post("/api/v1/agents/{agent_id}/wake", response_model=AgentResponse)
-async def wake_agent(agent_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId) -> Any:
-    """Wake an agent (transition to ready state)."""
-    stmt = select(Agent).where(Agent.id == agent_id, Agent.company_id == company_id)
-    result = await db.execute(stmt)
-    agent = result.scalar_one_or_none()
-    if agent is None:
+async def _reload(db: Any, company_id: uuid.UUID, agent_id: uuid.UUID) -> Agent:
+    return (
+        await db.execute(
+            select(Agent)
+            .where(Agent.id == agent_id, Agent.company_id == company_id)
+            .execution_options(populate_existing=True)
+        )
+    ).scalar_one()
+
+
+@router.post(
+    "/api/v1/agents/{agent_id}/wake",
+    response_model=AgentResponse,
+    dependencies=WRITE_AGENT,
+)
+async def wake_agent(
+    agent_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId, principal: CurrentPrincipal
+) -> Any:
+    """Wake an agent (transition to ready state).
+
+    Refused while a Governance lockdown or the agent's isolation is active: releasing those is
+    a governance decision, never a side effect of waking.
+    """
+    agent = await _lifecycle_agent(db, company_id, agent_id)
+    if await active_restrictions(db, company_id, agent_id):
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Agent {agent_id} not found",
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "AGENT_RESTRICTED",
+                "message": "A Governance lockdown or isolation is active; release it first",
+            },
         )
     if agent.status not in ("idle", "paused"):
         raise HTTPException(
@@ -363,17 +510,16 @@ async def wake_agent(agent_id: uuid.UUID, db: DbSession, company_id: CurrentComp
     update_stmt = (
         update(Agent)
         .where(Agent.id == agent_id, Agent.company_id == company_id)
-        .values(status="ready", updated_at=datetime.now(timezone.utc))
+        .values(status="ready", updated_at=utcnow())
     )
     await db.execute(update_stmt)
-    result = await db.execute(select(Agent).where(Agent.id == agent_id, Agent.company_id == company_id))
-    agent = result.scalar_one()
+    agent = await _reload(db, company_id, agent_id)
 
     # Audit: agent woken
     from nexus.governance.audit_service import record_audit
     await record_audit(
         company_id, "agent.woken",
-        actor_type="user", resource_type="agent", resource_id=str(agent_id),
+        **audit_actor(principal), resource_type="agent", resource_id=str(agent_id),
         details={"name": agent.name, "new_status": "ready"},
         db=db,
     )
@@ -381,40 +527,63 @@ async def wake_agent(agent_id: uuid.UUID, db: DbSession, company_id: CurrentComp
     return agent
 
 
-@router.post("/api/v1/agents/{agent_id}/pause", response_model=AgentResponse)
-async def pause_agent(agent_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId) -> Any:
-    """Pause an agent."""
-    stmt = select(Agent).where(Agent.id == agent_id, Agent.company_id == company_id)
-    result = await db.execute(stmt)
-    agent = result.scalar_one_or_none()
-    if agent is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Agent {agent_id} not found",
-        )
+@router.post(
+    "/api/v1/agents/{agent_id}/pause",
+    response_model=AgentResponse,
+    dependencies=WRITE_AGENT,
+)
+async def pause_agent(
+    agent_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId, principal: CurrentPrincipal
+) -> Any:
+    """Pause an agent. Allowed under isolation or lockdown too: it only removes capability."""
+    agent = await _lifecycle_agent(db, company_id, agent_id)
     if agent.status == "terminated":
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Cannot pause a terminated agent",
         )
+    previous = agent.status
     update_stmt = (
         update(Agent)
         .where(Agent.id == agent_id, Agent.company_id == company_id)
         .values(
             status="paused",
-            paused_at=datetime.now(timezone.utc),
-            updated_at=datetime.now(timezone.utc),
+            paused_at=utcnow(),
+            updated_at=utcnow(),
         )
     )
     await db.execute(update_stmt)
-    result = await db.execute(select(Agent).where(Agent.id == agent_id, Agent.company_id == company_id))
-    return result.scalar_one()
+    agent = await _reload(db, company_id, agent_id)
+
+    from nexus.governance.audit_service import record_audit
+    await record_audit(
+        company_id, "agent.paused",
+        **audit_actor(principal), resource_type="agent", resource_id=str(agent_id),
+        details={"name": agent.name, "previous_status": previous, "new_status": "paused"},
+        db=db,
+    )
+    return agent
 
 
-@router.post("/api/v1/agents/{agent_id}/heartbeat")
-async def agent_heartbeat(agent_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId) -> dict[str, Any]:
-    """Record a heartbeat from an agent."""
-    now = datetime.now(timezone.utc)
+def heartbeat_principal(principal: CurrentPrincipal, agent_id: uuid.UUID) -> Principal:
+    """Who may record a heartbeat for ``agent_id`` (default deny).
+
+    An agent's own run token (bound to this exact agent), or a person or API key whose role
+    holds ``write:agent``. Any other kind, and a run token for a different agent, is refused.
+    """
+    if principal.kind == "run" and principal.agent_id == agent_id:
+        return principal
+    if principal.kind in ("user", "service") and principal.has_permission("write", "agent"):
+        return principal
+    raise _forbidden("HEARTBEAT_FORBIDDEN", "Not allowed to record a heartbeat for this agent")
+
+
+@router.post("/api/v1/agents/{agent_id}/heartbeat", dependencies=[Depends(heartbeat_principal)])
+async def agent_heartbeat(
+    agent_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId
+) -> dict[str, Any]:
+    """Record a heartbeat. Writes ``last_heartbeat_at`` only and carries no body."""
+    now = utcnow()
     stmt = (
         update(Agent)
         .where(Agent.id == agent_id, Agent.company_id == company_id)
@@ -429,11 +598,10 @@ async def agent_heartbeat(agent_id: uuid.UUID, db: DbSession, company_id: Curren
     return {"agent_id": str(agent_id), "heartbeat_at": now.isoformat()}
 
 
-
 @router.delete(
     "/api/v1/agents/{agent_id}",
     status_code=status.HTTP_204_NO_CONTENT,
-    dependencies=[require_permission("write", "agent")],
+    dependencies=WRITE_AGENT,
 )
 async def delete_agent(agent_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId) -> None:
     """Delete an agent that owns no open work, or refuse with a stable 409.
@@ -504,18 +672,24 @@ async def delete_agent(agent_id: uuid.UUID, db: DbSession, company_id: CurrentCo
         )
 
 
-@router.post("/api/v1/agents/{agent_id}/clone", status_code=status.HTTP_201_CREATED, response_model=AgentResponse)
-async def clone_agent(agent_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId) -> Any:
-    """Clone an agent — creates a copy with all config, soul, and capabilities.
+@router.post(
+    "/api/v1/agents/{agent_id}/clone",
+    status_code=status.HTTP_201_CREATED,
+    response_model=AgentResponse,
+    dependencies=WRITE_AGENT,
+)
+async def clone_agent(
+    agent_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId, principal: CurrentPrincipal
+) -> Any:
+    """Clone an agent for a human administrator: profile, role, model and budget.
 
-    The new agent gets a "-clone" suffix on its name and starts in "idle" status.
+    The copy is a plain employee: not the CEO, status idle, the manager chosen by the server.
+    Autonomy, permissions, tools, the LLM connection, runtime configuration, memory and
+    heartbeat are never copied, and only the allow-listed adapter settings are.
     """
-    stmt = select(Agent).where(Agent.id == agent_id, Agent.company_id == company_id)
-    result = await db.execute(stmt)
-    source = result.scalar_one_or_none()
-    if source is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Agent {agent_id} not found")
-
+    if not can_write(principal):
+        raise _forbidden("HUMAN_ADMIN_REQUIRED", "Only a human administrator may clone an agent")
+    source = await _lifecycle_agent(db, company_id, agent_id)
     clone = Agent(
         company_id=company_id,
         name=f"{source.name}-clone",
@@ -524,7 +698,9 @@ async def clone_agent(agent_id: uuid.UUID, db: DbSession, company_id: CurrentCom
         department_id=source.department_id,
         team_id=source.team_id,
         adapter_type=source.adapter_type,
-        adapter_config=source.adapter_config,
+        adapter_config={
+            k: v for k, v in (source.adapter_config or {}).items() if k in CLONE_ADAPTER_KEYS
+        } or None,
         model=source.model,
         capabilities=list(source.capabilities) if source.capabilities else None,
         responsibilities=source.responsibilities,
@@ -535,6 +711,13 @@ async def clone_agent(agent_id: uuid.UUID, db: DbSession, company_id: CurrentCom
     clone.manager_id = await ceo_service.resolve_manager(db, company_id, None, None)
     db.add(clone)
     await db.flush()
+
+    from nexus.governance.audit_service import record_audit
+    await record_audit(
+        company_id, "agent.cloned",
+        **audit_actor(principal), resource_type="agent", resource_id=str(clone.id),
+        details={"source_agent_id": str(agent_id)}, db=db,
+    )
     return clone
 
 
@@ -551,7 +734,7 @@ class ManagerUpdate(BaseModel):
 @router.put(
     "/api/v1/agents/{agent_id}/manager",
     response_model=AgentResponse,
-    dependencies=[require_permission("write", "agent")],
+    dependencies=WRITE_AGENT,
 )
 async def set_agent_manager(
     agent_id: uuid.UUID,
@@ -578,7 +761,7 @@ async def set_agent_manager(
     if previous == target:
         return agent
     agent.manager_id = target
-    agent.updated_at = datetime.now(timezone.utc)
+    agent.updated_at = utcnow()
     await db.flush()
 
     from nexus.governance.audit_service import record_audit
@@ -610,7 +793,7 @@ class DelegateTaskRequest(BaseModel):
 @router.post(
     "/api/v1/agents/{agent_id}/delegate",
     status_code=status.HTTP_201_CREATED,
-    dependencies=[require_permission("write", "task")],
+    dependencies=[require_permission("write", "task"), principal_kinds("user", "service", "run")],
 )
 async def delegate_task(
     agent_id: uuid.UUID,
