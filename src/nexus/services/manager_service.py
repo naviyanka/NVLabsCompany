@@ -156,9 +156,16 @@ async def delegate(
     return attempt, created
 
 
+def awaiting_review(attempt: TaskAttempt) -> bool:
+    """A submitted deliverable no worker holds: only a manager's review moves it."""
+    return attempt.status == "verifying" and attempt.claimed_by is None
+
+
 def _stale(attempt: TaskAttempt, now: datetime) -> bool:
     if attempt.status not in ACTIVE_ATTEMPT_STATUSES:
         return False
+    if awaiting_review(attempt):
+        return False  # durable and waiting on a person, not on a worker
     if (
         attempt.status in LEASED_ATTEMPT_STATUSES
         and attempt.lease_expires_at is not None

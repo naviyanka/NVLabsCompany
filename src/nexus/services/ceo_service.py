@@ -403,8 +403,11 @@ async def status(db: Any, company_id: uuid.UUID) -> dict[str, Any]:
         from nexus.adapters import azure_openai_native
 
         azure = azure_openai_native.status()
+    from nexus.services import work_service
+
     return {
         "company_id": str(company_id),
+        "work": await work_service.status(db, company_id),
         "ceo": ceo and {**ms.agent_ref(ceo), "backend": org_snapshot._backend(ceo)},
         "ceo_tools_available": available,
         "ceo_tools_unavailable_reason": reason,
@@ -748,4 +751,11 @@ async def chat_context(db: Any, company_id: uuid.UUID, agent_id: uuid.UUID) -> s
     """The CEO's per-turn system-prompt addition; None for any other agent."""
     if not await is_ceo(db, company_id, agent_id):
         return None
-    return f"{CHAT_DIRECTIVE}\n\n{await executive_context(db, company_id)}"
+    from nexus.services import work_service
+
+    live = work_service.digest(await work_service.status(db, company_id))
+    return (
+        f"{CHAT_DIRECTIVE}\n\n{await executive_context(db, company_id)}\n\n"
+        f"{redact(live)[0]}\nWork is done only when its status is completed (manager-verified); "
+        "a deliverable awaiting review is not done."
+    )

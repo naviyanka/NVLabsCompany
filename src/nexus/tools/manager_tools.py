@@ -19,12 +19,12 @@ import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from nexus.runtime.task_attempts import attempt_view
-from nexus.services import hiring_service, org_snapshot
+from nexus.runtime.task_attempts import MAX_DELIVERABLE_CHARS, attempt_view
+from nexus.services import hiring_service, org_snapshot, work_service
 from nexus.services import manager_service as ms
 from nexus.tools.effects import (
     BRIDGE_KEY_HINT,
@@ -71,6 +71,48 @@ async def _delegate(db, company_id, manager_id, args, actor):
         db, company_id, manager_id, args["employee_id"], args["task_id"], principal
     )
     return {"created": created, "attempt": attempt_view(attempt)}
+
+
+class AssignWork(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    work_id: uuid.UUID
+    employee_id: uuid.UUID
+    title: str = Field(min_length=1, max_length=255)
+    objective: str = Field(min_length=1, max_length=4000)
+    expected_deliverable: str | None = Field(default=None, max_length=500)
+    max_deliverable_chars: int | None = Field(default=None, ge=100, le=MAX_DELIVERABLE_CHARS)
+    max_attempts: int | None = Field(default=None, ge=1, le=5)
+    idempotency_key: str = Field(min_length=1, max_length=200)
+
+
+class ReviewWork(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    attempt_id: uuid.UUID
+    decision: Literal["verify", "reject"]
+    reason: str | None = Field(default=None, max_length=1000)
+    retry: bool = False
+
+
+async def _assign_work(db, company_id, manager_id, args, actor):
+    principal = SimpleNamespace(kind="agent", display_name=actor)
+    task, attempt, created = await work_service.assign_task(
+        db, company_id, manager_id, args.work_id, args.employee_id,
+        title=args.title, objective=args.objective, idempotency_key=args.idempotency_key,
+        expected_deliverable=args.expected_deliverable,
+        max_deliverable_chars=args.max_deliverable_chars,
+        attempts_cap=args.max_attempts, principal=principal,
+    )
+    return {"created": created, "task_id": str(task.id), "attempt": attempt_view(attempt)}
+
+
+async def _review_work(db, company_id, manager_id, args, actor):
+    attempt, changed = await work_service.review(
+        db, company_id, args.attempt_id, decision=args.decision, reason=args.reason,
+        actor=actor, reviewer_agent_id=manager_id, retry=args.retry,
+    )
+    return {"changed": changed, "attempt": attempt_view(attempt)}
 
 
 async def _evidence(db, company_id, manager_id, args, actor):
@@ -131,6 +173,22 @@ MANAGER_TOOLS: dict[str, ManagerTool] = {
         ("task_id", "employee_id"),
         _delegate,
         effect=EffectClass.IDEMPOTENT_WRITE,
+    ),
+    "manager_assign_work": ManagerTool(
+        "Create one task under a work order delegated to you and assign it to a direct "
+        "report, with the deliverable you expect. Idempotent per idempotency_key.",
+        "write",
+        (),
+        _assign_work,
+        AssignWork,
+    ),
+    "manager_review_work": ManagerTool(
+        "Verify or reject a deliverable submitted by a direct report. Rejection needs a "
+        "reason and may request one bounded retry. You cannot review your own work.",
+        "write",
+        (),
+        _review_work,
+        ReviewWork,
     ),
     "manager_task_evidence": ManagerTool(
         "Attempts, results and evidence of a task held by one of your direct reports.",
