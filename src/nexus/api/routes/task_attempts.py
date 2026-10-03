@@ -18,6 +18,7 @@ from sqlalchemy import select
 from nexus.api.deps import CurrentCompanyId, CurrentPrincipal, DbSession, require_permission
 from nexus.models.task_attempt import TaskAttempt
 from nexus.runtime import task_attempts
+from nexus.services import work_service
 
 router = APIRouter(tags=["task-attempts"])
 
@@ -32,6 +33,10 @@ class AttemptStart(BaseModel):
 
     # Must be the task's assigned employee; defaults to it.
     agent_id: uuid.UUID | None = None
+
+
+def _full(principal: Any) -> bool:
+    return work_service.can_view_work_deliverable(principal)
 
 
 async def _attempt(
@@ -66,12 +71,12 @@ async def start_attempt(
         idempotency_key=idempotency_key,
     )
     response.status_code = status.HTTP_201_CREATED if created else status.HTTP_200_OK
-    return {**task_attempts.attempt_view(attempt), "created": created}
+    return {**task_attempts.attempt_view(attempt, full=_full(principal)), "created": created}
 
 
 @router.get("/api/v1/tasks/{task_id}/attempts", dependencies=READ)
 async def list_attempts(
-    task_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId
+    task_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId, principal: CurrentPrincipal
 ) -> list[dict[str, Any]]:
     """Every attempt on the task, newest first."""
     await task_attempts._load_task(db, company_id, task_id)
@@ -82,15 +87,20 @@ async def list_attempts(
             .order_by(TaskAttempt.attempt_number.desc())
         )
     ).scalars()
-    return [task_attempts.attempt_view(a) for a in rows]
+    return [task_attempts.attempt_view(a, full=_full(principal)) for a in rows]
 
 
 @router.get("/api/v1/tasks/{task_id}/attempts/{attempt_id}", dependencies=READ)
 async def get_attempt(
-    task_id: uuid.UUID, attempt_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId
+    task_id: uuid.UUID,
+    attempt_id: uuid.UUID,
+    db: DbSession,
+    company_id: CurrentCompanyId,
+    principal: CurrentPrincipal,
 ) -> dict[str, Any]:
     """One attempt with its latest report."""
-    return task_attempts.attempt_view(await _attempt(db, company_id, task_id, attempt_id))
+    attempt = await _attempt(db, company_id, task_id, attempt_id)
+    return task_attempts.attempt_view(attempt, full=_full(principal))
 
 
 @router.get("/api/v1/tasks/{task_id}/attempts/{attempt_id}/evidence", dependencies=READ)
@@ -129,7 +139,7 @@ async def cancel_attempt(
 ) -> dict[str, Any]:
     """Cancel this attempt only."""
     attempt = await task_attempts.cancel_attempt(db, company_id, task_id, attempt_id, principal)
-    return task_attempts.attempt_view(attempt)
+    return task_attempts.attempt_view(attempt, full=_full(principal))
 
 
 @router.post("/api/v1/tasks/{task_id}/attempts/{attempt_id}/retry", dependencies=WRITE)
@@ -147,4 +157,4 @@ async def retry_attempt(
         db, company_id, task_id, attempt_id, principal, idempotency_key=idempotency_key
     )
     response.status_code = status.HTTP_201_CREATED if created else status.HTTP_200_OK
-    return {**task_attempts.attempt_view(attempt), "created": created}
+    return {**task_attempts.attempt_view(attempt, full=_full(principal)), "created": created}

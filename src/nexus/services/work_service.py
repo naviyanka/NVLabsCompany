@@ -32,8 +32,9 @@ from datetime import datetime
 from typing import Any
 
 from fastapi import HTTPException
-from sqlalchemy import and_, func, select, update
+from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import aliased
 
 from nexus.models.agent import Agent
 from nexus.models.task import Goal, Task
@@ -43,7 +44,13 @@ from nexus.models.task_attempt import (
     TaskAttempt,
 )
 from nexus.runtime import task_attempts
-from nexus.runtime.task_attempts import DEFAULT_MAX_ATTEMPTS, MAX_DELIVERABLE_CHARS, WorkSpec
+from nexus.runtime.task_attempts import (
+    DEFAULT_MAX_ATTEMPTS,
+    MAX_DELIVERABLE_CHARS,
+    WORK_ORDER_KIND,
+    WorkSpec,
+    is_work_order_spec,
+)
 from nexus.services import manager_service as ms
 
 NAMESPACE = uuid.UUID("5d0b8f3e-6c1a-4f53-9a57-3e1f0c2b7a90")  # shared with the CEO tools
@@ -52,20 +59,84 @@ SUMMARY_CHARS = 500
 DIGEST_MAX_CHARS = 4000
 OPEN_LIMIT = 25
 CLOSED_LIMIT = 10
-WORK_ORDER: dict[str, Any] = {"kind": "work_order"}
+WORK_ORDER: dict[str, Any] = {"kind": WORK_ORDER_KIND}
 
 
 def is_work_order(task: Task) -> bool:
     """A top-level task created by :func:`create_work_order` (not an ordinary task)."""
-    return task.parent_task_id is None and task.work_spec == WORK_ORDER
+    return task.parent_task_id is None and is_work_order_spec(task.work_spec)
 
 
 def _work_order_clause() -> Any:
     """SQL form of :func:`is_work_order`."""
     return and_(
         Task.parent_task_id.is_(None),
-        Task.work_spec["kind"].as_string() == WORK_ORDER["kind"],
+        Task.work_spec["kind"].as_string() == WORK_ORDER_KIND,
     )
+
+
+def _kind_clause(task: Any) -> Any:
+    """Any ``kind`` in ``work_spec``, known or not. Only the lifecycle writes one."""
+    return task.work_spec["kind"].as_string().is_not(None)
+
+
+async def is_work_owned(db: Any, company_id: uuid.UUID, task_id: uuid.UUID) -> bool:
+    """True for a work order or a child of one: the work lifecycle owns its state.
+
+    Fails closed: a task (or its parent) whose ``work_spec`` carries any ``kind`` is owned,
+    even a kind this version does not know, so a malformed or future marker can never be
+    reassigned through the generic routes. It is still not a work order
+    (:func:`is_work_order`), so no lifecycle operation acts on it. A missing task, a foreign
+    company's task, an ordinary task and one with unrelated ``work_spec`` data are ``False``.
+    """
+    root = aliased(Task)
+    found = await db.execute(
+        select(Task.id)
+        .outerjoin(root, and_(root.id == Task.parent_task_id, root.company_id == Task.company_id))
+        .where(
+            Task.id == task_id,
+            Task.company_id == company_id,
+            or_(_kind_clause(Task), _kind_clause(root)),
+        )
+        .limit(1)
+    )
+    return found.first() is not None
+
+
+def can_view_work_deliverable(principal: Any) -> bool:
+    """Who may read a stored deliverable in full. Default deny.
+
+    Allowed: a signed-in person (``kind == "user"`` with a ``user_id``; the middleware only
+    builds one for an active user with a current membership) whose role may read tasks, and
+    the keyless, unlabelled service principal that ``AUTH_ENABLED=false`` builds for the
+    development operator. Everything else gets a bounded summary: API keys, run tokens
+    (agents), labelled in-process services, a principal that names an agent, and any kind
+    this function does not know.
+    """
+    kind = getattr(principal, "kind", None)
+    if getattr(principal, "agent_id", None) is not None or getattr(principal, "run_id", None):
+        return False
+    if not principal.has_permission("read", "task"):
+        return False
+    if kind == "user":
+        return getattr(principal, "user_id", None) is not None
+    if kind == "service":
+        return (
+            getattr(principal, "api_key_id", None) is None
+            and not getattr(principal, "label", "")
+            and getattr(principal, "user_id", None) is None
+        )
+    return False
+
+
+def refuse_if_work_owned(owned: bool) -> None:
+    """The stable error the generic task routes answer with for work-owned tasks."""
+    if owned:
+        raise _error(
+            409,
+            "WORK_OWNED_BY_LIFECYCLE",
+            "This task belongs to the company-work lifecycle; use the work routes",
+        )
 
 
 def _error(status_code: int, code: str, message: str) -> HTTPException:
@@ -180,9 +251,18 @@ async def require_work(db: Any, company_id: uuid.UUID, task_id: uuid.UUID) -> Ta
     An ordinary task is not work, so the work routes answer as if it did not exist.
     """
     task = await _row(db, company_id, task_id)
-    if not task.work_spec:
+    if not is_work_order(task) and not is_work_spec(task.work_spec):
         raise _error(404, "TASK_NOT_FOUND", f"Task {task_id} not found")
     return task
+
+
+def is_work_spec(raw: Any) -> bool:
+    """A stored ``work_spec`` that is a real ``WorkSpec`` (unrelated JSON is not work)."""
+    try:
+        task_attempts.parse_work_spec(raw)
+    except HTTPException:
+        return False
+    return True
 
 
 async def delegate_to_manager(
