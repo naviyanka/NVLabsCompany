@@ -32,11 +32,19 @@ IMAGE = "pgvector/pgvector:pg16"
 
 
 def _docker(*args: str, check: bool = True) -> str:
-    done = subprocess.run(["docker", *args], capture_output=True, text=True, check=check)
+    """Run docker. A failure exits with docker's stderr only: ``check=True`` would put the
+    whole command line, including POSTGRES_PASSWORD, into a traceback."""
+    try:
+        done = subprocess.run(["docker", *args], capture_output=True, text=True)
+    except OSError:
+        raise SystemExit("FAIL: docker is not available") from None
+    if check and done.returncode:
+        raise SystemExit(f"FAIL: docker {args[0]} failed: {done.stderr.strip()[-300:]}")
     return done.stdout.strip()
 
 
 def _wait_ready(name: str, seconds: int = 60) -> None:
+    """``name`` is the container id."""
     deadline = time.monotonic() + seconds
     while time.monotonic() < deadline:
         probe = subprocess.run(
@@ -76,11 +84,13 @@ def _report(junit: Path) -> int:
 
 
 def main() -> int:
-    name = f"nexus-work-acceptance-{uuid.uuid4().hex[:8]}"
+    # A per-run label is the ownership proof: cleanup removes only containers this run
+    # created, by id, never by a name another container could share.
+    label = f"nexus-work-acceptance={uuid.uuid4().hex}"
     password = secrets.token_hex(12)
     try:
-        _docker(
-            "run", "-d", "--rm", "--name", name, "-e", f"POSTGRES_PASSWORD={password}",
+        name = _docker(
+            "run", "-d", "--rm", "--label", label, "-e", f"POSTGRES_PASSWORD={password}",
             "-p", "127.0.0.1::5432", IMAGE,
         )  # fmt: skip
         port = _docker("port", name, "5432/tcp").splitlines()[0].rsplit(":", 1)[1]
@@ -103,7 +113,10 @@ def main() -> int:
             code = _report(junit)
             return code or (1 if run.returncode else 0)
     finally:
-        subprocess.run(["docker", "rm", "-f", "-v", name], capture_output=True)
+        # Also catches a container created by a `docker run` that then failed to start.
+        owned = _docker("ps", "-aq", "--filter", f"label={label}", check=False).split()
+        if owned:
+            _docker("rm", "-f", "-v", *owned, check=False)
 
 
 if __name__ == "__main__":
