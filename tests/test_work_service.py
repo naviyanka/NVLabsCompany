@@ -572,6 +572,29 @@ class TestRoutes:
         assert done["status"] == "completed"
         assert (await api("POST", f"/api/v1/work/{work}/cancel")).status_code == 409
 
+    async def test_run_tokens_cannot_act_and_never_read_a_deliverable(self, co, api):
+        work, task, attempt = await _submitted(co)
+        body = {"manager_id": str(co["acme_lead"])}
+        for method, path, payload in (
+            ("POST", f"/api/v1/work/{work}/delegate", body),
+            ("POST", f"/api/v1/work/{work}/cancel", None),
+            ("POST", f"/api/v1/work/attempts/{attempt}/review", {"decision": "verify"}),
+        ):
+            res = await api(method, path, payload, who="run")
+            assert (res.status_code, res.json()["detail"]["code"]) == (403, "AGENT_USES_TOOLS")
+        assert (await _get(co, Task, work)).status == "in_progress"
+        assert (await _get(co, Task, task)).status == "in_review"
+        assert (await _get(co, TaskAttempt, attempt)).status == "verifying"
+        listed = (await api("GET", "/api/v1/work", who="run")).json()
+        one = (await api("GET", f"/api/v1/work/{work}", who="run")).json()
+        for item in (_item(listed, work), one):
+            reply = item["tasks"][0]["attempt"]
+            assert reply["awaiting_review"] is True and "deliverable" not in reply
+        assert DELIVERABLE not in (await api("GET", "/api/v1/work", who="run")).text
+        assert DELIVERABLE not in (await api("GET", f"/api/v1/work/{work}", who="run")).text
+        human = (await api("GET", f"/api/v1/work/{work}")).json()
+        assert human["tasks"][0]["attempt"]["deliverable"] == DELIVERABLE
+
     async def test_delegate_route_uses_the_companys_ceo(self, co, api):
         work = await _order(co)
         url = f"/api/v1/work/{work}/delegate"
