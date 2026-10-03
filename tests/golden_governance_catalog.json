@@ -320,7 +320,7 @@
   ],
   "category": "organization",
   "effect_class": "write",
-  "explicit_allow_required": false,
+  "explicit_allow_required": true,
   "feature_gates": [
    {
     "name": "tool_binding_enforcement"
@@ -539,7 +539,7 @@
   ],
   "category": "organization",
   "effect_class": "write",
-  "explicit_allow_required": false,
+  "explicit_allow_required": true,
   "feature_gates": [
    {
     "name": "tool_binding_enforcement"
