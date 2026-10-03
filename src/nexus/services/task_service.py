@@ -48,6 +48,60 @@ async def require_parent(
     return parent
 
 
+async def refuse_if_agent_owns_work(
+    db: AsyncSession, company_id: uuid.UUID, agent_id: uuid.UUID
+) -> None:
+    """An agent that owns open work, or runs an attempt, cannot be deleted (409).
+
+    Open work is any task of this company assigned to the agent that is not completed,
+    failed or cancelled: an ordinary task, a manager's work order, an employee's work child
+    (including one waiting in review). A live attempt counts even if its task moved on.
+    Ownership is never nulled for any of these. A terminal task only loses its owner (the
+    caller clears it); a recorded attempt is history that pins the agent (AGENT_HAS_HISTORY).
+    """
+    from nexus.models.task_attempt import ACTIVE_ATTEMPT_STATUSES, TaskAttempt
+
+    open_task = await db.scalar(
+        select(Task.id)
+        .where(
+            Task.company_id == company_id,
+            Task.assigned_agent_id == agent_id,
+            Task.status.not_in(CLOSED_TASK_STATUSES),
+        )
+        .limit(1)
+    )
+    live_attempt = await db.scalar(
+        select(TaskAttempt.id)
+        .where(
+            TaskAttempt.company_id == company_id,
+            TaskAttempt.agent_id == agent_id,
+            TaskAttempt.status.in_(ACTIVE_ATTEMPT_STATUSES),
+        )
+        .limit(1)
+    )
+    if open_task is not None or live_attempt is not None:
+        raise _error(
+            status.HTTP_409_CONFLICT,
+            "AGENT_OWNS_ACTIVE_WORK",
+            "The agent owns active work; reassign or cancel it first",
+        )
+    history = await db.scalar(
+        select(TaskAttempt.id)
+        .where(TaskAttempt.company_id == company_id, TaskAttempt.agent_id == agent_id)
+        .limit(1)
+    )
+    if history is not None:
+        raise agent_history_error()
+
+
+def agent_history_error() -> HTTPException:
+    return _error(
+        status.HTTP_409_CONFLICT,
+        "AGENT_HAS_HISTORY",
+        "The agent has recorded work or activity and cannot be deleted; pause it instead",
+    )
+
+
 async def require_assignable_agent(
     db: AsyncSession, company_id: uuid.UUID, agent_id: uuid.UUID
 ) -> Agent:
