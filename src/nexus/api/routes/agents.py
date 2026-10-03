@@ -429,12 +429,34 @@ async def agent_heartbeat(agent_id: uuid.UUID, db: DbSession, company_id: Curren
 
 
 
-@router.delete("/api/v1/agents/{agent_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/api/v1/agents/{agent_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[require_permission("write", "agent")],
+)
 async def delete_agent(agent_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId) -> None:
-    """Delete an agent permanently. Nullifies all foreign key references first."""
+    """Delete an agent that owns no open work, or refuse with a stable 409.
+
+    Every query is scoped to the caller's company. 409 AGENT_OWNS_ACTIVE_WORK when the agent
+    holds a task that is not completed, failed or cancelled (ordinary, work order or work
+    child, including one in review) or a live attempt; that ownership is never nulled.
+    Retention: a terminal task of this company only loses its owner; recorded attempts (and
+    any other row that references the agent) are history that pins it (409 AGENT_HAS_HISTORY).
+    """
     from sqlalchemy import delete as sa_delete, update as sa_update
+    from sqlalchemy.exc import IntegrityError
     from nexus.models.task import Task, Goal
     from nexus.models.agent_worktree import AgentWorktree
+    from nexus.services import task_service
+
+    known = await db.scalar(
+        select(Agent.id).where(Agent.id == agent_id, Agent.company_id == company_id)
+    )
+    if known is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Agent {agent_id} not found",
+        )
 
     # Worktree records are history and pin their agent (RESTRICT), so refuse
     # before touching anything rather than surface a raw FK error.
@@ -449,14 +471,31 @@ async def delete_agent(agent_id: uuid.UUID, db: DbSession, company_id: CurrentCo
             detail=f"Agent {agent_id} has agent worktrees and cannot be deleted",
         )
 
-    # Nullify references from other tables
-    await ceo_service.release_reports(db, company_id, agent_id)
-    await db.execute(sa_update(Task).where(Task.assigned_agent_id == agent_id).values(assigned_agent_id=None))
-    await db.execute(sa_update(Goal).where(Goal.owner_agent_id == agent_id).values(owner_agent_id=None))
+    await task_service.refuse_if_agent_owns_work(db, company_id, agent_id)
 
-    # Delete the agent
-    stmt = sa_delete(Agent).where(Agent.id == agent_id, Agent.company_id == company_id)
-    result = await db.execute(stmt)
+    try:
+        # Reports move to the CEO; terminal tasks and goals of this company lose this owner.
+        await ceo_service.release_reports(db, company_id, agent_id)
+        await db.execute(
+            sa_update(Task)
+            .where(
+                Task.company_id == company_id,
+                Task.assigned_agent_id == agent_id,
+                Task.status.in_(task_service.CLOSED_TASK_STATUSES),
+            )
+            .values(assigned_agent_id=None)
+        )
+        await db.execute(
+            sa_update(Goal)
+            .where(Goal.company_id == company_id, Goal.owner_agent_id == agent_id)
+            .values(owner_agent_id=None)
+        )
+        stmt = sa_delete(Agent).where(Agent.id == agent_id, Agent.company_id == company_id)
+        result = await db.execute(stmt)
+    except IntegrityError:
+        # Another row still references the agent, or work arrived meanwhile.
+        await db.rollback()
+        raise task_service.agent_history_error() from None
     if result.rowcount == 0:  # type: ignore[union-attr]
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

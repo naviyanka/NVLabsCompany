@@ -484,7 +484,11 @@ async def _drive_goal(db: AsyncSession, goal: Any) -> None:
             return
 
         # Route unassigned pending subtasks
-        pending_unassigned = [t for t in subtasks if t.status == "pending" and not t.assigned_agent_id]
+        pending_unassigned = await _without_work_owned(
+            db,
+            company_id,
+            [t for t in subtasks if t.status == "pending" and not t.assigned_agent_id],
+        )
         if pending_unassigned:
             await _route_subtasks(db, pending_unassigned, company_id)
             return
@@ -538,10 +542,31 @@ async def _decompose_goal(db: AsyncSession, goal: Any, company_id: uuid.UUID) ->
     logger.info("Goal %s: decomposed into %d subtasks", goal.id, len(subtasks))
 
 
+async def _without_work_owned(
+    db: AsyncSession, company_id: uuid.UUID, tasks: list[Any]
+) -> list[Any]:
+    """Drop work orders and work children (and any task carrying a work_spec).
+
+    The work lifecycle owns their owner and status, so a generic router must never pick
+    one up as an unowned task. Uses the canonical ``work_service.is_work_owned``.
+    """
+    from nexus.services import work_service
+
+    return [
+        t
+        for t in tasks
+        if not t.work_spec and not await work_service.is_work_owned(db, company_id, t.id)
+    ]
+
+
 async def _route_subtasks(db: AsyncSession, tasks: list[Any], company_id: uuid.UUID) -> None:
     """Route unassigned subtasks to the best available agents."""
     from nexus.models.agent import Agent
     from nexus.orchestration.router import AgentCandidate, AgentRouter
+
+    tasks = await _without_work_owned(db, company_id, tasks)
+    if not tasks:
+        return
 
     # Load active agents
     agent_stmt = select(Agent).where(
