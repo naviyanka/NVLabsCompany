@@ -192,6 +192,77 @@ class TestStaleClaimReaping:
         assert after.status == "failed"
 
 
+class TestWorkOrdersAreNotLegacySubtasks:
+    """A company work order is owned by nexus.services.work_service, never by this loop."""
+
+    async def _order(self, factory, company, goal=None, *, started_ago: int | None = None):
+        from nexus.services import work_service
+
+        async with factory() as db:
+            task, _ = await work_service.create_work_order(
+                db,
+                company.id,
+                scope="human:op",
+                actor="op",
+                title="Quarterly report",
+                idempotency_key="k1",
+                goal_id=goal.id if goal else None,
+            )
+            if started_ago is not None:
+                stored = await db.get(Task, task.id)
+                stored.status = "in_progress"
+                stored.started_at = utcnow() - timedelta(seconds=started_ago)
+                await db.commit()
+            return task.id
+
+    async def test_reaper_leaves_a_work_order_awaiting_its_manager(self, company_db) -> None:
+        factory, company, _agent, _goal, task = company_db
+        age = orchestrator.STALE_SUBTASK_SECONDS + 1
+        order = await self._order(factory, company, started_ago=age)
+        async with factory() as session:
+            stored = await session.get(Task, task.id)
+            stored.status = "in_progress"
+            stored.started_at = utcnow() - timedelta(seconds=age)
+            await session.commit()
+
+        async with factory() as db:
+            assert await orchestrator._reap_stale_subtasks(db) == 1  # only the ordinary claim
+            await db.commit()
+
+        assert (await reload(factory, order)).status == "in_progress"
+        assert (await reload(factory, task.id)).status == "failed"
+
+    async def test_goal_driver_never_runs_a_work_order_as_a_plain_call(
+        self, company_db, monkeypatch
+    ) -> None:
+        factory, company, agent, _goal, task = company_db
+
+        async def never(*_args, **_kwargs):
+            raise AssertionError("a work order must not reach the model through the goal loop")
+
+        monkeypatch.setattr(chat, "_call_llm", never)
+        monkeypatch.setattr("nexus.database.async_session_factory", factory)
+        async with factory() as session:
+            other = Goal(company_id=company.id, title="Quarterly", owner_agent_id=agent.id)
+            session.add(other)
+            await session.commit()
+            goal_id = other.id
+        order = await self._order(factory, company, other)
+
+        async with factory() as db:
+            goal = await db.get(Goal, goal_id)
+            for _ in range(2):
+                await orchestrator._drive_goal(db, goal)
+            await db.commit()
+
+        stored = await reload(factory, order)
+        assert (stored.status, stored.assigned_agent_id, stored.started_at) == (
+            "pending",
+            None,
+            None,
+        )
+
+
 class TestStrandedGoalReclaim:
     """A goal handed to a workflow that died has to come back to the tick."""
 

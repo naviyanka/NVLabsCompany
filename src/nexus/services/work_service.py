@@ -1,6 +1,10 @@
 """Company work: the one lifecycle every route, tool and worker goes through.
 
-A *work order* is a top-level ``Task``. The CEO delegates it to a manager
+A *work order* is a top-level ``Task`` stamped with :data:`WORK_ORDER` in its
+``work_spec`` (no migration: the column already exists, and a real ``WorkSpec``
+forbids the ``kind`` key, so the stamp cannot be forged through the task routes).
+An ordinary top-level ``Task`` carries no stamp and never enters this lifecycle.
+The CEO delegates it to a manager
 (``delegated``); the manager assigns one child ``Task`` to a direct report with
 a text ``WorkSpec``; the employee's attempt answers it; the attempt then waits
 for a manager's review before anything counts as done::
@@ -28,7 +32,7 @@ from datetime import datetime
 from typing import Any
 
 from fastapi import HTTPException
-from sqlalchemy import func, select, update
+from sqlalchemy import and_, func, select, update
 from sqlalchemy.exc import IntegrityError
 
 from nexus.models.agent import Agent
@@ -48,6 +52,20 @@ SUMMARY_CHARS = 500
 DIGEST_MAX_CHARS = 4000
 OPEN_LIMIT = 25
 CLOSED_LIMIT = 10
+WORK_ORDER: dict[str, Any] = {"kind": "work_order"}
+
+
+def is_work_order(task: Task) -> bool:
+    """A top-level task created by :func:`create_work_order` (not an ordinary task)."""
+    return task.parent_task_id is None and task.work_spec == WORK_ORDER
+
+
+def _work_order_clause() -> Any:
+    """SQL form of :func:`is_work_order`."""
+    return and_(
+        Task.parent_task_id.is_(None),
+        Task.work_spec["kind"].as_string() == WORK_ORDER["kind"],
+    )
 
 
 def _error(status_code: int, code: str, message: str) -> HTTPException:
@@ -116,7 +134,7 @@ async def create_work_order(
         description=description,
         priority=priority,
         goal_id=goal_id,
-        work_spec=work_spec,
+        work_spec=work_spec if work_spec is not None else dict(WORK_ORDER),
     )
     try:
         async with db.begin_nested():
@@ -156,6 +174,17 @@ async def _row(db: Any, company_id: uuid.UUID, task_id: uuid.UUID) -> Task:
     return task
 
 
+async def require_work(db: Any, company_id: uuid.UUID, task_id: uuid.UUID) -> Task:
+    """The task if it is work (a work order or a work-spec task); else a plain 404.
+
+    An ordinary task is not work, so the work routes answer as if it did not exist.
+    """
+    task = await _row(db, company_id, task_id)
+    if not task.work_spec:
+        raise _error(404, "TASK_NOT_FOUND", f"Task {task_id} not found")
+    return task
+
+
 async def delegate_to_manager(
     db: Any,
     company_id: uuid.UUID,
@@ -172,8 +201,11 @@ async def delegate_to_manager(
     """
     await ms.require_report(db, company_id, ceo_id, manager_id)
     task = await _row(db, company_id, task_id)
-    if task.work_spec:
+    if task.work_spec and not is_work_order(task):
         raise _error(422, "TASK_HAS_WORK_SPEC", "Delegate a work-spec task as an attempt")
+    if not is_work_order(task):
+        # An ordinary task is not work: same answer as a task that does not exist.
+        raise _error(404, "TASK_NOT_FOUND", f"Task {task_id} not found")
     res = await db.execute(
         update(Task)
         .where(
@@ -228,7 +260,7 @@ async def assign_task(
     actor = principal.display_name
     await ms.require_report(db, company_id, manager_id, employee_id)
     parent = await _row(db, company_id, work_order_id)
-    if parent.assigned_agent_id != manager_id or parent.parent_task_id is not None:
+    if parent.assigned_agent_id != manager_id or not is_work_order(parent):
         # Not this manager's work order: indistinguishable from a missing one.
         raise _error(404, "TASK_NOT_FOUND", f"Task {work_order_id} not found")
     child_id = uuid.uuid5(NAMESPACE, f"{company_id}:{manager_id}:assigned:{idempotency_key}")
@@ -769,7 +801,7 @@ async def status(
     closed ones. Result text is the stored deliverable, clipped.
     """
     now = _now()
-    base = select(Task).where(Task.company_id == company_id, Task.parent_task_id.is_(None))
+    base = select(Task).where(Task.company_id == company_id, _work_order_clause())
     if work_id is not None:
         roots = list((await db.execute(base.where(Task.id == work_id))).scalars())
         if not roots:

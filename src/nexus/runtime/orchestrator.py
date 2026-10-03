@@ -108,7 +108,8 @@ async def _reap_stale_subtasks(db: AsyncSession) -> int:
         Task.started_at.is_not(None),
         Task.started_at < cutoff,
     )
-    # A work task's attempt holds its own lease; task_attempts recovers it.
+    # A work task's attempt holds its own lease (task_attempts recovers it), and a work
+    # order is stamped in work_spec and owned by work_service: neither is a legacy claim.
     stale = [t for t in (await db.execute(stmt)).scalars().all() if not t.work_spec]
 
     handled = 0
