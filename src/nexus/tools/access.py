@@ -62,6 +62,8 @@ from nexus.tools.policy_engine import (
 # matching deny rule always wins, whatever its priority.
 EXPLICIT_ALLOW_ONLY = frozenset({
     "manager_request_hire",
+    # Hands a task to another agent and queues its model run.
+    "manager_delegate_task",
     # Work lifecycle: assigning starts a model run, reviewing decides a deliverable.
     "manager_assign_work",
     "manager_review_work",

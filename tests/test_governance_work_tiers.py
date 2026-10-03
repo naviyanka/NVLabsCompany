@@ -29,8 +29,8 @@ from tests.test_governance_presets import _draft, _make, _publish
 from tests.test_governance_studio import _eff, _policy, api  # noqa: F401 -- fixtures, helpers
 from tests.test_tool_access import ctx, factory, t  # noqa: F401 -- fixtures
 
-WORK_TOOLS = ("manager_assign_work", "manager_review_work")
-MANAGER_TOOLS = ("manager_delegate_task", *WORK_TOOLS)
+WORK_TOOLS = ("manager_delegate_task", "manager_assign_work", "manager_review_work")
+MANAGER_TOOLS = WORK_TOOLS
 FIRST_LEVEL = {
     "ceo_get_work_status": 0,
     "manager_delegate_task": 3,
@@ -120,6 +120,60 @@ class TestExplicitAllowOnly:
         eff = await _eff(factory, t)
         assert eff["org.manager_review_work"]["state"] == "denied"
         assert not await _runtime(factory, t, "manager_review_work")
+
+
+class TestDelegateTaskIsExplicitAllowOnly:
+    """``manager_delegate_task`` hands a task to another agent and queues its run."""
+
+    async def test_default_wildcard_named_allow_and_deny_agree_with_the_simulator(
+        self,
+        factory,
+        t,  # noqa: F811
+    ):
+        tool = "manager_delegate_task"
+        assert tool in EXPLICIT_ALLOW_ONLY
+        assert _by_tool(tool)["explicit_allow_required"] is True
+        assert (await _eff(factory, t))[f"org.{tool}"]["state"] == "denied"
+        assert not await _runtime(factory, t, tool)
+        await _policy(
+            factory,
+            t["acme"],
+            name="wild",
+            effect="allow",
+            priority=5,
+            conditions={"tool_name": ["manager_*"]},
+        )
+        assert (await _eff(factory, t))[f"org.{tool}"]["state"] == "denied"
+        assert not await _runtime(factory, t, tool)
+        await _policy(
+            factory,
+            t["acme"],
+            name="named",
+            effect="allow",
+            priority=10,
+            conditions={"tool_name": [tool]},
+        )
+        assert (await _eff(factory, t))[f"org.{tool}"]["state"] == "allowed"
+        assert await _runtime(factory, t, tool)
+        await _policy(
+            factory,
+            t["acme"],
+            name="freeze",
+            effect="deny",
+            priority=1,
+            conditions={"tool_name": [tool]},
+        )
+        assert (await _eff(factory, t))[f"org.{tool}"]["state"] == "denied"
+        assert not await _runtime(factory, t, tool)
+
+    async def test_a_stock_write_tool_is_still_allowed_by_default(self, factory, t):  # noqa: F811
+        """The probe the older governance tests use: not explicit-only, so a default allows it."""
+        assert "msg-slack-send" not in EXPLICIT_ALLOW_ONLY
+        async with factory() as db:
+            decision = await check_tool_access(
+                db, ctx(t), tool_name="msg-slack-send", default_risk="write", enforcement="audit"
+            )
+        assert decision.allowed
 
 
 class TestPresetTiers:

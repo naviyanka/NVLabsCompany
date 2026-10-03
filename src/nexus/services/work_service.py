@@ -129,6 +129,38 @@ def can_view_work_deliverable(principal: Any) -> bool:
     return False
 
 
+async def require_work_owner(
+    db: Any, company_id: uuid.UUID, task_id: uuid.UUID, manager_id: uuid.UUID
+) -> None:
+    """For a work-owned task, only the manager who owns its work order may act on it.
+
+    Ordinary tasks (and a missing one, which the caller's own load answers) pass. A work
+    order or a child of one is owned by the manager recorded on the order; any other caller,
+    whatever the task's status or attempt history, gets the same 404 as a missing task and
+    nothing changes. The order itself is delegated, never executed, so even its owner is
+    refused (409 ``WORK_ORDER_NOT_EXECUTABLE``); an unknown ``kind`` is refused the same
+    closed way (409 ``WORK_OWNED_BY_LIFECYCLE``).
+    """
+    if not await is_work_owned(db, company_id, task_id):
+        return
+    task = (
+        await db.execute(select(Task).where(Task.id == task_id, Task.company_id == company_id))
+    ).scalar_one()
+    root = task
+    if task.parent_task_id is not None:
+        root = (
+            await db.execute(
+                select(Task).where(Task.id == task.parent_task_id, Task.company_id == company_id)
+            )
+        ).scalar_one_or_none()
+    if root is None or root.assigned_agent_id != manager_id:
+        raise _error(404, "TASK_NOT_FOUND", f"Task {task_id} not found")
+    if is_work_order(task):
+        raise _error(409, "WORK_ORDER_NOT_EXECUTABLE", "A work order is delegated, not executed")
+    if task.parent_task_id is None:
+        refuse_if_work_owned(True)
+
+
 def refuse_if_work_owned(owned: bool) -> None:
     """The stable error the generic task routes answer with for work-owned tasks."""
     if owned:

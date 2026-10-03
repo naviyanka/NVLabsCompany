@@ -82,7 +82,8 @@ _T: dict[str, tuple[str, str, str | None, tuple[str, ...]]] = {
         "Delegate a Task to a Direct Report",
         "Allows a manager to assign an existing task to one of their direct reports. "
         "Repeating the request does not create a duplicate.",
-        None, ()),
+        "Only direct reports. Company work only by the manager that owns its work order.",
+        ()),
     "org.manager_employee_status": (
         "View a Direct Report's Status",
         "Allows a manager to read one direct report's current state, active task, progress, "
