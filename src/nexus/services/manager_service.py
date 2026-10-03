@@ -135,7 +135,12 @@ async def delegate(
 
     Returns ``(attempt, created)``. Commits.
     """
+    from nexus.services import work_service
+
     await require_report(db, company_id, manager_id, employee_id)
+    # Marked work belongs to the manager that owns its work order: nobody else may take over
+    # a failed or idle child, and nothing is written before this check.
+    await work_service.require_work_owner(db, company_id, task_id, manager_id)
     task = await task_attempts._load_task(db, company_id, task_id)
     if task.assigned_agent_id != employee_id:
         active = await task_attempts._active(db, company_id, task_id)
