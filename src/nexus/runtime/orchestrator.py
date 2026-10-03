@@ -211,7 +211,8 @@ async def reconcile_recovery(db: AsyncSession, company_id: uuid.UUID | None = No
     if company_id is not None:
         stmt = stmt.where(Task.company_id == company_id)
     result = await db.execute(stmt)
-    tasks = list(result.scalars().all())
+    # A work task's attempt holds its own lease; this legacy pass never resets one.
+    tasks = [t for t in result.scalars().all() if not t.work_spec]
 
     recovered_count = 0
     now = utcnow()

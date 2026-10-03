@@ -272,6 +272,16 @@ class TaskExecutor:
         diagnosis = retry_result.diagnosis
         last_error = diagnosis.diagnosis_detail if diagnosis else "Unknown error after retries"
 
+        # Work orders and work children are owned by the work lifecycle: a retry
+        # escalation may not move their owner or add children behind its back.
+        from nexus.services import work_service
+
+        if escalation in (
+            EscalationAction.REASSIGN,
+            EscalationAction.DECOMPOSE,
+        ) and await work_service.is_work_owned(self._db, task.company_id, task.id):
+            escalation = EscalationAction.REPORT_BLOCKER
+
         # Act on escalation (not just log)
         if escalation == EscalationAction.REASSIGN:
             # Re-route to a different agent

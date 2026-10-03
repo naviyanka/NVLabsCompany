@@ -1,11 +1,10 @@
 """Task Service - CRUD and status management for tasks."""
 
 import uuid
-from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import HTTPException, status
-from sqlalchemy import select, update, delete
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from nexus.models.agent import Agent
@@ -236,99 +235,3 @@ class TaskService:
         stmt = stmt.offset(offset).limit(limit).order_by(Task.priority.desc())
         result = await self._db.execute(stmt)
         return list(result.scalars().all())
-
-    async def assign_task(
-        self, task_id: uuid.UUID, agent_id: uuid.UUID
-    ) -> Task | None:
-        """Assign a task to an agent.
-
-        Args:
-            task_id: The task to assign.
-            agent_id: The agent to assign the task to.
-
-        Returns:
-            The updated Task instance.
-        """
-        stmt = (
-            update(Task)
-            .where(Task.id == task_id)
-            .values(
-                assigned_agent_id=agent_id,
-                updated_at=datetime.now(timezone.utc),
-            )
-        )
-        await self._db.execute(stmt)
-        return await self.get_task(task_id)
-
-    async def update_status(
-        self, task_id: uuid.UUID, status: str
-    ) -> Task | None:
-        """Update the status of a task.
-
-        Args:
-            task_id: The task to update.
-            status: The new status value.
-
-        Returns:
-            The updated Task instance.
-        """
-        values: dict[str, Any] = {
-            "status": status,
-            "updated_at": datetime.now(timezone.utc),
-        }
-        if status == "running":
-            values["started_at"] = datetime.now(timezone.utc)
-
-        stmt = update(Task).where(Task.id == task_id).values(**values)
-        await self._db.execute(stmt)
-        return await self.get_task(task_id)
-
-    async def complete_task(
-        self, task_id: uuid.UUID, result: str | None = None
-    ) -> Task | None:
-        """Mark a task as completed.
-
-        Args:
-            task_id: The task to complete.
-            result: Optional result text.
-
-        Returns:
-            The updated Task instance.
-        """
-        stmt = (
-            update(Task)
-            .where(Task.id == task_id)
-            .values(
-                status="completed",
-                result=result,
-                completed_at=datetime.now(timezone.utc),
-                updated_at=datetime.now(timezone.utc),
-            )
-        )
-        await self._db.execute(stmt)
-        return await self.get_task(task_id)
-
-    async def fail_task(
-        self, task_id: uuid.UUID, error: str
-    ) -> Task | None:
-        """Mark a task as failed with an error message.
-
-        Args:
-            task_id: The task that failed.
-            error: Error description.
-
-        Returns:
-            The updated Task instance.
-        """
-        stmt = (
-            update(Task)
-            .where(Task.id == task_id)
-            .values(
-                status="failed",
-                error=error,
-                completed_at=datetime.now(timezone.utc),
-                updated_at=datetime.now(timezone.utc),
-            )
-        )
-        await self._db.execute(stmt)
-        return await self.get_task(task_id)
