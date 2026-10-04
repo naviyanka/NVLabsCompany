@@ -95,18 +95,71 @@ Where each path gets its slot:
 | Hermes loop | `(round, position)`: the loop round and the call's index in that round's list |
 | Governed loop | `(round_no, position)` |
 | MCP adapter, ToolConnection calls | `(0, position)` |
-| Inbound MCP bridge (agent CLI) | `(-1, n)`: `n` counts this server instance's ledgered writes, in call order; read-only calls are not counted |
+| Inbound MCP bridge (agent CLI) | `(-1, ordinal)`: the ordinal is allocated durably per client `Idempotency-Key` (see "Inbound MCP bridge identity") |
 | REST node calls | none: no turn, not ledgered |
 
 Parallel calls in one round have distinct positions fixed when the model's batch is read, so
-the execution order does not matter. The bridge's counter is the weakest identity: it assumes
-a recovered agent run issues the same ordered sequence of writes. If it does not, the
-mismatch rule above stops the divergent call. Calls issued in parallel over the bridge are
-numbered by arrival, so their order is not deterministic and they can fail closed on recovery.
+the execution order does not matter.
 
 A ledgered write (any write class, inside a chat turn, in a company) that reaches the guard with
 no slot is refused with `effect_ledger_unavailable` before any approval, notification or run.
 A path that cannot supply a slot does not get recovery it cannot provide.
+
+### Inbound MCP bridge identity
+
+The bridge builds a new `MCPServer` for every HTTP request, and a turn's agent process can be
+restarted, so nothing in memory can say "this is the same write". The identity of a bridge
+write is therefore the client's own `Idempotency-Key` request header, mapped to a slot in the
+database table `tool_bridge_slots`:
+
+- The primary key is `(company_id, turn_id, idempotency_key)`; a second unique constraint on
+  `(company_id, turn_id, ordinal)` makes the ordinal unique. The first request with a key takes
+  the turn's next free ordinal, and every retry of that key, from any process and after any
+  restart, finds the same row and so the same slot `(-1, ordinal)`. Two different keys never
+  share a slot, however concurrently they arrive: the database arbitrates and the loser retries
+  with the next ordinal. Nothing depends on arrival order or on a counter in memory.
+- `company_id` and `turn_id` come from the authenticated bridge credential (the execution-scoped
+  token resolved against the running chat turn), never from the client. A client cannot name
+  another tenant's or turn's slot, and the provider's tool-call id is not part of the identity.
+- The row stores the tool name and the digest of the arguments. A retry that reuses a key for a
+  different tool or different arguments is refused with `IDEMPOTENCY_KEY_REUSED` and nothing
+  runs.
+- A write with no `Idempotency-Key` is refused with `IDEMPOTENCY_KEY_REQUIRED` before any
+  dispatch, and no slot is reserved. A key that is not 1 to 128 characters of `A-Z a-z 0-9 . _
+  : ~ -` is a 400 from the route. Read-only calls need no key and take no slot.
+- Keys are scoped to the turn, so the same key in another turn is another write.
+
+Client requirement: the client must send a fresh, unique `Idempotency-Key` for every intended
+write and send the same key again when it retries that write. Two intentional identical writes
+need two keys. A stock agent CLI that cannot set a per-request header cannot make a bridge write
+with this design; its writes fail closed with `IDEMPOTENCY_KEY_REQUIRED` rather than run without
+a durable identity.
+
+## Recovery of a turn that already wrote
+
+A recovered chat turn has a second execution under a new `execution_id` but the same turn id.
+`ChatTurn.attempt_count` counts the executions and is read from the turn row by the server;
+neither a tool argument nor an HTTP header can set it. Each ledger row records the execution
+that first claimed its slot (`turn_attempt`).
+
+A durable record of what the first run *planned* does not exist: after recovery the model may
+plan the same write at a different slot (for example after an extra read-only round), and the
+slot alone cannot tell a new write from a shifted one. The rule is deliberately small:
+
+| Call in a recovered execution (attempt > 1) | Result |
+| --- | --- |
+| Same tool and arguments at a slot an earlier execution used | replays the stored result, or follows the state machine for that row |
+| Different tool or arguments at an occupied slot, including reordered calls | `effect_recovery_required` (`tool_effect.slot_mismatch` is audited) |
+| Write at an empty slot, and an earlier execution already claimed a write in this turn | `effect_recovery_required`, whether the write is idempotent or not. No row is left behind and no grant is spent |
+| Write at an empty slot, and no earlier execution claimed a write | runs normally |
+| Read-only call | runs normally, never ledgered |
+
+Rows created by the current execution do not count as earlier writes, so a recovered turn that
+had written nothing may write freely, and a recovered turn that is making new progress is not
+blocked by its own new rows. The cost is that a recovered turn which wrote before cannot make
+further new writes at all. A blocked call has no ledger row, so there is nothing to resolve
+through the manual recovery routes: check in the external system what the first run did, and
+if the remaining work is still wanted, start it in a new turn.
 
 ## State machine
 
@@ -152,14 +205,19 @@ Everything else is `ambiguous`, including errors that look harmless.
 | Result flagged `effect_unknown`, `is_error`, or `success = false` | `ambiguous` |
 | Plain `ValueError`, `JSONDecodeError`, any other exception after execution began | `ambiguous` |
 | Timeout, cancellation | `ambiguous` |
-| HTTP error status (400, 422, 5xx alike), or an unreadable response body (Discord and Telegram answering 200 with a body that is not JSON) | `ambiguous` |
+| `http-request` and `msg-webhook-notify` that completed an HTTP exchange, **whatever the status code (including 4xx and 5xx)** | `succeeded`: the executor returns the response instead of raising, so the status is part of the stored, replayed result and the call is not retried |
+| Slack, Discord or Telegram answering with an error status, or Discord and Telegram answering 200 with a body that is not JSON | `ambiguous` |
+| HTTP error status from an MCP server (`is_error`; a 5xx also sets `effect_unknown`) | `ambiguous` |
 | In-band MCP error | `ambiguous` |
 | Obsidian `conflict`, `denied`, `approval_failure`, `secret_rejection`, `invalid_content` and other rejected statuses | `failed` |
 | Obsidian `recovery_failure` and any other uncertain status | `ambiguous` |
 | Result that cannot be serialized or retained | `ambiguous`, caller sees `effect_result_unavailable` |
 
-No HTTP 4xx is assumed to prove that nothing happened. An exception is recorded by type name
-only; its message is never stored.
+No HTTP 4xx is assumed to prove that nothing happened. For `http-request` and
+`msg-webhook-notify` that means a completed 4xx or 5xx response is recorded as an *executed*
+effect, not as a failure: a recovered turn gets the same response back and the request is not
+sent again. Only an exception (timeout, connection failure) after dispatch is `ambiguous`. An
+exception is recorded by type name only; its message is never stored.
 
 For an idempotent tool, `ambiguous` is retried automatically (the proof above makes the retry
 harmless).
@@ -170,9 +228,15 @@ What the model sees:
 | --- | --- |
 | `success`, `replayed: true` | An earlier run in this turn is returned. The tool did not run. |
 | `effect_in_progress` | Another worker holds the call. Try later. |
-| `effect_recovery_required` | The outcome is unknown, or the slot holds a different call. An operator must decide. |
+| `effect_recovery_required` | Not run. Either the outcome is unknown, or the slot holds a different call, or (recovered turn) this is a new write at an empty slot after earlier executions already wrote. The last case leaves no ledger row (see "Recovery of a turn that already wrote"). |
 | `effect_result_unavailable` | The tool ran, but its result could not be retained. The effect is recorded as ambiguous and is not rerun. |
-| `effect_ledger_unavailable` | The ledger could not be used (no slot, or arguments with no canonical form), so the write was refused. |
+| `effect_ledger_unavailable` | Not run, or not replayable: the ledger could not be used (no slot, no database, or arguments with no canonical form), or the call already ran but its stored result cannot be decoded (replay decode failure; the effect is not rerun). |
+| `denied` | Not run: the access check refused it, or the temporary grant it relies on was spent or ended before the claim. |
+| `failed` (Hermes tool loop only) | The tool raised, and the Hermes adapter returns `{"error": ..., "status": "failed"}` to the model. The ledger row is **not** `failed`: an exception after dispatch is `ambiguous`, so a recovered turn is blocked at that slot with `effect_recovery_required` (non-idempotent) or retried (idempotent). The model's view and the ledger deliberately differ. |
+
+A tool that returns a failing result without raising (an in-band MCP error, an executor result
+with `success = false`) reaches the model as `status: success` with the failing result inside,
+because the guard cannot know more than the tool says; the ledger row is `ambiguous`.
 
 ## Idempotent retry
 
@@ -222,7 +286,20 @@ every call, including a replay: a revoked authority blocks the call before the s
 is returned.
 
 The notice is marked before it is sent, so it is at-most-once. A crash between the mark and the
-send loses that notification; it is never sent twice.
+send loses that notification; it is never sent twice, and nothing resends it on recovery. An
+operator who needs to know about a call that ran during such a crash finds it in the ledger and
+the audit log, not in the notification channel.
+
+### Temporary grants
+
+A temporary allow with `max_uses` is spent once per **slot**, not per call content. A ledgered
+write spends inside its claim transaction, and only when the decision is `run`: a replay, a busy
+or blocked slot, a slot mismatch and a blocked recovery spend nothing, and a retake of the same
+slot after a crash does not spend again. Two identical calls at two different slots are two
+uses, so a grant with `max_uses = 1` allows one of them and denies the other. When the grant is
+used up, expired or revoked before the claim, the call is `denied` and leaves no ledger row. A
+call that is not ledgered spends under its slot key when it has one, or under a fresh key when
+it has none.
 
 ## What the ledger stores
 
@@ -282,44 +359,59 @@ POST /api/v1/tool-effects/{effect_id}/resolve
 - **Lease.** `LEASE_SECONDS` is 900. There is no heartbeat, so a call that runs longer is
   treated as interrupted by a later claim: an idempotent call is retried, a non-idempotent one
   waits for an operator.
-- **Migration.** `c5e8a3b71d94` creates `tool_effects` and `tool_notifications` with forced row
-  level security and the usual `tenant_isolation` policy on PostgreSQL. No existing table,
-  policy or the memory tables change.
+- **Migration.** `c5e8a3b71d94` creates `tool_effects`, `tool_notifications` and
+  `tool_bridge_slots` with forced row level security and the usual `tenant_isolation` policy on
+  PostgreSQL. `tool_effects.turn_attempt` records the execution that claimed each slot. No
+  existing table, policy or the memory tables change.
 
 ### Downgrade
 
-Downgrading `c5e8a3b71d94` drops the ledger, which is the only record that a write already
-happened. It is therefore refused by default.
+Downgrading `c5e8a3b71d94` drops three tables. Two of them are the only record that something
+already happened: `tool_effects` (the writes) and `tool_notifications` (the notices already
+sent). It is therefore refused by default.
 
-- **Empty ledger**: the downgrade succeeds.
-- **Any row in `tool_effects`**: the downgrade raises `Refusing to downgrade` and deletes
-  nothing. Row level security is left as it was.
+- **All three tables empty**: the downgrade succeeds.
+- **Any row in `tool_effects` or in `tool_notifications`** (either one alone is enough): the
+  downgrade raises `Refusing to downgrade`, reports both row counts, and deletes nothing. The
+  check and the refusal are transactional, and row level security is left as it was.
+- **Rows only in `tool_bridge_slots`**: not a reason to refuse. Those rows only map client keys
+  to ordinals; with no effect or notice behind them nothing can repeat.
 - **Explicit override**: set `NEXUS_DESTROY_TOOL_EFFECTS=destroy-ledger` (that exact value).
-  The downgrade logs a `DESTRUCTIVE DOWNGRADE` warning with the row counts saying replay
-  protection is lost, then drops both tables.
+  The downgrade logs a `DESTRUCTIVE DOWNGRADE` warning that names the table row counts only
+  (no tool names, arguments or results) and says replay protection is lost, then drops all
+  three tables.
 - **Re-upgrade** after a destructive downgrade creates empty tables.
 
 After a destructive downgrade and re-upgrade, turns that were in flight must not be recovered
 automatically: their completed non-idempotent calls are no longer in the ledger and would run
-again. Cancel or manually close those turns, or check the external systems first. Nothing is
-cleaned up silently.
+again, their notifications would be sent again, and a recovered bridge client's retried keys
+would be allocated as brand new writes. Cancel or manually close those turns, or check the
+external systems first. Nothing is cleaned up silently.
 
 ## Known limits
 
 - Only calls inside a chat turn are ledgered. REST node calls and background task attempts are
   not; task-attempt recovery has its own idempotency key.
-- The inbound MCP bridge numbers writes by arrival order. A recovered agent that issues a
-  different sequence, or parallel writes in a different order, fails closed
-  (`effect_recovery_required`) rather than running, but needs an operator.
+- A bridge write is only as safe as its client's `Idempotency-Key`: a client that sends a new
+  key when it retries the same write executes it twice, and a client that cannot send the
+  header cannot write through the bridge at all. The server enforces uniqueness and replay of a
+  key; it cannot know that two different keys meant one intended write.
+- A recovered turn that already made writes can make no new write (`effect_recovery_required`),
+  idempotent or not, because no durable plan record says which slots the first run planned.
+  The blocked call leaves no ledger row for an operator to resolve.
 - A succeeded row at a slot where recovery then plans a different call stays blocked until an
   operator decides.
-- Notifications are at-most-once: a crash between marking and sending loses the notice.
-- `db-redis-set` refreshes the key's TTL when retried. A hire approved automatically but not
-  yet materialized when the process dies is completed by a human approval only (the work is
-  not duplicated). A CEO delegation that dies between the attempt commit and the memory
-  write loses that memory entry.
-- A temporary grant is spent under a key derived from the turn, tool and arguments, so
-  identical calls in one turn share one use of it.
+- Notifications are at-most-once: a crash between marking and sending loses the notice and
+  nothing resends it.
+- `db-redis-set` is non-idempotent, with or without a `ttl`: a rerun could extend the key's
+  life or overwrite a newer value, so an interrupted call waits for an operator. A hire
+  approved automatically but not yet materialized when the process dies is completed by a
+  human approval only (the work is not duplicated). A CEO delegation that dies between the
+  attempt commit and the memory write loses that memory entry.
+- `http-request` and `msg-webhook-notify` record a completed HTTP response, including 4xx and
+  5xx, as an executed effect. A request the remote server rejected is not retried by recovery.
+- A temporary grant is spent once per slot, so identical calls at different slots each take a
+  use (see "Temporary grants").
 - `HTTPException` from `ceo_record_decision` (non-idempotent) is ambiguous because it cannot
   be shown to precede the effect. Idempotent tools are unaffected.
 - Classification is a declaration. If a tool's behavior changes, its class and its row in the
