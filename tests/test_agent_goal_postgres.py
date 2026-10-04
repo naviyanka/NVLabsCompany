@@ -82,6 +82,26 @@ class TestAgentsAcrossTenants:
             assert reply.status_code == 403, spelling
         assert (await stack.one(Agent, b["eve"])).name == "eve"
 
+    async def test_foreign_company_reads_match_a_missing_company_in_every_spelling(self, stack):
+        a, b = await stack.seed("A"), await stack.seed("B")
+        admin = await stack.login(a["admin"])
+        for spelling in [*_spellings(b["company"]), str(uuid.uuid4())]:
+            for path in (
+                f"/api/v1/companies/{spelling}/agents",
+                f"/api/v1/companies/{spelling}/agents/{b['eve']}",
+                f"/api/v1/companies/{spelling}/agents/{a['eve']}",
+            ):
+                reply = await admin.call("GET", path)
+                assert reply.status_code == 403, path
+                assert str(b["eve"]) not in reply.text and str(a["eve"]) not in reply.text
+        own = await admin.call("GET", f"/api/v1/companies/{a['company'].hex}/agents")
+        assert own.status_code == 200
+        assert str(a["eve"]) in {x["id"] for x in own.json()}
+        assert {x["company_id"] for x in own.json()} == {str(a["company"])}
+        assert (
+            await admin.call("GET", f"/api/v1/companies/{a['company']}/agents/{b['eve']}")
+        ).status_code == 404
+
     async def test_only_a_company_admin_changes_authority_and_nothing_leaks(self, stack):
         a = await stack.seed("A")
         viewer, admin = await stack.login(a["viewer"]), await stack.login(a["admin"])

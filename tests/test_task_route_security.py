@@ -210,7 +210,6 @@ def _routers():
 UNSCOPED_COMPANY_ROUTES = {
     "activity": 3,
     "agent_profiling": 1,
-    "agents": 2,
     "audit": 3,
     "communication": 6,
     "company_sim": 8,

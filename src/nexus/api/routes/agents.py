@@ -54,6 +54,9 @@ def _forbidden(code: str, message: str) -> HTTPException:
 # heartbeat_principal): tests/test_agent_route_security walks the router and fails a route
 # that lacks either.
 WRITE_AGENT = [require_permission("write", "agent"), principal_kinds("user", "service")]
+# The company-in-the-URL read routes: PathCompanyId (403 for any company that is not the
+# caller's, existing or not) plus an explicit read:agent.
+READ_AGENT = [require_permission("read", "agent")]
 
 
 def enforce_update_policy(principal: Principal, updates: dict[str, Any]) -> None:
@@ -264,9 +267,10 @@ async def create_agent(
 @router.get(
     "/api/v1/companies/{company_id}/agents",
     response_model=list[AgentResponse],
+    dependencies=READ_AGENT,
 )
 async def list_agents(
-    company_id: uuid.UUID,
+    company_id: PathCompanyId,
     db: DbSession,
     status_filter: str | None = None,
     limit: int = 100,
@@ -298,9 +302,10 @@ async def get_agent(agent_id: uuid.UUID, db: DbSession, company_id: CurrentCompa
 @router.get(
     "/api/v1/companies/{company_id}/agents/{agent_id}",
     response_model=AgentResponse,
+    dependencies=READ_AGENT,
 )
 async def get_agent_company_scoped(
-    company_id: uuid.UUID, agent_id: uuid.UUID, db: DbSession
+    company_id: PathCompanyId, agent_id: uuid.UUID, db: DbSession
 ) -> Any:
     """Get an agent by ID (company-scoped path for dashboard compat)."""
     stmt = select(Agent).where(Agent.id == agent_id, Agent.company_id == company_id)
