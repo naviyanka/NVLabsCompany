@@ -239,6 +239,14 @@ async def guarded_call(
     from nexus.tools.access import DENIED, AccessDecision, check_tool_access
 
     company_id = ctx.company_id if ctx is not None else None
+    turn_id = getattr(ctx, "turn_id", None)
+    # The slot's durable identity is known before the tool runs; it also names the temporary
+    # grant use this call may pay for, so a replay of the slot reads the grant as live.
+    slot_key = (
+        effects.invocation_key(company_id, turn_id, slot)
+        if company_id is not None and turn_id is not None and slot is not None
+        else None
+    )
     try:
         async with _access_session(company_id) as db:
             decision = await check_tool_access(
@@ -249,6 +257,7 @@ async def guarded_call(
                 connection_id=connection_id,
                 endpoint_url=endpoint_url,
                 default_risk=default_risk,
+                grant_key=slot_key,
             )
     except Exception as exc:  # noqa: BLE001
         # An error is a soft problem: audit mode keeps the pre-ws05
@@ -270,7 +279,6 @@ async def guarded_call(
     # recovered turn cannot repeat the effect (see nexus.tools.effects).
     held = None
     effect_class = effects.resolve_effect(effect)
-    turn_id = getattr(ctx, "turn_id", None)
     ledgered = bool(
         effect_class is not effects.EffectClass.READ_ONLY and turn_id and decision.company_id
     )
@@ -298,8 +306,12 @@ async def guarded_call(
             company_id=decision.company_id,
             invocation_key=ledger_key,
         )
-        if refusal is None and decision.temp_grant_id is not None:
-            refusal = await _spend_temp_grant(decision, ctx, tool_name, arguments)
+        if refusal is None and decision.temp_grant_id is not None and not (
+            ledgered and slot is not None
+        ):
+            # A ledgered call spends inside its claim, once it is known to run. Any other call
+            # pays here, under its slot key, or a fresh key when it has no slot.
+            refusal = await _spend_temp_grant(decision, slot_key or uuid.uuid4().hex)
 
     record = functools.partial(_record_invocation, decision, ctx, tool_name, arguments, source)
     if refusal is not None:
@@ -309,7 +321,13 @@ async def guarded_call(
     if ledgered and slot is not None:
         try:
             held = await effects.claim(
-                decision.company_id, turn_id, slot, tool_name, effect_class, arguments
+                decision.company_id,
+                turn_id,
+                slot,
+                tool_name,
+                effect_class,
+                arguments,
+                grant_id=decision.temp_grant_id,
             )
         except Exception as exc:  # noqa: BLE001 - no ledger, no write: fail closed
             logger.error("Tool effect ledger unavailable for %s: %s", tool_name, exc)
@@ -332,6 +350,13 @@ async def guarded_call(
                 return refusal
             await record("replayed", started)
             return {"status": "success", "result": replayed, "replayed": True}
+        if held.action == "denied":
+            refusal = {
+                "error": "Denied by access policy: temporary access is no longer valid",
+                "status": "denied",
+            }
+            await record(refusal["status"], started, error=refusal["error"])
+            return refusal
         if held.action != "run":
             refusal = {
                 "error": f"Tool call not run: {held.reason}",
@@ -388,24 +413,20 @@ async def guarded_call(
     return {"status": "success", "result": result}
 
 
-async def _spend_temp_grant(
-    decision: Any, ctx: Any, tool_name: str, arguments: Any
-) -> dict[str, Any] | None:
-    """Use up one use of the temporary allow this call relies on, or refuse the call.
+async def _spend_temp_grant(decision: Any, key: str) -> dict[str, Any] | None:
+    """Use up one use of the temporary allow a call with no ledger claim relies on.
 
     One conditional UPDATE, so a revoke, an expiry or a parallel call that got there first
     leaves this call denied. The grant is spent just before the tool runs, not at check time,
-    and a later tool failure does not refund it. A replay of the same turn, tool and arguments
-    is not charged twice.
+    and a later tool failure does not refund it. ``key`` is the call's slot key, so a replay of
+    the same slot is not charged twice; a call with no slot gets a fresh key and is always
+    charged. Ledgered calls spend inside :func:`nexus.tools.effects.claim` instead.
     """
     from nexus.tools import governance_overlay
 
     async with _access_session(decision.company_id) as db:
         spent = await governance_overlay.consume_temp_grant(
-            db,
-            decision.company_id,
-            decision.temp_grant_id,
-            governance_overlay.invocation_key(getattr(ctx, "turn_id", None), tool_name, arguments),
+            db, decision.company_id, decision.temp_grant_id, key
         )
         await db.commit()
     if spent:

@@ -74,7 +74,7 @@ LEASE_SECONDS = 900
 MAX_RESULT_BYTES = 16_384
 MAX_TEXT_CHARS = 500
 
-Action = Literal["run", "replay", "busy", "blocked"]
+Action = Literal["run", "replay", "busy", "blocked", "denied"]
 
 
 class EffectClass(StrEnum):
@@ -485,8 +485,14 @@ async def claim(
     tool_name: str,
     effect_class: EffectClass,
     arguments: Any,
+    grant_id: uuid.UUID | None = None,
 ) -> Claim:
     """Reserve the call at ``slot``, or say why it must not run now.
+
+    With ``grant_id`` the temporary allow the call relies on is spent in the same transaction,
+    and only when the decision is ``run``: a replay, a busy or blocked slot and a slot mismatch
+    never spend. The use is keyed by this slot, so a retake of the slot after a crash does not
+    spend again. If the grant is no longer live nothing is committed, the result is ``denied``.
 
     Exactly one caller gets ``run`` for a given slot at a time: the first INSERT wins on the
     unique key, and every later takeover is one compare-and-set UPDATE. A recovery that
@@ -520,8 +526,8 @@ async def claim(
         except IntegrityError:
             pass
         else:
-            await db.commit()
-            return Claim("run", company_id, effect_class, new.id, token, key=key)
+            first = Claim("run", company_id, effect_class, new.id, token, key=key)
+            return await _commit_run(db, first, grant_id)
         row = (
             await db.execute(
                 select(ToolEffect)
@@ -541,8 +547,27 @@ async def claim(
                 reason="slot is occupied by a different call",
             )
         decision = await _decide(db, row, effect_class, token)
+        if decision.action == "run":
+            return await _commit_run(db, decision, grant_id)
         await db.commit()
         return decision
+
+
+async def _commit_run(db: Any, run: Claim, grant_id: uuid.UUID | None) -> Claim:
+    """Commit a ``run`` decision together with the grant use it depends on, or neither."""
+    if grant_id is not None:
+        from nexus.tools import governance_overlay
+
+        if not await governance_overlay.consume_temp_grant(
+            db, run.company_id, grant_id, run.key
+        ):
+            await db.rollback()
+            return Claim(
+                "denied", run.company_id, run.effect_class, key=run.key,
+                reason="temporary access is no longer valid",
+            )
+    await db.commit()
+    return run
 
 
 async def _decide(db: Any, row: ToolEffect, requested: EffectClass, token: str) -> Claim:

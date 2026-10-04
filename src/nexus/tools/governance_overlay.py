@@ -17,14 +17,12 @@ spend a one-use grant, and a revoke or expiry that lands first wins.
 
 from __future__ import annotations
 
-import hashlib
-import json
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import and_, case, or_, update
+from sqlalchemy import and_, case, exists, or_, update
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import select
 
@@ -51,15 +49,38 @@ class Overlay:
     policy_overridden: bool = False
 
 
-def live_grant_filter(company_id: uuid.UUID, at: datetime) -> list[Any]:
+def live_grant_filter(
+    company_id: uuid.UUID, at: datetime, spent_by: str | None = None
+) -> list[Any]:
     """WHERE terms shared by the read and the consume: active, approved, in window, uses left.
 
     An allow that went through an approval request counts only once someone approved it, so a
     row that is merely marked active without that approval never grants anything.
+
+    ``spent_by`` is the invocation key of a call that may already have paid for this grant. For
+    that call only, a grant that has since used up its last use still reads as live, so a replay
+    or a recovery of the slot that spent it is not refused. It never lets a new key spend.
     """
+    paid = (
+        exists().where(
+            GovernanceGrantUse.grant_id == GovernanceTempAccess.id,
+            GovernanceGrantUse.company_id == company_id,
+            GovernanceGrantUse.invocation_key == spent_by,
+        )
+        if spent_by is not None
+        else None
+    )
+    uses_left = or_(
+        GovernanceTempAccess.max_uses.is_(None),
+        GovernanceTempAccess.used_count < GovernanceTempAccess.max_uses,
+    )
     return [
         GovernanceTempAccess.company_id == company_id,
-        GovernanceTempAccess.status == "active",
+        (
+            GovernanceTempAccess.status.in_(("active", "used_up"))
+            if paid is not None
+            else GovernanceTempAccess.status == "active"
+        ),
         or_(
             GovernanceTempAccess.effect == "deny",
             GovernanceTempAccess.approved_by.is_not(None),
@@ -70,10 +91,7 @@ def live_grant_filter(company_id: uuid.UUID, at: datetime) -> list[Any]:
         ),
         GovernanceTempAccess.starts_at <= at,
         GovernanceTempAccess.expires_at > at,
-        or_(
-            GovernanceTempAccess.max_uses.is_(None),
-            GovernanceTempAccess.used_count < GovernanceTempAccess.max_uses,
-        ),
+        or_(uses_left, paid) if paid is not None else uses_left,
     ]
 
 
@@ -115,8 +133,12 @@ async def evaluate(
     explicit_only: bool = False,
     session_id: uuid.UUID | None = None,
     at: datetime | None = None,
+    spent_by: str | None = None,
 ) -> Overlay:
-    """The restriction and temp-access verdict for one call. Read only."""
+    """The restriction and temp-access verdict for one call. Read only.
+
+    ``spent_by``: see :func:`live_grant_filter`.
+    """
     at = at or now()
     out = Overlay()
     if agent_id is None:
@@ -132,7 +154,7 @@ async def evaluate(
             await db.execute(
                 select(GovernanceTempAccess)
                 .where(
-                    *live_grant_filter(company_id, at),
+                    *live_grant_filter(company_id, at, spent_by),
                     GovernanceTempAccess.agent_id == agent_id,
                     GovernanceTempAccess.tool_name == tool_name,
                     _session_scope(session_id),
@@ -155,14 +177,6 @@ async def evaluate(
     return out
 
 
-def invocation_key(turn_id: uuid.UUID | None, tool_name: str, arguments: Any) -> str | None:
-    """Identity of one invocation for replay protection, or ``None`` when there is no turn."""
-    if turn_id is None:
-        return None
-    canon = json.dumps(arguments, sort_keys=True, default=str, separators=(",", ":"))
-    return hashlib.sha256(f"{turn_id}|{tool_name}|{canon}".encode()).hexdigest()
-
-
 class _NotSpentError(Exception):
     """Raised inside the savepoint so the ledger row is undone when no use was spent."""
 
@@ -172,9 +186,11 @@ async def consume_temp_grant(
 ) -> bool:
     """Spend one use of a grant atomically. ``False`` when it is no longer live.
 
-    With a ``key`` the use is recorded in a ledger whose ``(grant_id, key)`` is unique, so a
-    replay of the same invocation is not charged twice: it is let through only while the grant
-    has not been revoked or expired.
+    With a ``key`` (the durable invocation key of the call's slot, never derived from the
+    tool or its arguments) the use is recorded in a ledger whose ``(grant_id, key)`` is unique,
+    so a replay or recovery of the same slot is not charged twice: it is let through only while
+    the grant has not been revoked or expired. Two different slots are two uses, even for
+    identical calls.
     """
     at = now()
     used = GovernanceTempAccess.used_count + 1

@@ -17,8 +17,9 @@ from sqlmodel import select
 
 from nexus.models.governance_studio import GovernanceGrantUse, GovernanceTempAccess
 from nexus.models.tool import ToolProfile, ToolProfileBinding
-from nexus.tools import governance_overlay
-from nexus.tools.effects import ToolSlot
+from nexus.models.tool_effect import ToolEffect
+from nexus.tools import effects, governance_overlay
+from nexus.tools.effects import EffectClass, ToolSlot
 from nexus.tools.factory import guarded_call
 from tests.test_governance_grants import (  # noqa: F401 -- fixtures and helpers
     HIRE,
@@ -64,7 +65,7 @@ async def _row(factory, grant_id) -> GovernanceTempAccess:  # noqa: F811
         return await db.get(GovernanceTempAccess, uuid.UUID(grant_id))
 
 
-def _call(t, tool=READ, args=None, slot=ToolSlot(0, 0), **ctx_over):  # noqa: F811
+def _call(t, tool=READ, args=None, slot=ToolSlot(0, 0), effect=None, **ctx_over):  # noqa: F811
     context = dataclasses.replace(ctx(t), **ctx_over)
     ran: list[int] = []
 
@@ -74,7 +75,7 @@ def _call(t, tool=READ, args=None, slot=ToolSlot(0, 0), **ctx_over):  # noqa: F8
 
     async def go() -> dict[str, Any]:
         return await guarded_call(context, tool, args or {}, run, source="test",
-                                  default_risk="write", slot=slot)
+                                  default_risk="write", slot=slot, effect=effect)
 
     return go, ran
 
@@ -243,3 +244,170 @@ class TestConsumption:
         assert real.json() == ghost.json()
         listed = (await api("GET", "/grants", who="outsider")).json()["items"]
         assert g["id"] not in [i["id"] for i in listed]
+
+
+async def _uses(factory, grant_id) -> list[str]:  # noqa: F811
+    async with factory() as db:
+        rows = (await db.execute(select(GovernanceGrantUse))).scalars().all()
+    return sorted(r.invocation_key for r in rows if str(r.grant_id) == grant_id)
+
+
+class TestUseIsScopedToTheSlot:
+    """A use is paid per durable slot (company, turn, round, position), never per content."""
+
+    async def test_identical_calls_at_two_slots_with_one_use_run_exactly_once(
+        self, api, factory, t  # noqa: F811
+    ):
+        g = await _active_allow(api, t, max_uses=1)
+        turn = uuid.uuid4()
+        first, ran = _call(t, HIRE, {"k": 1}, turn_id=turn)
+        second, ran2 = _call(t, HIRE, {"k": 1}, slot=ToolSlot(0, 1), turn_id=turn)
+        assert (await first())["status"] == "success"
+        assert (await second())["status"] == "denied"
+        assert ran == [1] and ran2 == []
+        assert (await _row(factory, g["id"])).used_count == 1
+        assert len(await _uses(factory, g["id"])) == 1
+
+    async def test_two_uses_allow_two_slots_and_never_a_third(self, api, factory, t):  # noqa: F811
+        g = await _active_allow(api, t, max_uses=2)
+        turn = uuid.uuid4()
+        statuses, ran_total = [], 0
+        for position in range(3):
+            go, ran = _call(t, HIRE, {"k": 1}, slot=ToolSlot(0, position), turn_id=turn)
+            statuses.append((await go())["status"])
+            ran_total += len(ran)
+        assert statuses == ["success", "success", "denied"] and ran_total == 2
+        row = await _row(factory, g["id"])
+        assert (row.used_count, row.status) == (2, "used_up")
+        assert len(await _uses(factory, g["id"])) == 2
+
+    async def test_reordering_does_not_move_a_use_between_slots(self, api, factory, t):  # noqa: F811
+        g = await _active_allow(api, t, max_uses=1)
+        turn = uuid.uuid4()
+        later, ran = _call(t, HIRE, {"k": "b"}, slot=ToolSlot(0, 1), turn_id=turn)
+        earlier, ran_e = _call(t, HIRE, {"k": "a"}, slot=ToolSlot(0, 0), turn_id=turn)
+        assert (await later())["status"] == "success"  # the use now belongs to slot (0, 1)
+        assert (await earlier())["status"] == "denied" and ran_e == []
+        again = await later()  # and it replays there
+        assert again["status"] == "success" and again["replayed"] is True and ran == [1]
+        assert (await _row(factory, g["id"])).used_count == 1
+
+    async def test_a_replay_of_the_slot_that_took_the_last_use_is_not_refused_or_recharged(
+        self, api, factory, t  # noqa: F811
+    ):
+        g = await _active_allow(api, t, max_uses=1)
+        go, ran = _call(t, HIRE, turn_id=uuid.uuid4())
+        assert (await go())["status"] == "success"
+        assert (await _row(factory, g["id"])).status == "used_up"
+        again = await go()
+        assert again["status"] == "success" and again["replayed"] is True
+        assert ran == [1] and (await _row(factory, g["id"])).used_count == 1
+        assert len(await _uses(factory, g["id"])) == 1
+
+    async def test_a_replay_of_a_used_up_slot_is_still_refused_once_the_grant_expires(
+        self, api, factory, t  # noqa: F811
+    ):
+        g = await _active_allow(api, t, max_uses=1)
+        go, ran = _call(t, HIRE, turn_id=uuid.uuid4())
+        assert (await go())["status"] == "success"
+        async with factory() as db:
+            row = await db.get(GovernanceTempAccess, uuid.UUID(g["id"]))
+            row.expires_at = governance_overlay.now() - timedelta(seconds=1)
+            db.add(row)
+            await db.commit()
+        assert (await go())["status"] == "denied" and ran == [1]
+
+    async def test_a_busy_concurrent_claimant_spends_nothing(self, api, factory, t):  # noqa: F811
+        g = await _active_allow(api, t, max_uses=3)
+        context = dataclasses.replace(ctx(t), turn_id=uuid.uuid4())
+        started, release = asyncio.Event(), asyncio.Event()
+        ran: list[int] = []
+
+        async def slow():
+            ran.append(1)
+            started.set()
+            await release.wait()
+            return "ok"
+
+        def call(run):
+            return guarded_call(context, HIRE, {}, run, source="test", default_risk="write",
+                                slot=ToolSlot(0, 0))
+
+        holder = asyncio.create_task(call(slow))
+        await started.wait()
+        busy = await call(slow)
+        assert busy["status"] == "effect_in_progress"
+        assert (await _row(factory, g["id"])).used_count == 1
+        release.set()
+        assert (await holder)["status"] == "success" and ran == [1]
+        assert (await _row(factory, g["id"])).used_count == 1
+
+    async def test_a_slot_mismatch_spends_nothing(self, api, factory, t):  # noqa: F811
+        g = await _active_allow(api, t, max_uses=3)
+        turn = uuid.uuid4()
+        first, _ = _call(t, HIRE, {"k": 1}, turn_id=turn)
+        assert (await first())["status"] == "success"
+        different, ran = _call(t, HIRE, {"k": 2}, turn_id=turn)  # same slot, other arguments
+        assert (await different())["status"] == "effect_recovery_required" and ran == []
+        assert (await _row(factory, g["id"])).used_count == 1
+        assert len(await _uses(factory, g["id"])) == 1
+
+    @pytest.mark.parametrize("effect", [EffectClass.IDEMPOTENT_WRITE, None])
+    async def test_a_crash_after_the_spend_recovers_the_same_slot_without_spending_again(
+        self, api, factory, t, effect  # noqa: F811
+    ):
+        g = await _active_allow(api, t, max_uses=1)
+        turn = uuid.uuid4()
+        # The process dies right after the claim committed the ledger row and the grant use,
+        # before the tool was dispatched or settled.
+        held = await effects.claim(
+            t["acme"], turn, ToolSlot(0, 0), HIRE,
+            effect or EffectClass.NON_IDEMPOTENT_WRITE, {},
+            grant_id=uuid.UUID(g["id"]),
+        )
+        assert held.action == "run"
+        assert (await _row(factory, g["id"])).used_count == 1
+        async with factory() as db:
+            row = (await db.execute(select(ToolEffect))).scalar_one()
+            row.lease_expires_at = governance_overlay.now() - timedelta(seconds=1)
+            db.add(row)
+            await db.commit()
+
+        go, ran = _call(t, HIRE, turn_id=turn, effect=effect)
+        result = await go()
+        if effect is None:
+            # Non-idempotent: it may have run, so a human decides; the use is not paid again.
+            assert result["status"] == "effect_recovery_required" and ran == []
+        else:
+            assert result["status"] == "success" and ran == [1]
+        row = await _row(factory, g["id"])
+        assert (row.used_count, row.status) == (1, "used_up")
+        assert len(await _uses(factory, g["id"])) == 1
+
+    async def test_the_same_slot_of_another_turn_is_another_use(self, api, factory, t):  # noqa: F811
+        g = await _active_allow(api, t, max_uses=1)
+        one, _ = _call(t, HIRE, turn_id=uuid.uuid4())
+        two, ran = _call(t, HIRE, turn_id=uuid.uuid4())
+        assert (await one())["status"] == "success"
+        assert (await two())["status"] == "denied" and ran == []
+        assert (await _row(factory, g["id"])).used_count == 1
+
+    async def test_the_identity_names_company_and_turn(self):
+        turn, slot = uuid.uuid4(), ToolSlot(0, 0)
+        keys = {
+            effects.invocation_key(uuid.uuid4(), turn, slot),
+            effects.invocation_key(uuid.uuid4(), turn, slot),
+            effects.invocation_key(uuid.uuid4(), uuid.uuid4(), slot),
+        }
+        assert len(keys) == 3
+
+    async def test_a_call_with_no_slot_is_charged_every_time(self, api, factory, t):  # noqa: F811
+        g = await _active_allow(api, t, max_uses=2)
+
+        async def run():
+            return "ok"
+
+        for _ in range(2):  # no turn, so no ledger and no identity to dedupe on
+            out = await guarded_call(ctx(t), HIRE, {}, run, source="test", default_risk="write")
+            assert out["status"] == "success"
+        assert (await _row(factory, g["id"])).used_count == 2

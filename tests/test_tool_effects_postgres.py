@@ -420,6 +420,83 @@ async def test_concurrent_claims_for_one_slot_have_one_runner_per_position(world
     assert len(await world.rows(world.acme)) == 2
 
 
+async def _grant(world, max_uses):
+    from nexus.models.governance_studio import GovernanceTempAccess
+
+    row = GovernanceTempAccess(
+        company_id=world.acme, agent_id=world.agent.id, effect="allow", tool_name="send-it",
+        status="active", expires_at=utcnow() + timedelta(hours=1), requested_by="x",
+        approved_by="y", max_uses=max_uses,
+    )
+    async with AsyncSession(world.engine) as db:
+        db.add(row)
+        await db.commit()
+    return row.id
+
+
+async def _grant_state(world, grant_id):
+    from nexus.models.governance_studio import GovernanceGrantUse, GovernanceTempAccess
+
+    async with AsyncSession(world.engine) as db:
+        grant = await db.get(GovernanceTempAccess, grant_id)
+        uses = (
+            await db.execute(
+                sa.select(sa.func.count())
+                .select_from(GovernanceGrantUse)
+                .where(GovernanceGrantUse.grant_id == grant_id)
+            )
+        ).scalar_one()
+    return grant.used_count, grant.status, uses
+
+
+async def test_concurrent_slots_never_spend_past_max_uses(world):
+    grant_id = await _grant(world, max_uses=2)
+    claims = await asyncio.gather(
+        *[
+            effects.claim(
+                world.acme, world.turn, ToolSlot(0, i), "send-it", NON_IDEM, {"n": 1},
+                grant_id=grant_id,
+            )
+            for i in range(RACERS)
+        ]
+    )
+    assert sorted(c.action for c in claims) == ["denied"] * (RACERS - 2) + ["run"] * 2
+    assert await _grant_state(world, grant_id) == (2, "used_up", 2)
+    # A denied claim leaves no ledger row behind, so nothing can later be retaken at its slot.
+    assert len(await world.rows(world.acme)) == 2
+
+
+async def test_a_racing_replay_of_a_spending_slot_pays_once(world):
+    grant_id = await _grant(world, max_uses=1)
+    claims = await asyncio.gather(
+        *[
+            effects.claim(
+                world.acme, world.turn, SLOT, "send-it", NON_IDEM, {"n": 1}, grant_id=grant_id
+            )
+            for _ in range(RACERS)
+        ]
+    )
+    assert sorted(c.action for c in claims) == ["busy"] * (RACERS - 1) + ["run"]
+    assert await _grant_state(world, grant_id) == (1, "used_up", 1)
+
+
+async def test_the_same_slot_of_another_company_or_turn_does_not_share_a_use(world):
+    grant_id = await _grant(world, max_uses=1)
+    first = await effects.claim(
+        world.acme, world.turn, SLOT, "send-it", NON_IDEM, {"n": 1}, grant_id=grant_id
+    )
+    other_turn = await effects.claim(
+        world.acme, uuid.uuid4(), SLOT, "send-it", NON_IDEM, {"n": 1}, grant_id=grant_id
+    )
+    # Another company's identity differs, and the grant is not visible to its session at all.
+    other_company = await effects.claim(
+        world.other, world.turn, SLOT, "send-it", NON_IDEM, {"n": 1}, grant_id=grant_id
+    )
+    assert (first.action, other_turn.action, other_company.action) == ("run", "denied", "denied")
+    assert first.key != other_company.key
+    assert await _grant_state(world, grant_id) == (1, "used_up", 1)
+
+
 # --- the database clock decides leases -------------------------------------------------------
 
 

@@ -142,6 +142,7 @@ async def check_tool_access(
     endpoint_url: str | None = None,
     default_risk: str | None = None,
     enforcement: str | None = None,
+    grant_key: str | None = None,
 ) -> AccessDecision:
     """Decide whether the caller in ``ctx`` may call ``tool_name``.
 
@@ -162,6 +163,9 @@ async def check_tool_access(
             :data:`UNCLASSIFIED_RISK`.
         enforcement: ``audit`` or ``enforce``; defaults to
             ``settings.tool_binding_enforcement``.
+        grant_key: The durable invocation key of this call's slot. A temporary allow that
+            this key already spent still reads as live (a replay or recovery of the slot),
+            though it has since used up its last use.
 
     Returns:
         The decision. ``outcome`` is ``allowed``, ``would_deny`` or ``denied``.
@@ -238,6 +242,7 @@ async def check_tool_access(
             policy,
             explicit_only=tool_name in EXPLICIT_ALLOW_ONLY,
             session_id=decision.session_id,
+            spent_by=grant_key,
         )
         for stage, reason, hard in overlay.problems:
             problem(stage, reason, hard=hard)
