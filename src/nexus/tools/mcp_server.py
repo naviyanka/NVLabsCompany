@@ -100,7 +100,9 @@ NODE_EFFECTS: dict[str, EffectClass] = {
     "ai-summarize": EffectClass.READ_ONLY,
     "ai-translate": EffectClass.READ_ONLY,
     "db-redis-get": EffectClass.READ_ONLY,
-    "db-redis-set": EffectClass.IDEMPOTENT_WRITE,
+    # Not idempotent: with a relative ``ttl`` a retry restarts the clock and so extends the key's
+    # life, and a SET with no ttl is not provably the same state if another writer ran between.
+    "db-redis-set": EffectClass.NON_IDEMPOTENT_WRITE,
     "db-sqlite-query": EffectClass.NON_IDEMPOTENT_WRITE,
     "file-csv-parse": EffectClass.READ_ONLY,
     "file-json-parse": EffectClass.READ_ONLY,

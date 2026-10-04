@@ -305,6 +305,69 @@ async def test_a_missing_credential_is_a_typed_rejection_and_retryable(
     assert done["isError"] is False and len(posts) == 1
 
 
+# --- db-redis-set: a relative TTL makes a retry unsafe ----------------------------------------
+
+
+class _Redis:
+    """A Redis whose keys expire on a clock the test moves; ``set`` records its arguments."""
+
+    def __init__(self):
+        self.now = 0.0
+        self.data: dict[str, tuple[str, float | None]] = {}
+        self.calls: list[dict] = []
+
+    async def set(self, key, value, **kwargs):
+        self.calls.append(kwargs)
+        self.data[key] = (value, self.now + kwargs["ex"] if "ex" in kwargs else None)
+
+    async def aclose(self):
+        pass
+
+
+def _redis(monkeypatch):
+    import redis.asyncio as aioredis
+
+    client = _Redis()
+    monkeypatch.setattr(aioredis, "from_url", lambda *a, **k: client)
+    return client
+
+
+@pytest.mark.parametrize("arguments", [{"key": "k", "value": "v"}, {"key": "k", "value": "v", "ttl": 60}])
+async def test_a_redis_set_replays_instead_of_running_twice(factory, world, monkeypatch, arguments):
+    redis = _redis(monkeypatch)
+    first = await MCPServer(turn_ctx(world)).call_tool("db-redis-set", arguments, slot=SLOT)
+    again = await MCPServer(turn_ctx(world)).call_tool("db-redis-set", arguments, slot=SLOT)
+    assert first["isError"] is False and again["isError"] is False
+    assert len(redis.calls) == 1
+    (row,) = await rows(factory)
+    assert row.effect_class == NON_IDEM.value and row.status == "succeeded"
+
+
+@pytest.mark.parametrize("arguments", [{"key": "k", "value": "v"}, {"key": "k", "value": "v", "ttl": 60}])
+async def test_a_crash_after_redis_accepted_the_set_is_never_retried_later(
+    factory, world, monkeypatch, arguments
+):
+    redis = _redis(monkeypatch)
+
+    async def lost(*args, **kwargs):  # the process dies after Redis accepted the write
+        return False
+
+    real = effects.settle
+    monkeypatch.setattr(effects, "settle", lost)
+    await MCPServer(turn_ctx(world)).call_tool("db-redis-set", arguments, slot=SLOT)
+    monkeypatch.setattr(effects, "settle", real)
+    (row,) = await rows(factory)
+    assert row.status == "executing"
+    await expire_lease(factory, row.id)
+    expiry = redis.data["k"][1]
+    redis.now += 300  # the requeued turn comes back minutes later
+    again = await MCPServer(turn_ctx(world)).call_tool("db-redis-set", arguments, slot=SLOT)
+    assert again["isError"] is True and "not run" in again["content"][0]["text"]
+    assert len(redis.calls) == 1 and redis.data["k"][1] == expiry  # the expiry was not extended
+    (row,) = await rows(factory)
+    assert row.status == "manual_recovery_required"
+
+
 # --- leases follow the database clock ---------------------------------------------------------
 
 

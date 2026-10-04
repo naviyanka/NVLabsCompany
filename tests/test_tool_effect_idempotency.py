@@ -19,6 +19,7 @@ import re
 import uuid
 from dataclasses import dataclass, replace
 from datetime import timedelta
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -75,7 +76,7 @@ TABLE: dict[str, Proof] = {
     "db-redis-get": Proof(READ, NONE, "reads only"),
     "file-csv-parse": Proof(READ, NONE, "reads only"),
     "file-json-parse": Proof(READ, NONE, "reads only"),
-    "db-redis-set": Proof(IDEM, INTRINSIC, "SET to a fixed value is the same state when repeated"),
+    "db-redis-set": Proof(NON_IDEM, NONE, "a relative TTL restarts on every retry"),
     "db-sqlite-query": Proof(NON_IDEM, NONE, "arbitrary SQL"),
     "http-request": Proof(NON_IDEM, NONE, "arbitrary request"),
     "msg-discord-send": Proof(NON_IDEM, NONE, "a message is sent each time"),
@@ -441,26 +442,64 @@ async def test_a_delegation_rerun_after_a_crash_is_one_attempt(db, c, monkeypatc
     assert len(await _rows(db, TaskAttempt, TaskAttempt.task_id == c["task2"])) == 1
 
 
-async def test_a_redis_set_repeated_leaves_the_same_state(monkeypatch):
+class _FakeRedis:
+    """Records the arguments of every SET, including the expiration, like a server would see."""
+
+    def __init__(self):
+        self.sets: list[tuple[str, str, dict]] = []
+
+    async def set(self, key, value, **kwargs):
+        self.sets.append((key, value, kwargs))
+
+    async def aclose(self):
+        pass
+
+
+@pytest.mark.parametrize(
+    ("params", "expiration"),
+    [
+        ({"key": "k", "value": "v"}, {}),
+        ({"key": "k", "value": "v", "ttl": 0}, {}),
+        ({"key": "k", "value": "v", "ttl": 90}, {"ex": 90}),
+        ({"key": "k", "value": "v", "ttl": "90"}, {"ex": 90}),
+    ],
+)
+async def test_a_redis_set_passes_its_expiration_through_unchanged(monkeypatch, params, expiration):
     import redis.asyncio as aioredis
 
     from nexus.nodes.executor import _run_redis_set
 
-    store: dict[str, str] = {}
-
-    class Client:
-        async def set(self, key, value, ex=None):
-            store[key] = value
-
-        async def aclose(self):
-            pass
-
-    monkeypatch.setattr(aioredis, "from_url", lambda *a, **k: Client())
-    params = {"key": "k", "value": "v"}
+    client = _FakeRedis()
+    monkeypatch.setattr(aioredis, "from_url", lambda *a, **k: client)
     await _run_redis_set(dict(params))
-    once = dict(store)
-    await _run_redis_set(dict(params))
-    assert store == once == {"k": "v"}
+    assert client.sets == [("k", "v", expiration)]
+
+
+def test_every_redis_set_is_non_idempotent_so_a_ttl_retry_can_never_run():
+    assert NODE_EFFECTS["db-redis-set"] is NON_IDEM and TABLE["db-redis-set"].effect is NON_IDEM
+    with pytest.raises(AssertionError):
+        check_classification({**NODE_EFFECTS, "db-redis-set": IDEM}, _all_tools())
+
+
+def _runbook_classes() -> dict[str, str]:
+    """Tool name to the class column of the runbook's classification table."""
+    text = (Path(__file__).parents[1] / "docs" / "runbooks" / "tool-effect-recovery.md").read_text(
+        encoding="utf-8"
+    )
+    classes: dict[str, str] = {}
+    for line in text.splitlines():
+        cells = [c.strip() for c in line.strip().strip("|").split("|")]
+        if len(cells) == 4 and cells[0] in ("Manager", "CEO", "Node", "Obsidian"):
+            for name in re.findall(r"`([^`]+)`", cells[1]):
+                classes[name] = cells[2]
+    return classes
+
+
+def test_the_runbook_classification_table_matches_production():
+    word = {READ: "read only", IDEM: "idempotent", NON_IDEM: "non-idempotent"}
+    declared = {**NODE_EFFECTS, **{n: t.effect for n, t in _all_tools().items()}}
+    documented = _runbook_classes()
+    assert {n: documented.get(n) for n in declared} == {n: word[e] for n, e in declared.items()}
 
 
 async def test_an_obsidian_replace_repeated_with_its_hash_is_refused_not_rewritten(

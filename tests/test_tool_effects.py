@@ -740,7 +740,7 @@ def test_node_effects_cover_every_exposed_node_and_classify_writes():
     assert mcp_server.NODE_EFFECTS["http-request"] is NON_IDEM
     assert mcp_server.NODE_EFFECTS["msg-slack-send"] is NON_IDEM
     assert mcp_server.NODE_EFFECTS["db-sqlite-query"] is NON_IDEM
-    assert mcp_server.NODE_EFFECTS["db-redis-set"] is IDEM
+    assert mcp_server.NODE_EFFECTS["db-redis-set"] is NON_IDEM
     assert mcp_server.NODE_EFFECTS["file-json-parse"] is EffectClass.READ_ONLY
 
 

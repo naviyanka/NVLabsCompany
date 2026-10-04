@@ -48,7 +48,7 @@ the ledger.
 | CEO | `ceo_record_decision` | non-idempotent | appends a memory entry each time |
 | CEO | `ceo_get_organization_snapshot`, `ceo_list_managers`, `ceo_get_manager_status`, `ceo_list_pending_approvals`, `ceo_search_executive_memory`, `organization_get_snapshot` | read only | no effect |
 | Node | `ai-chat`, `ai-sentiment`, `ai-summarize`, `ai-translate`, `db-redis-get`, `file-csv-parse`, `file-json-parse` | read only | no effect |
-| Node | `db-redis-set` | idempotent | intrinsic: `SET` of a fixed value; the TTL is re-applied by a retry |
+| Node | `db-redis-set` | non-idempotent | a relative `ttl` is applied again by a retry, so a rerun could extend the key's life (see below); every `db-redis-set` call is non-idempotent, with or without a `ttl` |
 | Node | `db-sqlite-query`, `http-request`, `msg-discord-send`, `msg-slack-send`, `msg-telegram-send`, `msg-webhook-notify` | non-idempotent | arbitrary SQL, requests or messages |
 | Obsidian | `obsidian.note_replace` | idempotent | intrinsic: compare-and-set on the hash the caller read, so a rerun finds the note changed and is refused (`WriteConflictError`) instead of rewriting |
 | Hermes | `register_tool` without `effect` | non-idempotent | default |
