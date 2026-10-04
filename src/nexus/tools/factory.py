@@ -9,6 +9,7 @@ a function instead of remembering six constructor arguments.
 
 from __future__ import annotations
 
+import asyncio
 import functools
 import logging
 import time
@@ -18,6 +19,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from nexus.guardrails import GuardrailChain, PolicyGuardrail, StructuralGuardrail
+from nexus.tools import effects
 from nexus.tools.audit import ToolAuditStore
 from nexus.tools.autonomy import AutonomyGate, db_policy_loader
 from nexus.tools.executor import RateLimitConfig, ToolExecutor
@@ -182,6 +184,7 @@ async def guarded_call(
     connection_id: uuid.UUID | None = None,
     endpoint_url: str | None = None,
     default_risk: str | None = None,
+    effect: str | None = None,
 ) -> dict[str, Any]:
     """Authorize, screen, run and record one tool call.
 
@@ -211,11 +214,17 @@ async def guarded_call(
         connection_id: The ``ToolConnection`` being called, when known.
         endpoint_url: MCP server URL, for calls into a ToolConnection.
         default_risk: Risk level of a tool with no catalog entry.
+        effect: The tool's declared :class:`~nexus.tools.effects.EffectClass`. ``None`` is
+            treated as a non-idempotent write: a missing declaration never makes a call
+            repeatable. Only a call inside a chat turn (``ctx.turn_id``) is ledgered.
 
     Returns:
-        ``{"status": "success", "result": ...}`` when the call ran, or a
-        refusal dict with ``error`` and ``status`` (``denied``,
-        ``guardrail_blocked``, ``autonomy_blocked``) when it did not.
+        ``{"status": "success", "result": ...}`` when the call ran (or, with
+        ``"replayed": True``, when an earlier run of the same logical call in this turn is
+        returned instead of running it again), or a refusal dict with ``error`` and
+        ``status`` (``denied``, ``guardrail_blocked``, ``autonomy_blocked``,
+        ``effect_in_progress``, ``effect_recovery_required``, ``effect_ledger_unavailable``)
+        when it did not.
     """
     from nexus.tools.access import DENIED, AccessDecision, check_tool_access
 
@@ -267,11 +276,63 @@ async def guarded_call(
         await record(refusal["status"], started, error=refusal["error"])
         return refusal
 
+    # Write-capable calls inside a chat turn are reserved durably before they run, so a
+    # recovered turn cannot repeat the effect (see nexus.tools.effects).
+    held = None
+    effect_class = effects.resolve_effect(effect)
+    turn_id = getattr(ctx, "turn_id", None)
+    if effect_class is not effects.EffectClass.READ_ONLY and turn_id and decision.company_id:
+        try:
+            held = await effects.claim(
+                decision.company_id, turn_id, tool_name, effect_class, arguments
+            )
+        except Exception as exc:  # noqa: BLE001 - no ledger, no write: fail closed
+            logger.error("Tool effect ledger unavailable for %s: %s", tool_name, exc)
+            refusal = {
+                "error": "Tool effect could not be recorded, so the call was not run",
+                "status": "effect_ledger_unavailable",
+            }
+            await record(refusal["status"], started, error=refusal["error"])
+            return refusal
+        if held.action == "replay":
+            try:
+                replayed = effects.decode_result(held.stored or {})
+            except Exception as exc:  # noqa: BLE001 - done once, but cannot be returned
+                logger.error("Stored effect for %s cannot be replayed: %s", tool_name, exc)
+                refusal = {
+                    "error": "Tool already ran in this turn and its result is unavailable",
+                    "status": "effect_ledger_unavailable",
+                }
+                await record(refusal["status"], started, error=refusal["error"])
+                return refusal
+            await record("replayed", started)
+            return {"status": "success", "result": replayed, "replayed": True}
+        if held.action != "run":
+            refusal = {
+                "error": f"Tool call not run: {held.reason}",
+                "status": (
+                    "effect_in_progress" if held.action == "busy" else "effect_recovery_required"
+                ),
+            }
+            await record(refusal["status"], started, error=refusal["error"])
+            return refusal
+
     try:
         result = await run()
-    except Exception as exc:
-        await record("error", started, error=str(exc))
+    except BaseException as exc:
+        if held is not None:
+            # Cancellation included: the effect may have happened. Shielded so a second
+            # cancel cannot leave the row looking like a live holder.
+            await asyncio.shield(
+                # By type only: an exception message can carry request data or credentials.
+                effects.settle(held, effects.outcome_of_exception(exc), error=type(exc).__name__)
+            )
+        if isinstance(exc, Exception):
+            await record("error", started, error=str(exc))
         raise
+    if held is not None:
+        status, error = effects.outcome_of(result)
+        await asyncio.shield(effects.settle(held, status, result=result, error=error))
     # An MCP result reports a tool-side failure in-band rather than raising.
     failed = bool(getattr(result, "is_error", False))
     await record("error" if failed else "success", started)

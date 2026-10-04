@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from types import SimpleNamespace
 from typing import Any
 
@@ -26,6 +26,7 @@ from pydantic import BaseModel, ValidationError
 from nexus.runtime.task_attempts import attempt_view
 from nexus.services import hiring_service, org_snapshot
 from nexus.services import manager_service as ms
+from nexus.tools.effects import EffectClass
 
 
 @dataclass(frozen=True)
@@ -36,6 +37,9 @@ class ManagerTool:
     run: Callable[[Any, uuid.UUID, uuid.UUID, Any, str], Awaitable[Any]]
     # Arguments other than UUIDs: validated by this model, which forbids extras.
     model: type[BaseModel] | None = None
+    # Required, with no default: a tool cannot be defined without saying whether a rerun of
+    # an interrupted call is safe (see nexus.tools.effects).
+    effect: EffectClass = field(kw_only=True)
 
 
 async def _list_reports(db, company_id, manager_id, args, actor):
@@ -102,7 +106,8 @@ async def _org_snapshot(db, company_id, manager_id, args, actor):
 
 MANAGER_TOOLS: dict[str, ManagerTool] = {
     "manager_list_reports": ManagerTool(
-        "List your direct reports.", "read", (), _list_reports
+        "List your direct reports.", "read", (), _list_reports,
+        effect=EffectClass.READ_ONLY,
     ),
     "manager_employee_status": ManagerTool(
         "Current state, active task, progress, evidence, last success and latest failure "
@@ -110,24 +115,28 @@ MANAGER_TOOLS: dict[str, ManagerTool] = {
         "read",
         ("employee_id",),
         _employee_status,
+        effect=EffectClass.READ_ONLY,
     ),
     "manager_delegate_task": ManagerTool(
         "Delegate an existing task to one of your direct reports. Idempotent.",
         "write",
         ("task_id", "employee_id"),
         _delegate,
+        effect=EffectClass.IDEMPOTENT_WRITE,
     ),
     "manager_task_evidence": ManagerTool(
         "Attempts, results and evidence of a task held by one of your direct reports.",
         "read",
         ("task_id",),
         _evidence,
+        effect=EffectClass.READ_ONLY,
     ),
     "manager_rollup": ManagerTool(
         "Your team roll-up: active, queued, completed, failed/blocked and stale work.",
         "read",
         (),
         _rollup,
+        effect=EffectClass.READ_ONLY,
     ),
     "manager_request_hire": ManagerTool(
         "Request a new direct report. The company's hiring policy decides: auto-approved "
@@ -137,18 +146,21 @@ MANAGER_TOOLS: dict[str, ManagerTool] = {
         (),
         _request_hire,
         hiring_service.HireRequest,
+        effect=EffectClass.IDEMPOTENT_WRITE,
     ),
     "manager_list_hiring_requests": ManagerTool(
         "Your hiring requests: status, policy decision, costs and the hired employee.",
         "read",
         (),
         _list_hires,
+        effect=EffectClass.READ_ONLY,
     ),
     "manager_get_hiring_request": ManagerTool(
         "One of your hiring requests.",
         "read",
         ("request_id",),
         _get_hire,
+        effect=EffectClass.READ_ONLY,
     ),
     org_snapshot.TOOL: ManagerTool(
         "The latest precomputed organization snapshot and its freshness: your team's "
@@ -157,6 +169,7 @@ MANAGER_TOOLS: dict[str, ManagerTool] = {
         "read",
         (),
         _org_snapshot,
+        effect=EffectClass.READ_ONLY,
     ),
 }
 

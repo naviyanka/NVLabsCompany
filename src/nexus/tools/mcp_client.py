@@ -28,11 +28,14 @@ class MCPResult:
         content: The result content (text or structured data).
         is_error: Whether the invocation resulted in an error.
         metadata: Additional server-provided metadata.
+        effect_unknown: True when the server may have run the tool without telling us (an
+            HTTP 5xx): the caller cannot assume the call had no effect.
     """
 
     content: Any = None
     is_error: bool = False
     metadata: dict[str, Any] = field(default_factory=dict)
+    effect_unknown: bool = False
 
 
 class MCPClient:
@@ -205,6 +208,7 @@ class MCPClient:
                 return MCPResult(
                     content=f"HTTP error: {response.status_code}",
                     is_error=True,
+                    effect_unknown=response.status_code >= 500,
                 )
 
             data = response.json()

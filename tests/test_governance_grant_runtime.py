@@ -187,7 +187,9 @@ class TestConsumption:
         go, ran = _call(t, HIRE, {"k": 1}, turn_id=turn)
         assert (await go())["status"] == "success"
         assert (await go())["status"] == "success"
-        assert (await _row(factory, g["id"])).used_count == 1 and ran == [1, 1]
+        # The tool is undeclared, so it is a non-idempotent write: the second call replays the
+        # recorded result instead of running the tool again, and the grant is charged once.
+        assert (await _row(factory, g["id"])).used_count == 1 and ran == [1]
         # A different invocation (other arguments, or another turn) pays again.
         other, _ = _call(t, HIRE, {"k": 2}, turn_id=turn)
         assert (await other())["status"] == "success"

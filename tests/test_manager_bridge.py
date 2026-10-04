@@ -177,7 +177,10 @@ class TestEndpoint:
             turn = await s.get(ChatTurn, turn.id)
         assert (await rpc(first_token, "tools/list")).status_code == 401
         again = _payload(await _tool(rpc, await _token(turn), "manager_delegate_task", args))
-        assert (first["created"], again["created"]) == (True, False)
+        # The retry replays the call recorded by the effect ledger instead of reaching the
+        # tool again, so it reports the original result; the single attempt row proves that
+        # nothing was delegated twice.
+        assert (first["created"], again["created"]) == (True, True)
         assert first["attempt"]["id"] == again["attempt"]["id"]
         assert len(await _rows(db, TaskAttempt, TaskAttempt.task_id == team["task2"])) == 1
         (queued,) = [r for r in await _rows(db, AuditLog, AuditLog.action == "task.attempt_queued")]

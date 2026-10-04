@@ -94,13 +94,21 @@ class HermesAdapter(BaseAdapter):
         if config.get("ollama_host"):
             _guard_url(config["ollama_host"], "ollama_host")
 
-    def register_tool(self, name: str, handler: Any, schema: dict[str, Any] | None = None) -> None:
+    def register_tool(
+        self,
+        name: str,
+        handler: Any,
+        schema: dict[str, Any] | None = None,
+        effect: str | None = None,
+    ) -> None:
         """Register a tool that Hermes can call.
 
         Args:
             name: Tool name (matches what Hermes emits in <tool_call>).
             handler: Async callable to execute when tool is invoked.
             schema: Optional JSON schema for the tool's parameters.
+            effect: The tool's declared ``EffectClass``. Left out, the tool runs as a
+                non-idempotent write: an interrupted call is never rerun automatically.
 
         Raises:
             ValueError: For a governed control-plane tool name.
@@ -110,6 +118,7 @@ class HermesAdapter(BaseAdapter):
         self._tool_registry[name] = {
             "handler": handler,
             "schema": schema,
+            "effect": effect,
         }
 
     async def _do_create_session(self, session: AgentSession) -> None:
@@ -595,7 +604,13 @@ class HermesAdapter(BaseAdapter):
 
         try:
             return await guarded_call(
-                context, name, arguments, run, source="hermes", agent_id=agent_id
+                context,
+                name,
+                arguments,
+                run,
+                source="hermes",
+                agent_id=agent_id,
+                effect=self._tool_registry[name].get("effect"),
             )
         except Exception as e:
             logger.error(f"Tool '{name}' execution failed: {e}")

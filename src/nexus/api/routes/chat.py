@@ -1001,6 +1001,10 @@ async def _call_llm(
             )
     except PermissionError as exc:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+    if turn_id is not None and execution_context.turn_id is None:
+        # The turn's stable id is what lets a recovered turn recognise a tool call it already
+        # made (nexus.tools.effects). Unlike the per-claim execution id, it survives requeue.
+        execution_context = replace(execution_context, turn_id=turn_id)
 
     # A session that holds a worktree runs its work in that worktree and
     # nowhere else. An unusable one (not activated, gone, off its branch) is a
@@ -1107,6 +1111,7 @@ async def _call_llm(
                 build_tool_executor,
                 register_obsidian_note_replace,
             )
+            from nexus.tools.effects import EffectClass
 
             tenant_factory = tenant_session_factory(agent.company_id)
             tool_registry = ToolRegistry(tenant_factory)
@@ -1150,6 +1155,9 @@ async def _call_llm(
                     "description": "Replace one existing Markdown note through governed vault write controls.",
                     "parameters": OBSIDIAN_NOTE_REPLACE_SCHEMA["properties"],
                 },
+                # Replaces a note only if it still has the hash the caller read, so a
+                # second run after success conflicts instead of writing again.
+                effect=EffectClass.IDEMPOTENT_WRITE,
             )
 
         # Tool calls act under the server-built context, never under anything

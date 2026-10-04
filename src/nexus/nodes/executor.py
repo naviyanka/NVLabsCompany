@@ -27,6 +27,9 @@ class ExecutorResult:
     outputs: dict[str, Any] = field(default_factory=dict)
     error: str | None = None
     tokens_used: int = 0
+    # True when the executor cannot say whether it acted (a timeout or an unexpected crash),
+    # as opposed to a refusal it reports itself. Durable tool-effect recovery relies on it.
+    effect_unknown: bool = False
 
 
 ExecutorFn = Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]
@@ -405,7 +408,11 @@ async def execute_node(
             return ExecutorResult(success=True, outputs=outputs)
         except asyncio.TimeoutError:
             span.set_attribute("success", False)
-            return ExecutorResult(success=False, error=f"Execution timed out after {timeout_seconds}s")
+            return ExecutorResult(
+                success=False,
+                error=f"Execution timed out after {timeout_seconds}s",
+                effect_unknown=True,
+            )
         except ValueError as exc:
             span.set_attribute("success", False)
             span.record_exception(exc)
@@ -414,4 +421,4 @@ async def execute_node(
             span.set_attribute("success", False)
             span.record_exception(exc)
             logger.warning("Node %s execution failed: %s", node_id, exc)
-            return ExecutorResult(success=False, error=str(exc))
+            return ExecutorResult(success=False, error=str(exc), effect_unknown=True)

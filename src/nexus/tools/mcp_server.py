@@ -52,6 +52,7 @@ from nexus.tools import manager_tools
 from nexus.tools.access import BUILTIN_ENDPOINT, DENIED, check_tool_access
 from nexus.tools.ceo_tools import CEO_TOOLS
 from nexus.tools.context import INBOUND_MCP, ExecutionContext
+from nexus.tools.effects import EffectClass
 from nexus.tools.factory import _access_session, guarded_call
 
 logger = logging.getLogger(__name__)
@@ -88,6 +89,27 @@ _WRITE_CATEGORIES = frozenset(
 def risk_level_for(node: NodeDefinition) -> str:
     """Classify a node as ``read`` or ``write`` for policy evaluation."""
     return "write" if node.category in _WRITE_CATEGORIES else "read"
+
+
+# What a rerun of an interrupted call does, declared per exposed node (never derived from the
+# name or the category above). A node missing here runs as a non-idempotent write, and a test
+# fails when an executable node has no entry.
+NODE_EFFECTS: dict[str, EffectClass] = {
+    "ai-chat": EffectClass.READ_ONLY,
+    "ai-sentiment": EffectClass.READ_ONLY,
+    "ai-summarize": EffectClass.READ_ONLY,
+    "ai-translate": EffectClass.READ_ONLY,
+    "db-redis-get": EffectClass.READ_ONLY,
+    "db-redis-set": EffectClass.IDEMPOTENT_WRITE,
+    "db-sqlite-query": EffectClass.NON_IDEMPOTENT_WRITE,
+    "file-csv-parse": EffectClass.READ_ONLY,
+    "file-json-parse": EffectClass.READ_ONLY,
+    "http-request": EffectClass.NON_IDEMPOTENT_WRITE,
+    "msg-discord-send": EffectClass.NON_IDEMPOTENT_WRITE,
+    "msg-slack-send": EffectClass.NON_IDEMPOTENT_WRITE,
+    "msg-telegram-send": EffectClass.NON_IDEMPOTENT_WRITE,
+    "msg-webhook-notify": EffectClass.NON_IDEMPOTENT_WRITE,
+}
 
 
 def exposed_nodes() -> dict[str, NodeDefinition]:
@@ -200,6 +222,7 @@ class MCPServer:
             source=INBOUND_MCP,
             endpoint_url=BUILTIN_ENDPOINT,
             default_risk=risk_level_for(node),
+            effect=NODE_EFFECTS.get(name),
         )
         if outcome["status"] != "success":
             logger.warning("Refused tool %s: %s", name, outcome["error"])
@@ -237,6 +260,7 @@ class MCPServer:
                 run,
                 source=INBOUND_MCP,
                 default_risk=tool.risk,
+                effect=tool.effect,
             )
         except HTTPException as exc:
             detail = exc.detail if isinstance(exc.detail, dict) else {"message": exc.detail}
