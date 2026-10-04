@@ -24,7 +24,8 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from nexus.auth.middleware import get_principal_from_scope
+from nexus.auth.middleware import get_principal_from_scope, is_public_path
+from nexus.governance.readiness import GovernanceUnavailable, ensure_company_governance_ready
 
 logger = logging.getLogger(__name__)
 
@@ -182,12 +183,12 @@ class _BudgetTracker:
     def check(self, company_id: uuid.UUID, estimated_cost: int) -> bool:
         """Return True if the company can afford the estimated cost.
 
-        If no budget data is cached, defaults to allowing (fail-open).
+        No cached budget means the company's state is not loaded: deny (fail closed).
         """
         with self._lock:
             entry = self._cache.get(company_id)
             if entry is None:
-                return True  # No data yet — fail open
+                return False
             budget = entry["budget"]
             if budget <= 0:
                 return True  # No budget cap configured
@@ -206,8 +207,8 @@ class _BudgetTracker:
 # Global budget tracker
 _budget_tracker = _BudgetTracker()
 
-# Global policy cache: company_id → list of active policy dicts
-# Seeded at startup from DB, can be refreshed via admin endpoint
+# Global policy cache: company_id → list of active policy dicts.
+# Filled lazily, one company at a time, by governance.readiness on that company's first request.
 _policy_cache: dict[uuid.UUID, list[dict[str, Any]]] = {}
 
 # Route patterns that are considered "expensive" (LLM calls)
@@ -355,6 +356,24 @@ class GovernanceMiddleware:
                 except (ValueError, IndexError):
                     pass
 
+        # 3c. Governance readiness. A company's policies and budget load on its first request;
+        # until they have, nothing of that company's can be governed, so it is refused (the
+        # public health/auth paths carry no company and are not affected).
+        if company_id and not is_public_path(path):
+            try:
+                await ensure_company_governance_ready(company_id)
+            except GovernanceUnavailable:
+                response = JSONResponse(
+                    status_code=503,
+                    content={
+                        "detail": "Governance state is unavailable; try again shortly.",
+                        "code": "GOVERNANCE_UNAVAILABLE",
+                    },
+                    headers={"Retry-After": "30"},
+                )
+                await response(scope, receive, send)
+                return
+
         # 4. Policy evaluation
         policy_result = self._evaluate_policy(request, company_id)
         if not policy_result["allowed"]:
@@ -479,11 +498,13 @@ class GovernanceMiddleware:
         if company_id is None:
             return {"allowed": True}
 
-        policies = _policy_cache.get(company_id)
-        if not policies:
-            return {"allowed": True}
-
         path = request.scope.get("path", "")
+        policies = _policy_cache.get(company_id)
+        if policies is None:
+            if is_public_path(path):  # health and auth answer without policy state
+                return {"allowed": True}
+            return {"allowed": False, "reason": "Governance state is not loaded"}
+
         method = request.scope.get("method", "GET")
 
         for policy in policies:
@@ -548,8 +569,7 @@ class GovernanceMiddleware:
     def _check_budget(self, company_id: uuid.UUID, estimated_cost: int) -> bool:
         """Check if the company has sufficient budget for this request.
 
-        Uses the in-memory budget tracker. If no budget data is cached
-        (first request before DB lookup), fails open (allows the request).
+        Uses the in-memory budget tracker. If no budget data is cached the request is denied.
         Also emits a warning log when budget usage exceeds 80%.
         """
         allowed = _budget_tracker.check(company_id, estimated_cost)

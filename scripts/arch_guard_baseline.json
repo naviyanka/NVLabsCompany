@@ -3,6 +3,9 @@
   "violations": {
     "R1 governance/config_governance.py:_fernet": "lazy cipher handle, not state; Phase 0.3 moves it behind the vault",
     "R1 governance/leader_election.py:_election": "process-local lease client; the lease itself is in Redis",
-    "R1 governance/leader_election.py:_initialized": "init latch for the above"
+    "R1 governance/leader_election.py:_initialized": "init latch for the above",
+    "R1 governance/readiness.py:_ready": "per-process load latch for the middleware caches; budget and policies stay in the DB and are reloaded on restart (SECURITY-DEBT-01)",
+    "R1 governance/readiness.py:_retry_at": "per-process retry back-off only; it never grants access (SECURITY-DEBT-01)",
+    "R1 governance/readiness.py:_locks": "per-process single-flight locks for the load (SECURITY-DEBT-01)"
   }
 }
