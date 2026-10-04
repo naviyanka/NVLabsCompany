@@ -69,6 +69,7 @@ from nexus.api.routes.governance_studio import router as governance_studio_route
 from nexus.api.routes.organization import ceo_router as organization_ceo_router
 from nexus.api.routes.organization import router as organization_router
 from nexus.api.routes.telegram_bot import router as telegram_bot_router
+from nexus.api.routes.tool_effects import router as tool_effects_router
 from nexus.api.routes.tools import router as tools_router
 from nexus.api.routes.portability import router as portability_router
 from nexus.api.routes.runs import router as runs_router
@@ -483,6 +484,7 @@ app.include_router(organization_ceo_router)
 app.include_router(goals_router)
 app.include_router(skills_router)
 app.include_router(tools_router)
+app.include_router(tool_effects_router)
 app.include_router(approvals_router)
 app.include_router(budgets_router)
 app.include_router(connections_router)
