@@ -25,6 +25,7 @@ EVENTS = frozenset(
         "op_completed",
         "op_failed",
         "op_skipped_not_leader",
+        "op_skipped_lease_unavailable",
     }
 )
 # Only these fields are ever recorded. Values must be numbers or a short code.

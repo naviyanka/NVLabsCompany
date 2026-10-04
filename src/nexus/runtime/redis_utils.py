@@ -95,6 +95,17 @@ async def get_redis() -> Any:
         return None
 
 
+def forget_failed_connection() -> None:
+    """Let the next ``get_redis()`` retry after a failed first connection.
+
+    The failure is otherwise cached for the life of the process. A connection that was
+    made keeps its client, which reconnects by itself.
+    """
+    global _redis_available
+    if _redis_client is None:
+        _redis_available = None
+
+
 async def try_acquire_leader(
     service_name: str, instance_id: str, ttl_seconds: int = 120
 ) -> bool:

@@ -310,21 +310,29 @@ def test_no_agent_or_model_entry_point_can_start_an_operation():
 # -- failure behaviour ------------------------------------------------------------------
 
 
+class _StubLease:
+    """The lease interface with each call replaceable; ownership holds unless a test says not."""
+
+    def __init__(self, acquire=None, release=None, held=None):
+        async def yes(*_a):
+            return True
+
+        async def noop(*_a):
+            return None
+
+        self.acquire = acquire or yes
+        self.release = release or noop
+        self.held = held or yes
+
+
 def _runtime(ops, *, acquire=None, release=None, clock=None):
-    async def always(*_a):
-        return True
-
-    async def noop(*_a):
-        return None
-
     kwargs = {}
     if clock is not None:
         kwargs["clock"] = clock
     return SystemRuntime(
         lambda name: None,
         operations={op.name: op for op in ops},
-        acquire=acquire or always,
-        release=release or noop,
+        lease=_StubLease(acquire, release),
         instance_id="test",
         **kwargs,
     )
@@ -376,7 +384,7 @@ async def test_a_hung_operation_times_out_and_releases_its_lease():
     async def hang(discovery, now):
         await asyncio.sleep(60)
 
-    async def release(lease, instance):
+    async def release(lease, token):
         released.append(lease)
 
     seen = _events()
@@ -413,7 +421,7 @@ async def test_cancellation_propagates_and_the_lease_is_released():
         started.set()
         await asyncio.sleep(60)
 
-    async def release(lease, instance):
+    async def release(lease, token):
         released.append(lease)
 
     runtime = _runtime([_op("goal_discovery", hang)], release=release)

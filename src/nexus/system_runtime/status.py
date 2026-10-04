@@ -17,7 +17,11 @@ STATUS_TTL_SECONDS = 180
 
 
 async def publish(
-    *, ops_enabled: list[str], role_validation: str, last_success: dict[str, float]
+    *,
+    ops_enabled: list[str],
+    role_validation: str,
+    last_success: dict[str, float],
+    lease_store: str = "ok",
 ) -> None:
     """Write the current status. Best effort: a Redis outage must not stop the runtime."""
     redis = await get_redis()
@@ -27,6 +31,7 @@ async def publish(
         "process_type": "system-runtime",
         "ops_enabled": sorted(ops_enabled),
         "role_validation": role_validation,
+        "lease_store": lease_store,
         "last_success": last_success,
         "published_at": time.time(),
     }
