@@ -249,6 +249,10 @@ class Watchdog:
         )
         return self._patrol_task
 
+    def forget_run(self, run_id: uuid.UUID) -> None:
+        """Drop stall bookkeeping for a run that has been closed and will not be patrolled again."""
+        self._stall_states.pop(run_id, None)
+
     async def stop(self) -> None:
         """Stop the background patrol task.
 

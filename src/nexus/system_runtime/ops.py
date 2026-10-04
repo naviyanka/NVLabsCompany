@@ -165,9 +165,9 @@ async def task_recovery(discovery: DiscoveryFactory, now: datetime) -> OpResult:
 
     async def work(company_id: uuid.UUID) -> None:
         async with tenant_session(company_id) as tdb:
-            changed = await _reap_stale_subtasks(tdb)
-            changed += await _reclaim_stranded_goals(tdb)
-            changed += await reconcile_recovery(tdb)
+            changed = await _reap_stale_subtasks(tdb, company_id)
+            changed += await _reclaim_stranded_goals(tdb, company_id)
+            changed += await reconcile_recovery(tdb, company_id)
             if changed:
                 await tdb.commit()
 
@@ -336,10 +336,12 @@ async def task_attempt_recovery(discovery: DiscoveryFactory, now: datetime) -> O
 
 async def watchdog_patrol(discovery: DiscoveryFactory, now: datetime) -> OpResult:
     """Check agent health across tenants and file escalations through each tenant session."""
-    from nexus.runtime.watchdog_service import patrol_once
+    from nexus.runtime.watchdog_service import discover_companies, patrol_company
 
-    await patrol_once(discovery=discovery)
-    return OpResult(seen=1, processed=1, batches=1)
+    ids = await discover_companies(discovery, OPERATIONS["watchdog_patrol"].batch_size)
+    result = OpResult()
+    await _per_company(result, ids, patrol_company)
+    return result
 
 
 # -- org_snapshot_refresh ------------------------------------------------------------
@@ -361,7 +363,7 @@ OPERATIONS: dict[str, Operation] = {
         Operation("goal_discovery", 60, 20, 30, goal_discovery),
         Operation("chat_turn_recovery", 15, 50, 60, chat_turn_recovery),
         Operation("task_attempt_recovery", 15, 50, 60, task_attempt_recovery),
-        Operation("watchdog_patrol", 60, 1, 60, watchdog_patrol),
+        Operation("watchdog_patrol", 60, 20, 60, watchdog_patrol),
         Operation("org_snapshot_refresh", 60, 20, 120, org_snapshot_refresh),
     )
 }

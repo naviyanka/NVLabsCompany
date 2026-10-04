@@ -84,7 +84,7 @@ def _finish(row: Any, status: str, reason: str) -> None:
     row.updated_at = datetime.now(timezone.utc)
 
 
-async def _reap_stale_subtasks(db: AsyncSession) -> int:
+async def _reap_stale_subtasks(db: AsyncSession, company_id: uuid.UUID | None = None) -> int:
     """Fail or flag subtasks claimed by a process that never came back.
 
     ``_execute_subtasks`` claims a task as ``in_progress`` before the LLM call.
@@ -95,6 +95,9 @@ async def _reap_stale_subtasks(db: AsyncSession) -> int:
     If an active checkpoint exists for the task, marks it as 'needs_recovery'
     so it can be resumed by the recovery reconciliation pass. Otherwise,
     marks the task failed with timeout.
+
+    ``company_id`` scopes the pass to one tenant explicitly. The system runtime always
+    passes it, so the boundary does not rest on row level security alone.
 
     Returns:
         How many stale claims were reaped or flagged for recovery.
@@ -108,6 +111,8 @@ async def _reap_stale_subtasks(db: AsyncSession) -> int:
         Task.started_at.is_not(None),
         Task.started_at < cutoff,
     )
+    if company_id is not None:
+        stmt = stmt.where(Task.company_id == company_id)
     # A work task's attempt holds its own lease; task_attempts recovers it.
     stale = [t for t in (await db.execute(stmt)).scalars().all() if not t.work_spec]
 
@@ -123,8 +128,8 @@ async def _reap_stale_subtasks(db: AsyncSession) -> int:
             task.updated_at = utcnow()
             db.add(task)
             logger.warning(
-                "Stale subtask '%s' flagged as needs_recovery with checkpoint step %d",
-                task.title[:40],
+                "Stale subtask %s flagged as needs_recovery with checkpoint step %d",
+                task.id,
                 checkpoint.step_index,
             )
         else:
@@ -135,8 +140,8 @@ async def _reap_stale_subtasks(db: AsyncSession) -> int:
             )
             db.add(task)
             logger.warning(
-                "Reaped stale subtask '%s' claimed at %s (no checkpoint)",
-                task.title[:40],
+                "Reaped stale subtask %s claimed at %s (no checkpoint)",
+                task.id,
                 task.started_at,
             )
         handled += 1
@@ -144,7 +149,7 @@ async def _reap_stale_subtasks(db: AsyncSession) -> int:
     return handled
 
 
-async def _reclaim_stranded_goals(db: AsyncSession) -> int:
+async def _reclaim_stranded_goals(db: AsyncSession, company_id: uuid.UUID | None = None) -> int:
     """Return goals to ``active`` when whatever took them never came back.
 
     Dispatching a goal to Temporal marks it ``in_progress`` so the tick does not
@@ -163,6 +168,8 @@ async def _reclaim_stranded_goals(db: AsyncSession) -> int:
         Goal.status == "in_progress",
         Goal.updated_at < cutoff,
     )
+    if company_id is not None:
+        stmt = stmt.where(Goal.company_id == company_id)
     stranded = list((await db.execute(stmt)).scalars().all())
 
     for goal in stranded:
@@ -176,7 +183,7 @@ async def _reclaim_stranded_goals(db: AsyncSession) -> int:
     return len(stranded)
 
 
-async def reconcile_recovery(db: AsyncSession) -> int:
+async def reconcile_recovery(db: AsyncSession, company_id: uuid.UUID | None = None) -> int:
     """Automated background recovery reconciliation pass.
 
     Identifies:
@@ -200,6 +207,8 @@ async def reconcile_recovery(db: AsyncSession) -> int:
     stmt = select(Task).where(
         Task.status.in_(["needs_recovery", "in_progress", "failed"])
     )
+    if company_id is not None:
+        stmt = stmt.where(Task.company_id == company_id)
     result = await db.execute(stmt)
     tasks = list(result.scalars().all())
 
@@ -237,8 +246,7 @@ async def reconcile_recovery(db: AsyncSession) -> int:
                 pass
 
             logger.info(
-                "Restored task '%s' (%s) from checkpoint step %d to pending queue",
-                task.title[:40],
+                "Restored task %s from checkpoint step %d to pending queue",
                 task.id,
                 checkpoint.step_index,
             )

@@ -483,7 +483,7 @@ async def generate(company_id: uuid.UUID, now: datetime | None = None) -> dict[s
     try:
         payload = await _read(company_id, now)
     except Exception as exc:  # noqa: BLE001 - recorded, previous snapshot kept
-        logger.warning("Organization snapshot for %s failed: %s", company_id, exc)
+        logger.warning("Organization snapshot build failed (%s)", type(exc).__name__)
         async with tenant_session(company_id) as db:
             await db.execute(
                 update(OrganizationSnapshotState)
@@ -787,7 +787,11 @@ async def tick(
     )
     done = []
     for r in due[:MAX_PER_TICK]:
-        await generate(r.id, now)
+        try:
+            await generate(r.id, now)
+        except Exception as exc:  # noqa: BLE001 - one company must not stop the rest
+            logger.warning("Organization snapshot pass failed (%s)", type(exc).__name__)
+            continue
         done.append(r.id)
     return done
 

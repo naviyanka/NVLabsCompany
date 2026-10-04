@@ -100,7 +100,9 @@ class TestNeedsRecoveryEscalation:
         await watchdog_service.patrol_once(factory)
 
         manager = PersistentDecisionQueueManager(factory)
-        items = await manager.get_pending(watchdog_service.ESCALATION_QUEUE)
+        items = await manager.get_pending(
+            watchdog_service.escalation_queue(_company.id)
+        )
         assert len(items) == 1
         assert items[0].source_id == stranded.id
 
