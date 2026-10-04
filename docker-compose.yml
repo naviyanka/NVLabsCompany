@@ -37,7 +37,6 @@ services:
       - "8000:8000"
     environment:
       - DATABASE_URL=postgresql+asyncpg://nexus_app:nexus_app_pass@postgres:5432/nexus
-      - SYSTEM_DATABASE_URL=postgresql+asyncpg://nexus_system:nexus_system_pass@postgres:5432/nexus
       - REDIS_URL=redis://redis:6379/0
       - AUTH_ENABLED=true
       - CORS_ORIGINS=http://localhost:3000
@@ -102,7 +101,6 @@ services:
       dockerfile: Dockerfile
     environment:
       - DATABASE_URL=postgresql+asyncpg://nexus_app:nexus_app_pass@postgres:5432/nexus
-      - SYSTEM_DATABASE_URL=postgresql+asyncpg://nexus_system:nexus_system_pass@postgres:5432/nexus
       - REDIS_URL=redis://redis:6379/0
       - TEMPORAL_HOST=temporal:7233
       - USE_TEMPORAL=true
@@ -116,6 +114,28 @@ services:
       redis:
         condition: service_started
     command: python -m nexus.temporal.worker
+
+  # The only process that holds the BYPASSRLS nexus_system credential (no ports). The backend
+  # and temporal-worker above hold nexus_app only and refuse to start if they are given it.
+  system-runtime:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://nexus_app:nexus_app_pass@postgres:5432/nexus
+      - SYSTEM_DATABASE_URL=postgresql+asyncpg://nexus_system:nexus_system_pass@postgres:5432/nexus
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    volumes:
+      - ./src:/app/src
+    command: python -m nexus.system_runtime
+    restart: unless-stopped
 
   # Optional self-hosted LLM gateway (WP-22). Behind the "gateway" profile so
   # the default `docker compose up` does not start it; run with

@@ -62,8 +62,8 @@ Create the name of the service account to use
 {{/*
 Database identities. The application, migration and system roles are three different
 principals, and each is used for one thing: the application role runs the pods, the
-migrator role owns the schema and runs migrations, and the system role is for explicit
-maintenance and is never given to a pod. Rendering fails rather than collapse them.
+migrator role owns the schema and runs migrations, and the system role belongs to the
+dedicated system runtime workload alone. Rendering fails rather than collapse them.
 */}}
 {{- define "nexus.validateDatabaseRoles" -}}
 {{- $app := required "database.user is required" .Values.database.user -}}
@@ -87,5 +87,18 @@ maintenance and is never given to a pod. Rendering fails rather than collapse th
 {{- if .Values.migration.enabled -}}
 {{- $_ := required "migration.existingSecret is required: the migration job needs its own credential and never falls back to the application's" .Values.migration.existingSecret -}}
 {{- $_ := required "migration.secretKey is required" .Values.migration.secretKey -}}
+{{- end -}}
+{{- if .Values.systemRuntime.enabled -}}
+{{- $secret := required "systemRuntime.existingSecret is required: the system runtime needs its own credential and never falls back to the application's" .Values.systemRuntime.existingSecret -}}
+{{- $key := required "systemRuntime.secretKey is required" .Values.systemRuntime.secretKey -}}
+{{- if eq $secret .Values.migration.existingSecret -}}
+{{- fail "systemRuntime.existingSecret must not be the migration Secret" -}}
+{{- end -}}
+{{- if eq $secret (printf "%s-secrets" (include "nexus.fullname" .)) -}}
+{{- fail "systemRuntime.existingSecret must not be the application Secret that the API and worker load" -}}
+{{- end -}}
+{{- if or (eq $key "DATABASE_URL") (eq $key "MIGRATION_DATABASE_URL") -}}
+{{- fail "systemRuntime.secretKey must not name the application or migration credential" -}}
+{{- end -}}
 {{- end -}}
 {{- end }}

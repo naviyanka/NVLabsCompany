@@ -1,9 +1,10 @@
 """Deployment guards for database role separation.
 
 The application role must not own the schema, so the credentials must never collapse into
-one: the migration job holds only the migrator credential, the runtime holds only the
-application (and system) credentials, and nothing falls back from one to the other. These
-checks read the chart, the Compose files and the SQL bootstrap, with no database needed. The
+one: the migration job holds only the migrator credential, the API and workers hold only the
+application credential, the dedicated system runtime alone holds the system credential, and
+nothing falls back from one to the other. These checks read the chart, the Compose files and
+the SQL bootstrap, with no database needed. The
 PostgreSQL behaviour is proved in ``test_db_role_separation_postgres.py``.
 """
 
@@ -52,7 +53,7 @@ def test_migration_job_uses_only_the_migration_credential():
     [
         "api-deployment.yaml",
         "worker-deployment.yaml",
-        "scheduler-deployment.yaml",
+        "system-runtime-deployment.yaml",
         "configmap.yaml",
         "secrets.yaml",
     ],
@@ -76,17 +77,37 @@ def test_the_app_secret_holds_the_application_credential_only():
     )
 
 
-def test_no_helm_template_carries_or_falls_back_to_a_system_credential():
-    # Helm injects no SYSTEM_DATABASE_URL today (a documented gap, see the runbook), so the
-    # chart must neither add one to a pod nor stand in the application URL for it.
+def test_only_the_system_runtime_template_carries_a_system_credential():
+    runtime = "system-runtime-deployment.yaml"
     for path in TEMPLATES.glob("*.yaml"):
         text = _text(path)
+        if path.name == runtime:
+            assert "SYSTEM_DATABASE_URL" in text
+            assert ".Values.systemRuntime.existingSecret" in text
+            continue
         assert "SYSTEM_DATABASE_URL" not in text, path.name
+        assert "systemRuntime.existingSecret" not in text, path.name
         if path.name != "configmap.yaml":
             assert ".Values.database.systemUser" not in text, path.name
     secrets = _text(TEMPLATES / "secrets.yaml")
     assert not re.search(r"SYSTEM", secrets)
     assert not re.search(r"default[^\n]*DATABASE_URL", secrets), "no URL fallback"
+    deployment = _text(TEMPLATES / runtime)
+    assert not re.search(r"default[^\n]*existingSecret", deployment), "no fallback secret"
+    assert "secretRef:" not in deployment, "the runtime does not load the whole application Secret"
+
+
+def test_the_system_runtime_has_no_service_ingress_or_public_route():
+    for path in TEMPLATES.glob("*.yaml"):
+        text = _text(path)
+        assert "system-runtime" not in text or path.name == "system-runtime-deployment.yaml", (
+            f"{path.name} routes to the system runtime"
+        )
+    deployment = _text(TEMPLATES / "system-runtime-deployment.yaml")
+    assert "containerPort" not in deployment and "ports:" not in deployment
+    assert "restartPolicy: Always" in deployment
+    for needed in ("startupProbe", "livenessProbe", "resources:", "healthcheck"):
+        assert needed in deployment, needed
 
 
 def test_migration_values_default_to_no_secret_and_a_distinct_role():
@@ -97,6 +118,10 @@ def test_migration_values_default_to_no_secret_and_a_distinct_role():
     assert values["migration"]["user"] == MIGRATOR_ROLE
     assert values["database"]["user"] == APP_ROLE
     assert values["database"]["systemUser"] == SYSTEM_ROLE
+    assert values["systemRuntime"]["existingSecret"] == "", (
+        "an unset system secret must fail closed, not default"
+    )
+    assert values["systemRuntime"]["secretKey"] == "SYSTEM_DATABASE_URL"
     assert (
         len(
             {
@@ -113,7 +138,15 @@ def test_the_chart_validates_the_roles_in_the_configmap():
     assert 'include "nexus.validateDatabaseRoles"' in _text(TEMPLATES / "configmap.yaml")
     helpers = _text(TEMPLATES / "_helpers.tpl")
     block = helpers[helpers.index('define "nexus.validateDatabaseRoles"') :]
-    for needle in ("fail", "migration.user", "database.user", "database.systemUser", "required"):
+    for needle in (
+        "fail",
+        "migration.user",
+        "database.user",
+        "database.systemUser",
+        "required",
+        "systemRuntime.existingSecret",
+        "systemRuntime.secretKey",
+    ):
         assert needle in block
 
 
@@ -127,23 +160,66 @@ def _render(*sets: str) -> subprocess.CompletedProcess:
     return subprocess.run(args, capture_output=True, text=True, check=False)
 
 
+def _docs(rendered: str) -> list[dict]:
+    return [d for d in yaml.safe_load_all(rendered) if d]
+
+
+def _env_of(deployment: dict) -> list[dict]:
+    return deployment["spec"]["template"]["spec"]["containers"][0].get("env", [])
+
+
 @helm
 def test_helm_render_is_fail_closed_and_refuses_collapsed_identities():
-    good = ("migration.existingSecret=migration-db",)
+    good = ("migration.existingSecret=migration-db", "systemRuntime.existingSecret=system-db")
     ok = _render(*good)
     assert ok.returncode == 0, ok.stderr
-    docs = [d for d in yaml.safe_load_all(ok.stdout) if d]
+    docs = _docs(ok.stdout)
     job = next(d for d in docs if d["kind"] == "Job")
     env = job["spec"]["template"]["spec"]["containers"][0]["env"]
     url = next(e for e in env if e["name"] == "MIGRATION_DATABASE_URL")
     assert url["valueFrom"]["secretKeyRef"]["name"] == "migration-db"
+    assert "SYSTEM_DATABASE_URL" not in yaml.safe_dump(job)
     for d in docs:
         if d["kind"] == "Deployment":
             assert "MIGRATION_DATABASE_URL" not in yaml.safe_dump(d)
-    assert "SYSTEM_DATABASE_URL" not in ok.stdout, "the chart injects no system credential"
+
+    # Who holds the system credential: the system runtime and nothing else.
+    holders = [d["metadata"]["name"] for d in docs if "SYSTEM_DATABASE_URL" in yaml.safe_dump(d)]
+    assert holders == ["t-nexus-system-runtime"], holders
+    runtime = next(d for d in docs if d["metadata"]["name"] == "t-nexus-system-runtime")
+    system = next(e for e in _env_of(runtime) if e["name"] == "SYSTEM_DATABASE_URL")
+    assert system["valueFrom"]["secretKeyRef"]["name"] == "system-db"
+    spec = runtime["spec"]["template"]["spec"]
+    assert spec["restartPolicy"] == "Always" and runtime["spec"]["replicas"] == 1
+    container = spec["containers"][0]
+    assert "ports" not in container
+    assert {"startupProbe", "livenessProbe", "resources"} <= container.keys()
+    assert not any("secretRef" in source for source in container.get("envFrom", [])), (
+        "the runtime loads no whole Secret"
+    )
+    for d in docs:
+        if d["kind"] in {"Service", "Ingress"}:
+            assert "system-runtime" not in yaml.safe_dump(d), "the system runtime is not routable"
+    for d in docs:
+        if d["kind"] == "Deployment" and d is not runtime:
+            assert "system-db" not in yaml.safe_dump(d), "no other pod mounts the system Secret"
 
     refused = {
-        "no migration secret": ("migration.existingSecret=",),
+        "no migration secret": ("migration.existingSecret=", "systemRuntime.existingSecret=s"),
+        "no system secret": ("migration.existingSecret=m", "systemRuntime.existingSecret="),
+        "system secret is the migration secret": (
+            "migration.existingSecret=same",
+            "systemRuntime.existingSecret=same",
+        ),
+        "system secret is the app secret": (
+            "migration.existingSecret=m",
+            "systemRuntime.existingSecret=t-nexus-secrets",
+        ),
+        "system key names the app credential": (*good, "systemRuntime.secretKey=DATABASE_URL"),
+        "system key names the migrator credential": (
+            *good,
+            "systemRuntime.secretKey=MIGRATION_DATABASE_URL",
+        ),
         "migrator is the app": (*good, "migration.user=nexus_app", "database.user=nexus_app"),
         "app is the migrator": (*good, "database.user=nexus_migrator"),
         "app is the system role": (*good, "database.user=nexus_system"),
@@ -154,6 +230,10 @@ def test_helm_render_is_fail_closed_and_refuses_collapsed_identities():
         result = _render(*sets)
         assert result.returncode != 0, f"{label} rendered"
         assert "migration-db" not in result.stdout
+
+    disabled = _render("migration.existingSecret=m", "systemRuntime.enabled=false")
+    assert disabled.returncode == 0, disabled.stderr
+    assert "SYSTEM_DATABASE_URL" not in disabled.stdout
 
 
 # --- Compose ---------------------------------------------------------------------------
@@ -175,22 +255,31 @@ def test_prod_compose_migrates_once_as_the_migrator_before_the_runtime_starts():
     assert migrate["restart"] == "no"
     assert _env_files(migrate) == [".env.migration"]
     assert migrate["depends_on"]["postgres"]["condition"] == "service_healthy"
-    for name in ("api", "worker", "scheduler"):
+    for name in ("api", "worker", "system-runtime"):
         assert (
             services[name]["depends_on"]["migrate"]["condition"] == "service_completed_successfully"
         ), name
 
 
+def _env_file_keys(path: Path) -> set[str]:
+    return set(re.findall(r"(?m)^([A-Z][A-Z0-9_]*)=", _text(path)))
+
+
 def test_prod_compose_keeps_the_credentials_apart():
     services = _compose("docker-compose.prod.yml")
+    assert "scheduler" not in services, "the scheduler runs inside the API; nothing else needs it"
     for name, service in services.items():
         files = _env_files(service)
         env = yaml.safe_dump(service.get("environment", {}))
         if name != "migrate":
             assert ".env.migration" not in files, f"{name} loads the migrator credential"
             assert "MIGRATION_DATABASE_URL" not in env, name
-        if name in ("api", "worker", "scheduler"):
+        if name != "system-runtime":
+            assert ".env.system" not in files, f"{name} loads the system credential"
+            assert "SYSTEM_DATABASE_URL" not in env, f"{name} sets the system credential"
+        if name in ("api", "worker"):
             assert files == [".env.production"], name
+        if name in ("api", "worker", "system-runtime"):
             assert "alembic" not in yaml.safe_dump(service.get("command", "")), (
                 f"{name} runs migrations"
             )
@@ -205,20 +294,19 @@ def test_prod_compose_keeps_the_credentials_apart():
     )
 
 
-def test_compose_system_credential_wiring_is_documented_not_accidental():
-    # The legacy carve-out exists today. While it does, the Compose file and the runbook must
-    # say so; this does not require the carve-out to stay, so the follow-up can remove it.
-    compose = _text(ROOT / "docker-compose.prod.yml")
-    runbook = _text(ROOT / "docs" / "runbooks" / "database-roles.md")
-    services = _compose("docker-compose.prod.yml")
-    env = _text(ROOT / ".env.production.example")
-    carries = re.search(r"(?m)^SYSTEM_DATABASE_URL=", env) is not None
-    for name in ("migrate", "postgres"):
-        assert "SYSTEM_DATABASE_URL" not in yaml.safe_dump(services[name]), name
-    if carries:
-        assert "LEGACY CARVE-OUT" in compose
-        assert "legacy carve-out" in runbook
-        assert "Deferred work: system-session process isolation" in runbook
+def test_prod_system_runtime_is_internal_and_the_only_reader_of_its_credential():
+    runtime = _compose("docker-compose.prod.yml")["system-runtime"]
+    assert _env_files(runtime) == [".env.system"]
+    assert runtime["command"] == ["python", "-m", "nexus.system_runtime"]
+    assert "ports" not in runtime and "expose" not in runtime, "it serves nothing"
+    assert runtime["restart"] == "unless-stopped"
+    assert "healthcheck" in runtime and "healthcheck" in str(runtime["healthcheck"]["test"])
+    assert runtime["deploy"]["replicas"] == 1
+    # The credential lives in exactly one example file, and it is not the API's.
+    assert "SYSTEM_DATABASE_URL" in _env_file_keys(ROOT / ".env.system.example")
+    for name in (".env.production.example", ".env.migration.example", ".env.postgres.example"):
+        assert "SYSTEM_DATABASE_URL" not in _env_file_keys(ROOT / name), name
+    assert "MIGRATION_DATABASE_URL" not in _env_file_keys(ROOT / ".env.system.example")
 
 
 def test_env_examples_keep_the_credentials_apart():
@@ -226,15 +314,17 @@ def test_env_examples_keep_the_credentials_apart():
     assert "MIGRATION_DATABASE_URL" not in re.sub(r"(?m)^#.*$", "", runtime)
     assert not re.search(r"(?m)^POSTGRES_PASSWORD=", runtime)
     assert re.search(rf"(?m)^DATABASE_URL=postgresql\+asyncpg://{APP_ROLE}:", runtime)
-    # The system credential is a documented legacy carve-out (see the runbook). It is allowed
-    # here only with its marker, and only as the system role; removing it later is fine.
-    system = re.search(r"(?m)^SYSTEM_DATABASE_URL=(.*)$", runtime)
-    if system:
-        assert system.group(1).startswith(f"postgresql+asyncpg://{SYSTEM_ROLE}:")
-        assert "LEGACY CARVE-OUT" in runtime
+    assert "SYSTEM_DATABASE_URL" not in re.sub(r"(?m)^#.*$", "", runtime), (
+        "the API and worker file must not carry the system credential"
+    )
     assert "DATABASE_SYSTEM_URL" not in runtime, (
         "the variable the application reads is SYSTEM_DATABASE_URL"
     )
+
+    system = _text(ROOT / ".env.system.example")
+    assert re.search(rf"(?m)^SYSTEM_DATABASE_URL=postgresql\+asyncpg://{SYSTEM_ROLE}:", system)
+    assert re.search(rf"(?m)^DATABASE_URL=postgresql\+asyncpg://{APP_ROLE}:", system)
+    assert MIGRATOR_ROLE not in re.sub(r"(?m)^#.*$", "", system)
 
     migration = _text(ROOT / ".env.migration.example")
     assert re.search(
@@ -246,23 +336,28 @@ def test_env_examples_keep_the_credentials_apart():
 
 def test_real_env_files_are_ignored():
     ignored = _text(ROOT / ".gitignore").splitlines()
-    for name in (".env.production", ".env.migration", ".env.postgres"):
+    for name in (".env.production", ".env.migration", ".env.postgres", ".env.system"):
         assert name in ignored, f"{name} could be committed"
 
 
-def test_dev_compose_already_separates_the_roles():
+def test_dev_compose_separates_the_roles():
     services = _compose("docker-compose.yml")
     assert f"//{MIGRATOR_ROLE}:" in str(services["migrate"]["environment"])
     for name in ("backend", "temporal-worker"):
         env = str(services[name]["environment"])
-        assert (
-            f"//{APP_ROLE}:" in env
-            and f"SYSTEM_DATABASE_URL=postgresql+asyncpg://{SYSTEM_ROLE}:" in env
-        )
+        assert f"//{APP_ROLE}:" in env, name
+        assert "SYSTEM_DATABASE_URL" not in env and SYSTEM_ROLE not in env, name
         assert "MIGRATION_DATABASE_URL" not in env
         assert (
             services[name]["depends_on"]["migrate"]["condition"] == "service_completed_successfully"
         )
+    runtime = services["system-runtime"]
+    env = str(runtime["environment"])
+    assert f"SYSTEM_DATABASE_URL=postgresql+asyncpg://{SYSTEM_ROLE}:" in env
+    assert f"DATABASE_URL=postgresql+asyncpg://{APP_ROLE}:" in env
+    assert "ports" not in runtime
+    assert runtime["command"] == "python -m nexus.system_runtime"
+    assert runtime["depends_on"]["migrate"]["condition"] == "service_completed_successfully"
     mounts = services["postgres"]["volumes"]
     assert any(m.startswith("./deploy/postgres:") for m in mounts), (
         "the dev bootstrap includes the canonical script"
