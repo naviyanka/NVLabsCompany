@@ -18,6 +18,7 @@ from sqlmodel import select
 from nexus.models.governance_studio import GovernanceGrantUse, GovernanceTempAccess
 from nexus.models.tool import ToolProfile, ToolProfileBinding
 from nexus.tools import governance_overlay
+from nexus.tools.effects import ToolSlot
 from nexus.tools.factory import guarded_call
 from tests.test_governance_grants import (  # noqa: F401 -- fixtures and helpers
     HIRE,
@@ -63,7 +64,7 @@ async def _row(factory, grant_id) -> GovernanceTempAccess:  # noqa: F811
         return await db.get(GovernanceTempAccess, uuid.UUID(grant_id))
 
 
-def _call(t, tool=READ, args=None, **ctx_over):  # noqa: F811
+def _call(t, tool=READ, args=None, slot=ToolSlot(0, 0), **ctx_over):  # noqa: F811
     context = dataclasses.replace(ctx(t), **ctx_over)
     ran: list[int] = []
 
@@ -73,7 +74,7 @@ def _call(t, tool=READ, args=None, **ctx_over):  # noqa: F811
 
     async def go() -> dict[str, Any]:
         return await guarded_call(context, tool, args or {}, run, source="test",
-                                  default_risk="write")
+                                  default_risk="write", slot=slot)
 
     return go, ran
 
@@ -190,8 +191,8 @@ class TestConsumption:
         # The tool is undeclared, so it is a non-idempotent write: the second call replays the
         # recorded result instead of running the tool again, and the grant is charged once.
         assert (await _row(factory, g["id"])).used_count == 1 and ran == [1]
-        # A different invocation (other arguments, or another turn) pays again.
-        other, _ = _call(t, HIRE, {"k": 2}, turn_id=turn)
+        # A different invocation (the next slot of the turn, or another turn) pays again.
+        other, _ = _call(t, HIRE, {"k": 2}, slot=ToolSlot(0, 1), turn_id=turn)
         assert (await other())["status"] == "success"
         fresh, _ = _call(t, HIRE, {"k": 1}, turn_id=uuid.uuid4())
         assert (await fresh())["status"] == "success"

@@ -210,11 +210,24 @@ class TestGovernance:
         await _appoint(c, c["chief"])
         await allow(db, c["acme"], c["chief"], "ceo_create_goal_or_work_order")
         args = {"kind": "goal", "title": "Once", "idempotency_key": "same"}
-        for _ in range(2):  # recovery: a new execution of the same request
+        turn = await _turn(db, c["chief"])
+        for _ in range(2):  # recovery: a new execution of the same durable turn
             provider([tool_response(("a", "ceo_create_goal_or_work_order", args)), text_response("x")])
-            result, _ = await run(db, c["chief"], manager_tools_required=True)
+            result, _ = await run(db, c["chief"], turn=turn, manager_tools_required=True)
             assert calls(result) == [("ceo_create_goal_or_work_order", False)]
         assert len(await _rows(db, Goal, Goal.title == "Once")) == 1
+
+    async def test_a_later_turn_is_a_new_logical_call_even_with_the_same_model_key(
+        self, provider, db, c  # noqa: F811
+    ):
+        """The ledger key, not the model's key, is the identity: a new turn is a new call."""
+        await _appoint(c, c["chief"])
+        await allow(db, c["acme"], c["chief"], "ceo_create_goal_or_work_order")
+        args = {"kind": "goal", "title": "Again", "idempotency_key": "same"}
+        for _ in range(2):
+            provider([tool_response(("a", "ceo_create_goal_or_work_order", args)), text_response("x")])
+            await run(db, c["chief"], manager_tools_required=True)
+        assert len(await _rows(db, Goal, Goal.title == "Again")) == 2
 
     async def test_model_supplied_identity_is_rejected(self, provider, db, c):  # noqa: F811
         await _appoint(c, c["chief"])

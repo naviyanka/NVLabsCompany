@@ -25,6 +25,27 @@ from nexus.obsidian import (
 from nexus.tools.registry import ToolDefinition, ToolRegistry
 
 OBSIDIAN_NOTE_REPLACE_NAME = "obsidian.note_replace"
+# A failure status that proves the write did not happen, so the call may be retried.
+OBSIDIAN_REJECTED_STATUSES = frozenset(
+    {
+        "conflict",
+        "denied",
+        "approval_failure",
+        "secret_rejection",
+        "invalid_content",
+        "invalid_path",
+    }
+)
+# A failure status raised after the write may have started, or by the governance wrapper
+# when its outcome is unknown. Never retried automatically.
+OBSIDIAN_UNCERTAIN_STATUSES = frozenset(
+    {
+        "recovery_failure",
+        "audit_failure",
+        "internal_execution_failure",
+        "governance_failure",
+    }
+)
 _OBSIDIAN_TOOL_NAMESPACE = uuid.UUID("2bb7ed7f-6dd6-5f41-a4f4-59c6bd1c4694")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 
@@ -234,6 +255,8 @@ class ObsidianNoteReplaceTool:
 
 __all__ = [
     "OBSIDIAN_NOTE_REPLACE_NAME",
+    "OBSIDIAN_REJECTED_STATUSES",
+    "OBSIDIAN_UNCERTAIN_STATUSES",
     "OBSIDIAN_NOTE_REPLACE_SCHEMA",
     "ObsidianNoteReplaceResult",
     "ObsidianToolExecutionError",

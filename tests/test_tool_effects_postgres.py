@@ -28,7 +28,7 @@ from nexus.models.governance import AuditLog
 from nexus.models.tool_effect import ToolEffect
 from nexus.tools import effects
 from nexus.tools.context import ExecutionContext
-from nexus.tools.effects import EffectClass
+from nexus.tools.effects import EffectClass, ToolSlot
 from nexus.tools.factory import guarded_call
 from tests.test_postgres_integration import (  # noqa: F401 -- fixtures
     app_role,
@@ -42,6 +42,7 @@ pytestmark = [pytest.mark.postgres, pytest.mark.integration]
 NON_IDEM = EffectClass.NON_IDEMPOTENT_WRITE
 IDEM = EffectClass.IDEMPOTENT_WRITE
 RACERS = 6
+SLOT = ToolSlot(0, 0)
 
 
 class World:
@@ -90,9 +91,10 @@ class Tool:
         return self.result
 
 
-async def go(w, tool, effect=NON_IDEM, args=None, ctx=None):
+async def go(w, tool, effect=NON_IDEM, args=None, ctx=None, slot=SLOT, name="send-it"):
     return await guarded_call(
-        ctx or w.ctx, "send-it", args or {"n": 1}, tool, source="test", effect=effect.value
+        ctx or w.ctx, name, args or {"n": 1}, tool, source="test", effect=effect.value,
+        slot=slot,
     )
 
 
@@ -106,8 +108,11 @@ async def started(tool):
 
 def _new_row(company, **over):
     values = dict(
-        company_id=company, turn_id=uuid.uuid4(), tool_name="t", effect_class="idempotent_write",
-        invocation_key=uuid.uuid4().hex + uuid.uuid4().hex, arguments_digest="0" * 64,
+        company_id=company, turn_id=uuid.uuid4(), round_index=0, invocation_index=0,
+        tool_name="t",
+        effect_class="idempotent_write",
+        invocation_key=uuid.uuid4().hex + uuid.uuid4().hex,
+        arguments_digest="0" * 64,
         claim_token="tok", lease_expires_at=utcnow() + timedelta(minutes=5),
     )
     values.update(over)
@@ -117,35 +122,55 @@ def _new_row(company, **over):
 # --- schema, RLS, ownership ------------------------------------------------------------------
 
 
-async def test_forced_rls_policy_and_migration_round_trip(migrated_postgres_url):
+async def _effects_state(engine):
+    async with engine.connect() as conn:
+        return [
+            tuple(r)
+            for r in (
+                await conn.execute(
+                    sa.text(
+                        "SELECT c.relname, c.relrowsecurity, c.relforcerowsecurity, "
+                        "(SELECT count(*) FROM pg_policies p WHERE p.tablename = c.relname "
+                        " AND p.policyname = 'tenant_isolation') "
+                        "FROM pg_class c WHERE c.relname IN ('tool_effects', 'tool_notifications') "
+                        "ORDER BY c.relname"
+                    )
+                )
+            ).all()
+        ]
+
+
+LIVE = [("tool_effects", True, True, 1), ("tool_notifications", True, True, 1)]
+
+
+@pytest.fixture
+async def migration(migrated_postgres_url):
     cfg = alembic.config.Config("alembic.ini")
     cfg.set_main_option("sqlalchemy.url", migrated_postgres_url)
     engine = create_async_engine(migrated_postgres_url)
-
-    async def state():
-        async with engine.connect() as conn:
-            return [
-                tuple(r)
-                for r in (
-                    await conn.execute(
-                        sa.text(
-                            "SELECT c.relrowsecurity, c.relforcerowsecurity, "
-                            "(SELECT count(*) FROM pg_policies p WHERE p.tablename = c.relname "
-                            " AND p.policyname = 'tenant_isolation') "
-                            "FROM pg_class c WHERE c.relname = 'tool_effects'"
-                        )
-                    )
-                ).all()
-            ]
-
     try:
-        assert await state() == [(True, True, 1)]
-        await asyncio.to_thread(alembic.command.downgrade, cfg, "b4d9f2a61c73")
-        try:
-            assert await state() == []
-        finally:
-            await asyncio.to_thread(alembic.command.upgrade, cfg, "head")
-        assert await state() == [(True, True, 1)]
+        yield cfg, engine
+    finally:
+        # Whatever a test did, leave the shared database at head for the tests after it.
+        await asyncio.to_thread(alembic.command.upgrade, cfg, "head")
+        async with engine.begin() as conn:
+            await conn.execute(sa.text("GRANT ALL ON ALL TABLES IN SCHEMA public TO nexus_app"))
+        await engine.dispose()
+
+
+async def _empty_the_ledger(engine):
+    """Test setup, as the superuser: a clean ledger so a downgrade is judged on its own rows."""
+    async with engine.begin() as conn:
+        await conn.execute(sa.text("DELETE FROM tool_notifications"))
+        await conn.execute(sa.text("DELETE FROM tool_effects"))
+
+
+
+
+async def test_forced_rls_policy_is_live_on_both_tables(migrated_postgres_url):
+    engine = create_async_engine(migrated_postgres_url)
+    try:
+        assert await _effects_state(engine) == LIVE
     finally:
         await engine.dispose()
 
@@ -187,7 +212,7 @@ async def test_force_rls_binds_the_table_owner(migrated_postgres_url):
 
 
 async def test_unbound_session_reads_nothing_and_cannot_insert(world, app_role):
-    await effects.claim(world.acme, world.turn, "t", NON_IDEM, {"a": 1})
+    await effects.claim(world.acme, world.turn, SLOT, "t", NON_IDEM, {"a": 1})
     async with app_role() as db:  # no tenant bound
         assert (await db.execute(sa.select(ToolEffect))).scalars().all() == []
         db.add(_new_row(world.acme))
@@ -196,18 +221,18 @@ async def test_unbound_session_reads_nothing_and_cannot_insert(world, app_role):
 
 
 async def test_tenants_are_invisible_to_each_other(world):
-    await effects.claim(world.acme, world.turn, "t", NON_IDEM, {"a": 1})
+    await effects.claim(world.acme, world.turn, SLOT, "t", NON_IDEM, {"a": 1})
     async with tenant_session(world.other) as db:
         assert (await db.execute(sa.select(ToolEffect))).scalars().all() == []
         db.add(_new_row(world.acme))  # forged company id
         with pytest.raises(DBAPIError, match="row-level security|own company"):
             await db.commit()
-    assert await effects.list_open(world.other) == []
+    assert await effects.list_open(world.other) == {"items": [], "next_cursor": None}
 
 
 async def test_same_call_in_two_tenants_is_two_rows(world):
-    a = await effects.claim(world.acme, world.turn, "t", NON_IDEM, {"a": 1})
-    b = await effects.claim(world.other, world.turn, "t", NON_IDEM, {"a": 1})
+    a = await effects.claim(world.acme, world.turn, SLOT, "t", NON_IDEM, {"a": 1})
+    b = await effects.claim(world.other, world.turn, SLOT, "t", NON_IDEM, {"a": 1})
     assert a.action == b.action == "run" and a.effect_id != b.effect_id
 
 
@@ -217,6 +242,8 @@ async def test_same_call_in_two_tenants_is_two_rows(world):
         ({"status": "paused"}, "ck_tool_effects_status"),
         ({"effect_class": "read_only"}, "ck_tool_effects_class"),
         ({"attempt_count": 0}, "ck_tool_effects_attempts"),
+        ({"round_index": -2}, "ck_tool_effects_round"),
+        ({"invocation_index": -1}, "ck_tool_effects_position"),
         ({"claim_token": None}, "ck_tool_effects_executing_claim"),
         ({"lease_expires_at": None}, "ck_tool_effects_executing_claim"),
     ],
@@ -244,7 +271,10 @@ async def test_unique_key_per_tenant(world):
 
 async def test_concurrent_claims_have_one_winner(world):
     claims = await asyncio.gather(
-        *[effects.claim(world.acme, world.turn, "t", NON_IDEM, {"a": 1}) for _ in range(RACERS)]
+        *[
+            effects.claim(world.acme, world.turn, SLOT, "t", NON_IDEM, {"a": 1})
+            for _ in range(RACERS)
+        ]
     )
     assert sorted(c.action for c in claims) == ["busy"] * (RACERS - 1) + ["run"]
     assert len(await world.rows(world.acme)) == 1
@@ -343,3 +373,185 @@ async def test_ledger_audit_is_written_as_the_application_role(world):
             ).scalars()
         }
     assert "tool_effect.ambiguous" in actions
+
+
+# --- position-aware identity -----------------------------------------------------------------
+
+
+async def test_identical_calls_at_different_positions_run_separately(world):
+    tool = Tool()
+    await go(world, tool, slot=ToolSlot(0, 0))
+    await go(world, tool, slot=ToolSlot(0, 1))
+    await go(world, tool, slot=ToolSlot(1, 0))
+    assert tool.runs == 3
+    assert sorted((r.round_index, r.invocation_index) for r in await world.rows(world.acme)) == [
+        (0, 0), (0, 1), (1, 0),
+    ]
+
+
+async def test_recovery_of_the_same_position_reuses_the_row(world):
+    tool = Tool(result={"sent": "m1"})
+    first = await go(world, tool, slot=ToolSlot(2, 3))
+    again = await go(world, tool, slot=ToolSlot(2, 3))
+    assert tool.runs == 1 and again["replayed"] is True and again["result"] == first["result"]
+    (row,) = await world.rows(world.acme)
+    assert row.attempt_count == 1 and row.tool_name == "send-it"
+
+
+async def test_a_different_call_at_an_occupied_slot_fails_closed(world):
+    await go(world, Tool())
+    other_tool, other_args = Tool(), Tool()
+    different_tool = await go(world, other_tool, name="other-tool")
+    different_args = await go(world, other_args, args={"n": 2})
+    assert different_tool["status"] == different_args["status"] == "effect_recovery_required"
+    assert other_tool.runs == other_args.runs == 0
+    (row,) = await world.rows(world.acme)
+    assert row.tool_name == "send-it" and row.status == "succeeded"
+
+
+async def test_concurrent_claims_for_one_slot_have_one_runner_per_position(world):
+    claims = await asyncio.gather(
+        *[
+            effects.claim(world.acme, world.turn, ToolSlot(0, i % 2), "t", NON_IDEM, {"a": i % 2})
+            for i in range(RACERS)
+        ]
+    )
+    assert sorted(c.action for c in claims) == ["busy"] * (RACERS - 2) + ["run"] * 2
+    assert len(await world.rows(world.acme)) == 2
+
+
+# --- the database clock decides leases -------------------------------------------------------
+
+
+@pytest.mark.parametrize("skew", [timedelta(days=1), timedelta(days=-1)])
+async def test_a_skewed_worker_clock_does_not_move_a_lease(world, monkeypatch, skew):
+    gate = asyncio.Event()
+    holder = Tool(gate=gate)
+    task = asyncio.create_task(go(world, holder, effect=IDEM))
+    await started(holder)
+
+    real = effects.utcnow
+    monkeypatch.setattr(effects, "utcnow", lambda: real() + skew)
+    rival = Tool()
+    # The worker clock says the lease is long expired (or far from it); the database says
+    # it is live, so the rival is told to wait and does not run.
+    assert (await go(world, rival, effect=IDEM))["status"] == "effect_in_progress"
+    assert rival.runs == 0
+    monkeypatch.setattr(effects, "utcnow", real)
+    gate.set()
+    await task
+    (row,) = await world.rows(world.acme)
+    assert row.status == "succeeded" and row.attempt_count == 1
+
+
+async def test_a_lease_the_database_says_expired_is_retaken_despite_a_slow_clock(
+    world, monkeypatch
+):
+    gate = asyncio.Event()
+    holder = Tool(gate=gate)
+    task = asyncio.create_task(go(world, holder, effect=IDEM))
+    await started(holder)
+    (row,) = await world.rows(world.acme)
+    async with AsyncSession(world.engine) as db:
+        await db.execute(
+            sa.update(ToolEffect)
+            .where(ToolEffect.id == row.id)
+            .values(
+                lease_expires_at=sa.text("timezone('UTC', clock_timestamp()) - interval '1 second'")
+            )
+        )
+        await db.commit()
+    real = effects.utcnow
+    monkeypatch.setattr(effects, "utcnow", lambda: real() - timedelta(days=1))
+    taker = Tool()
+    assert (await go(world, taker, effect=IDEM))["status"] == "success" and taker.runs == 1
+    monkeypatch.setattr(effects, "utcnow", real)
+    gate.set()
+    await task
+    (row,) = await world.rows(world.acme)
+    assert row.attempt_count == 2
+
+
+# --- sealed results and notifications --------------------------------------------------------
+
+
+async def test_first_result_equals_the_replayed_result_after_sealing(world):
+    big = {"id": "m-77", "token": "sk-" + "a" * 40, "rows": [{"v": "x" * 400} for _ in range(300)]}
+    tool = Tool(result=big)
+    first = await go(world, tool)
+    again = await go(world, tool)
+    assert tool.runs == 1 and again["replayed"] is True
+    assert first["result"] == again["result"]
+    assert first["result"]["id"] == "m-77"
+    assert "sk-" + "a" * 40 not in str(first["result"])
+    assert first["result"]["token"] != big["token"]
+
+
+async def test_an_unserializable_result_is_ambiguous_and_not_rerun(world):
+    tool = Tool(result={"handle": object()})
+    out = await go(world, tool)
+    assert out["status"] == "effect_result_unavailable" and tool.runs == 1
+    (row,) = await world.rows(world.acme)
+    assert row.status == "ambiguous"
+    retry = Tool()
+    assert (await go(world, retry))["status"] == "effect_recovery_required" and retry.runs == 0
+
+
+async def test_a_notice_is_claimed_once_per_invocation_even_when_racing(world):
+    key = effects.invocation_key(world.acme, world.turn, SLOT)
+    results = await asyncio.gather(*[effects.claim_notice(world.acme, key) for _ in range(RACERS)])
+    assert results.count(True) == 1
+    other = effects.invocation_key(world.acme, world.turn, ToolSlot(0, 1))
+    assert await effects.claim_notice(world.acme, other) is True
+    assert await effects.claim_notice(world.other, key) is True  # another tenant is its own
+
+
+# --- guarded downgrade -----------------------------------------------------------------------
+
+
+async def test_downgrade_of_an_empty_ledger_round_trips(migration, app_role):
+    cfg, engine = migration
+    await _empty_the_ledger(engine)
+    assert await _effects_state(engine) == LIVE
+    await asyncio.to_thread(alembic.command.downgrade, cfg, "b4d9f2a61c73")
+    assert await _effects_state(engine) == []
+    await asyncio.to_thread(alembic.command.upgrade, cfg, "head")
+    assert await _effects_state(engine) == LIVE
+
+
+async def test_downgrade_refuses_while_the_ledger_has_rows(migration, world, monkeypatch):
+    cfg, engine = migration
+    monkeypatch.delenv("NEXUS_DESTROY_TOOL_EFFECTS", raising=False)
+    await effects.claim(world.acme, world.turn, SLOT, "t", NON_IDEM, {"a": 1})
+    with pytest.raises(RuntimeError, match="Refusing to downgrade"):
+        await asyncio.to_thread(alembic.command.downgrade, cfg, "b4d9f2a61c73")
+    # Nothing was deleted and FORCE row level security is back on for both tables.
+    assert await _effects_state(engine) == LIVE
+    assert len(await world.rows(world.acme)) == 1
+    # Anything but the exact acknowledgement is not an override.
+    monkeypatch.setenv("NEXUS_DESTROY_TOOL_EFFECTS", "yes")
+    with pytest.raises(RuntimeError, match="Refusing to downgrade"):
+        await asyncio.to_thread(alembic.command.downgrade, cfg, "b4d9f2a61c73")
+    assert len(await world.rows(world.acme)) == 1
+
+
+async def test_destructive_override_reports_the_loss_and_reupgrade_is_empty(
+    migration, world, monkeypatch, capfd
+):
+    cfg, engine = migration
+    await effects.claim(world.acme, world.turn, SLOT, "t", NON_IDEM, {"a": 1})
+    monkeypatch.setenv("NEXUS_DESTROY_TOOL_EFFECTS", "destroy-ledger")
+    await asyncio.to_thread(alembic.command.downgrade, cfg, "b4d9f2a61c73")
+    # Alembic's own logging config owns the logger, so the report is read where it lands.
+    report = capfd.readouterr().err
+    assert "DESTRUCTIVE DOWNGRADE" in report and "LOST" in report
+    assert await _effects_state(engine) == []
+    monkeypatch.delenv("NEXUS_DESTROY_TOOL_EFFECTS")
+    await asyncio.to_thread(alembic.command.upgrade, cfg, "head")
+    assert await _effects_state(engine) == LIVE
+    async with engine.connect() as conn:
+        counts = [
+            (await conn.execute(sa.text(f"SELECT count(*) FROM {t}"))).scalar_one()
+            for t in ("tool_effects", "tool_notifications")
+        ]
+    assert counts == [0, 0]

@@ -26,7 +26,7 @@ from pydantic import BaseModel, ValidationError
 from nexus.runtime.task_attempts import attempt_view
 from nexus.services import hiring_service, org_snapshot
 from nexus.services import manager_service as ms
-from nexus.tools.effects import EffectClass
+from nexus.tools.effects import EffectClass, EffectNotStarted, downstream_key
 
 
 @dataclass(frozen=True)
@@ -189,8 +189,14 @@ def input_schema(tool: ManagerTool) -> dict[str, Any]:
 async def call(ctx: Any, name: str, arguments: dict[str, Any]) -> Any:
     """Run manager or CEO tool ``name`` as the context's agent, in its company.
 
+    A tool that carries an ``idempotency_key`` has it replaced, inside a ledgered call, by the
+    call's ledger key. The model invents a fresh key on every rerun, so trusting its own would
+    let a recovered turn file a second hire or work order; the ledger key is the same for the
+    same logical call, so the service's own dedupe collapses the rerun.
+
     Raises:
-        ValueError: No agent identity, or a missing or malformed argument.
+        EffectNotStarted: No agent identity, or a missing or malformed argument. A ValueError,
+            and proven pre-effect: nothing was dispatched.
         fastapi.HTTPException: The service refused (not found, not a report).
     """
     from nexus.database import tenant_session
@@ -198,22 +204,26 @@ async def call(ctx: Any, name: str, arguments: dict[str, Any]) -> Any:
     from nexus.tools.ceo_tools import run as run_ceo_tool
 
     if ctx.agent_id is None:
-        raise ValueError("manager tools need an agent identity")
+        raise EffectNotStarted("manager tools need an agent identity")
     tool = MANAGER_TOOLS.get(name) or CEO_TOOLS[name]
     args: Any
     if tool.model is not None:
         try:
             args = tool.model.model_validate(arguments)
         except ValidationError as exc:
-            raise ValueError(f"invalid arguments: {exc.errors(include_url=False)}") from exc
+            raise EffectNotStarted(f"invalid arguments: {exc.errors(include_url=False)}") from exc
+        if hasattr(args, "idempotency_key"):
+            args = args.model_copy(
+                update={"idempotency_key": downstream_key(args.idempotency_key)}
+            )
     else:
         extra = set(arguments) - set(tool.params)
         if extra:
-            raise ValueError(f"unexpected arguments: {sorted(extra)}")
+            raise EffectNotStarted(f"unexpected arguments: {sorted(extra)}")
         try:
             args = {p: uuid.UUID(str(arguments[p])) for p in tool.params}
         except (KeyError, ValueError) as exc:
-            raise ValueError(f"expected UUID arguments {list(tool.params)}") from exc
+            raise EffectNotStarted(f"expected UUID arguments {list(tool.params)}") from exc
     if name not in MANAGER_TOOLS:
         return await run_ceo_tool(ctx, name, args)
     async with tenant_session(ctx.company_id) as db:

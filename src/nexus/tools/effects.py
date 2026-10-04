@@ -17,41 +17,59 @@ a tool name or a risk label:
   never rerun; it waits for an audited operator decision. A tool with no declared class is
   treated as this one, so a missing declaration fails closed.
 
-Logical key: ``sha256(json([KEY_VERSION, company_id, turn_id, tool_name, canonical_args]))``
-with ``canonical_args`` the arguments as JSON with sorted keys, ``(",", ":")`` separators,
-ASCII escapes and no NaN. Arguments that are not plain JSON have no canonical form and are
-refused for a write. The model's own tool-call ids are not part of the key (a rerun
-regenerates them), so two identical calls in one turn are one logical call and the second
-replays the first.
+Logical key: ``sha256(json([KEY_VERSION, company_id, turn_id, round_index, invocation_index]))``.
+The identity is a durable *slot*: the model round within the turn and the call's position in
+that round. It does not depend on the call's content, so two identical calls at different
+positions are two logical calls, and a recovered turn that reaches the same position finds
+the same row. The row stores the tool name and the digest of the canonical arguments (JSON
+with sorted keys, ``(",", ":")`` separators, ASCII escapes and no NaN); a recovery that
+arrives at an occupied slot with a different tool or digest is refused. Provider-generated
+call ids are never part of the key (a rerun regenerates them), and nothing here is a
+process-global counter.
 
-A call without a turn id (a plain REST request) is not ledgered: nothing requeues it.
+A write-capable call inside a turn with no slot is refused rather than run without a durable
+identity. A call without a turn id (a plain REST request) is not ledgered: nothing requeues it.
+
+Outcomes fail closed. Only an :class:`EffectNotStarted` raised for a failure proven to happen
+before dispatch or mutation (or a result flagged ``effect_rejected``) is a retryable
+``failed``. Everything else that is not a clean success, including a plain ``ValueError``, an
+in-band tool error, a timeout, cancellation and any unexpected exception, is ``ambiguous``.
 """
 
 from __future__ import annotations
 
+import base64
+import binascii
 import hashlib
 import json
 import logging
 import re
 import secrets
 import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
-from datetime import timedelta
-from enum import StrEnum
+from datetime import date, datetime, timedelta
+from decimal import Decimal
+from enum import Enum, StrEnum
+from pathlib import PurePath
 from typing import Any, Literal
 
-from sqlalchemy import select, update
+from sqlalchemy import and_ as sa_and
+from sqlalchemy import func, literal_column, or_, select, update
 from sqlalchemy.exc import IntegrityError
 
 from nexus.models._time import utcnow
-from nexus.models.tool_effect import ToolEffect
+from nexus.models.tool_effect import ToolEffect, ToolNotification
 
 logger = logging.getLogger(__name__)
 
-KEY_VERSION = "nexus.tool-effect.v1"
+KEY_VERSION = "nexus.tool-effect.v2"
 # A live holder must settle within this window. There is no heartbeat: a call that runs
 # longer is treated as interrupted by a later claim (a non-idempotent one then needs an
-# operator, an idempotent one is retried).
+# operator, an idempotent one is retried). Lease decisions use the database clock, never a
+# worker's own.
 LEASE_SECONDS = 900
 MAX_RESULT_BYTES = 16_384
 MAX_TEXT_CHARS = 500
@@ -71,6 +89,41 @@ class EffectKeyError(ValueError):
 
 class EffectStateError(RuntimeError):
     """A manual-recovery request does not match what the ledger holds."""
+
+
+class EffectNotStarted(ValueError):  # noqa: N818 - a signal, not an error
+    """The call failed before it was dispatched and before it changed anything.
+
+    The only exception that lets a non-idempotent write become a retryable ``failed``. Raise
+    it only where the code itself proves that nothing was sent and nothing was mutated (an
+    argument or configuration check that runs ahead of the first side effect). A timeout, a
+    malformed response, an HTTP error status or anything raised once the tool has begun to
+    act does not qualify.
+    """
+
+
+class ResultNotRetainable(Exception):  # noqa: N818 - a signal, not an error
+    """A tool result has no JSON form that can be stored safely."""
+
+
+@dataclass(frozen=True)
+class ToolSlot:
+    """Where a call sits in a turn: its model round and its position within that round.
+
+    ``round_index`` is ``-1`` for a caller that has no rounds and numbers its writes in
+    order (the MCP bridge). Parallel provider calls in one round are numbered by the order the
+    provider returned them, which a recovery reproduces.
+    """
+
+    round_index: int
+    invocation_index: int
+
+    def __post_init__(self) -> None:
+        for value in (self.round_index, self.invocation_index):
+            if not isinstance(value, int) or isinstance(value, bool):
+                raise ValueError("a tool slot is two integers")
+        if self.round_index < -1 or self.invocation_index < 0:
+            raise ValueError("a tool slot has round >= -1 and position >= 0")
 
 
 def resolve_effect(declared: str | EffectClass | None) -> EffectClass:
@@ -94,13 +147,38 @@ def _sha256(text: str) -> str:
     return hashlib.sha256(text.encode()).hexdigest()
 
 
-def invocation_key(
-    company_id: uuid.UUID, turn_id: uuid.UUID, tool_name: str, arguments: Any
-) -> tuple[str, str]:
-    """Return ``(invocation_key, arguments_digest)`` for one logical call."""
-    canon = canonical_arguments(arguments)
-    parts = [KEY_VERSION, str(company_id), str(turn_id), tool_name, canon]
-    return _sha256(json.dumps(parts, separators=(",", ":"))), _sha256(canon)
+def invocation_key(company_id: uuid.UUID, turn_id: uuid.UUID, slot: ToolSlot) -> str:
+    """The logical identity of the call at ``slot`` in a turn."""
+    parts = [KEY_VERSION, str(company_id), str(turn_id), slot.round_index, slot.invocation_index]
+    return _sha256(json.dumps(parts, separators=(",", ":")))
+
+
+def arguments_digest(arguments: Any) -> str:
+    """sha256 of the canonical arguments; :class:`EffectKeyError` if there is none."""
+    return _sha256(canonical_arguments(arguments))
+
+
+# The ledger key of the call now running, so a tool can hand it downstream as its idempotency
+# key instead of trusting a key the model regenerates on every recovery.
+_current_key: ContextVar[str | None] = ContextVar("nexus_tool_effect_key", default=None)
+
+
+@contextmanager
+def bind_invocation(key: str | None) -> Iterator[None]:
+    token = _current_key.set(key)
+    try:
+        yield
+    finally:
+        _current_key.reset(token)
+
+
+def downstream_key(model_key: str | None) -> str | None:
+    """The idempotency key to pass downstream: the ledger's when one is bound, else the model's.
+
+    Inside a ledgered call the model's own key is ignored, because a recovered model
+    regenerates it. With no ledger there is no recovery to protect, so the caller's key stands.
+    """
+    return _current_key.get() or model_key
 
 
 @dataclass(frozen=True)
@@ -114,6 +192,8 @@ class Claim:
     token: str | None = None
     stored: dict[str, Any] | None = None
     reason: str = ""
+    # The slot's invocation key, for the downstream idempotency binding and notice dedupe.
+    key: str | None = None
 
 
 # --- bounded, scrubbed result and error data ------------------------------------------------
@@ -129,14 +209,17 @@ _TOKEN_PATTERNS = (
 )
 
 
-def redact_text(text: Any, limit: int = MAX_TEXT_CHARS) -> str:
-    """Mask secret-looking text (guardrail patterns plus token shapes), then cap the length."""
+def _mask(text: str) -> str:
     from nexus.tools.factory import BLOCKED_PATTERNS
 
-    out = str(text)
     for pattern in (*BLOCKED_PATTERNS, *_TOKEN_PATTERNS):
-        out = re.sub(pattern, "[redacted]", out)
-    return out[:limit]
+        text = re.sub(pattern, "[redacted]", text)
+    return text
+
+
+def redact_text(text: Any, limit: int = MAX_TEXT_CHARS) -> str:
+    """Mask secret-looking text (guardrail patterns plus token shapes), then cap the length."""
+    return _mask(str(text))[:limit]
 
 
 def _flatten(result: Any) -> tuple[str, Any]:
@@ -158,74 +241,166 @@ def _flatten(result: Any) -> tuple[str, Any]:
     return "json", result
 
 
-def encode_result(result: Any) -> dict[str, Any]:
-    """Bounded, scrubbed, JSON-safe form of a tool result.
+def _json_default(value: Any) -> Any:
+    """Plain scalar forms for the few non-JSON types tools commonly return."""
+    if isinstance(value, uuid.UUID | datetime | date | Decimal | PurePath):
+        return str(value)
+    if isinstance(value, Enum):
+        return value.value
+    raise TypeError(f"{type(value).__name__} is not JSON serializable")
 
-    Keys that look secret are masked (the same rule as the invocation audit row). A result
-    over :data:`MAX_RESULT_BYTES` is not stored; only its size and digest are, and a replay
-    says so instead of returning the data.
+
+# Tighter and tighter limits until the result fits: (string chars, list items, nesting depth).
+_BOUND_TIERS = ((2000, 100, 8), (500, 20, 5), (120, 5, 3))
+_SKELETON_KEYS = 50
+_SKELETON_CHARS = 120
+
+
+def _bound(value: Any, strings: int, items: int, depth: int, cut: list[bool]) -> Any:
+    """Redact strings and cap sizes, leaving a visible marker wherever something was dropped."""
+    if isinstance(value, str):
+        text = _mask(value)
+        if len(text) > strings:
+            cut[0] = True
+            return f"{text[:strings]}...[truncated {len(text) - strings} chars]"
+        return text
+    if isinstance(value, dict):
+        if depth <= 0:
+            cut[0] = True
+            return "[truncated: nesting]"
+        out = {
+            str(k)[:100]: _bound(v, strings, items, depth - 1, cut)
+            for k, v in list(value.items())[:items]
+        }
+        if len(value) > items:
+            cut[0] = True
+            out["_truncated_keys"] = len(value) - items
+        return out
+    if isinstance(value, list):
+        if depth <= 0:
+            cut[0] = True
+            return "[truncated: nesting]"
+        out_list = [_bound(v, strings, items, depth - 1, cut) for v in value[:items]]
+        if len(value) > items:
+            cut[0] = True
+            out_list.append(f"[{len(value) - items} more items truncated]")
+        return out_list
+    return value
+
+
+def _skeleton(value: Any, cut: list[bool]) -> Any:
+    """Last resort: the top-level scalar fields only (identifiers, statuses, counts)."""
+    cut[0] = True
+    if isinstance(value, dict):
+        out: dict[str, Any] = {}
+        for k, v in list(value.items())[:_SKELETON_KEYS]:
+            if isinstance(v, str):
+                out[str(k)[:100]] = _bound(v, _SKELETON_CHARS, 0, 0, cut)
+            elif v is None or isinstance(v, bool | int | float):
+                out[str(k)[:100]] = v
+        out["_truncated_fields"] = True
+        return out
+    return _bound(value, _SKELETON_CHARS, 0, 0, cut)
+
+
+def _size(value: Any) -> int:
+    return len(json.dumps(value, sort_keys=True, separators=(",", ":")).encode())
+
+
+def seal_result(result: Any) -> dict[str, Any]:
+    """The one durable, bounded, scrubbed form of a result, stored and returned to every caller.
+
+    The first caller and every replay receive the output of :func:`decode_result` on this same
+    envelope, so a recovery never sees less (or more) than the original run did. Secret-looking
+    keys are masked (the rule the invocation audit row uses), strings are pattern-redacted,
+    and a result over :data:`MAX_RESULT_BYTES` is cut down in steps that keep short scalar
+    identifiers and say where data was dropped. Raises :class:`ResultNotRetainable` when the
+    result has no JSON form (the effect already happened, so the caller must settle ambiguous
+    rather than rerun).
     """
     from nexus.tools.executor import _scrub_value
 
     kind, value = _flatten(result)
-    value = _scrub_value(json.loads(json.dumps(value, default=str)))
-    raw = json.dumps(value, sort_keys=True, separators=(",", ":"))
-    size = len(raw.encode())
-    if size > MAX_RESULT_BYTES:
-        return {"kind": kind, "omitted": {"bytes": size, "sha256": _sha256(raw)}}
-    return {"kind": kind, "value": value}
+    try:
+        plain = json.loads(json.dumps(value, default=_json_default, allow_nan=False))
+        plain = _scrub_value(plain)
+        original_bytes = _size(plain)
+        cut = [False]
+        bounded = _bound(plain, *_BOUND_TIERS[0], cut)
+        for tier in _BOUND_TIERS[1:]:
+            if _size(bounded) <= MAX_RESULT_BYTES:
+                break
+            cut = [True]
+            bounded = _bound(plain, *tier, cut)
+        if _size(bounded) > MAX_RESULT_BYTES:
+            bounded = _skeleton(plain, cut)
+        digest = _sha256(json.dumps(plain, sort_keys=True, separators=(",", ":")))
+    except (TypeError, ValueError, RecursionError, OverflowError) as exc:
+        raise ResultNotRetainable(type(exc).__name__) from exc
+    envelope: dict[str, Any] = {"kind": kind, "value": bounded}
+    if cut[0]:
+        envelope["truncated"] = {"original_bytes": original_bytes, "sha256": digest}
+    return envelope
 
 
 def decode_result(stored: dict[str, Any]) -> Any:
-    """Rebuild the result object a caller expects from :func:`encode_result` output."""
+    """Rebuild the result object a caller expects from :func:`seal_result` output."""
     from nexus.nodes.executor import ExecutorResult
     from nexus.tools.mcp_client import MCPResult
 
     kind = stored["kind"]
-    omitted = stored.get("omitted")
-    note = {"replayed": True, "result_omitted": True, **omitted} if omitted else None
-    value = stored.get("value") or {}
+    value = stored.get("value")
     if kind == "executor_result":
-        if note is not None:
-            return ExecutorResult(success=True, outputs=note)
         return ExecutorResult(
-            success=value["success"], outputs=value["outputs"], error=value["error"]
+            success=value["success"], outputs=value["outputs"] or {}, error=value["error"]
         )
     if kind == "mcp_result":
-        if note is not None:
-            return MCPResult(content=note)
         return MCPResult(
             content=value["content"], is_error=value["is_error"], metadata=value["metadata"] or {}
         )
     if kind == "json":
-        return note if note is not None else stored["value"]
+        return value
     raise ValueError(f"unknown stored result kind {kind!r}")
 
 
-def outcome_of(result: Any) -> tuple[str, str | None]:
+def outcome_of(result: Any, tool_name: str | None = None) -> tuple[str, str | None]:
     """``(status, error)`` for a result the tool returned rather than raised.
 
-    ``ambiguous`` only when the tool says it cannot tell whether it acted (a timeout or an
-    unexpected crash); a failure the tool reports itself is a definite no-effect ``failed``.
+    Fails closed: only a clean success is ``succeeded``, and only a result flagged
+    ``effect_rejected`` (the tool proved it acted on nothing) is a retryable ``failed``. A
+    result that reports an error without that proof, such as an in-band MCP error or a
+    non-success executor result, may still have had an effect and is ``ambiguous``.
     """
     if getattr(result, "effect_unknown", False):
         return "ambiguous", getattr(result, "error", None) or "outcome unknown"
+    if getattr(result, "effect_rejected", False):
+        return "failed", str(getattr(result, "error", None) or getattr(result, "content", ""))
     if getattr(result, "is_error", False):
-        return "failed", str(getattr(result, "content", ""))
+        return "ambiguous", str(getattr(result, "content", "")) or "in-band tool error"
     if getattr(result, "success", True) is False:
-        return "failed", getattr(result, "error", None)
+        return "ambiguous", getattr(result, "error", None) or "tool reported failure"
+    if isinstance(result, dict):
+        from nexus.tools.obsidian import (
+            OBSIDIAN_NOTE_REPLACE_NAME,
+            OBSIDIAN_REJECTED_STATUSES,
+            OBSIDIAN_UNCERTAIN_STATUSES,
+        )
+
+        status = result.get("status")
+        if tool_name == OBSIDIAN_NOTE_REPLACE_NAME and status in OBSIDIAN_REJECTED_STATUSES:
+            return "failed", str(result.get("reason") or status)
+        if tool_name == OBSIDIAN_NOTE_REPLACE_NAME and status in OBSIDIAN_UNCERTAIN_STATUSES:
+            return "ambiguous", str(result.get("reason") or status)
     return "succeeded", None
 
 
 def outcome_of_exception(exc: BaseException) -> str:
-    """A validation refusal (``ValueError``, HTTP 4xx) did nothing; everything else is unknown.
+    """``failed`` only for an :class:`EffectNotStarted`; every other raise is ``ambiguous``.
 
-    Cancellation, timeouts, connection errors and server errors all leave the effect unknown.
+    A plain ``ValueError``, a decoding error, a timeout, cancellation or an HTTP error may
+    all surface after the effect began, so none of them proves that nothing happened.
     """
-    if isinstance(exc, ValueError):
-        return "failed"
-    code = getattr(exc, "status_code", None)
-    if isinstance(exc, Exception) and isinstance(code, int) and 400 <= code < 500:
+    if isinstance(exc, EffectNotStarted):
         return "failed"
     return "ambiguous"
 
@@ -284,36 +459,60 @@ def _cas(row: ToolEffect, **values: Any) -> Any:
     )
 
 
+async def _db_now(db: Any) -> datetime:
+    """The database's current time as naive UTC, the form every ledger timestamp is stored in.
+
+    Lease expiry and takeover are decided against this clock, never a worker's: workers can
+    disagree by seconds or minutes, and a skewed one would otherwise reclaim a live call early.
+    PostgreSQL's ``clock_timestamp()`` advances inside a transaction (unlike ``now()``).
+    """
+    dialect = (await db.connection()).dialect.name
+    if dialect == "postgresql":
+        now = select(literal_column("timezone('UTC', clock_timestamp())"))
+        return (await db.execute(now)).scalar_one()
+    # SQLite has no server; its own clock is the equivalent, and is read in SQL so a test can
+    # skew the Python clock without moving it.
+    text = (
+        await db.execute(select(func.strftime("%Y-%m-%d %H:%M:%f", "now")))
+    ).scalar_one()
+    return datetime.strptime(text, "%Y-%m-%d %H:%M:%S.%f")
+
+
 async def claim(
     company_id: uuid.UUID,
     turn_id: uuid.UUID,
+    slot: ToolSlot,
     tool_name: str,
     effect_class: EffectClass,
     arguments: Any,
 ) -> Claim:
-    """Reserve one logical call, or say why it must not run now.
+    """Reserve the call at ``slot``, or say why it must not run now.
 
-    Exactly one caller gets ``run`` for a given key at a time: the first INSERT wins on the
-    unique key, and every later takeover is one compare-and-set UPDATE. Raises
+    Exactly one caller gets ``run`` for a given slot at a time: the first INSERT wins on the
+    unique key, and every later takeover is one compare-and-set UPDATE. A recovery that
+    reaches an occupied slot with a different tool or argument digest is ``blocked``. Raises
     :class:`EffectKeyError` for non-canonical arguments and propagates database errors; the
     caller must then refuse the call rather than run it unrecorded.
     """
     from nexus import database
 
-    key, digest = invocation_key(company_id, turn_id, tool_name, arguments)
+    key = invocation_key(company_id, turn_id, slot)
+    digest = arguments_digest(arguments)
     token = secrets.token_hex(16)
-    lease = utcnow() + timedelta(seconds=LEASE_SECONDS)
-    new = ToolEffect(
-        company_id=company_id,
-        turn_id=turn_id,
-        tool_name=tool_name,
-        effect_class=effect_class.value,
-        invocation_key=key,
-        arguments_digest=digest,
-        claim_token=token,
-        lease_expires_at=lease,
-    )
     async with database.tenant_session(company_id) as db:
+        lease = (await _db_now(db)) + timedelta(seconds=LEASE_SECONDS)
+        new = ToolEffect(
+            company_id=company_id,
+            turn_id=turn_id,
+            round_index=slot.round_index,
+            invocation_index=slot.invocation_index,
+            tool_name=tool_name,
+            effect_class=effect_class.value,
+            invocation_key=key,
+            arguments_digest=digest,
+            claim_token=token,
+            lease_expires_at=lease,
+        )
         try:
             async with db.begin_nested():
                 db.add(new)
@@ -322,7 +521,7 @@ async def claim(
             pass
         else:
             await db.commit()
-            return Claim("run", company_id, effect_class, new.id, token)
+            return Claim("run", company_id, effect_class, new.id, token, key=key)
         row = (
             await db.execute(
                 select(ToolEffect)
@@ -330,15 +529,25 @@ async def claim(
                 .with_for_update()
             )
         ).scalar_one()
-        decision = await _decide(db, row, effect_class, token, lease)
+        if row.tool_name != tool_name or row.arguments_digest != digest:
+            # Recovery diverged from what ran here before. Whether the occupant ran is not
+            # this call's to guess, so nothing runs and an operator looks at the turn.
+            await _audit(
+                db, row, "slot_mismatch", requested_tool=tool_name, requested_digest=digest
+            )
+            await db.commit()
+            return Claim(
+                "blocked", company_id, effect_class, row.id, key=key,
+                reason="slot is occupied by a different call",
+            )
+        decision = await _decide(db, row, effect_class, token)
         await db.commit()
         return decision
 
 
-async def _decide(
-    db: Any, row: ToolEffect, requested: EffectClass, token: str, lease: Any
-) -> Claim:
+async def _decide(db: Any, row: ToolEffect, requested: EffectClass, token: str) -> Claim:
     cid = row.company_id
+    key = row.invocation_key
     strict = (
         EffectClass.NON_IDEMPOTENT_WRITE
         if EffectClass.NON_IDEMPOTENT_WRITE.value in (row.effect_class, requested.value)
@@ -346,28 +555,33 @@ async def _decide(
     )
     if row.status == "succeeded":
         await _audit(db, row, "replayed")
-        return Claim("replay", cid, strict, row.id, stored=row.result)
+        return Claim("replay", cid, strict, row.id, stored=row.result, key=key)
     if row.status == "manual_recovery_required":
-        return Claim("blocked", cid, strict, row.id, reason="manual recovery required")
-    expired = row.lease_expires_at is None or row.lease_expires_at <= utcnow()
+        return Claim(
+            "blocked", cid, strict, row.id, key=key, reason="manual recovery required"
+        )
+    now = await _db_now(db)
+    expired = row.lease_expires_at is None or row.lease_expires_at <= now
     if row.status == "executing" and not expired:
-        return Claim("busy", cid, strict, row.id, reason="another worker holds this call")
+        return Claim(
+            "busy", cid, strict, row.id, key=key, reason="another worker holds this call"
+        )
     take = {
         "status": "executing",
         "claim_token": token,
-        "lease_expires_at": lease,
+        "lease_expires_at": now + timedelta(seconds=LEASE_SECONDS),
         "attempt_count": row.attempt_count + 1,
         "result": None,
         "error": None,
         "completed_at": None,
     }
     if row.status == "failed":
-        # The tool reported that it did nothing, so a retry cannot repeat an effect.
+        # The tool proved it did nothing, so a retry cannot repeat an effect.
         won = (await db.execute(_cas(row, **take))).rowcount == 1
         return (
-            Claim("run", cid, strict, row.id, token)
+            Claim("run", cid, strict, row.id, token, key=key)
             if won
-            else Claim("busy", cid, strict, row.id, reason="lost the claim race")
+            else Claim("busy", cid, strict, row.id, key=key, reason="lost the claim race")
         )
     # ambiguous, or an executing claim whose lease ran out: the effect may have happened.
     came_from = row.status
@@ -378,26 +592,31 @@ async def _decide(
         ).rowcount == 1
         if won:
             await _audit(db, row, "manual_recovery_required", must=True, came_from=came_from)
-        return Claim("blocked", cid, strict, row.id, reason="manual recovery required")
+        return Claim(
+            "blocked", cid, strict, row.id, key=key, reason="manual recovery required"
+        )
     won = (await db.execute(_cas(row, **take))).rowcount == 1
     if not won:
-        return Claim("busy", cid, strict, row.id, reason="lost the claim race")
+        return Claim("busy", cid, strict, row.id, key=key, reason="lost the claim race")
     await _audit(db, row, "retaken", must=True, came_from=came_from)
-    return Claim("run", cid, strict, row.id, token)
+    return Claim("run", cid, strict, row.id, token, key=key)
 
 
 async def settle(
-    held: Claim, status: str, *, result: Any = None, error: str | None = None
+    held: Claim, status: str, *, stored: dict[str, Any] | None = None, error: str | None = None
 ) -> bool:
     """Record the outcome of a call this claim started. Never raises.
 
-    Only the claim holding the token can settle, so a holder whose row was taken over after
-    its lease expired cannot overwrite the newer outcome. ``False`` means nothing changed;
-    the row then stays ``executing`` and the next claim treats it as ambiguous.
+    ``stored`` is the :func:`seal_result` envelope for a ``succeeded`` outcome. Only the claim
+    holding the token can settle, so a holder whose row was taken over after its lease expired
+    cannot overwrite the newer outcome. ``False`` means nothing changed; the row then stays
+    ``executing`` and the next claim treats it as ambiguous.
     """
     from nexus import database
 
     if held.action != "run" or held.effect_id is None:
+        return False
+    if status == "succeeded" and stored is None:
         return False
     now = utcnow()
     values: dict[str, Any] = {
@@ -408,9 +627,9 @@ async def settle(
         "updated_at": now,
         "completed_at": now,
     }
+    if status == "succeeded":
+        values["result"] = stored
     try:
-        if status == "succeeded":
-            values["result"] = encode_result(result)
         async with database.tenant_session(held.company_id) as db:
             done = await db.execute(
                 update(ToolEffect)
@@ -432,6 +651,30 @@ async def settle(
             return True
     except Exception as exc:  # noqa: BLE001 - settling must never fail the tool call
         logger.error("could not settle tool effect %s: %s", held.effect_id, exc)
+        return False
+
+
+async def claim_notice(company_id: uuid.UUID, invocation_key: str) -> bool:
+    """True exactly once per logical invocation: the caller that gets it may send the notice.
+
+    The insert is the decision (the primary key has one winner), and it is made before the
+    send, so a replay or a concurrent claim for the same slot never notifies again. If the
+    database cannot be reached the answer is ``False``: a notice may be missed, never doubled.
+    """
+    from nexus import database
+
+    try:
+        async with database.tenant_session(company_id) as db:
+            try:
+                async with db.begin_nested():
+                    db.add(ToolNotification(company_id=company_id, invocation_key=invocation_key))
+                    await db.flush()
+            except IntegrityError:
+                return False
+            await db.commit()
+            return True
+    except Exception as exc:  # noqa: BLE001 - a missed notice is safer than a repeated one
+        logger.error("could not record tool notification %s: %s", invocation_key, exc)
         return False
 
 
@@ -494,26 +737,60 @@ async def resolve_manual_recovery(
         return {"id": str(row.id), "status": values["status"], "outcome": outcome}
 
 
-async def list_open(company_id: uuid.UUID, limit: int = 100) -> list[dict[str, Any]]:
-    """Effects awaiting an operator decision, oldest first. Identifiers and states only."""
+def _encode_cursor(created_at: datetime, effect_id: uuid.UUID) -> str:
+    raw = json.dumps([created_at.isoformat(), str(effect_id)], separators=(",", ":"))
+    return base64.urlsafe_b64encode(raw.encode()).decode().rstrip("=")
+
+
+def _decode_cursor(cursor: str) -> tuple[datetime, uuid.UUID]:
+    try:
+        padded = cursor + "=" * (-len(cursor) % 4)
+        stamp, ident = json.loads(base64.urlsafe_b64decode(padded.encode()))
+        return datetime.fromisoformat(stamp), uuid.UUID(ident)
+    except (ValueError, TypeError, binascii.Error) as exc:
+        raise ValueError("invalid cursor") from exc
+
+
+async def list_open(
+    company_id: uuid.UUID, limit: int = 100, after: str | None = None
+) -> dict[str, Any]:
+    """One page of effects awaiting an operator decision, oldest first.
+
+    Identifiers and states only. ``next_cursor`` is ``None`` on the last page; pass it back as
+    ``after`` for the next. The cursor is keyset based, so a row resolved between two pages
+    never shifts what the next page contains.
+    """
     from nexus import database
 
-    async with database.tenant_session(company_id) as db:
-        rows = (
-            await db.execute(
-                select(ToolEffect)
-                .where(
-                    ToolEffect.company_id == company_id,
-                    ToolEffect.status.in_(("ambiguous", "manual_recovery_required")),
-                )
-                .order_by(ToolEffect.created_at, ToolEffect.id)
-                .limit(limit)
+    limit = max(1, min(limit, 500))
+    query = select(ToolEffect).where(
+        ToolEffect.company_id == company_id,
+        ToolEffect.status.in_(("ambiguous", "manual_recovery_required")),
+    )
+    if after is not None:
+        seen_at, seen_id = _decode_cursor(after)
+        query = query.where(
+            or_(
+                ToolEffect.created_at > seen_at,
+                sa_and(ToolEffect.created_at == seen_at, ToolEffect.id > seen_id),
             )
-        ).scalars()
-        return [
+        )
+    async with database.tenant_session(company_id) as db:
+        rows = list(
+            (
+                await db.execute(
+                    query.order_by(ToolEffect.created_at, ToolEffect.id).limit(limit + 1)
+                )
+            ).scalars()
+        )
+    page, more = rows[:limit], len(rows) > limit
+    return {
+        "items": [
             {
                 "id": str(r.id),
                 "turn_id": str(r.turn_id),
+                "round_index": r.round_index,
+                "invocation_index": r.invocation_index,
                 "tool_name": r.tool_name,
                 "effect_class": r.effect_class,
                 "status": r.status,
@@ -521,5 +798,7 @@ async def list_open(company_id: uuid.UUID, limit: int = 100) -> list[dict[str, A
                 "arguments_digest": r.arguments_digest,
                 "created_at": r.created_at.isoformat(),
             }
-            for r in rows
-        ]
+            for r in page
+        ],
+        "next_cursor": _encode_cursor(page[-1].created_at, page[-1].id) if more else None,
+    }

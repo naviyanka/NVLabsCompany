@@ -30,6 +30,9 @@ class ExecutorResult:
     # True when the executor cannot say whether it acted (a timeout or an unexpected crash),
     # as opposed to a refusal it reports itself. Durable tool-effect recovery relies on it.
     effect_unknown: bool = False
+    # True only when the executor proves it did nothing: it refused before dispatching
+    # anything. Any other failure of a write is treated as possibly having acted.
+    effect_rejected: bool = False
 
 
 ExecutorFn = Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]
@@ -102,9 +105,25 @@ async def _llm_prompt(prompt: str, model: str | None = None) -> tuple[str, int]:
     return str(result.output), result.input_tokens + result.output_tokens
 
 
+def _not_started(message: str) -> Exception:
+    """A refusal raised before anything was dispatched, so retrying cannot repeat an effect.
+
+    Imported on use: nexus.tools imports this module's package neighbours at load time.
+    """
+    from nexus.tools.effects import EffectNotStarted
+
+    return EffectNotStarted(message)
+
+
+def _is_not_started(exc: BaseException) -> bool:
+    from nexus.tools.effects import EffectNotStarted
+
+    return isinstance(exc, EffectNotStarted)
+
+
 def _required(params: dict[str, Any], key: str) -> Any:
     if key not in params or params[key] in (None, ""):
-        raise ValueError(f"Missing required parameter '{key}'")
+        raise _not_started(f"Missing required parameter '{key}'")
     return params[key]
 
 
@@ -172,7 +191,7 @@ async def _run_http_request(params: dict[str, Any]) -> dict[str, Any]:
     method = str(params.get("method") or "GET").upper()
     guard = SSRFGuard()
     if not guard.is_safe_url(url):
-        raise ValueError(f"URL blocked by SSRF protection: {url}")
+        raise _not_started(f"URL blocked by SSRF protection: {url}")
 
     headers = params.get("headers") or {}
     body = params.get("body")
@@ -197,7 +216,7 @@ async def _run_webhook_notify(params: dict[str, Any]) -> dict[str, Any]:
     url = str(_required(params, "url"))
     payload = params.get("payload") or {}
     if not SSRFGuard().is_safe_url(url):
-        raise ValueError(f"URL blocked by SSRF protection: {url}")
+        raise _not_started(f"URL blocked by SSRF protection: {url}")
     async with httpx.AsyncClient(timeout=15.0) as client:
         response = await client.post(url, json=payload)
     return {"status_code": response.status_code}
@@ -286,7 +305,7 @@ async def _run_slack_send(params: dict[str, Any]) -> dict[str, Any]:
 
     webhook_url = os.environ.get("SLACK_WEBHOOK_URL", "")
     if not webhook_url:
-        raise ValueError("SLACK_WEBHOOK_URL not configured")
+        raise _not_started("SLACK_WEBHOOK_URL not configured")
     async with httpx.AsyncClient(timeout=10.0) as client:
         resp = await client.post(webhook_url, json={"channel": channel, "text": text})
     if resp.status_code >= 300:
@@ -303,13 +322,18 @@ async def _run_discord_send(params: dict[str, Any]) -> dict[str, Any]:
 
     token = os.environ.get("DISCORD_BOT_TOKEN", "")
     if not token:
-        raise ValueError("DISCORD_BOT_TOKEN not configured")
+        raise _not_started("DISCORD_BOT_TOKEN not configured")
     url = f"https://discord.com/api/v10/channels/{channel_id}/messages"
     async with httpx.AsyncClient(timeout=10.0) as client:
         resp = await client.post(url, headers={"Authorization": f"Bot {token}"}, json={"content": content[:2000]})
     if resp.status_code >= 300:
         raise RuntimeError(f"Discord returned HTTP {resp.status_code}")
-    data = resp.json()
+    try:
+        data = resp.json()
+    except ValueError as exc:
+        # The API answered success, so the message was most likely delivered; only its id
+        # is unreadable. That is a possible effect, never a retryable rejection.
+        raise RuntimeError("Discord accepted the message but its response was unreadable") from exc
     return {"message_id": data.get("id", "")}
 
 
@@ -322,11 +346,14 @@ async def _run_telegram_send(params: dict[str, Any]) -> dict[str, Any]:
 
     token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
     if not token:
-        raise ValueError("TELEGRAM_BOT_TOKEN not configured")
+        raise _not_started("TELEGRAM_BOT_TOKEN not configured")
     url = f"https://api.telegram.org/bot{token}/sendMessage"
     async with httpx.AsyncClient(timeout=10.0) as client:
         resp = await client.post(url, json={"chat_id": chat_id, "text": text})
-    data = resp.json()
+    try:
+        data = resp.json()
+    except ValueError as exc:
+        raise RuntimeError("Telegram answered but its response was unreadable") from exc
     if not data.get("ok"):
         raise RuntimeError(f"Telegram error: {data.get('description', 'unknown')}")
     return {"message_id": data["result"]["message_id"]}
@@ -413,12 +440,12 @@ async def execute_node(
                 error=f"Execution timed out after {timeout_seconds}s",
                 effect_unknown=True,
             )
-        except ValueError as exc:
-            span.set_attribute("success", False)
-            span.record_exception(exc)
-            return ExecutorResult(success=False, error=str(exc))
         except Exception as exc:
+            # Only a typed pre-effect refusal proves nothing happened. A plain ValueError (or
+            # a JSONDecodeError) can come from anywhere after the call began, so it is unknown.
             span.set_attribute("success", False)
             span.record_exception(exc)
+            if _is_not_started(exc):
+                return ExecutorResult(success=False, error=str(exc), effect_rejected=True)
             logger.warning("Node %s execution failed: %s", node_id, exc)
             return ExecutorResult(success=False, error=str(exc), effect_unknown=True)

@@ -1,7 +1,11 @@
 """Durable ledger of write-capable tool effects, so a recovered turn never repeats one.
 
-One ``tool_effects`` row is one *logical* tool call: the same tenant, chat turn, tool and
-canonical arguments always map to the same row (see ``nexus.tools.effects`` for the key).
+One ``tool_effects`` row is one *logical* tool call: a durable slot (tenant, chat turn,
+round index, invocation index) always maps to the same row (see ``nexus.tools.effects`` for
+the key). The slot, not the call's content, is the identity, so two identical calls at
+different positions are two rows, and a recovered turn that reaches the same position finds
+the same row. The row records the tool name and the argument digest it was claimed for; a
+recovery that arrives at an occupied slot with a different tool or digest is refused.
 The row is inserted in state ``executing`` *before* the tool runs, so a crash at any later
 point leaves evidence that the effect may have happened.
 
@@ -47,6 +51,8 @@ class ToolEffect(SQLModel, table=True):
         CheckConstraint(_in("status", EFFECT_STATUSES), name="ck_tool_effects_status"),
         CheckConstraint(_in("effect_class", WRITE_EFFECT_CLASSES), name="ck_tool_effects_class"),
         CheckConstraint("attempt_count >= 1", name="ck_tool_effects_attempts"),
+        CheckConstraint("round_index >= -1", name="ck_tool_effects_round"),
+        CheckConstraint("invocation_index >= 0", name="ck_tool_effects_position"),
         CheckConstraint(
             "status <> 'executing' OR (claim_token IS NOT NULL AND lease_expires_at IS NOT NULL)",
             name="ck_tool_effects_executing_claim",
@@ -60,12 +66,17 @@ class ToolEffect(SQLModel, table=True):
     # The chat turn's stable id (unlike its per-claim execution id). Not a foreign key: a
     # turn is deleted with its session, and the ledger must outlive it.
     turn_id: uuid.UUID
+    # The durable slot: the model round within the turn (-1 for a caller that has no rounds
+    # and numbers its writes in order) and the call's position within that round.
+    round_index: int
+    invocation_index: int
     tool_name: str = Field(max_length=255)
     effect_class: str = Field(max_length=24)
-    # sha256 hex of the versioned canonical (company, turn, tool, arguments) tuple.
+    # sha256 hex of the versioned canonical (company, turn, round, position) tuple.
     invocation_key: str = Field(max_length=64)
-    # sha256 hex of the canonical arguments alone; lets an operator match a row to a call
-    # without the ledger holding the arguments.
+    # sha256 hex of the canonical arguments alone. Recovery compares it with the occupied
+    # slot's digest, and it lets an operator match a row to a call without the ledger
+    # holding the arguments.
     arguments_digest: str = Field(max_length=64)
     status: str = Field(default="executing", max_length=24)
     claim_token: str | None = Field(default=None, max_length=64)
@@ -80,3 +91,20 @@ class ToolEffect(SQLModel, table=True):
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
     completed_at: datetime | None = None
+
+
+class ToolNotification(SQLModel, table=True):
+    """Marks that the notification for one logical invocation was already sent.
+
+    The autonomy gate's level-2 notice is an external effect of its own. Inserting this row
+    (the unique key decides the winner) before sending means a replay, or a concurrent claim
+    for the same slot, does not send it again. A crash between the insert and the send loses
+    the notice rather than duplicating it.
+    """
+
+    __tablename__ = "tool_notifications"
+
+    company_id: uuid.UUID = Field(foreign_key="companies.id", ondelete="RESTRICT", primary_key=True)
+    invocation_key: str = Field(max_length=64, primary_key=True)
+    # Naive UTC, stored without a timezone; see nexus.models._time for why.
+    created_at: datetime = Field(default_factory=utcnow)

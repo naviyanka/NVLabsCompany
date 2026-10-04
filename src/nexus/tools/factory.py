@@ -103,6 +103,7 @@ async def guard_tool_call(
     context: dict[str, Any] | None = None,
     agent_id: uuid.UUID | None = None,
     company_id: uuid.UUID | None = None,
+    invocation_key: str | None = None,
 ) -> dict[str, Any] | None:
     """Screen one tool call, for dispatch paths that cannot use a ToolExecutor.
 
@@ -121,6 +122,8 @@ async def guard_tool_call(
         company_id: The company the call was authorized for. The autonomy gate
             then runs under that tenant's RLS context, the same one
             :func:`nexus.tools.access.check_tool_access` used.
+        invocation_key: The ledger key of a ledgered write. The autonomy gate sends its
+            notification at most once per key, so a replay does not notify again.
 
     Returns:
         None when the call may proceed, or an error dict shaped like an ordinary
@@ -158,6 +161,7 @@ async def guard_tool_call(
                 tool_name=tool_name,
                 arguments=arguments,
                 company_id=company_id,
+                notice_key=invocation_key,
             )
     except Exception as exc:  # noqa: BLE001
         logger.warning("Autonomy check errored for tool %s, allowing: %s", tool_name, exc)
@@ -185,6 +189,7 @@ async def guarded_call(
     endpoint_url: str | None = None,
     default_risk: str | None = None,
     effect: str | None = None,
+    slot: effects.ToolSlot | None = None,
 ) -> dict[str, Any]:
     """Authorize, screen, run and record one tool call.
 
@@ -217,6 +222,9 @@ async def guarded_call(
         effect: The tool's declared :class:`~nexus.tools.effects.EffectClass`. ``None`` is
             treated as a non-idempotent write: a missing declaration never makes a call
             repeatable. Only a call inside a chat turn (``ctx.turn_id``) is ledgered.
+        slot: Where the call sits in the turn (model round and position). Required for a
+            write inside a turn: the ledger identity is the slot, and a write with none is
+            refused rather than run without a durable identity.
 
     Returns:
         ``{"status": "success", "result": ...}`` when the call ran (or, with
@@ -224,7 +232,9 @@ async def guarded_call(
         returned instead of running it again), or a refusal dict with ``error`` and
         ``status`` (``denied``, ``guardrail_blocked``, ``autonomy_blocked``,
         ``effect_in_progress``, ``effect_recovery_required``, ``effect_ledger_unavailable``)
-        when it did not.
+        when it did not. A call that ran but whose result cannot be retained safely returns
+        ``effect_result_unavailable``; its effect is recorded as ambiguous, never rerun
+        automatically unless the tool is idempotent.
     """
     from nexus.tools.access import DENIED, AccessDecision, check_tool_access
 
@@ -256,10 +266,29 @@ async def guarded_call(
 
     started = time.monotonic()
     refusal: dict[str, Any] | None = None
+    # Write-capable calls inside a chat turn are reserved durably before they run, so a
+    # recovered turn cannot repeat the effect (see nexus.tools.effects).
+    held = None
+    effect_class = effects.resolve_effect(effect)
+    turn_id = getattr(ctx, "turn_id", None)
+    ledgered = bool(
+        effect_class is not effects.EffectClass.READ_ONLY and turn_id and decision.company_id
+    )
+    ledger_key: str | None = None
     if not decision.allowed:
         logger.warning("Access denied for tool %s: %s", tool_name, decision.reason)
         refusal = {"error": f"Denied by access policy: {decision.reason}", "status": "denied"}
+    elif ledgered and slot is None:
+        # Without a durable position there is no identity that survives a rerun, so a write
+        # must not pretend to have recovery. Refused before any guard or notice side effect.
+        logger.error("Write tool %s called inside a turn with no durable slot", tool_name)
+        refusal = {
+            "error": "Tool call has no durable position in the turn, so the write was not run",
+            "status": "effect_ledger_unavailable",
+        }
     else:
+        if ledgered and slot is not None:
+            ledger_key = effects.invocation_key(decision.company_id, turn_id, slot)
         # Only an agent that passed the access check reaches the autonomy
         # gate, and it runs under the company the call was authorized for.
         refusal = await guard_tool_call(
@@ -267,6 +296,7 @@ async def guarded_call(
             arguments,
             agent_id=decision.agent_id,
             company_id=decision.company_id,
+            invocation_key=ledger_key,
         )
         if refusal is None and decision.temp_grant_id is not None:
             refusal = await _spend_temp_grant(decision, ctx, tool_name, arguments)
@@ -276,15 +306,10 @@ async def guarded_call(
         await record(refusal["status"], started, error=refusal["error"])
         return refusal
 
-    # Write-capable calls inside a chat turn are reserved durably before they run, so a
-    # recovered turn cannot repeat the effect (see nexus.tools.effects).
-    held = None
-    effect_class = effects.resolve_effect(effect)
-    turn_id = getattr(ctx, "turn_id", None)
-    if effect_class is not effects.EffectClass.READ_ONLY and turn_id and decision.company_id:
+    if ledgered and slot is not None:
         try:
             held = await effects.claim(
-                decision.company_id, turn_id, tool_name, effect_class, arguments
+                decision.company_id, turn_id, slot, tool_name, effect_class, arguments
             )
         except Exception as exc:  # noqa: BLE001 - no ledger, no write: fail closed
             logger.error("Tool effect ledger unavailable for %s: %s", tool_name, exc)
@@ -318,7 +343,8 @@ async def guarded_call(
             return refusal
 
     try:
-        result = await run()
+        with effects.bind_invocation(held.key if held is not None else None):
+            result = await run()
     except BaseException as exc:
         if held is not None:
             # Cancellation included: the effect may have happened. Shielded so a second
@@ -331,8 +357,31 @@ async def guarded_call(
             await record("error", started, error=str(exc))
         raise
     if held is not None:
-        status, error = effects.outcome_of(result)
-        await asyncio.shield(effects.settle(held, status, result=result, error=error))
+        status, error = effects.outcome_of(result, tool_name)
+        if status == "succeeded":
+            # The replayable form is made once, here, and handed to this caller too, so the
+            # first run and every replay see exactly the same bounded, scrubbed result.
+            try:
+                stored = effects.seal_result(result)
+            except Exception as exc:  # noqa: BLE001 - the effect happened; never rerun it blind
+                reason = type(exc).__name__
+                logger.error("Result of %s cannot be retained: %s", tool_name, reason)
+                await asyncio.shield(
+                    effects.settle(held, "ambiguous", error=f"result not retainable: {reason}")
+                )
+                refusal = {
+                    "error": (
+                        "Tool ran but its result could not be retained safely; "
+                        "the outcome needs review"
+                    ),
+                    "status": "effect_result_unavailable",
+                }
+                await record("error", started, error=refusal["error"])
+                return refusal
+            await asyncio.shield(effects.settle(held, "succeeded", stored=stored))
+            result = effects.decode_result(stored)
+        else:
+            await asyncio.shield(effects.settle(held, status, error=error))
     # An MCP result reports a tool-side failure in-band rather than raising.
     failed = bool(getattr(result, "is_error", False))
     await record("error" if failed else "success", started)
@@ -484,6 +533,7 @@ def build_autonomy_gate(db: Any, default_level: int = 1) -> AutonomyGate:
         approvals=ApprovalService(db),
         notifier=_log_notifier,
         default_level=default_level,
+        notice_once=effects.claim_notice,
     )
 
 

@@ -12,6 +12,7 @@ from typing import Any
 from nexus.adapters.base import BaseAdapter
 from nexus.governance.ssrf_protection import guard_url as _guard_url
 from nexus.runtime.adapter import AgentSession, TaskResult
+from nexus.tools.effects import ToolSlot
 from nexus.tools.factory import guarded_call
 
 try:
@@ -152,7 +153,7 @@ class MCPAgentAdapter(BaseAdapter):
         all_success = True
         combined_output: list[str] = []
 
-        for call in tool_calls:
+        for position, call in enumerate(tool_calls):
             tool_name = call.get("tool_name", "")
             arguments = call.get("arguments", {})
 
@@ -174,6 +175,8 @@ class MCPAgentAdapter(BaseAdapter):
                     source="mcp",
                     agent_id=session.agent_id,
                     endpoint_url=session.config.get("server_url"),
+                    # One round of calls per execution; the position is the durable identity.
+                    slot=ToolSlot(0, position),
                 )
                 if outcome["status"] != "success":
                     self._add_log(session.session_id, f"[{tool_name}] {outcome['error']}")

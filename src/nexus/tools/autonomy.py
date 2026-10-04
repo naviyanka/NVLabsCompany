@@ -171,6 +171,7 @@ class AutonomyGate:
         approvals: Any | None = None,
         notifier: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
         default_level: int = 1,
+        notice_once: Callable[[uuid.UUID, str], Awaitable[bool]] | None = None,
     ) -> None:
         """Initialize the gate.
 
@@ -181,8 +182,13 @@ class AutonomyGate:
                 level 3 blocks but files nothing.
             notifier: Async sink for level-2 and level-3 notifications.
             default_level: Level for an action the policy does not mention.
+            notice_once: Async ``(company_id, notice_key) -> bool`` that is true exactly once
+                per key. A notification is an external effect of its own, so one tied to a
+                ledgered invocation (``check(..., notice_key=...)``) is sent only when this
+                says the key is new; a replay or a concurrent claim then does not send it again.
         """
         self._policy_loader = policy_loader
+        self._notice_once = notice_once
         self._approvals = approvals
         self._notifier = notifier
         self._default_level = default_level
@@ -194,8 +200,12 @@ class AutonomyGate:
         tool_name: str,
         arguments: dict[str, Any] | None = None,
         company_id: uuid.UUID | None = None,
+        notice_key: str | None = None,
     ) -> AutonomyDecision:
         """Decide whether a tool call may proceed under the agent's policy.
+
+        The policy is evaluated on every call. ``notice_key`` (the ledger's invocation key)
+        only decides whether this call may send its notification: the same key notifies once.
 
         Args:
             agent_id: The calling agent.
@@ -257,8 +267,8 @@ class AutonomyGate:
             )
             approval_type = "obsidian_write"
         if level == 2:
-            await self._notify(payload)
-            return AutonomyDecision(True, level, action_type, cid, notified=True)
+            sent = await self._notify(payload, company_id, notice_key)
+            return AutonomyDecision(True, level, action_type, cid, notified=sent)
 
         # Level 3: an approval decides. The correlation ID is the approval's
         # primary key, so a resumed call finds the decision made earlier.
@@ -301,7 +311,7 @@ class AutonomyGate:
                 payload=payload,
                 approval_id=cid,
             )
-            await self._notify(payload)
+            await self._notify(payload, company_id, notice_key)
 
         return AutonomyDecision(
             False,
@@ -313,10 +323,20 @@ class AutonomyGate:
             notified=existing is None,
         )
 
-    async def _notify(self, payload: dict[str, Any]) -> None:
-        """Emit an operator notification, if a sink is configured."""
-        if self._notifier is not None:
-            await self._notifier(payload)
+    async def _notify(
+        self,
+        payload: dict[str, Any],
+        company_id: uuid.UUID | None = None,
+        notice_key: str | None = None,
+    ) -> bool:
+        """Emit an operator notification, once per ``notice_key``; whether one was sent."""
+        if self._notifier is None:
+            return False
+        if notice_key is not None and self._notice_once is not None and company_id is not None:
+            if not await self._notice_once(company_id, notice_key):
+                return False
+        await self._notifier(payload)
+        return True
 
 
 def _coerce_level(value: Any, default: int) -> int:

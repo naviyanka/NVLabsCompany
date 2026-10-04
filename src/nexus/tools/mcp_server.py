@@ -52,7 +52,7 @@ from nexus.tools import manager_tools
 from nexus.tools.access import BUILTIN_ENDPOINT, DENIED, check_tool_access
 from nexus.tools.ceo_tools import CEO_TOOLS
 from nexus.tools.context import INBOUND_MCP, ExecutionContext
-from nexus.tools.effects import EffectClass
+from nexus.tools.effects import EffectClass, EffectNotStarted, ToolSlot, resolve_effect
 from nexus.tools.factory import _access_session, guarded_call
 
 logger = logging.getLogger(__name__)
@@ -165,6 +165,19 @@ class MCPServer:
         """
         self._ctx = ctx
         self._nodes = exposed_nodes() if node_tools else {}
+        # Writes this server has been asked to make, in order. Used as the durable position of
+        # a caller that supplies none (an external agent over stdio): a recovery that repeats
+        # the same writes in the same order reaches the same slots, and one that diverges meets
+        # an occupied slot with a different tool or digest and is refused. Per instance, never
+        # process-global.
+        self._writes = 0
+
+    def _slot_for(self, effect: Any, slot: ToolSlot | None) -> ToolSlot | None:
+        """The caller's slot, or the next write ordinal; a read-only call needs none."""
+        if slot is not None or resolve_effect(effect) is EffectClass.READ_ONLY:
+            return slot
+        position, self._writes = self._writes, self._writes + 1
+        return ToolSlot(-1, position)
 
     async def list_tools(self) -> list[dict[str, Any]]:
         """The tools this caller may be offered, in MCP ``tools/list`` shape."""
@@ -201,15 +214,21 @@ class MCPServer:
                     )
         return tools
 
-    async def call_tool(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    async def call_tool(
+        self, name: str, arguments: dict[str, Any], slot: ToolSlot | None = None
+    ) -> dict[str, Any]:
         """Authorize and run one tool call, in MCP ``tools/call`` result shape.
 
         A refusal comes back as an ``isError`` result rather than a JSON-RPC
         error: the client asked a well-formed question and deserves to see why
         the answer is no.
+
+        ``slot`` is the call's durable position in the turn (model round and position in
+        that round) when the caller has one; otherwise a write is numbered in the order this
+        server receives it.
         """
         if name in manager_tools.MANAGER_TOOLS or name in CEO_TOOLS:
-            return await self._call_manager_tool(name, arguments)
+            return await self._call_manager_tool(name, arguments, slot)
         node = self._nodes.get(name)
         if node is None:
             return _tool_error(f"Unknown tool '{name}'")
@@ -223,6 +242,7 @@ class MCPServer:
             endpoint_url=BUILTIN_ENDPOINT,
             default_risk=risk_level_for(node),
             effect=NODE_EFFECTS.get(name),
+            slot=self._slot_for(NODE_EFFECTS.get(name), slot),
         )
         if outcome["status"] != "success":
             logger.warning("Refused tool %s: %s", name, outcome["error"])
@@ -237,7 +257,9 @@ class MCPServer:
             "isError": False,
         }
 
-    async def _call_manager_tool(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    async def _call_manager_tool(
+        self, name: str, arguments: dict[str, Any], slot: ToolSlot | None = None
+    ) -> dict[str, Any]:
         """Run a manager or CEO tool through the same guarded boundary as a node tool.
 
         The access policy is checked (and audited) first; then only a tool of
@@ -248,7 +270,8 @@ class MCPServer:
 
         async def run() -> Any:
             if name not in await manager_tools.catalog(self._ctx):
-                raise ValueError(f"TOOL_NOT_OFFERED: '{name}' is not available to this agent")
+                # Proven pre-effect: the catalog check runs before anything is dispatched.
+                raise EffectNotStarted(f"TOOL_NOT_OFFERED: '{name}' is not available to this agent")
             return await manager_tools.call(self._ctx, name, arguments)
 
         tool = {**manager_tools.MANAGER_TOOLS, **CEO_TOOLS}[name]
@@ -261,6 +284,7 @@ class MCPServer:
                 source=INBOUND_MCP,
                 default_risk=tool.risk,
                 effect=tool.effect,
+                slot=self._slot_for(tool.effect, slot),
             )
         except HTTPException as exc:
             detail = exc.detail if isinstance(exc.detail, dict) else {"message": exc.detail}

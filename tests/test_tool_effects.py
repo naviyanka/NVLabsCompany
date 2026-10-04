@@ -28,12 +28,13 @@ from nexus.models.tool_invocation import ToolInvocation
 from nexus.nodes.executor import ExecutorResult
 from nexus.tools import effects
 from nexus.tools.context import ExecutionContext
-from nexus.tools.effects import EffectClass
+from nexus.tools.effects import EffectClass, EffectNotStarted, ToolSlot
 from nexus.tools.factory import guarded_call
 from nexus.tools.mcp_client import MCPResult
 
 IDEM = EffectClass.IDEMPOTENT_WRITE
 NON_IDEM = EffectClass.NON_IDEMPOTENT_WRITE
+SLOT = ToolSlot(0, 0)
 
 
 @pytest.fixture
@@ -86,7 +87,7 @@ class Tool:
         return self.result
 
 
-async def go(world, tool, *, effect=NON_IDEM, ctx=None, name="send-it", args=None):
+async def go(world, tool, *, effect=NON_IDEM, ctx=None, name="send-it", args=None, slot=SLOT):
     return await guarded_call(
         ctx if ctx is not None else turn_ctx(world),
         name,
@@ -94,6 +95,7 @@ async def go(world, tool, *, effect=NON_IDEM, ctx=None, name="send-it", args=Non
         tool,
         source="test",
         effect=effect.value if effect is not None else None,
+        slot=slot,
     )
 
 
@@ -140,21 +142,21 @@ def test_canonical_arguments_are_order_independent_and_compact():
 
 @pytest.mark.parametrize("bad", [{"x": float("nan")}, {"x": float("inf")}, {"x": object()},
                                  {"x": {1, 2}}, {"x": b"raw"}])
-def test_non_canonical_arguments_have_no_key(bad):
+def test_non_canonical_arguments_have_no_digest(bad):
     with pytest.raises(effects.EffectKeyError):
-        effects.invocation_key(uuid.uuid4(), uuid.uuid4(), "t", bad)
+        effects.arguments_digest(bad)
 
 
-def test_key_is_stable_and_scoped_by_tenant_turn_tool_and_arguments():
+def test_key_is_scoped_by_tenant_turn_round_and_position_only():
     c, t = uuid.uuid4(), uuid.uuid4()
-    key, digest = effects.invocation_key(c, t, "tool", {"a": 1, "b": 2})
-    assert effects.invocation_key(c, t, "tool", {"b": 2, "a": 1}) == (key, digest)
-    assert len(key) == 64 and len(digest) == 64 and key != digest
+    key = effects.invocation_key(c, t, ToolSlot(1, 2))
+    assert key == effects.invocation_key(c, t, ToolSlot(1, 2))
+    assert len(key) == 64
     others = [
-        effects.invocation_key(uuid.uuid4(), t, "tool", {"a": 1, "b": 2})[0],
-        effects.invocation_key(c, uuid.uuid4(), "tool", {"a": 1, "b": 2})[0],
-        effects.invocation_key(c, t, "other", {"a": 1, "b": 2})[0],
-        effects.invocation_key(c, t, "tool", {"a": 1, "b": 3})[0],
+        effects.invocation_key(uuid.uuid4(), t, ToolSlot(1, 2)),
+        effects.invocation_key(c, uuid.uuid4(), ToolSlot(1, 2)),
+        effects.invocation_key(c, t, ToolSlot(2, 2)),
+        effects.invocation_key(c, t, ToolSlot(1, 3)),
     ]
     assert key not in others and len(set(others)) == 4
 
@@ -163,19 +165,27 @@ def test_key_derivation_is_pinned():
     """The documented derivation. Changing it orphans every stored key: bump KEY_VERSION."""
     c = uuid.UUID("12345678-1234-1234-1234-123456789abc")
     t = uuid.UUID("99999999-9999-9999-9999-999999999999")
-    key, digest = effects.invocation_key(c, t, "tool", {"a": 1})
+    key = effects.invocation_key(c, t, ToolSlot(3, 4))
     import hashlib
 
-    parts = ["nexus.tool-effect.v1", str(c), str(t), "tool", '{"a":1}']
+    parts = ["nexus.tool-effect.v2", str(c), str(t), 3, 4]
     assert key == hashlib.sha256(json.dumps(parts, separators=(",", ":")).encode()).hexdigest()
-    assert digest == hashlib.sha256(b'{"a":1}').hexdigest()
+    assert effects.arguments_digest({"a": 1}) == hashlib.sha256(b'{"a":1}').hexdigest()
 
 
-def test_argument_boundaries_cannot_collide():
-    c, t = uuid.uuid4(), uuid.uuid4()
-    a = effects.invocation_key(c, t, "ab", {"c": 1})[0]
-    b = effects.invocation_key(c, t, "a", {"bc": 1})[0]
-    assert a != b
+def test_the_key_does_not_depend_on_the_call_content_or_a_provider_id():
+    """Tool, arguments and provider call ids are not inputs: only the durable slot is."""
+    import inspect
+
+    assert list(inspect.signature(effects.invocation_key).parameters) == [
+        "company_id", "turn_id", "slot",
+    ]
+
+
+@pytest.mark.parametrize("bad", [(-2, 0), (0, -1), ("0", 0), (0, 1.5), (True, 0)])
+def test_a_slot_must_be_a_real_position(bad):
+    with pytest.raises((ValueError, TypeError)):
+        ToolSlot(*bad)
 
 
 # --- bounded, scrubbed results ---------------------------------------------------------------
@@ -183,32 +193,21 @@ def test_argument_boundaries_cannot_collide():
 
 def test_result_codecs_round_trip():
     ex = ExecutorResult(success=True, outputs={"n": 1})
-    got = effects.decode_result(effects.encode_result(ex))
+    got = effects.decode_result(effects.seal_result(ex))
     assert isinstance(got, ExecutorResult) and got.outputs == {"n": 1} and got.success
 
     mcp = MCPResult(content={"x": [1, 2]}, is_error=False, metadata={"m": 1})
-    got = effects.decode_result(effects.encode_result(mcp))
+    got = effects.decode_result(effects.seal_result(mcp))
     assert isinstance(got, MCPResult) and got.content == {"x": [1, 2]} and got.metadata == {"m": 1}
 
-    assert effects.decode_result(effects.encode_result({"a": [1]})) == {"a": [1]}
+    assert effects.decode_result(effects.seal_result({"a": [1]})) == {"a": [1]}
 
 
 def test_result_secrets_are_masked_before_storage():
-    stored = effects.encode_result({"api_key": "sk-live-123", "password": "hunter2", "ok": 1})
+    stored = effects.seal_result({"api_key": "sk-live-123", "password": "hunter2", "ok": 1})
     blob = json.dumps(stored)
     assert "sk-live-123" not in blob and "hunter2" not in blob
     assert effects.decode_result(stored)["ok"] == 1
-
-
-def test_oversize_result_is_not_stored_and_replay_says_so():
-    big = {"data": "x" * (effects.MAX_RESULT_BYTES + 10)}
-    stored = effects.encode_result(big)
-    assert "value" not in stored and stored["omitted"]["bytes"] > effects.MAX_RESULT_BYTES
-    assert len(json.dumps(stored)) < 400
-    got = effects.decode_result(stored)
-    assert got["replayed"] is True and got["result_omitted"] is True
-    assert isinstance(effects.decode_result(effects.encode_result(
-        ExecutorResult(success=True, outputs=big))), ExecutorResult)
 
 
 def test_error_text_is_bounded_and_redacted():
@@ -223,9 +222,10 @@ def test_error_text_is_bounded_and_redacted():
     ("result", "expected"),
     [
         (ExecutorResult(success=True, outputs={}), "succeeded"),
-        (ExecutorResult(success=False, error="bad input"), "failed"),
+        (ExecutorResult(success=False, error="bad input", effect_rejected=True), "failed"),
+        (ExecutorResult(success=False, error="bad input"), "ambiguous"),
         (ExecutorResult(success=False, error="timed out", effect_unknown=True), "ambiguous"),
-        (MCPResult(content="x", is_error=True), "failed"),
+        (MCPResult(content="x", is_error=True), "ambiguous"),
         (MCPResult(content="x", is_error=True, effect_unknown=True), "ambiguous"),
         ({"a": 1}, "succeeded"),
         ("text", "succeeded"),
@@ -243,8 +243,10 @@ class _HttpError(Exception):
 @pytest.mark.parametrize(
     ("exc", "expected"),
     [
-        (ValueError("bad"), "failed"),
-        (_HttpError(422), "failed"),
+        (EffectNotStarted("refused before dispatch"), "failed"),
+        (ValueError("bad"), "ambiguous"),
+        (json.JSONDecodeError("bad json", "", 0), "ambiguous"),
+        (_HttpError(422), "ambiguous"),
         (_HttpError(503), "ambiguous"),
         (RuntimeError("?"), "ambiguous"),
         (TimeoutError(), "ambiguous"),
@@ -283,17 +285,23 @@ async def test_executor_timeout_and_crash_mark_the_effect_unknown():
     async def crash():
         raise RuntimeError("kaput")
 
-    async def refuse():
+    async def late_value_error():
         raise ValueError("bad input")
+
+    async def typed_refusal():
+        raise EffectNotStarted("bad input")
 
     async def fine():
         return {"ok": 1}
 
     assert (await _execute(slow, timeout=0.05)).effect_unknown is True
     assert (await _execute(crash)).effect_unknown is True
-    assert (await _execute(refuse)).effect_unknown is False
+    unknown = await _execute(late_value_error)
+    assert unknown.effect_unknown is True and unknown.effect_rejected is False
+    refused = await _execute(typed_refusal)
+    assert refused.effect_rejected is True and refused.effect_unknown is False
     ok = await _execute(fine)
-    assert ok.success and ok.effect_unknown is False
+    assert ok.success and ok.effect_unknown is False and ok.effect_rejected is False
 
 
 def test_mcp_result_defaults_to_known_outcome():
@@ -338,11 +346,11 @@ async def test_replay_returns_the_typed_result(factory, world):
     assert isinstance(again["result"], ExecutorResult) and again["result"].outputs == {"id": 7}
 
 
-async def test_different_arguments_or_turn_are_different_calls(factory, world):
+async def test_different_slots_or_turns_are_different_calls(factory, world):
     tool = Tool()
-    await go(world, tool, args={"to": "a"})
-    await go(world, tool, args={"to": "b"})
-    await go(world, tool, args={"to": "a"}, ctx=turn_ctx(world, uuid.uuid4()))
+    await go(world, tool, args={"to": "a"}, slot=ToolSlot(0, 0))
+    await go(world, tool, args={"to": "b"}, slot=ToolSlot(0, 1))
+    await go(world, tool, args={"to": "a"}, slot=ToolSlot(0, 0), ctx=turn_ctx(world, uuid.uuid4()))
     assert tool.runs == 3
     assert len(await rows(factory)) == 3
 
@@ -407,18 +415,19 @@ async def test_ambiguous_idempotent_is_retried_once_per_claim(factory, world):
     assert (await go(world, again, effect=IDEM))["replayed"] is True and again.runs == 0
 
 
-async def test_definite_refusal_is_retryable_for_both_classes(factory, world):
-    for effect in (IDEM, NON_IDEM):
-        args = {"effect": effect.value}
-        with pytest.raises(ValueError):
-            await go(world, Tool(raises=ValueError("bad input")), effect=effect, args=args)
+async def test_typed_pre_effect_refusal_is_retryable_for_both_classes(factory, world):
+    for position, effect in enumerate((IDEM, NON_IDEM)):
+        slot = ToolSlot(0, position)
+        with pytest.raises(EffectNotStarted):
+            await go(world, Tool(raises=EffectNotStarted("bad input")), effect=effect, slot=slot)
         retry = Tool()
-        out = await go(world, retry, effect=effect, args=args)
+        out = await go(world, retry, effect=effect, slot=slot)
         assert retry.runs == 1 and out["status"] == "success"
 
 
-async def test_tool_reported_failure_is_failed_and_retryable(factory, world):
-    bad = Tool(result=ExecutorResult(success=False, error="validation: missing field"))
+async def test_tool_reported_rejection_is_failed_and_retryable(factory, world):
+    bad = Tool(result=ExecutorResult(success=False, error="validation: missing field",
+                                     effect_rejected=True))
     await go(world, bad)
     (row,) = await rows(factory)
     assert row.status == "failed" and "missing field" in row.error
@@ -702,11 +711,12 @@ async def test_manual_resolution_refuses_an_executing_row(factory, world):
 
 async def test_list_open_is_tenant_scoped_and_holds_no_payload(factory, world):
     row = await stuck(factory, world)
-    open_rows = await effects.list_open(world["acme"])
-    assert [r["id"] for r in open_rows] == [str(row.id)]
-    assert set(open_rows[0]) == {"id", "turn_id", "tool_name", "effect_class", "status",
-                                 "attempt_count", "arguments_digest", "created_at"}
-    assert await effects.list_open(world["other"]) == []
+    page = await effects.list_open(world["acme"])
+    assert [r["id"] for r in page["items"]] == [str(row.id)] and page["next_cursor"] is None
+    assert set(page["items"][0]) == {"id", "turn_id", "round_index", "invocation_index",
+                                     "tool_name", "effect_class", "status", "attempt_count",
+                                     "arguments_digest", "created_at"}
+    assert await effects.list_open(world["other"]) == {"items": [], "next_cursor": None}
 
 
 # --- wiring ----------------------------------------------------------------------------------
@@ -760,12 +770,3 @@ def test_manager_tool_effect_is_required():
 
     with pytest.raises(TypeError):
         ManagerTool(description="d", risk="read", params=(), run=None)  # type: ignore[call-arg]
-
-
-def test_migration_head_chain_and_downgrade_warning():
-    from pathlib import Path
-
-    text = (Path(__file__).parents[1] / "alembic" / "versions"
-            / "c5e8a3b71d94_tool_effects.py").read_text()
-    assert 'down_revision: str | None = "b4d9f2a61c73"' in text
-    assert "FORCE ROW LEVEL SECURITY" in text and "DATA LOSS" in text

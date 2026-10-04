@@ -111,6 +111,7 @@ EXPECTED_TABLES = {
     "tool_connections",
     "tool_effects",
     "tool_invocations",
+    "tool_notifications",
     "tool_policies",
     "tool_profile_bindings",
     "tool_profiles",
