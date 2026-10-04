@@ -69,7 +69,7 @@ an audit entry, and is idempotent and restart safe. "Discovery" is the only use 
 | `goal_discovery` | 60 s | 20 | 30 s | Companies with active goals that have an owner, or tasks in progress | None. Publishes company ids as work hints; the orchestrator reads goals in each company's session |
 | `chat_turn_recovery` | 15 s | 50 | 60 s | Companies with expired chat-turn leases or stale queued turns; queued counts | `chat_turns.recover_company`. Publishes hints for companies with queued turns |
 | `task_attempt_recovery` | 15 s | 50 | 60 s | Same, for task attempts | `task_attempts.recover_company`. Publishes hints |
-| `watchdog_patrol` | 60 s | 1 pass | 60 s | Agent status and active-run rows across companies, read in one pass (not batched; no row content is logged) | Escalations are filed per company in its tenant session |
+| `watchdog_patrol` | 60 s | 20 | 60 s | Distinct company ids that have agents, 20 per run, resuming after the last one handled (a rotating cursor). Ids only | Read the company's agents and active runs, patrol, file escalations and close confirmed-dead runs, all in its tenant session |
 | `org_snapshot_refresh` | 60 s | 20 | 120 s | Company ids with their snapshot state, to find those due; at most 20 are regenerated per run | Regenerate the snapshot per company |
 
 Interval is the minimum time between starts. The runtime wakes every 5 seconds and runs what is
@@ -79,6 +79,69 @@ which keeps `scripts/arch_guard.py` rule R2 satisfied).
 Not in the catalogue, deliberately: trigger firing. The `triggers` table is not RLS protected,
 so the scheduler lists due triggers on the application role and fires each one inside its own
 tenant session. It runs in the API/worker process and needs no system role.
+
+### Leader lease
+
+Each operation runs under a Redis lease named for it, fenced by a per-run token. The lease fails
+closed:
+
+- Two runtimes racing for one operation: exactly one acquires it. The other records
+  `op_skipped_not_leader`.
+- Redis unreachable or slow: the operation does not run. The runtime records
+  `op_skipped_lease_unavailable` with the code `LEASE_STORE_UNAVAILABLE`, reports
+  `lease_store: unavailable` in its status record, and retries on the next tick. There is no
+  fallback that grants the lease without Redis.
+- Release deletes the key only if it still holds this run's token (one atomic script), so a
+  stale owner can never release a newer owner's lease. A clean shutdown or a timeout releases
+  it; after a crash it expires after the operation timeout plus 30 s.
+- Before a run is recorded as a success the runtime re-checks that it still holds the lease. If
+  it expired and someone else took it, the run is recorded as `op_failed` with `LEASE_LOST`, and
+  `last_success` does not move. The work already done is safe to repeat because every operation
+  is idempotent per company.
+
+### Watchdog tenant boundary
+
+`watchdog_patrol` crosses tenants only to list company ids. For each id, `patrol_company` reads
+that company's agents and runs, runs the stateless `Watchdog`, files escalations, and closes runs
+that stalled past the critical threshold, all inside `tenant_session(company_id)`. No mutation
+runs under `nexus_system`, and agent output is never kept after a company's pass (the watchdog
+holds fingerprint hashes of the last output, not text).
+
+- Escalation queues are per company (`watchdog_escalations:<company id>`). Queue names are
+  looked up globally, so a shared name would have filed one company's items in another's queue.
+- Escalations are de-duplicated against the database (a decision-queue item for the same
+  agent or run already exists), so a restart does not file them again. `_escalated` is only a
+  per-process fast path in front of that check, and the discovery cursor is process-local: a
+  restart only changes which companies are visited first.
+- Stall detection needs two patrols of a company (a baseline, then a flag), so a company is
+  visited at least once per `ceil(companies / 20)` runs.
+- A run silent for more than four hours is closed (`confirmed_dead`) and its agent parked in
+  `needs_recovery`, once, in the company's session. This replaces the old startup PID check
+  (below).
+- Not yet fixed: the decision and its queue item are committed in two transactions, so a crash
+  between them can leave an unqueued decision, and the retry then files a second one. A queue
+  item is never duplicated. No external notification is sent from this path today (nothing
+  consumes `needs_notification`), so this cannot produce a duplicate external action. If a
+  consumer is added, make the filing a single transaction first.
+
+### Heartbeat orphan recovery
+
+The API no longer calls `reclaim_orphans()` at startup. It ran with an unscoped session, so on
+PostgreSQL it saw no tenant's runs, and a PID is only meaningful in the process namespace that
+started the run, which a separate system runtime container does not share. Recovery of a run
+whose process died is now the watchdog's staleness rule above: bounded per company, tenant-bound
+and idempotent. Nothing in production creates heartbeat runs yet, so there is no recovery gap
+today. `PersistentHeartbeatService.reclaim_orphans` remains for a caller that shares the
+namespace with its runs; no deployed process uses it.
+
+### New companies
+
+A company created while the API is running needs nothing from the system runtime. Governance is
+loaded lazily, per company, on the first request: until that load succeeds the request gets
+`503 GOVERNANCE_UNAVAILABLE` (fail closed). A failed load backs off for 30 s so a broken company
+does not hammer the database, but the backoff only suppresses retries: once readiness is recorded
+the company is served at once, with no restart. One company failing to load never blocks
+another. The removed startup step only warmed this cache; it wrote nothing.
 
 ### Work hints
 
@@ -114,7 +177,7 @@ code in the log, not as a silently idle process.
 
 - **Audit events** (structured log lines, `nexus.system_runtime.audit` logger):
   `runtime_started`, `runtime_stopped`, `runtime_refused`, `op_started`, `op_completed`,
-  `op_failed`, `op_skipped_not_leader`. Fields: `operation`, `companies_seen`,
+  `op_failed`, `op_skipped_not_leader`, `op_skipped_lease_unavailable`. Fields: `operation`, `companies_seen`,
   `companies_processed`, `companies_failed`, `batches`, `duration_ms`, `code`, `ops_enabled`.
   No company id, name, prompt, task or memory text. A failing subscriber is counted and
   ignored. Audit events are log lines; forward them to your log store to retain them.
@@ -238,20 +301,23 @@ Secret and `.env.system` together.
 | `op_failed` with `OP_FAILED` | An operation raised | Logs name the exception class only. Reproduce against the company through a tenant session |
 | `companies_failed` > 0 in `op_completed` | Some companies failed, others completed | The failed companies are picked up again next run |
 | `op_skipped_not_leader` always | Another replica holds the lease | Expected with several replicas. If there is one, check for a stale lease; it expires after the operation timeout plus 30 s |
+| `op_skipped_lease_unavailable` / `LEASE_STORE_UNAVAILABLE` | Redis is unreachable, so nothing runs (fail closed) | Restore Redis. Serving is unaffected; recovery and hints resume on the next tick |
+| `op_failed` with `LEASE_LOST` | The run outlived its lease and another runtime took it | Raise the operation timeout or lower the batch if it recurs. Repeating the work is harmless |
 | Suspected misuse of `nexus_system` | | Rotate it, run the verification SQL in [database-roles.md](database-roles.md), compare `pg_stat_activity` and the PostgreSQL log with the system runtime's host |
 
 ## Limitations
 
 - One privileged process is a single point of maintenance. Its absence stops lease recovery and
   hint publication, not serving.
-- Without Redis the leader lease is always granted and hints are not published, so workers do
-  not learn of work in idle companies. Production needs Redis.
+- Without Redis no operation runs (the lease fails closed) and hints are not published, so
+  workers do not learn of work in idle companies. Production needs Redis.
 - `cost_events` is not row level secured (its policy table, `budget_policies`, is). The reap
   operation therefore passes the company id so a company's pass releases only that company's
   holds. Securing `cost_events` needs a migration and is not part of this change.
 - Audit events are structured logs, not a database table.
-- `watchdog_patrol` and the snapshot discovery read all agents (or all companies) in one query rather
-  than in bounded batches. They keep the data in memory for the pass and log counts only. Batching
-  them is a follow-up.
+- `org_snapshot_refresh` discovery reads every company's id and four snapshot timestamps in one
+  query, then caps regeneration at 20 per run (oldest attempt first). It holds ids and timestamps
+  only, no content. Bounding the read needs an index on the state table and is a follow-up.
+- The watchdog's decision and queue item are two transactions (see the watchdog section).
 - With `externalSecrets.enabled`, the remote key for the application Secret must not contain
   `SYSTEM_DATABASE_URL`; the API and worker would refuse to start.
