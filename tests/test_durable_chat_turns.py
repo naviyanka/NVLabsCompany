@@ -231,7 +231,7 @@ class TestRecovery:
         turn = await _queue(db, t["acme"], t["acme_session"])
         for attempt in range(1, turn.max_attempts + 1):
             assert await chat_turns.claim(turn.id, t["acme"], f"dead-{attempt}") is not None
-            outcome = await chat_turns.sweep(now=chat_turns._now() + LATER)
+            outcome = await chat_turns.recover_company(t["acme"], now=chat_turns._now() + LATER)
             expected = "failed" if attempt == turn.max_attempts else "recovered"
             assert outcome[expected] == 1, outcome
         stored = (await _rows(db, ChatTurn))[0]
@@ -243,7 +243,7 @@ class TestRecovery:
         actions = await _actions(db, turn.id)
         assert actions.count("chat.turn_recovered") == 2 and "chat.turn_failed" in actions
         # Idempotent: another pass changes nothing.
-        again = await chat_turns.sweep(now=chat_turns._now() + LATER)
+        again = await chat_turns.recover_company(t["acme"], now=chat_turns._now() + LATER)
         assert not (again["failed"] or again["recovered"])
         assert len(await _rows(db, Notification)) == 1
 
@@ -257,7 +257,7 @@ class TestRecovery:
             stored = await s.get(ChatTurn, turn.id)
             stored.response_message_id = reply.id
             await s.commit()
-        outcome = await chat_turns.sweep(now=chat_turns._now() + LATER)
+        outcome = await chat_turns.recover_company(t["acme"], now=chat_turns._now() + LATER)
         assert outcome["completed"] == 1
         assert (await _rows(db, ChatTurn))[0].status == "completed"
 
@@ -265,7 +265,8 @@ class TestRecovery:
         turn = await _queue(db, t["acme"], t["acme_session"])
         # A worker claimed it, then its process died before calling the model.
         await chat_turns.claim(turn.id, t["acme"], "crashed-worker")
-        assert (await chat_turns.sweep(now=chat_turns._now() + LATER))["recovered"] == 1
+        outcome = await chat_turns.recover_company(t["acme"], now=chat_turns._now() + LATER)
+        assert outcome["recovered"] == 1
         chat_turns.get_worker().wake(t["acme"])
         await chat_turns.drain()
         stored = (await _rows(db, ChatTurn))[0]
@@ -277,7 +278,7 @@ class TestRecovery:
     async def test_worker_that_lost_its_lease_stores_nothing(self, db, t) -> None:
         turn = await _queue(db, t["acme"], t["acme_session"])
         held = await chat_turns.claim(turn.id, t["acme"], "slow")
-        await chat_turns.sweep(now=chat_turns._now() + LATER)
+        await chat_turns.recover_company(t["acme"], now=chat_turns._now() + LATER)
         late = await chat_turns.finalize(held, "slow", "completed", prompt="hi", text="late")
         assert late is None
         assert await _rows(db, ChatMessage, ChatMessage.sender == "agent") == []
@@ -286,7 +287,8 @@ class TestRecovery:
     async def test_stale_queued_turn_expires(self, db, t) -> None:
         turn = await _queue(db, t["acme"], t["acme_session"])
         ttl = timedelta(seconds=settings.chat_turn_queue_ttl_seconds + 1)
-        assert (await chat_turns.sweep(now=chat_turns._now() + ttl))["expired"] == 1
+        outcome = await chat_turns.recover_company(t["acme"], now=chat_turns._now() + ttl)
+        assert outcome["expired"] == 1
         assert (await _rows(db, ChatTurn))[0].error_code == "QUEUE_TTL_EXPIRED"
         assert "chat.turn_expired" in await _actions(db, turn.id)
 

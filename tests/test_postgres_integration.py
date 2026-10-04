@@ -515,27 +515,23 @@ async def test_postgres_atomic_budget_reservations_concurrency(app_user_postgres
 
 @pytest.mark.asyncio
 async def test_orchestrator_tick_sees_work_as_app_role(
-    app_user_postgres_url, system_user_postgres_url, monkeypatch
+    app_user_postgres_url, monkeypatch
 ):
-    """Positive control: orchestrator discovers cross-tenant goals under system role,
-    and drives/creates subtasks under standard app role with RLS enforcement (WP-15b)."""
+    """Positive control: the orchestrator drives a hinted company's goals and creates
+    subtasks under the app role with RLS enforcement; it never holds the system credential
+    (WP-15b)."""
     from nexus.models.agent import Agent
     from nexus.models.task import Goal, Task
     from nexus.runtime.orchestrator import _tick
     from nexus.config import settings
 
-    # Wire database settings so system_session and tenant_session connect to test Postgres
+    # Wire database settings so tenant_session connects to test Postgres
     monkeypatch.setattr(settings, "database_url", app_user_postgres_url)
-    monkeypatch.setattr(settings, "system_database_url", system_user_postgres_url)
 
     app_engine = create_async_engine(app_user_postgres_url)
     app_factory = async_sessionmaker(app_engine, class_=AsyncSession, expire_on_commit=False)
 
-    sys_engine = create_async_engine(system_user_postgres_url)
-    sys_factory = async_sessionmaker(sys_engine, class_=AsyncSession, expire_on_commit=False)
-
     monkeypatch.setattr("nexus.database.async_session_factory", app_factory)
-    monkeypatch.setattr("nexus.database._system_session_factory", sys_factory)
 
     cid = uuid.uuid4()
     agent_id = uuid.uuid4()
@@ -572,7 +568,7 @@ async def test_orchestrator_tick_sees_work_as_app_role(
         await session.commit()
 
     # 2. Invoke real _tick() directly
-    await _tick()
+    await _tick(company_ids=[cid])
 
     # 3. Verify subtasks exist under tenant session
     async with app_factory() as session:
@@ -585,12 +581,11 @@ async def test_orchestrator_tick_sees_work_as_app_role(
         assert len(subtasks) > 0, "Subtasks should be created by real _tick() under tenant context"
 
     await app_engine.dispose()
-    await sys_engine.dispose()
 
 
 @pytest.mark.asyncio
 async def test_chat_turn_claim_race_ordering_and_rls(
-    app_user_postgres_url, system_user_postgres_url, monkeypatch
+    app_user_postgres_url, monkeypatch
 ):
     """Durable chat turns on PostgreSQL as the application role.
 
@@ -609,13 +604,9 @@ async def test_chat_turn_claim_race_ordering_and_rls(
     from nexus.runtime import chat_turns
 
     monkeypatch.setattr(settings, "database_url", app_user_postgres_url)
-    monkeypatch.setattr(settings, "system_database_url", system_user_postgres_url)
     app_engine = create_async_engine(app_user_postgres_url)
     app_factory = async_sessionmaker(app_engine, class_=AsyncSession, expire_on_commit=False)
-    sys_engine = create_async_engine(system_user_postgres_url)
-    sys_factory = async_sessionmaker(sys_engine, class_=AsyncSession, expire_on_commit=False)
     monkeypatch.setattr("nexus.database.async_session_factory", app_factory)
-    monkeypatch.setattr("nexus.database._system_session_factory", sys_factory)
 
     mine, theirs = uuid.uuid4(), uuid.uuid4()
     session_id = uuid.uuid4()
@@ -662,24 +653,23 @@ async def test_chat_turn_claim_race_ordering_and_rls(
         assert await chat_turns.get_turn(theirs, first) is None
         assert await chat_turns.claim(second, theirs, "worker-y") is None
 
-        outcome = await chat_turns.sweep(now=chat_turns._now() + timedelta(minutes=5))
+        later = chat_turns._now() + timedelta(minutes=5)
+        outcome = await chat_turns.recover_company(mine, now=later)
         assert outcome["recovered"] == 1
         assert (await chat_turns.get_turn(mine, first)).status == "queued"
-        assert f"company:{mine}" in outcome
     finally:
         await app_engine.dispose()
-        await sys_engine.dispose()
 
 
 @pytest.mark.asyncio
 async def test_task_attempt_claim_race_and_rls(
-    app_user_postgres_url, system_user_postgres_url, monkeypatch
+    app_user_postgres_url, monkeypatch
 ):
     """Task attempts and their effect ledger on PostgreSQL as the application role.
 
     One of many racing claims wins, the partial unique index refuses a second
     active attempt, another tenant sees no attempt or effect row (RLS, no WHERE
-    clause), and the system-role sweep recovers an expired lease.
+    clause), and the tenant-bound recovery pass recovers an expired lease.
     """
     import asyncio
     from datetime import timedelta
@@ -692,13 +682,9 @@ async def test_task_attempt_claim_race_and_rls(
     from nexus.runtime import task_attempts
 
     monkeypatch.setattr(settings, "database_url", app_user_postgres_url)
-    monkeypatch.setattr(settings, "system_database_url", system_user_postgres_url)
     app_engine = create_async_engine(app_user_postgres_url)
     app_factory = async_sessionmaker(app_engine, class_=AsyncSession, expire_on_commit=False)
-    sys_engine = create_async_engine(system_user_postgres_url)
-    sys_factory = async_sessionmaker(sys_engine, class_=AsyncSession, expire_on_commit=False)
     monkeypatch.setattr("nexus.database.async_session_factory", app_factory)
-    monkeypatch.setattr("nexus.database._system_session_factory", sys_factory)
 
     async def as_tenant(session, cid):
         await session.execute(
@@ -749,13 +735,13 @@ async def test_task_attempt_claim_race_and_rls(
         assert await task_attempts.get_attempt(theirs, attempt.id) is None
         assert await task_attempts.claim(attempt.id, theirs, "worker-y") is None
 
-        outcome = await task_attempts.sweep(now=task_attempts._now() + timedelta(minutes=5))
+        later = task_attempts._now() + timedelta(minutes=5)
+        outcome = await task_attempts.recover_company(mine, now=later)
         assert outcome["recovered"] == 1
         recovered = await task_attempts.get_attempt(mine, attempt.id)
         assert (recovered.status, recovered.recoveries) == ("queued", 1)
     finally:
         await app_engine.dispose()
-        await sys_engine.dispose()
 
 
 @pytest.mark.asyncio
@@ -1191,13 +1177,11 @@ async def test_organization_snapshot_race_and_rls(
     from nexus.services import org_snapshot
 
     monkeypatch.setattr(settings, "database_url", app_user_postgres_url)
-    monkeypatch.setattr(settings, "system_database_url", system_user_postgres_url)
     app_engine = create_async_engine(app_user_postgres_url)
     app_factory = async_sessionmaker(app_engine, class_=AsyncSession, expire_on_commit=False)
     sys_engine = create_async_engine(system_user_postgres_url)
     sys_factory = async_sessionmaker(sys_engine, class_=AsyncSession, expire_on_commit=False)
     monkeypatch.setattr("nexus.database.async_session_factory", app_factory)
-    monkeypatch.setattr("nexus.database._system_session_factory", sys_factory)
 
     async def as_tenant(session, cid):
         await session.execute(
@@ -1232,7 +1216,7 @@ async def test_organization_snapshot_race_and_rls(
 
         # Other tests' companies share this database; reconcile them all.
         monkeypatch.setattr(org_snapshot, "MAX_PER_TICK", 10_000)
-        reconciled = await org_snapshot.tick()
+        reconciled = await org_snapshot.tick(discovery=sys_factory)
         assert theirs in reconciled
         async with app_factory() as session:
             await as_tenant(session, mine)

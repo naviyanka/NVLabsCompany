@@ -138,7 +138,7 @@ class BudgetService:
             stmt = stmt.where(BudgetPolicy.company_id == company_id)
 
         # Proactively reap any expired reservations so stale holds don't block spend
-        await self.reap_expired_reservations()
+        await self.reap_expired_reservations(company_id)
 
         result = await self._db.execute(stmt)
         policies = result.scalars().all()
@@ -505,20 +505,25 @@ class BudgetService:
         await self._db.commit()
         return True
 
-    async def reap_expired_reservations(self) -> int:
+    async def reap_expired_reservations(self, company_id: uuid.UUID | None = None) -> int:
         """Reap and release reservations older than their expiry instant.
 
         Releases holds where status='reserved' and expires_at <= utcnow,
-        restoring reserved_cents on policies.
+        restoring reserved_cents on policies. ``cost_events`` is not row level
+        secured but ``budget_policies`` is, so a pass inside one tenant's session
+        must pass that tenant's ``company_id``: releasing another company's hold
+        without being able to restore its policy would leave that policy's
+        reserved_cents too high.
         """
         now = datetime.now(timezone.utc).replace(tzinfo=None)
-        res = await self._db.execute(
-            select(CostEvent).where(
-                CostEvent.status == "reserved",
-                CostEvent.expires_at.is_not(None),
-                CostEvent.expires_at <= now,
-            )
-        )
+        expired = [
+            CostEvent.status == "reserved",
+            CostEvent.expires_at.is_not(None),
+            CostEvent.expires_at <= now,
+        ]
+        if company_id is not None:
+            expired.append(CostEvent.company_id == company_id)
+        res = await self._db.execute(select(CostEvent).where(*expired))
         expired_events = list(res.scalars().all())
         if not expired_events:
             return 0
@@ -541,11 +546,7 @@ class BudgetService:
 
         await self._db.execute(
             update(CostEvent)
-            .where(
-                CostEvent.status == "reserved",
-                CostEvent.expires_at.is_not(None),
-                CostEvent.expires_at <= now,
-            )
+            .where(*expired)
             .values(status="released", cost_cents=0, expires_at=None)
         )
         await self._db.commit()

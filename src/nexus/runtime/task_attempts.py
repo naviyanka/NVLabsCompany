@@ -88,6 +88,7 @@ from nexus.models.task_attempt import (
 
 logger = logging.getLogger(__name__)
 
+from nexus.runtime import work_hints  # noqa: E402
 from nexus.runtime.chat_turns import WORKER_ID  # noqa: E402 -- one identity per process
 
 STATS: Counter[str] = Counter()
@@ -1107,19 +1108,24 @@ async def _recover(attempt: TaskAttempt, now: datetime) -> str:
     return "recovered"
 
 
-async def sweep(now: datetime | None = None) -> Counter[str]:
-    """One recovery pass over every tenant; also reports companies with queued attempts."""
-    from nexus.database import system_session
+async def recover_company(company_id: uuid.UUID, now: datetime | None = None) -> Counter[str]:
+    """One recovery pass over a single tenant, inside that tenant's RLS context.
+
+    The privileged system runtime finds which companies need this
+    (``task_attempt_recovery``); the recovery itself runs on the tenant-bound role.
+    """
+    from nexus.database import tenant_session
 
     now = now or _now()
     ttl = timedelta(seconds=_settings().task_attempt_queue_ttl_seconds)
     outcome: Counter[str] = Counter()
-    async with system_session("task attempt recovery") as db:
+    async with tenant_session(company_id) as db:
         expired = list(
             (
                 await db.execute(
                     select(TaskAttempt)
                     .where(
+                        TaskAttempt.company_id == company_id,
                         TaskAttempt.status.in_(LEASED_ATTEMPT_STATUSES),
                         TaskAttempt.lease_expires_at < now,
                     )
@@ -1131,15 +1137,12 @@ async def sweep(now: datetime | None = None) -> Counter[str]:
             (
                 await db.execute(
                     select(TaskAttempt)
-                    .where(TaskAttempt.status == "queued", TaskAttempt.queued_at < now - ttl)
+                    .where(
+                        TaskAttempt.company_id == company_id,
+                        TaskAttempt.status == "queued",
+                        TaskAttempt.queued_at < now - ttl,
+                    )
                     .limit(_BATCH)
-                )
-            ).scalars()
-        )
-        waiting = set(
-            (
-                await db.execute(
-                    select(TaskAttempt.company_id).where(TaskAttempt.status == "queued").distinct()
                 )
             ).scalars()
         )
@@ -1155,7 +1158,6 @@ async def sweep(now: datetime | None = None) -> Counter[str]:
             error_code="QUEUE_TTL_EXPIRED",
         )
         outcome["expired" if done else "skipped"] += 1
-    outcome.update({f"company:{cid}": 1 for cid in waiting})
     return outcome
 
 
@@ -1927,10 +1929,9 @@ class TaskAttemptWorker:
             try:
                 if self.persistent and time.monotonic() - self._last_sweep >= _SWEEP_EVERY_SECONDS:
                     self._last_sweep = time.monotonic()
-                    found = await sweep()
-                    self._companies.update(
-                        uuid.UUID(k.split(":", 1)[1]) for k in found if k.startswith("company:")
-                    )
+                    # Companies with queued attempts come from the system runtime's hints;
+                    # this worker never looks across tenants itself.
+                    self._companies.update(await work_hints.claim("task_attempts"))
                 await self._dispatch()
             except Exception:  # noqa: BLE001 -- keep the worker alive; the next pass retries
                 logger.exception("task attempt worker pass failed")

@@ -47,7 +47,6 @@ async def db(tmp_path, monkeypatch):
     import nexus.database as database
 
     monkeypatch.setattr(database, "async_session_factory", factory)
-    monkeypatch.setattr(database, "_system_session_factory", factory)
     monkeypatch.setattr(settings, "database_url", str(engine.url))
     factory.engine = engine
     yield factory
@@ -291,18 +290,19 @@ class TestRefresh:
 
     async def test_debounced_regeneration_and_reconciliation(self, db, org):
         t0 = org.now
-        assert sorted(await snap.tick(t0), key=str) == sorted([org.acme, org.other], key=str)
+        ticked = await snap.tick(t0, discovery=db)
+        assert sorted(ticked, key=str) == sorted([org.acme, org.other], key=str)
         async with db() as s:
             await s.execute(update(Task).where(Task.id == org.running).values(title="Renamed"))
             await s.commit()
         await snap.mark_dirty({org.acme}, t0 + timedelta(seconds=60))
-        assert await snap.tick(t0 + timedelta(seconds=70)) == []  # still settling
-        assert await snap.tick(t0 + timedelta(seconds=95)) == [org.acme]
+        assert await snap.tick(t0 + timedelta(seconds=70), discovery=db) == []  # still settling
+        assert await snap.tick(t0 + timedelta(seconds=95), discovery=db) == [org.acme]
         assert [r.version for r in await _versions(db, org.acme)] == [1, 2]
         assert (await _state(db, org.acme)).dirty_since is None
         # Reconciliation: every company, changed or not, and no new version when unchanged.
         later = t0 + timedelta(seconds=95) + snap.RECONCILE_EVERY
-        assert set(await snap.tick(later)) == {org.acme, org.other}
+        assert set(await snap.tick(later, discovery=db)) == {org.acme, org.other}
         assert [r.version for r in await _versions(db, org.other)] == [1]
         assert (await _state(db, org.other)).verified_at == later
 

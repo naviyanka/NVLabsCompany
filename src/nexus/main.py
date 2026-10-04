@@ -110,12 +110,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     from nexus.config_validator import (
         enforce_auth_policy,
         enforce_no_migration_credential,
+        enforce_no_system_credential,
         enforce_webhook_timeout_policy,
     )
     # Before the database or any route: a disallowed AUTH_ENABLED=false refuses to start.
     enforce_auth_policy()
     # Likewise a runtime process that was handed the schema owner's credential.
     enforce_no_migration_credential()
+    # And one that was handed the BYPASSRLS system credential: only the system runtime
+    # process may hold it.
+    enforce_no_system_credential()
     # Likewise a webhook timeout that would outlive the idempotency lease.
     enforce_webhook_timeout_policy()
     from nexus.database import async_session_factory, engine, assert_role_rls_posture
@@ -150,7 +154,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # Seed demo data (agents, tasks, etc.)
     # Everything below writes RLS-covered tables (agents, tasks, etc.) -> tenant_session
-    from nexus.database import tenant_session, system_session
+    from nexus.database import tenant_session
     from nexus.demo.seed import seed_database
     async with tenant_session(default_company_id) as session:
         counts = await seed_database(session)
@@ -163,39 +167,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     import logging
     _logger = logging.getLogger(__name__)
 
-    # Seed budget tracker with company budget data (cross-tenant, policies is RLS-covered -> system_session)
-    try:
-        from nexus.api.middleware import _budget_tracker, _policy_cache
-        from nexus.models.company import Company as CompanyModel
-        from nexus.models.policy import Policy as PolicyModel
-
-        async with system_session("lifespan: seed budget tracker and policy cache") as session:
-            from sqlalchemy import select as sa_select
-            result = await session.execute(sa_select(CompanyModel))
-            for company in result.scalars().all():
-                _budget_tracker.set_budget(
-                    company.id,
-                    company.budget_monthly_cents,
-                    company.spent_monthly_cents,
-                )
-
-            # Load active policies into cache
-            policy_result = await session.execute(
-                sa_select(PolicyModel).where(PolicyModel.enabled == True)  # noqa: E712
-            )
-            for policy in policy_result.scalars().all():
-                if policy.company_id not in _policy_cache:
-                    _policy_cache[policy.company_id] = []
-                _policy_cache[policy.company_id].append({
-                    "name": policy.name,
-                    "rules": policy.rules,
-                    "priority": policy.priority,
-                })
-
-        _logger.info("Budget tracker and policy cache seeded from DB")
-    except Exception as exc:
-        _logger = logging.getLogger(__name__)
-        _logger.warning("Could not seed budget/policy data: %s", exc)
+    # The budget tracker and policy cache are no longer seeded for every company here
+    # (that needed a cross-tenant read). The governance middleware loads each company's
+    # state on its first request, inside that company's tenant session.
 
     # Global non-RLS governance tables: kill_switches, circuit_breakers
     try:
@@ -261,30 +235,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         on_postgres=not settings.database_url.startswith("sqlite")
     )
 
-    # Reclaim heartbeat runs whose process died while we were down (Phase 1.3.4, WP-15a)
-    # Cross-tenant over RLS-covered tables (heartbeat_runs, agents) -> system_session
-    try:
-        from nexus.runtime.heartbeat_persistent import PersistentHeartbeatService
-        from nexus.database import system_session_factory
-        reclaimed = await PersistentHeartbeatService(system_session_factory).reclaim_orphans()
-        if reclaimed:
-            _logger.warning("Reclaimed %d orphaned heartbeat run(s)", len(reclaimed))
-    except Exception as exc:
-        _logger.warning("Heartbeat orphan reclaim failed: %s", exc)
+    # Cross-tenant startup work is not done here: the API holds no credential that can
+    # enumerate tenants. Checkpoint recovery is the system runtime's `task_recovery`
+    # operation (nexus.system_runtime.ops). The old startup reclaim of heartbeat runs whose
+    # process died is dropped rather than moved: it keys on a PID, which only means
+    # something inside the process that started the run, so a separate runtime would mark
+    # live runs dead. The watchdog patrol finds stalled runs by their stale heartbeat.
 
-    # Automated recovery pass: reconcile interrupted tasks with active checkpoints
-    # Cross-tenant over RLS-covered tables (tasks, checkpoints) -> system_session
-    try:
-        from nexus.runtime.orchestrator import reconcile_recovery
-        async with system_session("lifespan: reconcile recovery") as recovery_db:
-            recovered_count = await reconcile_recovery(recovery_db)
-            if recovered_count:
-                await recovery_db.commit()
-                _logger.info("Startup recovery pass re-enqueued %d task(s) from checkpoints", recovered_count)
-    except Exception as exc:
-        _logger.warning("Startup checkpoint recovery pass failed: %s", exc)
-
-    # Start the background scheduler for cron/schedule triggers
+    # Start the background scheduler for cron/schedule triggers (the triggers table is
+    # not RLS-covered, so this runs on the application role).
     from nexus.runtime.scheduler import start_scheduler, stop_scheduler
     await start_scheduler()
 
@@ -308,9 +267,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     from nexus.services import org_snapshot
     await org_snapshot.start_listener()
 
-    # The watchdog patrol rides the scheduler tick (see runtime/scheduler.py); it
-    # detects stuck agents and silently stalled runs, and files a human decision
-    # for stalls it cannot explain (Phase 1.4). Only shutdown needs wiring here.
+    # The watchdog patrol is an operation of the system runtime process (see
+    # system_runtime/ops.py); it detects stuck agents and silently stalled runs, and
+    # files a human decision for stalls it cannot explain (Phase 1.4). Only shutdown
+    # needs wiring here.
     from nexus.runtime.watchdog_service import stop_watchdog
 
     # Register event bridge handlers (connects EventBus → orchestration)

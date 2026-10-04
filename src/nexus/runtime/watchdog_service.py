@@ -3,7 +3,9 @@
 `watchdog.py` is deliberately free of database access: it takes agent state as
 `AgentInfo` dataclasses and returns a `PatrolReport`. That keeps it testable, but
 it also means something has to feed it real rows and act on its verdicts. This
-module is that something, and it is what `main.py` starts.
+module is that something. The system runtime's `watchdog_patrol` operation calls
+`patrol_once`; it discovers agents with the privileged connection and patrols
+each one in its own tenant session.
 
 Escalations become decision-queue items so a human sees them, deduped per run so
 a stalled run does not refile every patrol.
@@ -13,6 +15,8 @@ from __future__ import annotations
 
 import logging
 import uuid
+from collections.abc import Callable
+from contextlib import AbstractAsyncContextManager
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -32,9 +36,8 @@ _watchdog: Watchdog | None = None
 _escalated: set[uuid.UUID] = set()
 
 
-async def _load_agents(session: AsyncSession) -> list[AgentInfo]:
-    """Read current agent state into the dataclass the watchdog expects."""
-    rows = (await session.execute(select(Agent))).scalars().all()
+def _agent_infos(rows: list[Agent]) -> list[AgentInfo]:
+    """Convert agent rows into the dataclass the watchdog expects."""
     return [
         AgentInfo(
             agent_id=row.id,
@@ -59,6 +62,7 @@ async def _file_decision(
     title: str,
     body: str,
     session_factory: async_sessionmaker[AsyncSession] | None = None,
+    company_id: uuid.UUID | None = None,
 ) -> None:
     """Put one open decision on the escalation queue for a human to answer.
 
@@ -72,12 +76,16 @@ async def _file_decision(
         title: Short summary shown in the queue.
         body: What the operator needs to know to decide.
         session_factory: Optional session factory override for tests.
+        company_id: The agent's company, already known to the patrol. Production
+            filing runs inside that company's ``tenant_session``; without it (and
+            without a ``session_factory``) nothing is filed, because the company
+            cannot be looked up without crossing tenants.
     """
+    from nexus.database import async_session_factory, tenant_session
     from nexus.governance.decision_queue_persistent import (
         PersistentDecisionQueueManager,
     )
     from nexus.models.governance import Decision
-    from nexus.database import system_session, tenant_session, async_session_factory
 
     if source_id in _escalated:
         return
@@ -116,15 +124,9 @@ async def _file_decision(
             priority=1,
         )
     else:
-        # Production RLS path: discover agent company_id via system_session
-        async with system_session("watchdog: discover agent company") as session:
-            agent = (
-                await session.execute(select(Agent).where(Agent.id == agent_id))
-            ).scalars().first()
-            if agent is None:
-                logger.warning("Cannot escalate: unknown agent %s", agent_id)
-                return
-            company_id = agent.company_id
+        if company_id is None:
+            logger.warning("Cannot escalate agent %s: company unknown", agent_id)
+            return
 
         # Write decision and queue item inside tenant_session(company_id)
         async with tenant_session(company_id) as session:
@@ -157,6 +159,7 @@ async def _file_decision(
 async def _escalate(
     session_factory: async_sessionmaker[AsyncSession] | None = None,
     action: dict[str, object] | None = None,
+    company_of: dict[uuid.UUID, uuid.UUID] | None = None,
 ) -> None:
     """File one human decision for a stalled run."""
     if action is None:
@@ -168,8 +171,10 @@ async def _escalate(
         return
 
     run_id = uuid.UUID(str(raw_run_id))
+    agent_id = uuid.UUID(str(raw_agent_id))
     await _file_decision(
-        agent_id=uuid.UUID(str(raw_agent_id)),
+        agent_id=agent_id,
+        company_id=(company_of or {}).get(agent_id),
         source_id=run_id,
         title=f"Stalled agent run {run_id}",
         body=str(action.get("reason", "Run stopped producing output.")),
@@ -180,6 +185,7 @@ async def _escalate(
 async def _escalate_recovery(
     session_factory: async_sessionmaker[AsyncSession] | None = None,
     agent_id: uuid.UUID | None = None,
+    company_of: dict[uuid.UUID, uuid.UUID] | None = None,
 ) -> None:
     """File a decision for an agent left in ``needs_recovery``."""
     if agent_id is None:
@@ -187,6 +193,7 @@ async def _escalate_recovery(
 
     await _file_decision(
         agent_id=agent_id,
+        company_id=(company_of or {}).get(agent_id),
         source_id=agent_id,
         title=f"Agent {agent_id} needs recovery",
         body=(
@@ -197,29 +204,39 @@ async def _escalate_recovery(
     )
 
 
-async def patrol_once(session_factory: async_sessionmaker[AsyncSession] | None = None) -> None:
-    """One patrol: load state, run the checks, act on escalations."""
+async def patrol_once(
+    session_factory: async_sessionmaker[AsyncSession] | None = None,
+    discovery: Callable[[], AbstractAsyncContextManager[AsyncSession]] | None = None,
+) -> None:
+    """One patrol: load state, run the checks, act on escalations.
+
+    Loading agents and unfinished runs spans every tenant, so in production it is done by
+    the privileged system runtime, which passes its ``discovery`` session. Escalations are
+    then filed through each agent's own ``tenant_session``. With neither argument there is
+    no way to read across tenants, and the patrol does nothing.
+    """
     global _watchdog
-    from nexus.database import system_session
 
     if _watchdog is None:
         _watchdog = Watchdog(config=WatchdogConfig())
 
-    if session_factory is not None:
-        async with session_factory() as session:
-            agents = await _load_agents(session)
-            runs = await _load_active_runs(session)
-    else:
-        async with system_session("watchdog: patrol discovery") as session:
-            agents = await _load_agents(session)
-            runs = await _load_active_runs(session)
+    factory = discovery or session_factory
+    if factory is None:
+        return
+    async with factory() as session:
+        rows = (await session.execute(select(Agent))).scalars().all()
+        company_of = {row.id: row.company_id for row in rows}
+        agents = _agent_infos(rows)
+        runs = await _load_active_runs(session)
 
     report = _watchdog.patrol(agents, runs)
 
     for action in report.actions_taken:
         if action.get("action") == RecoveryAction.ESCALATE_HUMAN.value:
             try:
-                await _escalate(session_factory=session_factory, action=action)
+                await _escalate(
+                    session_factory=session_factory, action=action, company_of=company_of
+                )
             except Exception as exc:  # noqa: BLE001 - one failure must not stop the patrol
                 logger.warning("Could not escalate stalled run: %s", exc)
 
@@ -229,7 +246,9 @@ async def patrol_once(session_factory: async_sessionmaker[AsyncSession] | None =
         if agent.status != NEEDS_RECOVERY:
             continue
         try:
-            await _escalate_recovery(session_factory=session_factory, agent_id=agent.agent_id)
+            await _escalate_recovery(
+                session_factory=session_factory, agent_id=agent.agent_id, company_of=company_of
+            )
         except Exception as exc:  # noqa: BLE001 - one failure must not stop the patrol
             logger.warning("Could not escalate agent %s: %s", agent.agent_id, exc)
 

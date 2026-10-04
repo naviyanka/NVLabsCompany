@@ -5,7 +5,7 @@ under the application role, it reads nothing from a tenant-owned table and every
 write to one fails the policy's WITH CHECK. In background code that failure is
 often only logged. Tenant-owned work therefore goes through
 ``tenant_session(company_id)`` or ``tenant_session_factory(company_id)``, and
-cross-tenant maintenance through ``system_session``.
+cross-tenant discovery through the privileged ``nexus.system_runtime`` process.
 
 The remaining raw uses are listed in ``ALLOWED``, each with a category and the
 reason it is not tenant work. See ``docs/security/TENANT_SESSION_AUDIT.md``.
@@ -53,6 +53,11 @@ ALLOWED: dict[str, tuple[str, str]] = {
     "runtime/watchdog_service.py::_file_decision": (
         SYSTEM,
         "decision queues are not tenant-scoped; the queue row carries company_id",
+    ),
+    "runtime/scheduler.py::_tick": (
+        SYSTEM,
+        "lists due rows of triggers, which is not RLS protected; each trigger then fires "
+        "inside its own tenant_session",
     ),
     "tools/factory.py::_access_session": (
         SYSTEM,

@@ -233,6 +233,12 @@ async def readiness() -> JSONResponse:
     db_res = await _check_db_health()
     redis_res = await _check_redis_health()
     temporal_res = await _check_temporal_health()
+    # Informational only: the system runtime is a separate privileged process, and its
+    # absence must not make the public API unready. This reads its published status from
+    # Redis and never opens a connection with the system credential.
+    from nexus.system_runtime import status as system_runtime_status
+
+    system_runtime_res = await system_runtime_status.read()
 
     db_ready = db_res.get("status") == "connected"
     redis_ready = redis_res.get("status") in ("connected", "disabled")
@@ -253,6 +259,7 @@ async def readiness() -> JSONResponse:
                 "database": db_res,
                 "redis": redis_res,
                 "temporal": temporal_res,
+                "system_runtime": system_runtime_res,
             },
         },
     )
