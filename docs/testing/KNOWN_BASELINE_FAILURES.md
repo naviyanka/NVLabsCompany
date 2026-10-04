@@ -107,6 +107,9 @@ durability phase, the five files that held them pass together (61 tests).
   `_system_session_factory` to the test factory. `_tick` keeps its production
   path: it discovers triggers in `system_session` and fires them in
   `tenant_session`. `tests/test_scheduler_persistence.py` passes 25/25.
+- **Superseded:** `system_session` and `_system_session_factory` no longer exist.
+  `_tick` now takes the test's session factory directly and reads triggers with
+  the application role, so the fixture no longer patches a system factory.
 
 ## Order-dependent failure found and fixed in this phase
 

@@ -11,8 +11,10 @@ Each one was classified as one of the following.
 - **tenant**: tenant-owned work. It now uses `tenant_session(company_id)` or
   `tenant_session_factory(company_id)`, which set `nexus.company_id` on every
   transaction.
-- **system**: cross-tenant maintenance. It uses `system_session(reason)`, which
-  requires a role with `BYPASSRLS`.
+- **system**: cross-tenant maintenance. `system_session` no longer exists. Finding
+  which companies have work is done only by the system runtime process, through
+  `system_runtime.db.discovery_session(op)`; the work itself is a tenant session.
+  See [system-runtime.md](../runbooks/system-runtime.md).
 - **allowed raw**: not tenant work (discovery, global tables, bootstrap). The
   raw session stays, and the reason is recorded in `ALLOWED` in
   `tests/test_tenant_session_guard.py`.
@@ -58,21 +60,25 @@ routes are therefore disabled outright. They return 410
 `LEGACY_CHANNEL_INGRESS_DISABLED`, read no body and write nothing. See
 [Legacy channel ingress](LEGACY_CHANNEL_INGRESS.md).
 
-## Callers that already used system sessions
+## Callers that used system sessions (removed)
 
-These run cross-tenant discovery or recovery and hold `BYPASSRLS` through
-`system_session(reason)`. They were reviewed and left unchanged, because the
-discovery itself is legitimate. Each hands the tenant work it finds to a
-tenant session.
+These ran cross-tenant discovery or recovery through `system_session(reason)`, so the
+API and worker processes held a `BYPASSRLS` credential. `system_session` and the
+second engine behind it are deleted. Each caller moved as follows.
 
-- `main.py::lifespan`: seeds the budget tracker and policy cache, and
-  reconciles recovery.
-- `runtime/chat_turns.py`: chat turn recovery.
-- `runtime/orchestrator.py`: discovers active goals.
-- `runtime/scheduler.py`: reaps reservations and finds due triggers.
-- `runtime/task_attempts.py`: task attempt recovery.
-- `runtime/watchdog_service.py`: discovers the agent's company and runs patrol
-  discovery.
+| Former caller | Now |
+|---|---|
+| `main.py::lifespan` (budget tracker and policy cache seeding, recovery reconcile) | Removed from the lifespan. Budget state loads lazily per company; recovery is the system runtime's `task_recovery`, `chat_turn_recovery` and `task_attempt_recovery` operations. The lifespan refuses to start if `SYSTEM_DATABASE_URL` is set. |
+| `runtime/chat_turns.py` sweep | `chat_turns.recover_company(company_id)` in a tenant session, driven by the `chat_turn_recovery` operation |
+| `runtime/orchestrator.py` goal discovery | The `goal_discovery` operation publishes company ids as work hints; the orchestrator reads hints and runs each company in `tenant_session`. Without hints it does nothing; it never enumerates tenants. |
+| `runtime/scheduler.py` reservation reaping | `budget_reservation_reap`, per company, with an explicit `company_id` filter because `cost_events` has no RLS policy |
+| `runtime/scheduler.py` due-trigger lookup | Trigger rows are not under RLS and are read with the application role; each firing runs in `tenant_session` |
+| `runtime/task_attempts.py` sweep | `task_attempts.recover_company(company_id)`, driven by `task_attempt_recovery` |
+| `runtime/watchdog_service.py` patrol | The `watchdog_patrol` operation discovers agents; the patrol of each agent runs in `tenant_session` |
+| `runtime/org_snapshot.py` refresh | `org_snapshot_refresh`: discovery returns company ids, each snapshot is built in `tenant_session` |
+
+The static guard `tests/test_system_runtime_process.py` fails if any file outside the
+system runtime reads `SYSTEM_DATABASE_URL`, or imports its operations or runner.
 
 ## Justified raw sessions (`ALLOWED`)
 
@@ -125,8 +131,8 @@ into its company's own hash chain; see migration `e7a1c2d3f404`.
 
 An audit row with `company_id=None` (a system event) is invisible to the
 application role and cannot be inserted by it, because the RLS policy compares
-against a non-null tenant. Such rows can only be written through a caller's
-`system_session`. Without one, `record_audit` fails closed:
+against a non-null tenant. No process holds a general-purpose system session any
+more, so `record_audit` fails closed for such a row:
 
 - it logs the failure;
 - with `raise_on_error=True`, it raises;
