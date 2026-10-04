@@ -107,6 +107,7 @@ EXPECTED_TABLES = {
     "tasks",
     "teams",
     "tool_access",
+    "tool_bridge_slots",
     "tool_catalog_entries",
     "tool_connections",
     "tool_effects",
