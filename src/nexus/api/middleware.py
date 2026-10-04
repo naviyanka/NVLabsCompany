@@ -24,8 +24,8 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from nexus.api.readiness import GovernanceUnavailable, ensure_company_governance_ready
 from nexus.auth.middleware import get_principal_from_scope, is_public_path
-from nexus.governance.readiness import GovernanceUnavailable, ensure_company_governance_ready
 
 logger = logging.getLogger(__name__)
 
@@ -208,7 +208,7 @@ class _BudgetTracker:
 _budget_tracker = _BudgetTracker()
 
 # Global policy cache: company_id → list of active policy dicts.
-# Filled lazily, one company at a time, by governance.readiness on that company's first request.
+# Filled lazily, one company at a time, by api.readiness on that company's first request.
 _policy_cache: dict[uuid.UUID, list[dict[str, Any]]] = {}
 
 # Route patterns that are considered "expensive" (LLM calls)

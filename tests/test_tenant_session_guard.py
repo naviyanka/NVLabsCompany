@@ -50,10 +50,6 @@ ALLOWED: dict[str, tuple[str, str]] = {
         SYSTEM,
         "execution_checkpoints is not tenant-scoped",
     ),
-    "runtime/watchdog_service.py::_file_decision": (
-        SYSTEM,
-        "decision queues are not tenant-scoped; the queue row carries company_id",
-    ),
     "runtime/scheduler.py::_tick": (
         SYSTEM,
         "lists due rows of triggers, which is not RLS protected; each trigger then fires "

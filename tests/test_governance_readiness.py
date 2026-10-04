@@ -17,8 +17,8 @@ from sqlmodel import SQLModel
 
 import nexus.models  # noqa: F401 - registers every table
 from nexus.api import middleware as mw
+from nexus.api import readiness
 from nexus.auth.principal import Principal
-from nexus.governance import readiness
 from nexus.models.company import Company
 from nexus.models.policy import Policy
 
@@ -275,3 +275,98 @@ def test_caches_themselves_default_to_deny_when_unloaded():
     assert mw._budget_tracker.check(cid, 1) is False
     request = type("R", (), {"scope": {"path": "/x", "method": "GET"}})()
     assert mw.GovernanceMiddleware(app=None)._evaluate_policy(request, cid)["allowed"] is False
+
+
+# -- a company created while the API is running ------------------------------------------------
+#
+# Startup used to warm the caches for every company that existed then. That was a cache load,
+# not a write, and a company created later was never covered by it. The first request now loads
+# a company's state in its own tenant session, so nothing needs seeding by a privileged
+# process and nothing needs a restart. These tests pin that.
+
+
+async def test_a_company_created_while_running_is_served_without_a_restart(engine):
+    old = await _company(engine, name="Old", budget=900)
+    down = _Downstream()
+    assert (await _request(down, "/api/v1/agents", "GET", old))[0] == 200
+
+    new = await _company(engine, name="New", budget=300, deny_methods=["DELETE"])
+
+    assert not readiness.is_ready(new)
+    assert (await _request(down, "/api/v1/agents", "GET", new))[0] == 200
+    assert readiness.is_ready(new) and mw._budget_tracker.get_remaining(new) == 300
+    assert (await _request(down, "/api/v1/agents", "DELETE", new))[0] == 403  # its own policy
+    assert mw._budget_tracker.get_remaining(old) == 900  # the older company is untouched
+
+
+async def test_an_unready_company_is_refused_then_served_once_it_exists_and_the_window_ends(
+    engine, monkeypatch
+):
+    clock = [1000.0]
+    monkeypatch.setattr(readiness, "time", type("T", (), {"monotonic": lambda: clock[0]}))
+    real, attempts = readiness._load, []
+
+    async def counting(company_id):
+        attempts.append(company_id)
+        return await real(company_id)
+
+    monkeypatch.setattr(readiness, "_load", counting)
+    cid, down = uuid.uuid4(), _Downstream()
+    assert (await _request(down, "/api/v1/agents", "GET", cid))[0] == 503
+
+    async with async_sessionmaker(engine, expire_on_commit=False)() as db:
+        db.add(Company(id=cid, name="Late", budget_monthly_cents=50))
+        await db.commit()  # the row becomes visible while the back-off is still open
+
+    clock[0] += readiness.BACKOFF_SECONDS - 1
+    assert (await _request(down, "/api/v1/agents", "GET", cid))[0] == 503
+    assert len(attempts) == 1, "inside the window no load is attempted"
+
+    clock[0] += 2
+    assert (await _request(down, "/api/v1/agents", "GET", cid))[0] == 200
+    assert (await _request(down, "/api/v1/agents", "GET", cid))[0] == 200
+    assert len(attempts) == 2, "ready: later requests do not load again"
+    assert down.calls == 2 and cid not in readiness._retry_at
+
+
+async def test_recorded_readiness_ends_denial_even_inside_an_open_backoff(engine):
+    cid = await _company(engine)
+    readiness._retry_at[cid] = float("inf")  # a failed load left a back-off that never ends
+    down = _Downstream()
+    assert (await _request(down, "/api/v1/agents", "GET", cid))[0] == 503
+
+    mw._budget_tracker.set_budget(cid, 10_000, 0)  # state recorded by another path
+    mw._policy_cache[cid] = []
+
+    assert (await _request(down, "/api/v1/agents", "GET", cid))[0] == 200
+
+
+async def test_initialization_is_idempotent_and_writes_nothing(engine, monkeypatch):
+    cid = await _company(engine, deny_methods=["DELETE"])
+    before = await _rows(engine)
+    real, loads = readiness._load, []
+
+    async def counting(company_id):
+        loads.append(1)
+        return await real(company_id)
+
+    monkeypatch.setattr(readiness, "_load", counting)
+    for _ in range(3):
+        await readiness.ensure_company_governance_ready(cid)
+
+    assert len(loads) == 1
+    assert await _rows(engine) == before
+    assert mw._policy_cache[cid] == [
+        {"name": "p", "rules": {"deny_methods": ["DELETE"]}, "priority": 0}
+    ]
+
+
+async def test_a_new_company_that_cannot_load_does_not_block_an_established_one(
+    engine, monkeypatch
+):
+    established = await _company(engine, name="Established")
+    down = _Downstream()
+    assert (await _request(down, "/api/v1/agents", "GET", established))[0] == 200
+
+    assert (await _request(down, "/api/v1/agents", "GET", uuid.uuid4()))[0] == 503
+    assert (await _request(down, "/api/v1/agents", "GET", established))[0] == 200

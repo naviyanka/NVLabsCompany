@@ -34,20 +34,21 @@ class GovernanceUnavailable(Exception):  # noqa: N818 - a state, named for the 5
     """The company's governance state is not loaded, so the request cannot be governed."""
 
 
-_ready: set[uuid.UUID] = set()
 _retry_at: dict[uuid.UUID, float] = {}
 _locks: dict[uuid.UUID, asyncio.Lock] = {}
 
 
 def reset() -> None:
-    """Forget all readiness state (tests)."""
-    _ready.clear()
+    """Forget the back-off and lock bookkeeping (tests). Loaded state lives in the caches."""
     _retry_at.clear()
     _locks.clear()
 
 
 def is_ready(company_id: uuid.UUID) -> bool:
-    return company_id in _ready
+    """Ready means the load finished: the policy cache is written last, after the budget."""
+    from nexus.api.middleware import _policy_cache
+
+    return company_id in _policy_cache
 
 
 async def _load(company_id: uuid.UUID) -> tuple[int, int, list[dict]]:
@@ -87,11 +88,11 @@ async def ensure_company_governance_ready(company_id: uuid.UUID) -> None:
 
     ``company_id`` must come from the authenticated principal, never from the request.
     """
-    if company_id in _ready:
+    if is_ready(company_id):
         return
     lock = _locks.setdefault(company_id, asyncio.Lock())
     async with lock:
-        if company_id in _ready:  # another request finished the load while this one waited
+        if is_ready(company_id):  # another request finished the load while this one waited
             return
         if time.monotonic() < _retry_at.get(company_id, 0.0):
             raise GovernanceUnavailable("backoff")
@@ -109,5 +110,4 @@ async def ensure_company_governance_ready(company_id: uuid.UUID) -> None:
             _retry_at[company_id] = time.monotonic() + BACKOFF_SECONDS
             logger.warning("Company governance state unavailable (%s)", type(exc).__name__)
             raise GovernanceUnavailable(type(exc).__name__) from exc
-        _ready.add(company_id)
         _retry_at.pop(company_id, None)
