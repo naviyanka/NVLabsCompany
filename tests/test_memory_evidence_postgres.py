@@ -852,10 +852,13 @@ async def test_downgrading_one_revision_drops_only_the_evidence_tables_and_their
 
     kept = {t: await rows(world.engine, f"SELECT * FROM {t} ORDER BY id")
             for t in ("companies", "memory_records", "audit_log")}
-    before = await _catalog(world.engine)
     cfg = alembic.config.Config("alembic.ini")
     cfg.set_main_option("sqlalchemy.url", migrated_postgres_url)
     version = "SELECT version_num FROM alembic_version"
+    # Later revisions sit above the evidence one; step down to it so that "one revision" is
+    # the evidence migration and nothing else (the tool ledger is dropped on the way).
+    await asyncio.to_thread(alembic.command.downgrade, cfg, "b4d9f2a61c73")
+    before = await _catalog(world.engine)
     assert await rows(world.engine, version) == [("b4d9f2a61c73",)]
 
     await asyncio.to_thread(alembic.command.downgrade, cfg, "-1")
@@ -897,7 +900,8 @@ async def test_downgrading_one_revision_drops_only_the_evidence_tables_and_their
         )
         assert gone == [(True, True)]  # the evidence history went with its tables
     finally:
-        await asyncio.to_thread(alembic.command.upgrade, cfg, "head")
+        # Back to the evidence revision, the state ``before`` was taken in; the head follows below.
+        await asyncio.to_thread(alembic.command.upgrade, cfg, "b4d9f2a61c73")
 
     # This database was migrated as the superuser, so the recreated tables get no privileges
     # for the fixture's application role. That is the fixture's setup, which grants once when it
@@ -917,6 +921,9 @@ async def test_downgrading_one_revision_drops_only_the_evidence_tables_and_their
             await db.execute(
                 sa.text("UPDATE memory_evidence SET grade = 'none' WHERE id = :e"), {"e": fresh}
             )
+    await asyncio.to_thread(alembic.command.upgrade, cfg, "head")
+    async with world.engine.begin() as conn:
+        await conn.execute(sa.text("GRANT ALL ON ALL TABLES IN SCHEMA public TO nexus_app"))
 
 # --- grant path: the application role through the real provisioning and migration path ---------
 
@@ -1133,7 +1140,7 @@ async def test_the_provisioned_application_role_reads_and_writes_evidence_and_st
     """
     p = provisioned
     await _application_role_works_and_stays_confined(p, "fresh")
-    await asyncio.to_thread(alembic.command.downgrade, p.cfg, "-1")
+    await asyncio.to_thread(alembic.command.downgrade, p.cfg, "b4d9f2a61c73-1")
     assert await rows(p.owner, "SELECT to_regclass('memory_evidence') IS NULL") == [(True,)]
     await asyncio.to_thread(alembic.command.upgrade, p.cfg, "head")
     await _application_role_works_and_stays_confined(p, "upgraded")
