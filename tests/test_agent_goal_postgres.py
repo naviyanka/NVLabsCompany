@@ -102,6 +102,17 @@ class TestAgentsAcrossTenants:
             await admin.call("GET", f"/api/v1/companies/{a['company']}/agents/{b['eve']}")
         ).status_code == 404
 
+    async def test_direct_agent_read_hides_a_foreign_agent_like_a_missing_one(self, stack):
+        a, b = await stack.seed("A"), await stack.seed("B")
+        admin = await stack.login(a["admin"])
+        absent = uuid.uuid4()
+        foreign = await admin.call("GET", f"/api/v1/agents/{b['eve']}")
+        missing = await admin.call("GET", f"/api/v1/agents/{absent}")
+        assert foreign.status_code == missing.status_code == 404
+        assert foreign.text.replace(str(b["eve"]), str(absent)) == missing.text
+        own = await admin.call("GET", f"/api/v1/agents/{a['eve']}")
+        assert own.status_code == 200 and own.json()["company_id"] == str(a["company"])
+
     async def test_only_a_company_admin_changes_authority_and_nothing_leaks(self, stack):
         a = await stack.seed("A")
         viewer, admin = await stack.login(a["viewer"]), await stack.login(a["admin"])

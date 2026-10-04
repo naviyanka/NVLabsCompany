@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict, Field, computed_field
 from sqlalchemy import select, update
 
@@ -54,9 +54,12 @@ def _forbidden(code: str, message: str) -> HTTPException:
 # heartbeat_principal): tests/test_agent_route_security walks the router and fails a route
 # that lacks either.
 WRITE_AGENT = [require_permission("write", "agent"), principal_kinds("user", "service")]
-# The company-in-the-URL read routes: PathCompanyId (403 for any company that is not the
-# caller's, existing or not) plus an explicit read:agent.
-READ_AGENT = [require_permission("read", "agent")]
+# Every Agent GET route: an explicit read:agent and people or API keys only. A run token
+# (the agent role) never reads the full Agent record, which carries autonomy, budget and
+# persona text; tests/test_agent_read_routes walks the router and fails a GET route without it.
+READ_AGENT = [require_permission("read", "agent"), principal_kinds("user", "service")]
+AGENT_PAGE_DEFAULT = 100
+AGENT_PAGE_MAX = 200
 
 
 def enforce_update_policy(principal: Principal, updates: dict[str, Any]) -> None:
@@ -273,19 +276,19 @@ async def list_agents(
     company_id: PathCompanyId,
     db: DbSession,
     status_filter: str | None = None,
-    limit: int = 100,
-    offset: int = 0,
+    limit: int = Query(default=AGENT_PAGE_DEFAULT, ge=1, le=AGENT_PAGE_MAX),
+    offset: int = Query(default=0, ge=0),
 ) -> Any:
-    """List agents for a company."""
+    """List agents for a company, newest first (id breaks ties), paged in SQL."""
     stmt = select(Agent).where(Agent.company_id == company_id)
     if status_filter:
         stmt = stmt.where(Agent.status == status_filter)
-    stmt = stmt.offset(offset).limit(limit).order_by(Agent.created_at.desc())
+    stmt = stmt.order_by(Agent.created_at.desc(), Agent.id.desc()).offset(offset).limit(limit)
     result = await db.execute(stmt)
     return list(result.scalars().all())
 
 
-@router.get("/api/v1/agents/{agent_id}", response_model=AgentResponse)
+@router.get("/api/v1/agents/{agent_id}", response_model=AgentResponse, dependencies=READ_AGENT)
 async def get_agent(agent_id: uuid.UUID, db: DbSession, company_id: CurrentCompanyId) -> Any:
     """Get an agent by ID."""
     stmt = select(Agent).where(Agent.id == agent_id, Agent.company_id == company_id)

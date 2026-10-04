@@ -75,7 +75,6 @@ ROLE_AGENT = Role(
         Permission(action="read", resource_type="task", resource_id="*"),
         Permission(action="write", resource_type="task", resource_id="*"),
         Permission(action="read", resource_type="goal", resource_id="*"),
-        Permission(action="read", resource_type="agent", resource_id="*"),
         Permission(action="execute", resource_type="tool", resource_id="*"),
         Permission(action="read", resource_type="memory", resource_id="*"),
         Permission(action="write", resource_type="memory", resource_id="*"),

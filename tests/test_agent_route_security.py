@@ -68,6 +68,12 @@ async def route_world(co):
             kind="service", company_id=co["acme"], role="admin", api_key_id=uuid.uuid4()
         ),
         "worker": Principal(kind="service", company_id=co["acme"], role="admin", label="worker"),
+        "service_viewer": Principal(
+            kind="service", company_id=co["acme"], role="viewer", api_key_id=uuid.uuid4()
+        ),
+        "service_agent": Principal(
+            kind="service", company_id=co["acme"], role="agent", api_key_id=uuid.uuid4()
+        ),
         "run": Principal(
             kind="run",
             company_id=co["acme"],
