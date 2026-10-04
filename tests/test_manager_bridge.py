@@ -107,8 +107,10 @@ async def _tools(rpc, token):
     return {t["name"] for t in response.json()["result"]["tools"]}
 
 
-async def _tool(rpc, token, name, arguments=None):
-    response = await rpc(token, "tools/call", {"name": name, "arguments": arguments or {}})
+async def _tool(rpc, token, name, arguments=None, key=None):
+    headers = {"idempotency-key": key} if key else None
+    response = await rpc(token, "tools/call", {"name": name, "arguments": arguments or {}},
+                         headers=headers)
     assert response.status_code == 200, response.text
     return response.json()["result"]
 
@@ -156,7 +158,7 @@ class TestEndpoint:
         await _staffed(team)
         token = await _token(await _turn(db, team["lead"]))
         denied = await _tool(rpc, token, "manager_delegate_task", {
-            "task_id": str(team["task2"]), "employee_id": str(team["acme_agy"])})
+            "task_id": str(team["task2"]), "employee_id": str(team["acme_agy"])}, key="k-denied")
         assert denied["isError"] and "Denied by access policy" in denied["content"][0]["text"]
         assert await _rows(db, TaskAttempt, TaskAttempt.task_id == team["task2"]) == []
 
@@ -166,7 +168,7 @@ class TestEndpoint:
         turn = await _turn(db, team["lead"])
         first_token = await _token(turn)
         args = {"task_id": str(team["task2"]), "employee_id": str(team["acme_agy"])}
-        first = _payload(await _tool(rpc, first_token, "manager_delegate_task", args))
+        first = _payload(await _tool(rpc, first_token, "manager_delegate_task", args, key="hire-1"))
         await ta.drain()
         # The turn is recovered and claimed again under a new execution ID:
         # the old credential dies, the retry's own delegates nothing new.
@@ -176,7 +178,8 @@ class TestEndpoint:
             await s.commit()
             turn = await s.get(ChatTurn, turn.id)
         assert (await rpc(first_token, "tools/list")).status_code == 401
-        again = _payload(await _tool(rpc, await _token(turn), "manager_delegate_task", args))
+        again = _payload(await _tool(rpc, await _token(turn), "manager_delegate_task", args,
+                                     key="hire-1"))
         # The retry replays the call recorded by the effect ledger instead of reaching the
         # tool again, so it reports the original result; the single attempt row proves that
         # nothing was delegated twice.

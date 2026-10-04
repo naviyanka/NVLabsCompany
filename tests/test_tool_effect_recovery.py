@@ -157,19 +157,6 @@ async def test_a_read_only_call_needs_no_slot(factory, world):
     assert out["status"] == "success" and tool.runs == 1 and await rows(factory) == []
 
 
-def test_the_bridge_numbers_its_writes_per_server_instance(world):
-    ctx = turn_ctx(world)
-    first, second = MCPServer(ctx, node_tools=False), MCPServer(ctx, node_tools=False)
-    assert first._slot_for(NON_IDEM, None) == ToolSlot(-1, 0)
-    assert first._slot_for(IDEM, None) == ToolSlot(-1, 1)
-    assert first._slot_for(None, None) == ToolSlot(-1, 2)  # undeclared is a write
-    assert first._slot_for(effects.EffectClass.READ_ONLY, None) is None
-    assert first._slot_for(NON_IDEM, ToolSlot(4, 4)) == ToolSlot(4, 4)  # a caller's slot wins
-    assert first._slot_for(NON_IDEM, None) == ToolSlot(-1, 3)  # reads and explicit slots skip it
-    # Another server starts again from zero: the count is not process-global.
-    assert second._slot_for(NON_IDEM, None) == ToolSlot(-1, 0)
-
-
 # --- exception semantics: only a typed pre-effect rejection is retryable ----------------------
 
 
@@ -332,7 +319,9 @@ def _redis(monkeypatch):
     return client
 
 
-@pytest.mark.parametrize("arguments", [{"key": "k", "value": "v"}, {"key": "k", "value": "v", "ttl": 60}])
+@pytest.mark.parametrize(
+    "arguments", [{"key": "k", "value": "v"}, {"key": "k", "value": "v", "ttl": 60}]
+)
 async def test_a_redis_set_replays_instead_of_running_twice(factory, world, monkeypatch, arguments):
     redis = _redis(monkeypatch)
     first = await MCPServer(turn_ctx(world)).call_tool("db-redis-set", arguments, slot=SLOT)
@@ -343,7 +332,9 @@ async def test_a_redis_set_replays_instead_of_running_twice(factory, world, monk
     assert row.effect_class == NON_IDEM.value and row.status == "succeeded"
 
 
-@pytest.mark.parametrize("arguments", [{"key": "k", "value": "v"}, {"key": "k", "value": "v", "ttl": 60}])
+@pytest.mark.parametrize(
+    "arguments", [{"key": "k", "value": "v"}, {"key": "k", "value": "v", "ttl": 60}]
+)
 async def test_a_crash_after_redis_accepted_the_set_is_never_retried_later(
     factory, world, monkeypatch, arguments
 ):

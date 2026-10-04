@@ -4,7 +4,7 @@ Revision ID: c5e8a3b71d94
 Revises: b4d9f2a61c73
 Create Date: 2026-10-04
 
-Two tenant tables with the same FORCE ``tenant_isolation`` row-level security as the other
+Three tenant tables with the same FORCE ``tenant_isolation`` row-level security as the other
 tenant tables (PostgreSQL only):
 
 - ``tool_effects``: one row per logical tool call. The identity is the durable slot (company,
@@ -14,17 +14,25 @@ tenant tables (PostgreSQL only):
   its session and the ledger must outlive it.
 - ``tool_notifications``: one row per invocation whose notification was already sent, so a
   replay does not notify again.
+- ``tool_bridge_slots``: maps an inbound MCP bridge client's ``Idempotency-Key`` to the next
+  free ordinal of its turn, so a retry of one request reaches the same ledger slot from any
+  process and two requests never share one. Unique per (company, turn, key) and per
+  (company, turn, ordinal).
+
+``tool_effects.turn_attempt`` records which execution of the turn first claimed a slot; a
+recovered execution may replay those slots but may not open a new write beside them.
 
 The company foreign keys are RESTRICT. Nothing else is touched: no existing table, constraint
 or policy changes, and the memory tables are not involved. The tables are owned by the
 migrator role like every other table; the application role only receives the default DML
 privileges, never ownership.
 
-Downgrade refuses while ``tool_effects`` holds any row, because dropping it deletes the only
-record that a write already happened and a recovered turn could then repeat it. The refusal
-deletes nothing. An operator who accepts that loss sets ``NEXUS_DESTROY_TOOL_EFFECTS`` to
-``destroy-ledger``; the downgrade then logs a warning with the row counts and drops both
-tables. An upgrade afterwards creates an empty ledger, and turns that were in flight must not
+Downgrade refuses while ``tool_effects`` or ``tool_notifications`` holds any row: the first is
+the only record that a write already happened, the second the only record that a notice was
+already sent, and a recovered turn could repeat either. The refusal deletes nothing. An
+operator who accepts that loss sets ``NEXUS_DESTROY_TOOL_EFFECTS`` to ``destroy-ledger``; the
+downgrade then logs a warning with the table row counts (never row contents) and drops all
+three tables. An upgrade afterwards creates an empty ledger, and turns that were in flight must not
 be recovered automatically (see ``docs/runbooks/tool-effect-recovery.md``).
 """
 
@@ -44,6 +52,7 @@ depends_on: str | Sequence[str] | None = None
 
 _TABLE = "tool_effects"
 _NOTICES = "tool_notifications"
+_SLOTS = "tool_bridge_slots"
 # The explicit operator override that lets a downgrade destroy a non-empty ledger.
 OVERRIDE_ENV = "NEXUS_DESTROY_TOOL_EFFECTS"
 OVERRIDE_VALUE = "destroy-ledger"
@@ -78,6 +87,7 @@ def upgrade() -> None:
         sa.Column("effect_class", _s(24), nullable=False),
         sa.Column("invocation_key", _s(64), nullable=False),
         sa.Column("arguments_digest", _s(64), nullable=False),
+        sa.Column("turn_attempt", sa.Integer(), nullable=False, server_default="1"),
         sa.Column("status", _s(24), nullable=False),
         sa.Column("claim_token", _s(64), nullable=True),
         sa.Column("attempt_count", sa.Integer(), nullable=False),
@@ -94,6 +104,7 @@ def upgrade() -> None:
         sa.CheckConstraint(_in("status", _STATUSES), name="ck_tool_effects_status"),
         sa.CheckConstraint(_in("effect_class", _CLASSES), name="ck_tool_effects_class"),
         sa.CheckConstraint("attempt_count >= 1", name="ck_tool_effects_attempts"),
+        sa.CheckConstraint("turn_attempt >= 1", name="ck_tool_effects_turn_attempt"),
         sa.CheckConstraint("round_index >= -1", name="ck_tool_effects_round"),
         sa.CheckConstraint("invocation_index >= 0", name="ck_tool_effects_position"),
         sa.CheckConstraint(
@@ -114,10 +125,29 @@ def upgrade() -> None:
         sa.Column("invocation_key", _s(64), primary_key=True),
         sa.Column("created_at", sa.DateTime(), nullable=False),
     )
+    op.create_table(
+        _SLOTS,
+        sa.Column(
+            "company_id",
+            uid,
+            sa.ForeignKey("companies.id", ondelete="RESTRICT"),
+            primary_key=True,
+        ),
+        sa.Column("turn_id", uid, primary_key=True),
+        sa.Column("idempotency_key", _s(128), primary_key=True),
+        sa.Column("ordinal", sa.Integer(), nullable=False),
+        sa.Column("tool_name", _s(255), nullable=False),
+        sa.Column("arguments_digest", _s(64), nullable=False),
+        sa.Column("created_at", sa.DateTime(), nullable=False),
+        sa.UniqueConstraint(
+            "company_id", "turn_id", "ordinal", name="uq_tool_bridge_slots_ordinal"
+        ),
+        sa.CheckConstraint("ordinal >= 0", name="ck_tool_bridge_slots_ordinal"),
+    )
 
     if op.get_bind().dialect.name != "postgresql":
         return
-    for table in (_TABLE, _NOTICES):
+    for table in (_TABLE, _NOTICES, _SLOTS):
         op.execute(f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY;")
         op.execute(f"ALTER TABLE {table} FORCE ROW LEVEL SECURITY;")
         op.execute(
@@ -133,33 +163,35 @@ def _count(bind: sa.engine.Connection, table: str) -> int:
 def downgrade() -> None:
     bind = op.get_bind()
     postgres = bind.dialect.name == "postgresql"
+    tables = (_TABLE, _NOTICES, _SLOTS)
     if postgres:
         # FORCE row level security hides every row from a session with no tenant set, so the
         # table owner would count zero rows and wrongly pass. Lift FORCE for the counts; the
         # statements are transactional, and FORCE is restored below on refusal as well.
-        for table in (_TABLE, _NOTICES):
+        for table in tables:
             op.execute(f"ALTER TABLE {table} NO FORCE ROW LEVEL SECURITY;")
-    effects = _count(bind, _TABLE)
-    notices = _count(bind, _NOTICES)
-    if effects and os.environ.get(OVERRIDE_ENV) != OVERRIDE_VALUE:
+    counts = {table: _count(bind, table) for table in tables}
+    if (counts[_TABLE] or counts[_NOTICES]) and os.environ.get(OVERRIDE_ENV) != OVERRIDE_VALUE:
         if postgres:
-            for table in (_TABLE, _NOTICES):
+            for table in tables:
                 op.execute(f"ALTER TABLE {table} FORCE ROW LEVEL SECURITY;")
         raise RuntimeError(
-            f"Refusing to downgrade: {_TABLE} holds {effects} row(s) and dropping it would "
-            "delete the only record that those writes already happened, so a recovered turn "
+            f"Refusing to downgrade: {_TABLE} holds {counts[_TABLE]} row(s) and {_NOTICES} "
+            f"holds {counts[_NOTICES]}. The first is the only record that those writes already "
+            "happened and the second that those notices were already sent, so a recovered turn "
             "could repeat them. Nothing was deleted. To accept that loss deliberately, set "
             f"{OVERRIDE_ENV}={OVERRIDE_VALUE} and run the downgrade again."
         )
-    if effects:
+    if counts[_TABLE] or counts[_NOTICES]:
         logger.warning(
-            "DESTRUCTIVE DOWNGRADE: dropping %s (%d row(s)) and %s (%d row(s)). Replay "
-            "protection for those calls is LOST; do not automatically recover any turn that "
-            "was in flight.",
-            _TABLE, effects, _NOTICES, notices,
+            "DESTRUCTIVE DOWNGRADE: dropping %s (%d row(s)), %s (%d row(s)) and %s (%d row(s)). "
+            "Replay protection for those calls is LOST; do not automatically recover any turn "
+            "that was in flight.",
+            _TABLE, counts[_TABLE], _NOTICES, counts[_NOTICES], _SLOTS, counts[_SLOTS],
         )
     if postgres:
-        for table in (_NOTICES, _TABLE):
+        for table in (_SLOTS, _NOTICES, _TABLE):
             op.execute(f"DROP POLICY IF EXISTS tenant_isolation ON {table};")
+    op.drop_table(_SLOTS)
     op.drop_table(_NOTICES)
     op.drop_table(_TABLE)

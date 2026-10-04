@@ -52,7 +52,15 @@ from nexus.tools import manager_tools
 from nexus.tools.access import BUILTIN_ENDPOINT, DENIED, check_tool_access
 from nexus.tools.ceo_tools import CEO_TOOLS
 from nexus.tools.context import INBOUND_MCP, ExecutionContext
-from nexus.tools.effects import EffectClass, EffectNotStarted, ToolSlot, resolve_effect
+from nexus.tools.effects import (
+    BridgeSlotError,
+    EffectClass,
+    EffectKeyError,
+    EffectNotStarted,
+    ToolSlot,
+    reserve_bridge_slot,
+    resolve_effect,
+)
 from nexus.tools.factory import _access_session, guarded_call
 
 logger = logging.getLogger(__name__)
@@ -156,7 +164,13 @@ def input_schema_for(node: NodeDefinition) -> dict[str, Any]:
 class MCPServer:
     """Serves the exposed node tools over one stdio session."""
 
-    def __init__(self, ctx: ExecutionContext, *, node_tools: bool = True) -> None:
+    def __init__(
+        self,
+        ctx: ExecutionContext,
+        *,
+        node_tools: bool = True,
+        idempotency_key: str | None = None,
+    ) -> None:
         """Bind the server to one authenticated caller.
 
         Args:
@@ -164,22 +178,35 @@ class MCPServer:
                 every call to its company, principal, role and agent.
             node_tools: False serves only the manager tools (the manager
                 bridge, :mod:`nexus.tools.manager_bridge`).
+            idempotency_key: The bridge request's ``Idempotency-Key``. A write that arrives
+                without a caller-supplied slot is identified by it (see ``_slot_for``).
         """
         self._ctx = ctx
         self._nodes = exposed_nodes() if node_tools else {}
-        # Writes this server has been asked to make, in order. Used as the durable position of
-        # a caller that supplies none (an external agent over stdio): a recovery that repeats
-        # the same writes in the same order reaches the same slots, and one that diverges meets
-        # an occupied slot with a different tool or digest and is refused. Per instance, never
-        # process-global.
-        self._writes = 0
+        self._idempotency_key = idempotency_key
 
-    def _slot_for(self, effect: Any, slot: ToolSlot | None) -> ToolSlot | None:
-        """The caller's slot, or the next write ordinal; a read-only call needs none."""
-        if slot is not None or resolve_effect(effect) is EffectClass.READ_ONLY:
+    async def _slot_for(
+        self, effect: Any, slot: ToolSlot | None, name: str, arguments: dict[str, Any]
+    ) -> ToolSlot | None:
+        """The caller's slot, or the durable slot this request's key maps to.
+
+        A read-only call needs none. A write with no slot is identified by the request's
+        idempotency key through a durable record (:func:`reserve_bridge_slot`), never by this
+        object: the bridge builds a new server per request, so nothing held here survives
+        a retry. A call with no turn is not ledgered and gets none.
+
+        Raises:
+            BridgeSlotError: The write has no usable key, or the key names another call.
+        """
+        if (
+            slot is not None
+            or resolve_effect(effect) is EffectClass.READ_ONLY
+            or self._ctx.turn_id is None
+        ):
             return slot
-        position, self._writes = self._writes, self._writes + 1
-        return ToolSlot(-1, position)
+        return await reserve_bridge_slot(
+            self._ctx.company_id, self._ctx.turn_id, self._idempotency_key, name, arguments
+        )
 
     async def list_tools(self) -> list[dict[str, Any]]:
         """The tools this caller may be offered, in MCP ``tools/list`` shape."""
@@ -226,14 +253,21 @@ class MCPServer:
         the answer is no.
 
         ``slot`` is the call's durable position in the turn (model round and position in
-        that round) when the caller has one; otherwise a write is numbered in the order this
-        server receives it.
+        that round) when the caller has one; otherwise a write is identified by the request's
+        idempotency key, and refused before dispatch when there is none.
         """
         if name in manager_tools.MANAGER_TOOLS or name in CEO_TOOLS:
             return await self._call_manager_tool(name, arguments, slot)
         node = self._nodes.get(name)
         if node is None:
             return _tool_error(f"Unknown tool '{name}'")
+        try:
+            slot = await self._slot_for(NODE_EFFECTS.get(name), slot, name, arguments)
+        except (BridgeSlotError, EffectKeyError) as exc:
+            return _tool_error(str(exc))
+        except Exception as exc:  # noqa: BLE001 - no durable identity, no write: fail closed
+            logger.error("Bridge slot unavailable for %s: %s", name, exc)
+            return _tool_error("effect_ledger_unavailable: the write was not run")
 
         outcome = await guarded_call(
             self._ctx,
@@ -244,7 +278,7 @@ class MCPServer:
             endpoint_url=BUILTIN_ENDPOINT,
             default_risk=risk_level_for(node),
             effect=NODE_EFFECTS.get(name),
-            slot=self._slot_for(NODE_EFFECTS.get(name), slot),
+            slot=slot,
         )
         if outcome["status"] != "success":
             logger.warning("Refused tool %s: %s", name, outcome["error"])
@@ -278,6 +312,13 @@ class MCPServer:
 
         tool = {**manager_tools.MANAGER_TOOLS, **CEO_TOOLS}[name]
         try:
+            slot = await self._slot_for(tool.effect, slot, name, arguments)
+        except (BridgeSlotError, EffectKeyError) as exc:
+            return _tool_error(str(exc))
+        except Exception as exc:  # noqa: BLE001 - no durable identity, no write: fail closed
+            logger.error("Bridge slot unavailable for %s: %s", name, exc)
+            return _tool_error("effect_ledger_unavailable: the write was not run")
+        try:
             outcome = await guarded_call(
                 self._ctx,
                 name,
@@ -286,7 +327,7 @@ class MCPServer:
                 source=INBOUND_MCP,
                 default_risk=tool.risk,
                 effect=tool.effect,
-                slot=self._slot_for(tool.effect, slot),
+                slot=slot,
             )
         except HTTPException as exc:
             detail = exc.detail if isinstance(exc.detail, dict) else {"message": exc.detail}

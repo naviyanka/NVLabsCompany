@@ -27,6 +27,17 @@ arrives at an occupied slot with a different tool or digest is refused. Provider
 call ids are never part of the key (a rerun regenerates them), and nothing here is a
 process-global counter.
 
+A recovered execution of a turn (``ChatTurn.attempt_count > 1``, read from the turn row by the
+server, never from a caller) may replay the slots an earlier execution claimed, but it may not
+open a new write beside them: its model may have planned the same write at another position,
+and nothing durable records which positions were planned. Such a call is ``blocked`` (the
+model sees ``effect_recovery_required``), idempotent or not, because an idempotent write's
+downstream key follows the slot. Reads are never ledgered and are unaffected.
+
+The inbound MCP bridge has no rounds: a write names itself with the client's
+``Idempotency-Key``, which :func:`reserve_bridge_slot` maps durably to the slot
+``(-1, ordinal)`` of the turn.
+
 A write-capable call inside a turn with no slot is refused rather than run without a durable
 identity. A call without a turn id (a plain REST request) is not ledgered: nothing requeues it.
 
@@ -61,7 +72,8 @@ from sqlalchemy import func, literal_column, or_, select, update
 from sqlalchemy.exc import IntegrityError
 
 from nexus.models._time import utcnow
-from nexus.models.tool_effect import ToolEffect, ToolNotification
+from nexus.models.chat_turn import ChatTurn
+from nexus.models.tool_effect import ToolBridgeSlot, ToolEffect, ToolNotification
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +93,10 @@ class EffectClass(StrEnum):
     READ_ONLY = "read_only"
     IDEMPOTENT_WRITE = "idempotent_write"
     NON_IDEMPOTENT_WRITE = "non_idempotent_write"
+
+
+class BridgeSlotError(ValueError):
+    """A bridge write has no usable idempotency identity, so it must not be dispatched."""
 
 
 class EffectKeyError(ValueError):
@@ -507,6 +523,7 @@ async def claim(
     token = secrets.token_hex(16)
     async with database.tenant_session(company_id) as db:
         lease = (await _db_now(db)) + timedelta(seconds=LEASE_SECONDS)
+        attempt = await _turn_attempt(db, company_id, turn_id)
         new = ToolEffect(
             company_id=company_id,
             turn_id=turn_id,
@@ -516,6 +533,7 @@ async def claim(
             effect_class=effect_class.value,
             invocation_key=key,
             arguments_digest=digest,
+            turn_attempt=attempt,
             claim_token=token,
             lease_expires_at=lease,
         )
@@ -523,8 +541,23 @@ async def claim(
             async with db.begin_nested():
                 db.add(new)
                 await db.flush()
+                if attempt > 1 and await _earlier_execution_wrote(db, new, attempt):
+                    raise _NewSlotInRecovery
         except IntegrityError:
             pass
+        except _NewSlotInRecovery:
+            # The savepoint rolled the new row back: nothing was reserved or spent.
+            logger.warning(
+                "recovered turn %s attempt %d tried a new write %s at slot (%d, %d)",
+                turn_id, attempt, tool_name, slot.round_index, slot.invocation_index,
+            )
+            return Claim(
+                "blocked", company_id, effect_class, key=key,
+                reason=(
+                    "this turn was recovered and already made writes, so a new write at a "
+                    "position no earlier run used needs an operator to decide"
+                ),
+            )
         else:
             first = Claim("run", company_id, effect_class, new.id, token, key=key)
             return await _commit_run(db, first, grant_id)
@@ -551,6 +584,120 @@ async def claim(
             return await _commit_run(db, decision, grant_id)
         await db.commit()
         return decision
+
+
+class _NewSlotInRecovery(Exception):  # noqa: N818 - rolls back the savepoint, never escapes
+    """A recovered execution reached an empty slot while earlier writes exist."""
+
+
+async def _turn_attempt(db: Any, company_id: uuid.UUID, turn_id: uuid.UUID) -> int:
+    """Which execution of the turn this is: 1 for the first run and for a call with no turn row."""
+    count = (
+        await db.execute(
+            select(ChatTurn.attempt_count).where(
+                ChatTurn.id == turn_id, ChatTurn.company_id == company_id
+            )
+        )
+    ).scalar_one_or_none()
+    return max(count or 1, 1)
+
+
+async def _earlier_execution_wrote(db: Any, row: ToolEffect, attempt: int) -> bool:
+    """Whether a previous execution of the turn claimed any write other than ``row``."""
+    found = await db.execute(
+        select(ToolEffect.id)
+        .where(
+            ToolEffect.company_id == row.company_id,
+            ToolEffect.turn_id == row.turn_id,
+            ToolEffect.turn_attempt < attempt,
+            ToolEffect.id != row.id,
+        )
+        .limit(1)
+    )
+    return found.first() is not None
+
+
+BRIDGE_KEY_PATTERN = re.compile(r"[A-Za-z0-9._:~-]{1,128}")
+# Slot allocation retries when a concurrent request takes the key or the ordinal first. Each
+# lost round means another request won, so the bound is the number of simultaneous writes
+# in one turn.
+_BRIDGE_ATTEMPTS = 50
+
+
+def valid_bridge_key(key: Any) -> bool:
+    """Whether ``key`` is an acceptable bridge ``Idempotency-Key`` (1-128 URL-safe characters)."""
+    return isinstance(key, str) and BRIDGE_KEY_PATTERN.fullmatch(key) is not None
+
+
+async def reserve_bridge_slot(
+    company_id: uuid.UUID,
+    turn_id: uuid.UUID,
+    key: str | None,
+    tool_name: str,
+    arguments: Any,
+) -> ToolSlot:
+    """The durable slot of one inbound bridge write, allocated once per ``Idempotency-Key``.
+
+    The first call with a key reserves the turn's next free ordinal; any retry, from another
+    process or after a restart, returns the same slot. The primary key (one row per key) and
+    the unique ordinal (one row per slot) are enforced by the database, so concurrent requests
+    cannot share a slot whatever order they arrive in. A key reused for a different tool or
+    different arguments is refused, and so is a missing or malformed key: a write with no
+    identity is never dispatched. Company and turn come from the authenticated bridge
+    credential, never from the client.
+
+    Raises:
+        BridgeSlotError: Missing or malformed key, or the key names a different call.
+        EffectKeyError: The arguments have no canonical form.
+    """
+    from nexus import database
+
+    if not valid_bridge_key(key):
+        raise BridgeSlotError(
+            "IDEMPOTENCY_KEY_REQUIRED: a write needs an Idempotency-Key header "
+            "(1-128 characters from A-Z a-z 0-9 . _ : ~ -), unique per intended write"
+        )
+    digest = arguments_digest(arguments)
+    async with database.tenant_session(company_id) as db:
+        for _ in range(_BRIDGE_ATTEMPTS):
+            row = (
+                await db.execute(
+                    select(ToolBridgeSlot).where(
+                        ToolBridgeSlot.company_id == company_id,
+                        ToolBridgeSlot.turn_id == turn_id,
+                        ToolBridgeSlot.idempotency_key == key,
+                    )
+                )
+            ).scalar_one_or_none()
+            if row is not None:
+                if row.tool_name != tool_name or row.arguments_digest != digest:
+                    raise BridgeSlotError(
+                        "IDEMPOTENCY_KEY_REUSED: this Idempotency-Key already names a "
+                        "different call"
+                    )
+                return ToolSlot(-1, row.ordinal)
+            ordinal = (
+                await db.execute(
+                    select(func.coalesce(func.max(ToolBridgeSlot.ordinal), -1) + 1).where(
+                        ToolBridgeSlot.company_id == company_id,
+                        ToolBridgeSlot.turn_id == turn_id,
+                    )
+                )
+            ).scalar_one()
+            try:
+                async with db.begin_nested():
+                    db.add(
+                        ToolBridgeSlot(
+                            company_id=company_id, turn_id=turn_id, idempotency_key=key,
+                            ordinal=ordinal, tool_name=tool_name, arguments_digest=digest,
+                        )
+                    )
+                    await db.flush()
+            except IntegrityError:
+                continue  # a concurrent request took this key or ordinal; look again
+            await db.commit()
+            return ToolSlot(-1, ordinal)
+    raise BridgeSlotError("could not reserve a slot for this write; retry the request")
 
 
 async def _commit_run(db: Any, run: Claim, grant_id: uuid.UUID | None) -> Claim:

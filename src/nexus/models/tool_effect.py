@@ -51,6 +51,7 @@ class ToolEffect(SQLModel, table=True):
         CheckConstraint(_in("status", EFFECT_STATUSES), name="ck_tool_effects_status"),
         CheckConstraint(_in("effect_class", WRITE_EFFECT_CLASSES), name="ck_tool_effects_class"),
         CheckConstraint("attempt_count >= 1", name="ck_tool_effects_attempts"),
+        CheckConstraint("turn_attempt >= 1", name="ck_tool_effects_turn_attempt"),
         CheckConstraint("round_index >= -1", name="ck_tool_effects_round"),
         CheckConstraint("invocation_index >= 0", name="ck_tool_effects_position"),
         CheckConstraint(
@@ -78,6 +79,11 @@ class ToolEffect(SQLModel, table=True):
     # slot's digest, and it lets an operator match a row to a call without the ledger
     # holding the arguments.
     arguments_digest: str = Field(max_length=64)
+    # Which execution of the turn (``ChatTurn.attempt_count``) first claimed this slot. A
+    # recovered execution may replay a slot an earlier one claimed, but it may not open a new
+    # write beside them (see ``nexus.tools.effects.claim``). Read from the turn row by the
+    # server, never from a caller.
+    turn_attempt: int = Field(default=1)
     status: str = Field(default="executing", max_length=24)
     claim_token: str | None = Field(default=None, max_length=64)
     attempt_count: int = Field(default=1)
@@ -106,5 +112,35 @@ class ToolNotification(SQLModel, table=True):
 
     company_id: uuid.UUID = Field(foreign_key="companies.id", ondelete="RESTRICT", primary_key=True)
     invocation_key: str = Field(max_length=64, primary_key=True)
+    # Naive UTC, stored without a timezone; see nexus.models._time for why.
+    created_at: datetime = Field(default_factory=utcnow)
+
+
+class ToolBridgeSlot(SQLModel, table=True):
+    """Maps a bridge client's idempotency key to a durable ledger slot of one turn.
+
+    The inbound MCP bridge has no model rounds, and its HTTP handler is rebuilt per request, so
+    nothing in memory can name "the same write". The client's ``Idempotency-Key`` does: the
+    first request with a key reserves the next free ordinal of the turn, and every retry of
+    that key, from any process or after a restart, finds the same row and therefore the same
+    ledger slot ``(-1, ordinal)``. The primary key makes one winner per key and the unique
+    ordinal makes one winner per slot, so concurrent requests can never share a slot. Company
+    and turn come from the authenticated bridge credential, so a key only ever names a slot of
+    the caller's own turn. ``tool_name`` and ``arguments_digest`` let a reused key with
+    different content fail before anything is dispatched.
+    """
+
+    __tablename__ = "tool_bridge_slots"
+    __table_args__ = (
+        UniqueConstraint("company_id", "turn_id", "ordinal", name="uq_tool_bridge_slots_ordinal"),
+        CheckConstraint("ordinal >= 0", name="ck_tool_bridge_slots_ordinal"),
+    )
+
+    company_id: uuid.UUID = Field(foreign_key="companies.id", ondelete="RESTRICT", primary_key=True)
+    turn_id: uuid.UUID = Field(primary_key=True)
+    idempotency_key: str = Field(max_length=128, primary_key=True)
+    ordinal: int
+    tool_name: str = Field(max_length=255)
+    arguments_digest: str = Field(max_length=64)
     # Naive UTC, stored without a timezone; see nexus.models._time for why.
     created_at: datetime = Field(default_factory=utcnow)

@@ -55,7 +55,7 @@ from nexus.models.tool import (
     ToolProfile,
     ToolProfileBinding,
 )
-from nexus.models.tool_effect import ToolEffect, ToolNotification
+from nexus.models.tool_effect import ToolBridgeSlot, ToolEffect, ToolNotification
 from nexus.models.tool_invocation import ToolInvocation
 from nexus.models.trigger import Trigger, TriggerExecution
 from nexus.governance.kill_switch_model import KillSwitchRecord
@@ -129,6 +129,7 @@ __all__ = [
     "ToolProfile",
     "ToolProfileBinding",
     "ToolPolicy",
+    "ToolBridgeSlot",
     "ToolEffect",
     "ToolNotification",
     "ToolInvocation",
