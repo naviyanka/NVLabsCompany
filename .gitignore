@@ -23,6 +23,7 @@ ENV/
 .env
 .env.production
 .env.migration
+.env.system
 .env.postgres
 
 # OS

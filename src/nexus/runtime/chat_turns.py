@@ -14,9 +14,10 @@ Ordering and exclusivity come from the database, not from process memory:
   one session never run at once.
 - The claim sets a lease. The worker renews it in short transactions while the
   model or CLI runs. No transaction is held across the call.
-- :func:`sweep` recovers turns whose lease expired, for example after a
-  crashed or restarted worker. It completes the turn if its reply is stored,
-  cancels it if a cancel was requested, requeues it if attempts are left, and
+- :func:`recover_company` recovers one company's turns whose lease expired, for
+  example after a crashed or restarted worker. The system runtime decides which
+  companies to recover; this module never enumerates tenants. It completes the turn if its
+  reply is stored, cancels it if a cancel was requested, requeues it if attempts are left, and
   otherwise fails it and files a notification. Execution is at least once: a
   worker that loses its lease discards its result.
 - Cancelling sets ``cancel_requested_at``. The worker that runs the turn sees
@@ -51,6 +52,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import aliased
 
 from nexus.models.chat_turn import ACTIVE_STATUSES, TERMINAL_STATUSES, ChatTurn
+from nexus.runtime import work_hints
 
 logger = logging.getLogger(__name__)
 
@@ -689,24 +691,29 @@ async def _recover(turn: ChatTurn, now: datetime) -> str:
     return event
 
 
-async def sweep(now: datetime | None = None) -> Counter[str]:
-    """One recovery pass over every tenant. Safe to run on many workers at once.
+async def recover_company(company_id: uuid.UUID, now: datetime | None = None) -> Counter[str]:
+    """One recovery pass over a single tenant, inside that tenant's RLS context.
 
-    Also refreshes the queued/active gauges and returns the companies that
-    have queued turns, so a freshly started worker knows where to look.
+    Re-queues or fails turns whose lease expired and expires turns that waited in the queue
+    past their TTL. Safe to run on many workers at once. The privileged system runtime
+    finds which companies need this (``chat_turn_recovery``); the work itself never leaves
+    the tenant-bound role.
     """
-    from nexus.database import system_session, tenant_session
-    from nexus.observability.metrics import set_chat_turns
+    from nexus.database import tenant_session
 
     now = now or _now()
     ttl = timedelta(seconds=_settings().chat_turn_queue_ttl_seconds)
     outcome: Counter[str] = Counter()
-    async with system_session("chat turn recovery") as db:
+    async with tenant_session(company_id) as db:
         expired = (
             (
                 await db.execute(
                     select(ChatTurn)
-                    .where(ChatTurn.status.in_(ACTIVE_STATUSES), ChatTurn.lease_expires_at < now)
+                    .where(
+                        ChatTurn.company_id == company_id,
+                        ChatTurn.status.in_(ACTIVE_STATUSES),
+                        ChatTurn.lease_expires_at < now,
+                    )
                     .limit(_BATCH)
                 )
             )
@@ -717,33 +724,17 @@ async def sweep(now: datetime | None = None) -> Counter[str]:
             (
                 await db.execute(
                     select(ChatTurn)
-                    .where(ChatTurn.status == "queued", ChatTurn.queued_at < now - ttl)
+                    .where(
+                        ChatTurn.company_id == company_id,
+                        ChatTurn.status == "queued",
+                        ChatTurn.queued_at < now - ttl,
+                    )
                     .limit(_BATCH)
                 )
             )
             .scalars()
             .all()
         )
-        by_status = dict(
-            (
-                await db.execute(
-                    select(ChatTurn.status, func.count())
-                    .where(ChatTurn.status.in_(("queued", *ACTIVE_STATUSES)))
-                    .group_by(ChatTurn.status)
-                )
-            ).all()
-        )
-        waiting = set(
-            (
-                await db.execute(
-                    select(ChatTurn.company_id).where(ChatTurn.status == "queued").distinct()
-                )
-            )
-            .scalars()
-            .all()
-        )
-    set_chat_turns("queued", by_status.get("queued", 0))
-    set_chat_turns("active", sum(by_status.get(s, 0) for s in ACTIVE_STATUSES))
 
     for turn in expired:
         outcome[await _recover(turn, now)] += 1
@@ -769,7 +760,6 @@ async def sweep(now: datetime | None = None) -> Counter[str]:
         _count("expired")
         outcome["expired"] += 1
         await _publish(turn)
-    outcome.update({f"company:{cid}": 1 for cid in waiting})
     return outcome
 
 
@@ -856,11 +846,10 @@ class ChatTurnWorker:
             pending = False
             try:
                 if self.persistent and time.monotonic() - self._last_sweep >= _SWEEP_EVERY_SECONDS:
+                    # Which companies have queued turns is learned from the system
+                    # runtime's hints; this worker never looks across tenants itself.
                     self._last_sweep = time.monotonic()
-                    found = await sweep()
-                    self._companies.update(
-                        uuid.UUID(k.split(":", 1)[1]) for k in found if k.startswith("company:")
-                    )
+                    self._companies.update(await work_hints.claim("chat_turns"))
                 pending = await self._dispatch()
             except Exception:  # noqa: BLE001 -- keep the worker alive; the next pass retries
                 logger.exception("chat turn worker pass failed")

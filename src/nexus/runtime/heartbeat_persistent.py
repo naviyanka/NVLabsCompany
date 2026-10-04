@@ -227,11 +227,16 @@ class PersistentHeartbeatService:
     # -- orphan reclaim --------------------------------------------------
 
     async def reclaim_orphans(self) -> list[uuid.UUID]:
-        """Reclaim active runs whose process is gone. Call on startup.
+        """Reclaim active runs whose process is gone.
 
         Marks each such run ``confirmed_dead`` and moves its agent to
         ``needs_recovery`` so a human or the watchdog decides what happens
         next, rather than leaving a dead run counted as active forever.
+
+        The PID check is only valid when the caller shares a process namespace with
+        the runs, and it reads every tenant's rows, so no deployed process calls this:
+        the watchdog closes runs that stall past its critical threshold instead
+        (``watchdog_service._reclaim_stalled_run``).
 
         Returns:
             The ids of the reclaimed runs.

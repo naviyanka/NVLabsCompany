@@ -192,7 +192,7 @@ class TestHelmChartArchitecture:
         # Core components
         assert "api" in values
         assert "worker" in values
-        assert "scheduler" in values
+        assert "systemRuntime" in values
         assert "frontend" in values
         assert "ingress" in values
         assert "database" in values
@@ -230,7 +230,7 @@ class TestHelmChartArchitecture:
             "api-service.yaml",
             "api-hpa.yaml",
             "worker-deployment.yaml",
-            "scheduler-deployment.yaml",
+            "system-runtime-deployment.yaml",
             "frontend-deployment.yaml",
             "frontend-service.yaml",
             "ingress.yaml",
@@ -326,13 +326,13 @@ class TestContainerSecurityAudit:
         prod_services = prod_data["services"]
         assert "api" in prod_services
         assert "worker" in prod_services
-        assert "scheduler" in prod_services
+        assert "system-runtime" in prod_services
         assert "postgres" in prod_services
         assert "redis" in prod_services
         assert "temporal" in prod_services
 
         # Resource limits and healthchecks in prod
-        for svc_name in ["api", "worker", "scheduler", "postgres", "redis"]:
+        for svc_name in ["api", "worker", "system-runtime", "postgres", "redis"]:
             svc = prod_services[svc_name]
             assert "deploy" in svc and "resources" in svc["deploy"], f"{svc_name} missing resource limits"
             assert "limits" in svc["deploy"]["resources"]

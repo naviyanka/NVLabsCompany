@@ -19,8 +19,8 @@ change them, so ownership has to sit with a different role that the application 
 | Role | Used by | Purpose | Attributes |
 | --- | --- | --- | --- |
 | `nexus_migrator` | Migration job only | Owns schema `public` and every table, sequence and function. Runs Alembic. | LOGIN, no SUPERUSER, no BYPASSRLS, no CREATEDB, no CREATEROLE |
-| `nexus_app` | API, worker, scheduler (`DATABASE_URL`) | Runtime DML identity. Reads and writes rows. Owns nothing. | LOGIN, no SUPERUSER, no BYPASSRLS, no CREATEDB, no CREATEROLE, bound by RLS |
-| `nexus_system` | Existing cross-tenant `system_session` callers (see "The system role today") | Privileged identity that bypasses RLS so it can see every tenant. Owns nothing. | LOGIN, BYPASSRLS, no SUPERUSER, no CREATEDB, no CREATEROLE |
+| `nexus_app` | API, workers, and the system runtime for per-company work (`DATABASE_URL`) | Runtime DML identity. Reads and writes rows. Owns nothing. | LOGIN, no SUPERUSER, no BYPASSRLS, no CREATEDB, no CREATEROLE, bound by RLS |
+| `nexus_system` | The system runtime process only (see [system-runtime.md](system-runtime.md)) | Privileged identity that bypasses RLS so it can find which tenants have work. Owns nothing. | LOGIN, BYPASSRLS, no SUPERUSER, no CREATEDB, no CREATEROLE |
 
 None of the three is a member of another. `nexus_app` cannot `SET ROLE` to the migrator or the
 system role.
@@ -54,30 +54,24 @@ Three credentials, three variables, never derived from one another:
 
 | Variable | Role | Injected into |
 | --- | --- | --- |
-| `DATABASE_URL` | `nexus_app` | API, worker, scheduler |
+| `DATABASE_URL` | `nexus_app` | API, worker, and the system runtime (for tenant-bound work) |
 | `MIGRATION_DATABASE_URL` | `nexus_migrator` | The migration job only |
-| `SYSTEM_DATABASE_URL` | `nexus_system` | Production Compose: API, worker and scheduler (legacy carve-out). Helm: nothing. See "The system role today" |
+| `SYSTEM_DATABASE_URL` | `nexus_system` | The system runtime only. Never the API, a worker, the migration job or the frontend |
 
-### The system role today
+### The system role
 
 `nexus_app` is the runtime DML identity. `nexus_migrator` owns schema objects and runs Alembic.
-`nexus_system` is a privileged BYPASSRLS identity that the existing cross-tenant
-`system_session` callers use. Those callers include the API lifespan startup tasks and the
-orchestrator tick, and `system_session` refuses to run unless its connection has BYPASSRLS.
+`nexus_system` is a privileged BYPASSRLS identity. Exactly one process holds it: the system
+runtime (`python -m nexus.system_runtime`), which has no network port and runs a fixed
+catalogue of maintenance operations. It uses `nexus_system` only to find which companies have
+work; the work itself runs through tenant-bound `nexus_app` sessions. The catalogue, the threat
+model and the process matrix are in [system-runtime.md](system-runtime.md).
 
-- **Production Compose** currently injects `SYSTEM_DATABASE_URL` into the API, worker and
-  scheduler, through `.env.production`. This is an explicit legacy carve-out, not the desired
-  final architecture. `DATABASE_URL` in those processes is still `nexus_app`, but a process that
-  also holds a BYPASSRLS credential is not least-privileged: code or an attacker running in it
-  can reach every tenant.
-- **Helm** currently injects no `SYSTEM_DATABASE_URL` into any pod. The existing lifespan and
-  orchestrator `system_session` paths can therefore fail their BYPASSRLS validation in Helm
-  deployments. The chart does not fall back to `DATABASE_URL` for the system credential, and
-  this document does not recommend adding the system credential to every pod.
-
-Do not describe `nexus_system` as absent from the normal runtime processes while the Compose
-carve-out stands. Both points are a production blocker for runtime least privilege; the
-follow-up is described under "Deferred work: system-session process isolation".
+The API and ordinary workers refuse to start when `SYSTEM_DATABASE_URL` is in their
+environment (`SYSTEM_CREDENTIAL_IN_RUNTIME`), the same way they refuse the migrator credential.
+The system runtime refuses to start without both URLs, with the same URL for both, or when the
+live PostgreSQL role attributes do not match (see "Role validation" in the system runtime
+runbook). Nothing falls back from one credential to another.
 
 Rules:
 
@@ -160,32 +154,50 @@ The chart builds no database URL and holds no password.
    ```
 
 3. Supply the runtime URL (`DATABASE_URL`, `nexus_app`) through the chart's existing secret
-   mechanism. The Deployment receives only that URL.
+   mechanism. The API and worker Deployments receive only that URL.
+4. Create a second Secret with the key `SYSTEM_DATABASE_URL` holding the `nexus_system` URL and
+   point the system runtime at it:
 
-The migration Job receives only the configuration map and `MIGRATION_DATABASE_URL`. The
-Deployment receives only `DATABASE_URL`. Rendering fails, with no fallback, when:
+   ```yaml
+   systemRuntime:
+     enabled: true
+     existingSecret: <name of that Secret>
+     secretKey: SYSTEM_DATABASE_URL
+   ```
+
+The migration Job receives only the configuration map and `MIGRATION_DATABASE_URL`. The API
+and worker Deployments receive only `DATABASE_URL`. The `system-runtime` Deployment is the only
+workload that references the system Secret; it also reads `DATABASE_URL` and `REDIS_URL` from
+the application Secret, key by key, and has no Service, Ingress or container port. Rendering
+fails, with no fallback, when:
 
 - `migration.enabled` is true and `migration.existingSecret` or `migration.secretKey` is empty;
 - `migration.user`, `database.user` and `database.systemUser` are not three different roles, so
   one principal would migrate and serve;
 - `database.user` is `nexus_system` or `nexus_migrator`;
 - `migration.user` is `nexus_app` or `nexus_system`;
-- any of the three user values is empty.
+- any of the three user values is empty;
+- `systemRuntime.enabled` is true and `systemRuntime.existingSecret` or
+  `systemRuntime.secretKey` is empty;
+- the system Secret is the migration Secret or the chart's application Secret, or the system
+  key is `DATABASE_URL` or `MIGRATION_DATABASE_URL`.
 
 `helm lint` and `helm template` in the deploy pipeline pass
-`--set migration.existingSecret=nexus-migration-db` so they validate the chart shape without a
+`--set migration.existingSecret=nexus-migration-db --set systemRuntime.existingSecret=nexus-system-db`
+so they validate the chart shape without a
 real Secret.
 
 ## Production Compose
 
-`docker-compose.prod.yml` uses three env files, one per trust domain. Copy the examples and fill
+`docker-compose.prod.yml` uses four env files, one per trust domain. Copy the examples and fill
 them in; the real files are ignored by git.
 
 | File | Holds | Read by |
 | --- | --- | --- |
 | `.env.postgres` (from `.env.postgres.example`) | Bootstrap administrator for the `postgres` service | `postgres` only |
 | `.env.migration` (from `.env.migration.example`) | `MIGRATION_DATABASE_URL` | `migrate` only |
-| `.env.production` (from `.env.production.example`) | `DATABASE_URL` and `SYSTEM_DATABASE_URL`, plus the rest of the runtime configuration | api, worker, scheduler |
+| `.env.production` (from `.env.production.example`) | `DATABASE_URL`, plus the rest of the runtime configuration. Never `SYSTEM_DATABASE_URL` | api, worker |
+| `.env.system` (from `.env.system.example`) | `SYSTEM_DATABASE_URL`, `DATABASE_URL` and `REDIS_URL` | `system-runtime` only |
 
 Start order:
 
@@ -207,8 +219,8 @@ Start order:
    in the command line. `POSTGRES_USER` and `POSTGRES_DB` come from your `.env.postgres`.
 3. Start the stack: `docker compose -f docker-compose.prod.yml up -d`. The `migrate` service
    runs `python -m nexus.db_migrate` as `nexus_migrator` and exits. The API, worker and
-   scheduler declare `depends_on: migrate: condition: service_completed_successfully`, so they
-   start only after a successful migration, and a refused preflight keeps them down.
+   `system-runtime` declare `depends_on: migrate: condition: service_completed_successfully`, so
+   they start only after a successful migration, and a refused preflight keeps them down.
 
 Nothing creates roles or schema implicitly. Temporal in this file still takes its database
 credentials from shell interpolation; it is outside the NEXUS role model.
@@ -408,7 +420,10 @@ If a credential may be exposed:
   in the PostgreSQL log if it is enabled. Check that `MIGRATION_DATABASE_URL` is not set on any
   runtime pod; the runtime refuses to start with it, so a running pod without it is expected.
 - `nexus_system` credential: rotate at once. The role bypasses RLS, so treat it as access to
-  every tenant, and review the audit log for the window.
+  every tenant, and review the audit log for the window. Then follow the incident steps in
+  [system-runtime.md](system-runtime.md).
+- A process that starts with `SYSTEM_CREDENTIAL_IN_RUNTIME`: the system credential reached an
+  API or worker environment. Remove it and treat it as exposed.
 - A runtime process that starts with `MIGRATION_CREDENTIAL_IN_RUNTIME`: the migrator credential
   reached an application environment. Remove it from that environment and treat the credential
   as exposed.
@@ -422,32 +437,12 @@ If a credential may be exposed:
 - Evidence-table grants are not narrowed. The runtime role has the same DML on every table, and
   the evidence tables could be narrowed to the access they need without naming a role in a
   migration. That is a follow-up.
-- Production blocker: runtime system-role isolation is not done. Production Compose gives the
-  API, worker and scheduler `SYSTEM_DATABASE_URL`, and Helm gives no pod one, so the
-  `system_session` paths may fail in Helm. See "The system role today". This change separates
-  schema ownership and the migration identity; it does not make the runtime least-privileged.
+- The system runtime is a single privileged process. If it is down, hint publication and lease
+  recovery stop until it returns; the API and workers keep serving. See the limitations in
+  [system-runtime.md](system-runtime.md).
 - The ownership preflight runs in the migration job. The runtime performs no ownership check
   beyond refusing to hold the migrator credential.
 - Remediation replaces privileges on moved relations and cannot restore the previous ones
   automatically.
 - Provisioning needs an administrator that can transfer the schema, and `BYPASSRLS` for the
   system role needs superuser-level rights. Some managed services do not allow that.
-
-## Deferred work: system-session process isolation
-
-Not implemented here. This is the design record for the next change, which must be a separate
-pull request that audits every `system_session` caller before moving it.
-
-Target architecture:
-
-- The API receives only `DATABASE_URL` (`nexus_app`).
-- Ordinary workers receive only `DATABASE_URL` (`nexus_app`).
-- Cross-tenant discovery and control-plane work runs in a dedicated internal process that holds
-  `SYSTEM_DATABASE_URL` (`nexus_system`). That process has no public ingress.
-- The scheduler or system dispatcher may discover tenant ids with `nexus_system`, but tenant
-  work runs through tenant-bound `nexus_app` sessions wherever possible.
-- Startup checks that need privileged access move out of the public API lifespan.
-- Helm and production Compose wire the system credential only to the dedicated privileged
-  process.
-- No fallback to the application or migrator credential.
-- Tests prove that the API and ordinary worker environments contain no system credential.

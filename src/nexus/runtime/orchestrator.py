@@ -84,7 +84,7 @@ def _finish(row: Any, status: str, reason: str) -> None:
     row.updated_at = datetime.now(timezone.utc)
 
 
-async def _reap_stale_subtasks(db: AsyncSession) -> int:
+async def _reap_stale_subtasks(db: AsyncSession, company_id: uuid.UUID | None = None) -> int:
     """Fail or flag subtasks claimed by a process that never came back.
 
     ``_execute_subtasks`` claims a task as ``in_progress`` before the LLM call.
@@ -95,6 +95,9 @@ async def _reap_stale_subtasks(db: AsyncSession) -> int:
     If an active checkpoint exists for the task, marks it as 'needs_recovery'
     so it can be resumed by the recovery reconciliation pass. Otherwise,
     marks the task failed with timeout.
+
+    ``company_id`` scopes the pass to one tenant explicitly. The system runtime always
+    passes it, so the boundary does not rest on row level security alone.
 
     Returns:
         How many stale claims were reaped or flagged for recovery.
@@ -108,6 +111,8 @@ async def _reap_stale_subtasks(db: AsyncSession) -> int:
         Task.started_at.is_not(None),
         Task.started_at < cutoff,
     )
+    if company_id is not None:
+        stmt = stmt.where(Task.company_id == company_id)
     # A work task's attempt holds its own lease; task_attempts recovers it.
     stale = [t for t in (await db.execute(stmt)).scalars().all() if not t.work_spec]
 
@@ -123,8 +128,8 @@ async def _reap_stale_subtasks(db: AsyncSession) -> int:
             task.updated_at = utcnow()
             db.add(task)
             logger.warning(
-                "Stale subtask '%s' flagged as needs_recovery with checkpoint step %d",
-                task.title[:40],
+                "Stale subtask %s flagged as needs_recovery with checkpoint step %d",
+                task.id,
                 checkpoint.step_index,
             )
         else:
@@ -135,8 +140,8 @@ async def _reap_stale_subtasks(db: AsyncSession) -> int:
             )
             db.add(task)
             logger.warning(
-                "Reaped stale subtask '%s' claimed at %s (no checkpoint)",
-                task.title[:40],
+                "Reaped stale subtask %s claimed at %s (no checkpoint)",
+                task.id,
                 task.started_at,
             )
         handled += 1
@@ -144,7 +149,7 @@ async def _reap_stale_subtasks(db: AsyncSession) -> int:
     return handled
 
 
-async def _reclaim_stranded_goals(db: AsyncSession) -> int:
+async def _reclaim_stranded_goals(db: AsyncSession, company_id: uuid.UUID | None = None) -> int:
     """Return goals to ``active`` when whatever took them never came back.
 
     Dispatching a goal to Temporal marks it ``in_progress`` so the tick does not
@@ -163,6 +168,8 @@ async def _reclaim_stranded_goals(db: AsyncSession) -> int:
         Goal.status == "in_progress",
         Goal.updated_at < cutoff,
     )
+    if company_id is not None:
+        stmt = stmt.where(Goal.company_id == company_id)
     stranded = list((await db.execute(stmt)).scalars().all())
 
     for goal in stranded:
@@ -176,7 +183,7 @@ async def _reclaim_stranded_goals(db: AsyncSession) -> int:
     return len(stranded)
 
 
-async def reconcile_recovery(db: AsyncSession) -> int:
+async def reconcile_recovery(db: AsyncSession, company_id: uuid.UUID | None = None) -> int:
     """Automated background recovery reconciliation pass.
 
     Identifies:
@@ -200,6 +207,8 @@ async def reconcile_recovery(db: AsyncSession) -> int:
     stmt = select(Task).where(
         Task.status.in_(["needs_recovery", "in_progress", "failed"])
     )
+    if company_id is not None:
+        stmt = stmt.where(Task.company_id == company_id)
     result = await db.execute(stmt)
     tasks = list(result.scalars().all())
 
@@ -237,8 +246,7 @@ async def reconcile_recovery(db: AsyncSession) -> int:
                 pass
 
             logger.info(
-                "Restored task '%s' (%s) from checkpoint step %d to pending queue",
-                task.title[:40],
+                "Restored task %s from checkpoint step %d to pending queue",
                 task.id,
                 checkpoint.step_index,
             )
@@ -255,11 +263,21 @@ async def reconcile_recovery(db: AsyncSession) -> int:
     return recovered_count
 
 
-async def _tick(session_factory: async_sessionmaker[AsyncSession] | None = None) -> None:
-    """Single orchestration tick: find active goals and drive progress (WP-15b)."""
-    from nexus.models.task import Goal, Task
-    from nexus.models.agent import Agent
-    from nexus.database import system_session, tenant_session
+async def _tick(
+    session_factory: async_sessionmaker[AsyncSession] | None = None,
+    company_ids: list[uuid.UUID] | None = None,
+) -> None:
+    """Single orchestration tick: drive the active goals of the hinted companies (WP-15b).
+
+    This process holds only the tenant-bound role, so it never looks across tenants. The
+    companies to work on come from the system runtime's ``goal_discovery`` hints (or from
+    ``company_ids``, for a caller that already knows them), and each company's goals are
+    read and driven inside that company's own ``tenant_session``. Stale-lease recovery for
+    tasks and goals is a system runtime operation (``task_recovery``), not part of this tick.
+    """
+    from nexus.database import tenant_session
+    from nexus.models.task import Goal
+    from nexus.runtime import work_hints
     from nexus.runtime.redis_utils import try_acquire_leader
 
     # Leader election: only the leader instance runs orchestration
@@ -272,53 +290,28 @@ async def _tick(session_factory: async_sessionmaker[AsyncSession] | None = None)
     except Exception:
         pass
 
-    # Phase 1: discovery. Cross-tenant, read-only, BYPASSRLS role.
-    # Discovers active goals and in-progress tasks across tenants for maintenance sweeps.
-    async with system_session("orchestrator tick: discover active goals") as db:
-        rows = (
-            await db.execute(
-                select(Goal.company_id, Goal.id)
-                .where(Goal.status == "active")
-                .where(Goal.owner_agent_id != None)  # noqa: E711
-                .limit(MAX_GOALS_PER_TICK)
-            )
-        ).all()
-
-        # Also discover any companies with tasks that might need sweep/recovery
-        sweep_rows = (
-            await db.execute(
-                select(Task.company_id)
-                .where(Task.status.in_(["in_progress", "needs_recovery"]))
-                .distinct()
-                .limit(20)
-            )
-        ).scalars().all()
-
-    by_company: dict[uuid.UUID, list[uuid.UUID]] = {}
-    for company_id, goal_id in rows:
-        by_company.setdefault(company_id, []).append(goal_id)
-
-    # Ensure companies with in-progress tasks are also swept even if no active goal rows
-    all_companies = set(by_company.keys()) | set(sweep_rows)
-
+    all_companies = (
+        company_ids if company_ids is not None else await work_hints.claim("goals", limit=20)
+    )
     if not all_companies:
         return
 
-    logger.info("Orchestrator tick: %d companies with active goals or maintenance", len(all_companies))
+    logger.info("Orchestrator tick: %d companies with work hints", len(all_companies))
 
-    # Phase 2: work. One tenant-scoped session per company.
+    # One tenant-scoped session per company. A failure in one company's pass is logged and
+    # does not stop the others.
     for company_id in all_companies:
-        goal_ids = by_company.get(company_id, [])
-        async with tenant_session(company_id) as db:
-            recovered = await _reap_stale_subtasks(db)
-            recovered += await _reclaim_stranded_goals(db)
-            restored = await reconcile_recovery(db)
-            if recovered or restored:
-                await db.commit()
-
-            if goal_ids:
+        try:
+            async with tenant_session(company_id) as db:
                 goals = list(
-                    (await db.execute(select(Goal).where(Goal.id.in_(goal_ids))))
+                    (
+                        await db.execute(
+                            select(Goal)
+                            .where(Goal.company_id == company_id, Goal.status == "active")
+                            .where(Goal.owner_agent_id != None)  # noqa: E711
+                            .limit(MAX_GOALS_PER_TICK)
+                        )
+                    )
                     .scalars()
                     .all()
                 )
@@ -351,18 +344,19 @@ async def _tick(session_factory: async_sessionmaker[AsyncSession] | None = None)
                             logger.error("Orchestrator: goal %s processing failed: %s", goal.id, e)
                             break
 
-            for name, maintenance in (
-                ("_auto_evaluate_proposals", _auto_evaluate_proposals(db)),
-                ("_memory_maintenance", _memory_maintenance(db, company_id)),
-                ("_agent_heartbeat_wakeup", _agent_heartbeat_wakeup(db)),
-            ):
-                try:
-                    await maintenance
-                except Exception as e:
-                    logger.debug("%s error: %s", name, e)
+                for name, maintenance in (
+                    ("_auto_evaluate_proposals", _auto_evaluate_proposals(db)),
+                    ("_memory_maintenance", _memory_maintenance(db, company_id)),
+                    ("_agent_heartbeat_wakeup", _agent_heartbeat_wakeup(db)),
+                ):
+                    try:
+                        await maintenance
+                    except Exception as e:
+                        logger.debug("%s error: %s", name, e)
 
-            await db.commit()
-
+                await db.commit()
+        except Exception as exc:  # noqa: BLE001 - one company's failure must not stop the others
+            logger.error("Orchestrator: company pass failed: %s", type(exc).__name__)
 
 
 async def _drive_goal(db: AsyncSession, goal: Any) -> None:

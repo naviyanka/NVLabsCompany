@@ -42,6 +42,8 @@ import json
 import logging
 import uuid
 from collections import Counter
+from collections.abc import Callable
+from contextlib import AbstractAsyncContextManager
 from datetime import UTC, datetime, timedelta
 from itertools import chain
 from typing import Any
@@ -481,7 +483,7 @@ async def generate(company_id: uuid.UUID, now: datetime | None = None) -> dict[s
     try:
         payload = await _read(company_id, now)
     except Exception as exc:  # noqa: BLE001 - recorded, previous snapshot kept
-        logger.warning("Organization snapshot for %s failed: %s", company_id, exc)
+        logger.warning("Organization snapshot build failed (%s)", type(exc).__name__)
         async with tenant_session(company_id) as db:
             await db.execute(
                 update(OrganizationSnapshotState)
@@ -752,12 +754,19 @@ def _due(state: Any, now: datetime) -> bool:
     return state.attempted_at is None or now - state.attempted_at >= RECONCILE_EVERY
 
 
-async def tick(now: datetime | None = None) -> list[uuid.UUID]:
-    """Scheduler hook: regenerate debounced dirty companies and reconcile the rest."""
-    from nexus.database import system_session
+async def tick(
+    now: datetime | None = None,
+    *,
+    discovery: Callable[[], AbstractAsyncContextManager[Any]],
+) -> list[uuid.UUID]:
+    """System runtime hook: regenerate debounced dirty companies and reconcile the rest.
 
+    ``discovery`` opens the cross-tenant read session that finds the due companies (the
+    state table is row level security protected). Each snapshot is then generated inside
+    its own company's tenant session by :func:`generate`.
+    """
     now = now or _now()
-    async with system_session("organization snapshot: due companies") as db:
+    async with discovery() as db:
         rows = (
             await db.execute(
                 select(
@@ -778,7 +787,11 @@ async def tick(now: datetime | None = None) -> list[uuid.UUID]:
     )
     done = []
     for r in due[:MAX_PER_TICK]:
-        await generate(r.id, now)
+        try:
+            await generate(r.id, now)
+        except Exception as exc:  # noqa: BLE001 - one company must not stop the rest
+            logger.warning("Organization snapshot pass failed (%s)", type(exc).__name__)
+            continue
         done.append(r.id)
     return done
 

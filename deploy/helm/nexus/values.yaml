@@ -91,20 +91,28 @@ worker:
     maxReplicas: 8
     targetCPUUtilizationPercentage: 75
 
-scheduler:
-  replicaCount: 1
+# The privileged internal process: the only workload that holds the BYPASSRLS system
+# credential (nexus_system). It has no Service, no Ingress and serves no port. The API and
+# worker pods never receive the credential; they refuse to start if they find it.
+systemRuntime:
+  enabled: true
   image:
     repository: ghcr.io/nvlabs/nexus-api
     tag: "0.1.0"
     pullPolicy: IfNotPresent
-  command: ["python", "-c", "import asyncio; from nexus.runtime.scheduler import run_scheduler; asyncio.run(run_scheduler())"]
+  command: ["python", "-m", "nexus.system_runtime"]
+  # Name of an existing Secret that holds the system connection URL. Required while the
+  # runtime is enabled: the chart never builds this URL, holds no password, and renders fail
+  # if the Secret is the migration Secret or the application Secret.
+  existingSecret: ""
+  secretKey: SYSTEM_DATABASE_URL
   resources:
     limits:
-      cpu: 1000m
-      memory: 1024Mi
+      cpu: 500m
+      memory: 512Mi
     requests:
-      cpu: 250m
-      memory: 256Mi
+      cpu: 100m
+      memory: 128Mi
 
 frontend:
   replicaCount: 2

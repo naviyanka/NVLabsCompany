@@ -158,12 +158,11 @@ class TestCronTriggerSurvivesRestart:
     def scheduler_sessions(self, monkeypatch, session_factory):
         """Point the tick's own sessions at this test DB.
 
-        ``_tick`` discovers due triggers in ``system_session`` and fires them in
-        ``tenant_session`` (WP-7), both built from the module-level factories,
+        ``_tick`` lists due triggers (the table is not RLS protected) and fires each
+        company's in ``tenant_session``, which is built from the module-level factory,
         so the ``session_factory`` argument alone does not reach the test DB.
         """
         monkeypatch.setattr("nexus.database.async_session_factory", session_factory)
-        monkeypatch.setattr("nexus.database._system_session_factory", session_factory)
 
     async def test_created_trigger_gets_a_next_fire_time(
         self, session_factory, company_and_agent

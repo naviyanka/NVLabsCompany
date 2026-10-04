@@ -259,6 +259,36 @@ def test_baseline_entries_are_still_violated(guard):
     assert not stale, f"BASELINE entries no longer violated, remove them: {stale}"
 
 
+def test_governance_readiness_state_is_not_baselined(guard):
+    """The per-company readiness bookkeeping lives in api/, so it needs no R1 exemption.
+
+    It was once baselined under governance/. Moving it beside the caches it fills removed
+    the exemption; a baseline entry for it would hide the same state creeping back.
+    """
+    assert not [key for key in guard.BASELINE if "readiness" in key]
+    assert not (guard.SRC / "governance" / "readiness.py").exists()
+    assert (guard.SRC / "api" / "readiness.py").is_file()
+
+
+def test_r1_fails_when_readiness_state_returns_to_governance(guard, fake_src):
+    """Mutation check: the real readiness module placed under governance/ trips R1.
+
+    The findings name exactly the process-local back-off and lock maps, so the guard fails
+    for the reason the removed baseline entries used to hide.
+    """
+    real = Path(__file__).resolve().parents[1] / "src" / "nexus" / "api" / "readiness.py"
+    (fake_src / "governance" / "readiness.py").write_text(
+        real.read_text(encoding="utf-8"), encoding="utf-8"
+    )
+
+    keys = _keys(guard.check_r1())
+    assert sorted(keys) == [
+        "R1 governance/readiness.py:_locks",
+        "R1 governance/readiness.py:_retry_at",
+    ]
+    assert not [k for k in keys if k in guard.BASELINE]
+
+
 def test_repo_currently_passes_the_guard(guard, capsys):
     """The committed tree must be green, otherwise CI is red on arrival."""
     assert guard.main([]) == 0

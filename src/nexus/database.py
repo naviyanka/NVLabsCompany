@@ -46,25 +46,6 @@ async_session_factory = async_sessionmaker(
     expire_on_commit=False,
 )
 
-# Dedicated engine and session factory for privileged system maintenance (nexus_system)
-_system_engine = None
-_system_session_factory = None
-
-if settings.system_database_url:
-    _system_engine = create_async_engine(settings.system_database_url, **_engine_kwargs)
-    _system_session_factory = async_sessionmaker(
-        _system_engine,
-        class_=AsyncSession,
-        expire_on_commit=False,
-    )
-
-def get_system_session_factory() -> async_sessionmaker[AsyncSession]:
-    """Return the system session factory (nexus_system) or fallback to app factory."""
-    return _system_session_factory or async_session_factory
-
-system_session_factory = _system_session_factory or async_session_factory
-
-
 def _bind_tenant(session: AsyncSession, company_id: uuid.UUID) -> None:
     """Set the RLS tenant (WP-7, WP-9) at the start of every transaction.
 
@@ -104,29 +85,6 @@ def tenant_session_factory(
     service built for one tenant's work cannot write without the RLS tenant.
     """
     return partial(tenant_session, company_id)
-
-
-@asynccontextmanager
-async def system_session(reason: str) -> AsyncIterator[AsyncSession]:
-    """Cross-tenant session for privileged maintenance holding BYPASSRLS (WP-7)."""
-    logger.info("system_session acquired: %s", reason)
-    factory = _system_session_factory or async_session_factory
-    async with factory() as session:
-        is_postgres = not (settings.system_database_url or settings.database_url).startswith("sqlite")
-        if is_postgres:
-            res = await session.execute(
-                text("SELECT rolname, rolbypassrls, rolsuper FROM pg_roles WHERE rolname = current_user;")
-            )
-            row = res.first()
-            if row and not (row[1] or row[2]):
-                raise RuntimeError(
-                    f"system_session requires role with BYPASSRLS or SUPERUSER. Current role: {row[0]}"
-                )
-        try:
-            yield session
-        except Exception:
-            await session.rollback()
-            raise
 
 
 async def assert_role_rls_posture() -> None:

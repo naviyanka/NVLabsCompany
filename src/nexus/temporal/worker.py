@@ -23,6 +23,12 @@ TASK_QUEUE = "nexus-main"
 
 async def run_worker():
     """Start the Temporal worker."""
+    # An ordinary worker holds only the application credential: refuse to start with the
+    # schema owner's or the BYPASSRLS system credential in its environment.
+    from nexus.config_validator import enforce_no_migration_credential, enforce_no_system_credential
+
+    enforce_no_migration_credential()
+    enforce_no_system_credential()
     try:
         from temporalio.client import Client
         from temporalio.worker import Worker

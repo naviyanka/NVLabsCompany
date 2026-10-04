@@ -49,8 +49,9 @@ A failed `RESET` is only logged at debug level, which widens the window.
 - Remove the `RESET` in `finally`, which becomes redundant, and add a pool
   `checkin` or `reset` hook that asserts `current_setting('nexus.company_id', true)`
   is empty. Violations are logged loudly and fail tests.
-- `system_session` (BYPASSRLS) is unchanged, and must never share a pool with
-  tenant sessions.
+- The BYPASSRLS credential must never share a pool with tenant sessions. It has since
+  been moved out of the API and workers entirely: only the system runtime process
+  holds it, for discovery. See `docs/runbooks/system-runtime.md`.
 - SQLite has no RLS or GUCs. The listener must be a no-op there, and the SQLite
   test suite must not pretend to cover RLS.
 

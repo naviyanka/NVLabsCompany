@@ -95,6 +95,22 @@ def enforce_no_migration_credential() -> None:
         )
 
 
+def enforce_no_system_credential() -> None:
+    """Refuse to start a public-facing or ordinary worker process that holds the system role.
+
+    ``SYSTEM_DATABASE_URL`` is the BYPASSRLS ``nexus_system`` credential. It belongs to the
+    privileged system runtime (``python -m nexus.system_runtime``) alone. An API, worker or
+    Temporal worker that can read it could be steered, by a bug or a prompt injection, into
+    reading every tenant's rows. The message names the variable, never its value.
+    """
+    if os.environ.get("SYSTEM_DATABASE_URL"):
+        raise ConfigurationError(
+            "SYSTEM_CREDENTIAL_IN_RUNTIME",
+            "SYSTEM_DATABASE_URL must be set only for the system runtime, never for the "
+            "API or a worker.",
+        )
+
+
 async def validate_config() -> None:
     """Validate application configuration and log warnings.
 

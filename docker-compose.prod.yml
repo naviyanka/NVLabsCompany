@@ -1,15 +1,16 @@
 # Database roles: the schema is owned by nexus_migrator and the application runs as
 # nexus_app, which owns nothing and so cannot drop triggers, disable row level security
-# or alter policies. Three env files keep the credentials apart:
+# or alter policies. The BYPASSRLS nexus_system credential belongs to one internal process,
+# system-runtime, and to nothing else. Four env files keep the credentials apart:
 #   .env.postgres    bootstrap superuser, read only by the postgres service
 #   .env.migration   MIGRATION_DATABASE_URL (nexus_migrator), read only by the migrate service
-#   .env.production  DATABASE_URL (nexus_app) and SYSTEM_DATABASE_URL, read by the runtime
-# LEGACY CARVE-OUT: .env.production also holds SYSTEM_DATABASE_URL (nexus_system, BYPASSRLS), so
-# the api, worker and scheduler can reach every tenant through the existing system_session
-# callers. That is not the intended final architecture; see "Deferred work: system-session
-# process isolation" in the runbook.
+#   .env.production  DATABASE_URL (nexus_app), read by the api and worker. It must not hold
+#                    SYSTEM_DATABASE_URL: both refuse to start if they find it.
+#   .env.system      SYSTEM_DATABASE_URL (nexus_system) plus the application DATABASE_URL and
+#                    REDIS_URL, read only by system-runtime, which publishes no port.
 # Roles are provisioned once, by an administrator, before the first start. See
-# docs/runbooks/database-roles.md. Nothing here creates roles or schema implicitly.
+# docs/runbooks/database-roles.md and docs/runbooks/system-runtime.md. Nothing here creates
+# roles or schema implicitly.
 services:
   postgres:
     # pgvector is required by the migrations.
@@ -157,14 +158,18 @@ services:
           cpus: "0.5"
           memory: 512M
 
-  scheduler:
+  # The only process that holds the BYPASSRLS system credential. No ports, no ingress. It
+  # finds which companies need maintenance and publishes content-free work hints; company
+  # data is only ever touched through nexus_app tenant sessions. It starts only after the
+  # migration has finished.
+  system-runtime:
     build:
       context: .
       dockerfile: Dockerfile.prod
     restart: unless-stopped
-    command: ["python", "-c", "import asyncio; from nexus.runtime.scheduler import run_scheduler; asyncio.run(run_scheduler())"]
+    command: ["python", "-m", "nexus.system_runtime"]
     env_file:
-      - .env.production
+      - .env.system
     depends_on:
       postgres:
         condition: service_healthy
@@ -172,15 +177,22 @@ services:
         condition: service_completed_successfully
       redis:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-m", "nexus.system_runtime", "healthcheck"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    stop_grace_period: 30s
     deploy:
       replicas: 1
       resources:
         limits:
-          cpus: "1.0"
-          memory: 1024M
+          cpus: "0.5"
+          memory: 512M
         reservations:
-          cpus: "0.2"
-          memory: 256M
+          cpus: "0.1"
+          memory: 128M
 
   frontend:
     build:

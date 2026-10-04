@@ -29,6 +29,7 @@ Usage:
 import asyncio
 import logging
 import uuid
+from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -169,9 +170,8 @@ def compute_next_fire(
 
 async def _tick(session_factory: async_sessionmaker[AsyncSession] | None = None) -> None:
     """Single scheduler tick: find and fire due triggers (WP-15c)."""
-    from nexus.models.trigger import Trigger, TriggerExecution
-    from nexus.models.agent import Agent
-    from nexus.database import system_session, tenant_session
+    from nexus.database import async_session_factory, tenant_session
+    from nexus.models.trigger import Trigger
     from nexus.runtime.redis_utils import try_acquire_leader
 
     # Leader election: only the leader instance processes triggers
@@ -180,16 +180,9 @@ async def _tick(session_factory: async_sessionmaker[AsyncSession] | None = None)
 
     now = datetime.now(timezone.utc).replace(tzinfo=None)
 
-    async with system_session("scheduler tick: reap reservations, find due triggers") as db:
-        try:
-            from nexus.services.budget_service import BudgetService
-            reaped = await BudgetService(db).reap_expired_reservations()
-            if reaped > 0:
-                logger.info("Scheduler reaped %d expired budget reservations", reaped)
-        except Exception as e:
-            logger.debug("Scheduler budget reap error: %s", e)
-
-        # Triggers is not RLS-covered, discovery is cross-tenant
+    # The triggers table is not row level security protected, so the tenant-bound role can
+    # list every company's due triggers. Each one is then fired inside its own tenant_session.
+    async with (session_factory or async_session_factory)() as db:
         stmt = (
             select(Trigger.company_id, Trigger.id)
             .where(
@@ -311,50 +304,51 @@ async def _fire_trigger(db: AsyncSession, trigger: Any, now: datetime) -> None:
     logger.info("Fired trigger '%s' → agent %s (%d tokens)", trigger.name, agent.name, tokens_used)
 
 
-async def _scheduler_loop(session_factory: async_sessionmaker[AsyncSession] | None = None) -> None:
-    """Main scheduler loop — ticks every TICK_INTERVAL seconds."""
+TickFn = Callable[[], Awaitable[None]]
+
+
+async def _scheduler_loop(
+    session_factory: async_sessionmaker[AsyncSession] | None = None,
+    ticks: list[tuple[str | None, TickFn]] | None = None,
+    interval: float = TICK_INTERVAL,
+) -> None:
+    """Main scheduler loop: runs each registered tick every ``interval`` seconds.
+
+    The API registers the trigger tick. The privileged system runtime registers its own
+    operation tick through ``ticks`` so that it shares this one periodic driver (arch_guard
+    rule R2) instead of owning a second polling loop. A tick registered with a leader name
+    runs only on the instance that holds that lease; ``None`` means the tick takes its own
+    leases.
+    """
     global _running
     from nexus.governance.leader_election import is_leader
 
-    logger.info("Scheduler started (tick interval: %ds)", TICK_INTERVAL)
+    if ticks is None:
+        ticks = [("scheduler", lambda: _tick(session_factory))]
+    logger.info("Scheduler started (tick interval: %ds)", interval)
     while _running:
-        try:
-            if await is_leader("scheduler"):
-                await _tick(session_factory)
-        except Exception as e:
-            logger.error("Scheduler tick error: %s", e)
-
-        # The watchdog patrol rides this tick rather than running a loop of its
-        # own, so there is one periodic driver in the process.
-        try:
-            from nexus.runtime.watchdog_service import patrol_once
-
-            if await is_leader("watchdog"):
-                await patrol_once(session_factory)
-        except Exception as e:
-            logger.error("Watchdog patrol error: %s", e)
-
-        # Organization snapshots: debounced regeneration of dirty companies and
-        # periodic reconciliation (nexus.services.org_snapshot).
-        try:
-            from nexus.services import org_snapshot
-
-            if await is_leader("org_snapshot"):
-                await org_snapshot.tick()
-        except Exception as e:
-            logger.error("Organization snapshot tick error: %s", e)
-
-        await asyncio.sleep(TICK_INTERVAL)
+        for leader, fn in ticks:
+            try:
+                if leader is None or await is_leader(leader):
+                    await fn()
+            except Exception as e:
+                logger.error("Scheduler tick error: %s", type(e).__name__)
+        await asyncio.sleep(interval)
     logger.info("Scheduler stopped")
 
 
-async def start_scheduler(session_factory: async_sessionmaker[AsyncSession] | None = None) -> None:
+async def start_scheduler(
+    session_factory: async_sessionmaker[AsyncSession] | None = None,
+    *,
+    ticks: list[tuple[str | None, TickFn]] | None = None,
+    interval: float = TICK_INTERVAL,
+) -> None:
     """Start the background scheduler task."""
     global _scheduler_task, _running
     if _scheduler_task is not None:
         return  # Already running
     _running = True
-    _scheduler_task = asyncio.create_task(_scheduler_loop(session_factory))
+    _scheduler_task = asyncio.create_task(_scheduler_loop(session_factory, ticks, interval))
 
 
 async def stop_scheduler() -> None:

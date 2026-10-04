@@ -162,7 +162,6 @@ async def db(tmp_path, monkeypatch):
     import nexus.database as database
 
     monkeypatch.setattr(database, "async_session_factory", factory)
-    monkeypatch.setattr(database, "_system_session_factory", factory)
     # tenant_session() picks its dialect from the URL, not from this factory.
     monkeypatch.setattr(settings, "database_url", str(engine.url))
     monkeypatch.setattr(settings, "repository_roots", str(tmp_path / "repos" / "{company_id}"))
@@ -658,7 +657,7 @@ class TestWorkspace:
             await s.execute(update(TaskAttempt).where(TaskAttempt.id == attempt.id)
                             .values(chat_turn_id=None))
             await s.commit()
-        await ta.sweep(ta._now() + LATER)
+        await ta.recover_company(w["acme"], ta._now() + LATER)
         ta.get_worker().wake(w["acme"])
         await ta.drain()
         final = await _attempt(db, w["acme"], attempt.id)
@@ -741,7 +740,7 @@ class TestRecovery:
         before = await _attempt(db, w["acme"], attempt.id)
         assert before.status == "running" and len(db.emp.calls) == 1
 
-        outcome = await ta.sweep(ta._now() + LATER)
+        outcome = await ta.recover_company(w["acme"], ta._now() + LATER)
         assert outcome["recovered"] == 1
         queued = await _attempt(db, w["acme"], attempt.id)
         assert (queued.status, queued.recoveries, queued.claimed_by) == ("queued", 1, None)
@@ -759,13 +758,14 @@ class TestRecovery:
         monkeypatch.setattr(settings, "task_attempt_max_recoveries", 0)
         attempt, _ = await _start_without_worker(db, w)
         await ta.claim(attempt.id, w["acme"], "dead-worker")
-        await ta.sweep(ta._now() + LATER)
+        await ta.recover_company(w["acme"], ta._now() + LATER)
         final = await _attempt(db, w["acme"], attempt.id)
         assert (final.status, final.error_code) == ("failed", "ATTEMPTS_EXHAUSTED")
 
     async def test_stale_queue_entries_expire(self, db, w):
         attempt, _ = await _start_without_worker(db, w)
-        await ta.sweep(ta._now() + timedelta(seconds=settings.task_attempt_queue_ttl_seconds + 60))
+        ttl = settings.task_attempt_queue_ttl_seconds
+        await ta.recover_company(w["acme"], ta._now() + timedelta(seconds=ttl + 60))
         final = await _attempt(db, w["acme"], attempt.id)
         assert final.status == "expired"
         assert (await _rows(db, Task, Task.id == w["task"]))[0].status == "pending"

@@ -1,0 +1,73 @@
+{{- if .Values.systemRuntime.enabled }}
+{{- /*
+The only workload that holds the BYPASSRLS system credential. It has no Service and no
+Ingress, serves no port, and loads the application Secret only through the two keys it
+needs. The API and worker pods never receive the system credential.
+*/ -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "nexus.fullname" . }}-system-runtime
+  labels:
+    {{- include "nexus.labels" . | nindent 4 }}
+    app.kubernetes.io/component: system-runtime
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "nexus.selectorLabels" (dict "context" . "component" "system-runtime") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "nexus.labels" . | nindent 8 }}
+        {{- include "nexus.selectorLabels" (dict "context" . "component" "system-runtime") | nindent 8 }}
+    spec:
+      restartPolicy: Always
+      serviceAccountName: {{ include "nexus.serviceAccountName" . }}
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: system-runtime
+          image: "{{ .Values.systemRuntime.image.repository }}:{{ .Values.systemRuntime.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.systemRuntime.image.pullPolicy }}
+          command: {{ .Values.systemRuntime.command | toJson }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "nexus.fullname" . }}-config
+          env:
+            - name: SYSTEM_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.systemRuntime.existingSecret | quote }}
+                  key: {{ .Values.systemRuntime.secretKey | quote }}
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "nexus.fullname" . }}-secrets
+                  key: DATABASE_URL
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "nexus.fullname" . }}-secrets
+                  key: REDIS_URL
+          startupProbe:
+            exec:
+              command: ["python", "-m", "nexus.system_runtime", "healthcheck"]
+            periodSeconds: 5
+            failureThreshold: 36
+            timeoutSeconds: 10
+          livenessProbe:
+            exec:
+              command: ["python", "-m", "nexus.system_runtime", "healthcheck"]
+            periodSeconds: 30
+            failureThreshold: 3
+            timeoutSeconds: 10
+          resources:
+            {{- toYaml .Values.systemRuntime.resources | nindent 12 }}
+{{- end }}

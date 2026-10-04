@@ -150,6 +150,31 @@ if _PROMETHEUS_AVAILABLE:
         "Chat turns currently queued or active (claimed/running), from the database",
         ["status"],
     )
+
+    # Privileged system runtime (nexus.system_runtime). Labels are operation names and
+    # fixed outcome codes only: never a company id, so cardinality stays bounded.
+    nexus_system_runtime_events_total = Counter(
+        "nexus_system_runtime_events_total",
+        "System runtime events (op_completed, op_failed, lock_contention, "
+        "missing_credential, role_validation_failure, audit_subscriber_failure)",
+        ["event"],
+    )
+    nexus_system_runtime_op_duration_seconds = Histogram(
+        "nexus_system_runtime_op_duration_seconds",
+        "Duration of one system runtime operation run",
+        ["operation"],
+        buckets=TASK_DURATION_BUCKETS,
+    )
+    nexus_system_runtime_tenants_total = Counter(
+        "nexus_system_runtime_tenants_total",
+        "Tenants handled by a system runtime operation, by outcome (processed, failed)",
+        ["operation", "outcome"],
+    )
+    nexus_system_runtime_last_success_timestamp_seconds = Gauge(
+        "nexus_system_runtime_last_success_timestamp_seconds",
+        "Unix time of the last successful run of a system runtime operation",
+        ["operation"],
+    )
 else:
     # No-op placeholders if prometheus_client is absent
     nexus_llm_tokens_total = None  # type: ignore
@@ -168,6 +193,11 @@ else:
     nexus_chat_turn_claim_latency_seconds = None  # type: ignore
     nexus_chat_turn_duration_seconds = None  # type: ignore
     nexus_chat_turns = None  # type: ignore
+    nexus_system_runtime_events_total = None  # type: ignore
+    nexus_system_runtime_op_duration_seconds = None  # type: ignore
+    nexus_system_runtime_tenants_total = None  # type: ignore
+    nexus_system_runtime_last_success_timestamp_seconds = None  # type: ignore
+
 
 
 # ---------------------------------------------------------------------------
@@ -350,6 +380,30 @@ def set_chat_turns(status: str, count: int) -> None:
     if not _PROMETHEUS_AVAILABLE:
         return
     nexus_chat_turns.labels(status=status).set(float(count))
+
+
+def record_system_runtime_event(event: str) -> None:
+    """Count one system runtime event (see the counter's help for the fixed set)."""
+    if not _PROMETHEUS_AVAILABLE:
+        return
+    nexus_system_runtime_events_total.labels(event=event).inc()
+
+
+def record_system_runtime_op(
+    operation: str, duration: float, *, processed: int, failed: int, ok: bool
+) -> None:
+    """Record one finished operation run: duration, tenant outcomes and last success."""
+    if not _PROMETHEUS_AVAILABLE:
+        return
+    nexus_system_runtime_op_duration_seconds.labels(operation=operation).observe(duration)
+    nexus_system_runtime_tenants_total.labels(
+        operation=operation, outcome="processed"
+    ).inc(processed)
+    nexus_system_runtime_tenants_total.labels(operation=operation, outcome="failed").inc(failed)
+    if ok:
+        nexus_system_runtime_last_success_timestamp_seconds.labels(operation=operation).set(
+            time.time()
+        )
 
 
 def generate_metrics_response() -> tuple[bytes, str]:

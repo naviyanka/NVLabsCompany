@@ -88,12 +88,12 @@ jobs:
       - name: Helm Lint
         # migration.existingSecret has no default on purpose: the chart refuses to render
         # without a credential for the migration job.
-        run: helm lint deploy/helm/nexus --set migration.existingSecret=nexus-migration-db
+        run: helm lint deploy/helm/nexus --set migration.existingSecret=nexus-migration-db --set systemRuntime.existingSecret=nexus-system-db
 
       - name: Render Helm Templates
         run: |
           mkdir -p output
-          helm template nexus deploy/helm/nexus --set migration.existingSecret=nexus-migration-db > output/manifests.yaml
+          helm template nexus deploy/helm/nexus --set migration.existingSecret=nexus-migration-db --set systemRuntime.existingSecret=nexus-system-db > output/manifests.yaml
 
       # yannh/kubeconform-action no longer exists. Install the pinned release
       # binary and verify it against the checksum published with v0.8.0.

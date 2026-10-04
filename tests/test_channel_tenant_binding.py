@@ -139,10 +139,15 @@ async def test_a_forged_company_header_creates_nothing(factory, client, monkeypa
     before = await _snapshot(factory)
     monkeypatch.setattr(settings, "auth_enabled", False)
 
-    for company in (caller, uuid.uuid4()):  # a real tenant and one that does not exist
-        response = await client.post(path, json=body, headers={"X-Company-Id": str(company)})
-        assert response.status_code == 410
-        assert response.json() == DISABLED[path]
+    response = await client.post(path, json=body, headers={"X-Company-Id": str(caller)})
+    assert response.status_code == 410
+    assert response.json() == DISABLED[path]
+
+    # A company that does not exist has no governance state to load, so governance refuses
+    # it before the route runs. Either way nothing is written.
+    ghost = await client.post(path, json=body, headers={"X-Company-Id": str(uuid.uuid4())})
+    assert ghost.status_code == 503
+    assert ghost.json()["code"] == "GOVERNANCE_UNAVAILABLE"
     assert await _snapshot(factory) == before
 
 
