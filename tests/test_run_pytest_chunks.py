@@ -202,8 +202,12 @@ class FakeLaunch:
         return result
 
 
-def run_cli(monkeypatch, rc, root, argv, launch, dirty=None, commit=FAKE_COMMIT):
-    """Run rc.main() against a fake repository with fake git answers."""
+def run_cli(monkeypatch, rc, root, argv, launch, dirty=None, commit=FAKE_COMMIT, env_addopts=None):
+    """Run rc.main() against a fake repository with fake git answers.
+
+    PYTEST_ADDOPTS is cleared unless ``env_addopts`` supplies it, so the host
+    environment can never change what these tests exercise.
+    """
     init_git_repo(root)
     monkeypatch.setattr(rc, "git_toplevel", lambda hint: root)
     monkeypatch.setattr(rc, "git_head_commit", lambda repo_root: commit)
@@ -212,6 +216,10 @@ def run_cli(monkeypatch, rc, root, argv, launch, dirty=None, commit=FAKE_COMMIT)
     )
     monkeypatch.setattr(rc, "pytest_version_string", lambda: "pytest 9.0.0 (fake)")
     monkeypatch.setattr(rc, "run_one_chunk", launch)
+    if env_addopts is None:
+        monkeypatch.delenv(rc.PYTEST_ADDOPTS_ENV_VAR, raising=False)
+    else:
+        monkeypatch.setenv(rc.PYTEST_ADDOPTS_ENV_VAR, env_addopts)
     return rc.main(argv)
 
 
@@ -1234,3 +1242,179 @@ def test_empty_selection_is_a_clear_error(rc, tmp_path, monkeypatch):
     launch = FakeLaunch()
     assert run_cli(monkeypatch, rc, root, ["tests/test_pg.py"], launch) == 2
     assert launch.calls == []
+
+
+# --- environment and repository addopts (fail-closed parallel-mode policy) ------
+#
+# pytest merges PYTEST_ADDOPTS and configured addopts into every run, so a
+# parallel mode can arrive without ever appearing on argv. The runner must
+# refuse either source before the first child starts, and must never echo the
+# refused value back.
+
+
+def test_pytest_addopts_env_absent_or_empty(rc, monkeypatch):
+    monkeypatch.delenv(rc.PYTEST_ADDOPTS_ENV_VAR, raising=False)
+    rc.validate_pytest_addopts_env(None)  # must not raise
+    rc.validate_pytest_addopts_env("")  # must not raise
+    rc.validate_pytest_addopts_env("   ")  # must not raise
+
+
+def test_pytest_addopts_env_safe_values_pass(rc, monkeypatch):
+    monkeypatch.setenv(rc.PYTEST_ADDOPTS_ENV_VAR, "-q --tb=short")
+    rc.validate_pytest_addopts_env("-q --tb=short")  # must not raise
+    rc.validate_pytest_addopts_env('-k "a b or c"')  # quoted, must not raise
+
+
+@pytest.mark.parametrize(
+    "env_value",
+    [
+        "-n 4",
+        "-n4",
+        "-nauto",
+        "--numprocesses 4",
+        "--numprocesses=4",
+        "-p xdist",
+        "-p xdist.plugin",
+        "-o addopts=-n",
+        '--override-ini addopts="--numprocesses=4"',
+    ],
+)
+def test_pytest_addopts_env_forbidden_values_are_refused(rc, env_value):
+    with pytest.raises(rc.RunnerError, match="PYTEST_ADDOPTS"):
+        rc.validate_pytest_addopts_env(env_value)
+
+
+def test_pytest_addopts_env_quoted_parallel_value_is_refused(rc):
+    with pytest.raises(rc.RunnerError, match="PYTEST_ADDOPTS"):
+        rc.validate_pytest_addopts_env('-p "xdist"')
+
+
+def test_pytest_addopts_env_malformed_quoting_is_refused(rc):
+    with pytest.raises(rc.RunnerError, match="malformed"):
+        rc.validate_pytest_addopts_env("-k 'unclosed")
+
+
+def test_pytest_addopts_env_refusal_names_the_variable_not_the_value(
+    rc, tmp_path, monkeypatch, capsys
+):
+    root = make_repo(tmp_path, plain=["test_a.py"])
+    secret_env = "-n 4 marker_secret_value"
+    launch = FakeLaunch(ok(rc))
+    assert run_cli(monkeypatch, rc, root, [], launch, env_addopts=secret_env) == 2
+    err = capsys.readouterr().err
+    assert "PYTEST_ADDOPTS" in err
+    assert "marker_secret_value" not in err
+    assert "parallel" in err
+    assert launch.calls == []  # refusal happens before any child starts
+
+
+def test_pytest_addopts_env_safe_value_never_reaches_json_or_manifest(
+    rc, tmp_path, monkeypatch
+):
+    marker = "-rAnever_logged_marker_zz"
+    root = make_repo(tmp_path, plain=["test_a.py"])
+    argv = ["--json", "summary.json", "--manifest", "manifest.json"]
+    assert run_cli(monkeypatch, rc, root, argv, FakeLaunch(ok(rc)), env_addopts=marker) == 0
+    json_text = (root / "summary.json").read_text(encoding="utf-8")
+    manifest_text = (root / "manifest.json").read_text(encoding="utf-8")
+    assert "never_logged_marker_zz" not in json_text
+    assert "never_logged_marker_zz" not in manifest_text
+    assert "PYTEST_ADDOPTS" not in json_text
+    assert "PYTEST_ADDOPTS" not in manifest_text
+
+
+def test_pyproject_addopts_parallel_is_refused(rc, tmp_path, monkeypatch):
+    root = make_repo(
+        tmp_path,
+        plain=["test_a.py"],
+        extra_files={"pyproject.toml": '[tool.pytest.ini_options]\naddopts = "-n auto"\n'},
+    )
+    launch = FakeLaunch(ok(rc))
+    assert run_cli(monkeypatch, rc, root, [], launch) == 2
+    assert launch.calls == []
+
+
+def test_pyproject_addopts_array_form_is_refused(rc, tmp_path, monkeypatch):
+    root = make_repo(
+        tmp_path,
+        plain=["test_a.py"],
+        extra_files={
+            "pyproject.toml": '[tool.pytest.ini_options]\naddopts = ["-q", "-n", "auto"]\n'
+        },
+    )
+    launch = FakeLaunch(ok(rc))
+    assert run_cli(monkeypatch, rc, root, [], launch) == 2
+    assert launch.calls == []
+
+
+def test_pytest_ini_addopts_parallel_is_refused(rc, tmp_path, monkeypatch):
+    root = make_repo(
+        tmp_path,
+        plain=["test_a.py"],
+        extra_files={"pytest.ini": "[pytest]\naddopts = --numprocesses=4\n"},
+    )
+    launch = FakeLaunch(ok(rc))
+    assert run_cli(monkeypatch, rc, root, [], launch) == 2
+    assert launch.calls == []
+
+
+def test_setup_cfg_addopts_parallel_is_refused(rc, tmp_path, monkeypatch):
+    root = make_repo(
+        tmp_path,
+        plain=["test_a.py"],
+        extra_files={"setup.cfg": "[tool:pytest]\naddopts = -n 4\n"},
+    )
+    launch = FakeLaunch(ok(rc))
+    assert run_cli(monkeypatch, rc, root, [], launch) == 2
+    assert launch.calls == []
+
+
+def test_tox_ini_addopts_parallel_is_refused(rc, tmp_path, monkeypatch):
+    root = make_repo(
+        tmp_path,
+        plain=["test_a.py"],
+        extra_files={"tox.ini": "[pytest]\naddopts = -p xdist\n"},
+    )
+    launch = FakeLaunch(ok(rc))
+    assert run_cli(monkeypatch, rc, root, [], launch) == 2
+    assert launch.calls == []
+
+
+def test_safe_configured_addopts_remains_usable(rc, tmp_path, monkeypatch):
+    """Ordinary options in configuration keep working; the files stay untouched."""
+    root = make_repo(
+        tmp_path,
+        plain=["test_a.py"],
+        extra_files={
+            "pyproject.toml": '[tool.pytest.ini_options]\naddopts = "-q --tb=short"\n',
+            "pytest.ini": "[pytest]\naddopts = -rA\n",
+        },
+    )
+    launch = FakeLaunch(ok(rc))
+    assert run_cli(monkeypatch, rc, root, [], launch) == 0
+    assert len(launch.calls) == 1
+    assert (root / "pyproject.toml").read_text(encoding="utf-8") == (
+        '[tool.pytest.ini_options]\naddopts = "-q --tb=short"\n'
+    )
+
+
+def test_unparseable_config_source_is_refused_and_sanitized(rc, tmp_path, monkeypatch):
+    root = make_repo(
+        tmp_path, plain=["test_a.py"], extra_files={"pyproject.toml": "not [valid toml"}
+    )
+    launch = FakeLaunch(ok(rc))
+    assert run_cli(monkeypatch, rc, root, [], launch) == 2
+    assert launch.calls == []
+
+
+def test_config_refusal_names_the_file_not_the_value(rc, tmp_path, monkeypatch, capsys):
+    root = make_repo(
+        tmp_path,
+        plain=["test_a.py"],
+        extra_files={"pytest.ini": "[pytest]\naddopts = -n marker_config_value\n"},
+    )
+    launch = FakeLaunch(ok(rc))
+    assert run_cli(monkeypatch, rc, root, [], launch) == 2
+    err = capsys.readouterr().err
+    assert "pytest.ini" in err
+    assert "marker_config_value" not in err

@@ -66,6 +66,24 @@ xdist options, `--forked`, `-p xdist`, `-o addopts=-n 4`, ...) are rejected.
 $ python scripts/run_pytest_chunks.py tests/test_budget.py -- -k reservation --tb=short
 ```
 
+## Environment and repository addopts
+
+pytest merges options from `PYTEST_ADDOPTS` and from repository configuration
+(`pyproject.toml`, `pytest.ini`, `setup.cfg`, `tox.ini`) into every run, so a
+parallel mode can arrive without ever appearing on the command line. The
+runner validates both fail-closed before the first child starts:
+
+- `PYTEST_ADDOPTS` is supported only when it is safe and sequential. Values
+  containing `-n`/`-n4`/`-nauto`, `--numprocesses`, xdist plugin loading
+  (`-p xdist`, `-p xdist.plugin`), or `-o/--override-ini addopts=...` that
+  carries any of these refuse the run, as does malformed quoting.
+- Parallel settings from repository configuration are refused the same way.
+- Ordinary safe options from either source continue to apply unchanged; the
+  configuration files are inspected, never modified, and never disabled.
+- The runner never records the environment value: errors name the variable
+  or file, never their contents, and no console summary, JSON file, or
+  manifest contains them.
+
 ## Stop-on-failure
 
 Continuing past a failed chunk is the default so one failure cannot hide later

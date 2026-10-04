@@ -14,7 +14,10 @@ Design constraints that are easy to regress and therefore pinned here:
   starting the next. No xdist, no background test processes, no concurrency.
 - Child commands are built as argument arrays and never through a shell.
   Arguments that could introduce parallel execution (-n/--numprocesses, xdist
-  options, pytest-forked, addopts overrides carrying them) are rejected.
+  options, pytest-forked, addopts overrides carrying them) are rejected, and
+  the same rules are applied fail-closed to PYTEST_ADDOPTS and to the
+  addopts configured in pyproject.toml / pytest.ini / setup.cfg / tox.ini
+  (values inspected, never modified; their contents never logged or stored).
 - pytest's stdout is streamed through to the caller line by line; only the
   final summary line is parsed. Large output is never buffered whole.
 - A failed chunk does not hide later chunks: continuation is the default,
@@ -56,14 +59,17 @@ interrupted (130 on Ctrl+C).
 from __future__ import annotations
 
 import argparse
+import configparser
 import json
 import os
 import re
+import shlex
 import signal
 import subprocess
 import sys
 import tempfile
 import time
+import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -100,6 +106,25 @@ PARALLEL_OPTION_NAMES = {
     "workers",
     "tests-per-worker",
 }
+# pytest merges addopts from the environment and from its configuration
+# files, so a parallel mode can arrive without ever touching the command
+# line. Both sources are validated with the same deny rules as argv, and
+# the raw values are never logged, stored, or echoed -- errors name the
+# variable or file, never their contents.
+PYTEST_ADDOPTS_ENV_VAR = "PYTEST_ADDOPTS"
+PYTEST_ADDOPTS_PARALLEL_ERROR = (
+    "PYTEST_ADDOPTS enables or contains a pytest option that introduces "
+    "parallel execution (-n/--numprocesses, xdist plugin loading, or an "
+    "addopts override); refusing to run"
+)
+PYTEST_CONFIG_SOURCES = (
+    # (file name, kind): pyproject uses [tool.pytest.ini_options]; the ini
+    # files use the [pytest] / [tool:pytest] sections pytest actually reads.
+    ("pyproject.toml", "pyproject"),
+    ("pytest.ini", "pytest"),
+    ("setup.cfg", "tool:pytest"),
+    ("tox.ini", "pytest"),
+)
 
 
 class RunnerError(Exception):
@@ -369,6 +394,92 @@ def validate_extra_args(args: list[str]) -> None:
 def build_command(interpreter: str, files: list[str], extra_args: list[str]) -> list[str]:
     """The chunk's pytest invocation as an argument array (never a shell string)."""
     return [interpreter, "-m", "pytest", *files, *extra_args]
+
+
+def validate_pytest_addopts_env(env_value: str | None) -> None:
+    """Fail closed on a PYTEST_ADDOPTS that could enable parallel execution.
+
+    pytest merges this environment variable into every run's arguments, so
+    ``PYTEST_ADDOPTS="-n auto"`` would silently start a parallel run even
+    though the command line is clean. The value is parsed with
+    ``shlex.split`` -- the exact parsing pytest itself applies -- and then
+    checked with the same rules as argv. Quoting errors are refused rather
+    than guessed at. The raw value is never logged, stored, or echoed:
+    errors name the variable, never its contents.
+    """
+    if env_value is None or not env_value.strip():
+        return
+    try:
+        tokens = shlex.split(env_value)
+    except ValueError:
+        raise RunnerError(
+            f"{PYTEST_ADDOPTS_ENV_VAR} is malformed (unbalanced quoting or an "
+            "incomplete escape); refusing to run. Fix or unset it and retry."
+        ) from None
+    try:
+        validate_extra_args(tokens)
+    except RunnerError:
+        raise RunnerError(PYTEST_ADDOPTS_PARALLEL_ERROR) from None
+
+
+def configured_pytest_addopts(root: Path) -> list[tuple[str, str]]:
+    """addopts values from the repository's pytest configuration sources.
+
+    Read-only: the files are inspected, never modified, and children keep
+    receiving their settings -- a safe addopts continues to apply. Sources
+    that pytest does not read (or that do not exist) are skipped. A source
+    that cannot be parsed is refused, since an unparseable configuration
+    cannot be proven safe.
+    """
+    found: list[tuple[str, str]] = []
+    pyproject = root / "pyproject.toml"
+    if pyproject.is_file():
+        try:
+            data = tomllib.loads(pyproject.read_text(encoding="utf-8-sig"))
+        except (tomllib.TOMLDecodeError, OSError, UnicodeDecodeError):
+            raise RunnerError(
+                "pyproject.toml cannot be parsed to validate its pytest addopts; "
+                "refusing to run"
+            ) from None
+        value = data.get("tool", {}).get("pytest", {}).get("ini_options", {}).get("addopts")
+        if isinstance(value, list):
+            # TOML array form: validate every entry by joining conservatively.
+            value = " ".join(str(item) for item in value)
+        elif value is not None:
+            value = str(value)
+        if value:
+            found.append(("pyproject.toml", value))
+    for name, section in PYTEST_CONFIG_SOURCES[1:]:
+        path = root / name
+        if not path.is_file():
+            continue
+        parser = configparser.RawConfigParser(strict=False, interpolation=None)
+        try:
+            parser.read(path, encoding="utf-8-sig")
+        except configparser.Error:
+            raise RunnerError(
+                f"{name} cannot be parsed to validate its pytest addopts; refusing to run"
+            ) from None
+        if parser.has_option(section, "addopts"):
+            found.append((name, parser.get(section, "addopts")))
+    return found
+
+
+def validate_pytest_config_sources(root: Path) -> None:
+    """Refuse runs whose repository pytest configuration enables parallel mode.
+
+    Same deny rules as the command line and the environment, applied to every
+    configured addopts value. Errors name the file, never the value.
+    """
+    for source, value in configured_pytest_addopts(root):
+        try:
+            validate_extra_args(shlex.split(value))
+        except (ValueError, RunnerError):
+            raise RunnerError(
+                f"{source} configures pytest addopts that enable parallel execution "
+                "(-n/--numprocesses, xdist plugin loading, or an addopts override); "
+                "refusing to run"
+            ) from None
 
 
 def display_command(cmd: list[str]) -> str:
@@ -1033,9 +1144,14 @@ def main(argv: list[str] | None = None) -> int:
     try:
         args, extra_args = parse_args(argv)
         validate_extra_args(extra_args)
+        # Environment and repository configuration are checked before anything
+        # runs: a parallel mode arriving through either would defeat the
+        # one-process-at-a-time guarantee without ever appearing on argv.
+        validate_pytest_addopts_env(os.environ.get(PYTEST_ADDOPTS_ENV_VAR))
         script_root = Path(__file__).resolve().parent.parent
         root = git_toplevel(script_root)
         commit = git_head_commit(root)
+        validate_pytest_config_sources(root)
         mode = "only" if args.postgres_only else ("include" if args.include_postgres else "exclude")
         selection = select_files(root, args.filters, mode)
         chunks = partition(selection.included, args.chunk_size)
