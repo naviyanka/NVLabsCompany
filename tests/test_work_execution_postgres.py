@@ -44,7 +44,6 @@ from tests.test_postgres_integration import (  # noqa: F401 -- module fixtures
     app_user_postgres_url,
     migrated_postgres_url,
     postgres_container,
-    system_user_postgres_url,
 )
 
 pytestmark = [pytest.mark.postgres, pytest.mark.integration]
@@ -89,8 +88,8 @@ def _ctx(company: uuid.UUID, agent: uuid.UUID) -> ExecutionContext:
 class Stack:
     """The app's engines, patched in. ``restart`` rebuilds them: a service restart."""
 
-    def __init__(self, admin_url, app_url, system_url, monkeypatch, tmp_path) -> None:
-        self.urls = (admin_url, app_url, system_url)
+    def __init__(self, admin_url, app_url, monkeypatch, tmp_path) -> None:
+        self.urls = (admin_url, app_url)
         self.mp = monkeypatch
         self.model = Model()
         self.admin = create_async_engine(admin_url)
@@ -110,22 +109,17 @@ class Stack:
     def _wire(self) -> None:
         import nexus.database as database
 
-        _, app_url, system_url = self.urls
+        _, app_url = self.urls
         app = create_async_engine(app_url, pool_size=10)
-        system = create_async_engine(system_url, pool_size=5)
-        self.engines = [app, system]
+        self.engines = [app]
         self.mp.setattr(settings, "database_url", app_url)
-        self.mp.setattr(settings, "system_database_url", system_url)
         factory = async_sessionmaker(app, expire_on_commit=False)
         self.mp.setattr(database, "async_session_factory", factory)
         # The auth middleware bound the default factory when it was imported.
         self.mp.setattr(auth_middleware, "async_session_factory", factory)
-        self.mp.setattr(
-            database, "_system_session_factory", async_sessionmaker(system, expire_on_commit=False)
-        )
 
-    async def restart(self) -> None:
-        """Drop every engine and client, build new ones, then recover stale claims."""
+    async def restart(self, *companies: uuid.UUID) -> None:
+        """Drop every engine and client, build new ones, then recover each company's stale work."""
         await ta.drain()
         await chat_turns.drain()
         for client in self.clients:
@@ -134,7 +128,8 @@ class Stack:
         for engine in self.engines:
             await engine.dispose()
         self._wire()
-        await ta.sweep()
+        for company in companies:
+            await ta.recover_company(company)
 
     async def close(self) -> None:
         await ta.drain()
@@ -229,16 +224,8 @@ class Session:
 
 
 @pytest.fixture
-async def stack(
-    migrated_postgres_url, app_user_postgres_url, system_user_postgres_url, tmp_path, monkeypatch
-):
-    s = Stack(
-        migrated_postgres_url,
-        app_user_postgres_url,
-        system_user_postgres_url,
-        monkeypatch,
-        tmp_path,
-    )
+async def stack(migrated_postgres_url, app_user_postgres_url, tmp_path, monkeypatch):
+    s = Stack(migrated_postgres_url, app_user_postgres_url, monkeypatch, tmp_path)
     yield s
     await s.close()
 
@@ -339,7 +326,7 @@ class TestAcceptance:
         assert (await other.call("GET", "/api/v1/work")).json()["work"] == []
 
         # Restart: new engines, new clients, stale-claim sweep. Same state, no extra work.
-        await stack.restart()
+        await stack.restart(a["company"], b["company"])
         admin, other = await stack.login(a["admin"]), await stack.login(b["admin"])
         survived = await _work(admin, work)
         assert survived["status"] != "completed"
@@ -511,7 +498,7 @@ class TestReplayAndRaces:
         assert stack.model.calls == 1
 
         await stack.restart()
-        outcome = await ta.sweep(ta._now() + timedelta(hours=2))
+        outcome = await ta.recover_company(a["company"], ta._now() + timedelta(hours=2))
         assert outcome["recovered"] >= 1
         ta.get_worker().wake(a["company"])
         await ta.drain()

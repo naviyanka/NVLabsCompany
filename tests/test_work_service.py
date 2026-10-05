@@ -7,6 +7,7 @@ call is faked. Waiting is done on the worker's own drain, never on sleeps.
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import uuid
 from types import SimpleNamespace
 
@@ -14,6 +15,7 @@ import httpx
 import pytest
 from fastapi import FastAPI, HTTPException, Request
 
+from nexus.adapters.registry import AdapterRegistry
 from nexus.api.routes import chat as chat_routes
 from nexus.api.routes import task_attempts as attempt_routes
 from nexus.api.routes import tasks as task_routes
@@ -31,6 +33,8 @@ from tests.test_employee_work import _me, _rows, db, w  # noqa: F401 -- fixtures
 
 pytestmark = pytest.mark.employee_work
 
+REAL_CALL_LLM = chat_routes._call_llm  # before the fixtures replace it with a fake
+
 DELIVERABLE = "Q3 summary: revenue up 12%, costs flat."
 LEAD = SimpleNamespace(kind="agent", display_name="agent:lead")
 
@@ -42,9 +46,11 @@ class Model:
         self.reply = DELIVERABLE
         self.error: Exception | None = None
         self.calls = 0
+        self.contexts: list = []
 
     async def __call__(self, agent, system_prompt, prompt, history, **kw):
         self.calls += 1
+        self.contexts.append(kw.get("context"))
         if self.error is not None:
             raise self.error
         return self.reply, "fake-model", 7
@@ -211,6 +217,66 @@ class TestLifecycle:
         # The employee ran it, the manager did not.
         assert done.agent_id == co["acme_eve"]
 
+    async def test_text_attempt_is_offered_no_governed_tool(self, co):
+        # The attempt is a chat turn run with work_mode "text", and that offers no governed
+        # tool to any agent, even a manager or the CEO. A plain chat turn still gets them.
+        await _submitted(co)
+        context = co["model"].contexts[0]
+        assert context.work_mode == "text"
+        for agent in ("acme_ceo", "acme_lead", "acme_eve"):
+            assert await manager_tools.catalog(
+                dataclasses.replace(context, agent_id=co[agent])
+            ) == {}
+        plain = dataclasses.replace(context, agent_id=co["acme_lead"], work_mode=None)
+        assert await manager_tools.catalog(plain)
+
+    @pytest.mark.parametrize(("work_mode", "offered"), [(None, True), ("text", False)])
+    async def test_a_work_turn_is_registered_no_vault_tool(
+        self, co, monkeypatch, work_mode, offered
+    ):
+        # The real _call_llm: a plain turn of a non-CEO agent gets the governed vault write
+        # tool on an adapter that takes tools; a task attempt gets none.
+        registered: list[str] = []
+
+        class Adapter:
+            def register_tool(self, name, fn, schema, effect=None):
+                registered.append(name)
+
+            async def create_session(self, agent_id, config):
+                return SimpleNamespace(agent_id=agent_id, session_id=uuid.uuid4())
+
+            async def execute_task(self, session, task_id, payload):
+                return SimpleNamespace(
+                    success=True, output="ok", input_tokens=1, output_tokens=1,
+                    artifacts=[], error=None,
+                )
+
+            async def terminate(self, session):
+                pass
+
+        async def _no_budget(*args, **kw):
+            return None
+
+        async def _no_memory(*args, **kw):
+            return None
+
+        monkeypatch.setattr(AdapterRegistry, "create_adapter", lambda self, *a, **kw: Adapter())
+        monkeypatch.setattr(
+            chat_routes, "_resolve_adapter_type", lambda *a, **kw: ("hermes", {"model": "m"})
+        )
+        monkeypatch.setattr(chat_routes, "_reserve_budget", _no_budget)
+        monkeypatch.setattr(chat_routes, "_settle_budget", _no_budget)
+        monkeypatch.setattr(chat_routes, "_remember_response", _no_memory)
+        async with co["db"]() as s:
+            agent = await s.get(Agent, co["acme_eve"])
+        context = ExecutionContext(
+            company_id=co["acme"], principal_id="agent:eve", principal_role="agent",
+            source="chat", agent_id=agent.id, work_mode=work_mode,
+        )
+        reply = await REAL_CALL_LLM(agent, "sys", "hi", [], context=context)
+        assert reply[0] == "ok"
+        assert bool(registered) is offered
+
     async def test_status_reports_stored_state(self, co):
         work, _, attempt = await _submitted(co)
         snap = await _status(co)
@@ -315,7 +381,7 @@ class TestReplay:
         work, task, attempt = await _submitted(co)
         before = await _status(co)
         # A new service pass: sweep leaves an attempt that waits for review alone.
-        await ta.sweep()
+        await ta.recover_company(co["acme"])
         await ta.drain()
         after = await _status(co)
         assert after["work"] == before["work"]

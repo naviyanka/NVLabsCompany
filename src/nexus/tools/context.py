@@ -36,8 +36,9 @@ class ExecutionContext:
     session_id: uuid.UUID | None = None
     adapter: str | None = None
     model: str | None = None
-    # Set for task-attempt turns: "write" or "read_only". The CLI adapter maps
-    # it to the backend's own cataloged permission flags; never model-chosen.
+    # Set for task-attempt turns: "write", "read_only" or "text". The CLI adapter maps
+    # it to the backend's own cataloged permission flags; a work turn is offered no
+    # governed tool. Never model-chosen.
     work_mode: str | None = None
     # A chat turn whose caller requires the manager tool bridge: the CLI
     # adapter refuses the turn rather than run it without the tools.

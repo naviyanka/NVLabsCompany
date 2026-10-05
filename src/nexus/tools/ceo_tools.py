@@ -263,6 +263,7 @@ CEO_TOOLS: dict[str, ManagerTool] = {
         "verified results. Pass work_id for one work order. Prefer this over the snapshot "
         "when asked what is happening or done.",
         "read", (), _work_status, WorkStatus,
+        effect=EffectClass.READ_ONLY,
     ),
     "ceo_delegate_task_to_manager": ManagerTool(
         "Delegate a work order to a manager who reports to you; the manager assigns the "

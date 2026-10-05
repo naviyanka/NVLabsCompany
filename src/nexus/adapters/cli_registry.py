@@ -129,7 +129,8 @@ class CLIBackendInfo:
             ValueError: If the backend has no flags for that mode, so a task
                 attempt never runs with the CLI's default permissions.
         """
-        args = dict(self.work_args).get(work_mode)
+        # Text work needs no edits or commands: it runs with the read-only flags.
+        args = dict(self.work_args).get("read_only" if work_mode == "text" else work_mode)
         if args is None:
             raise ValueError(f"{self.id} does not support work mode {work_mode!r}")
         return args

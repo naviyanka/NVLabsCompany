@@ -40,13 +40,15 @@ the ledger.
 | Source | Tool | Class | Proof |
 | --- | --- | --- | --- |
 | Manager | `manager_delegate_task` | idempotent | intrinsic: one task attempt per manager and employee key (unique `(company, task, key)` on `task_attempts`) |
+| Manager | `manager_assign_work` | idempotent | ledger key: `AssignWork.idempotency_key`; the child task id derives from it, a repeat returns the same task and attempt, and the same key for another employee or title is `IDEMPOTENCY_KEY_REUSED` |
+| Manager | `manager_review_work` | idempotent | intrinsic: one conditional update decides the attempt, a repeat of the winning decision returns the stored result, and the one bounded retry has its own key (`review:<attempt>:retry`) |
 | Manager | `manager_request_hire` | idempotent | ledger key: `HireRequest.idempotency_key`; the hire id derives from it and a repeat returns the same request |
 | Manager | `manager_list_reports`, `manager_employee_status`, `manager_task_evidence`, `manager_rollup`, `manager_list_hiring_requests`, `manager_get_hiring_request` | read only | no effect |
 | CEO | `ceo_delegate_task_to_manager` | idempotent | intrinsic: same task attempt key as above |
 | CEO | `ceo_create_goal_or_work_order` | idempotent | ledger key: the goal or work order id derives from it; a title mismatch is `IDEMPOTENCY_KEY_REUSED` |
 | CEO | `ceo_request_hire` | idempotent | ledger key, as `manager_request_hire` |
 | CEO | `ceo_record_decision` | non-idempotent | appends a memory entry each time |
-| CEO | `ceo_get_organization_snapshot`, `ceo_list_managers`, `ceo_get_manager_status`, `ceo_list_pending_approvals`, `ceo_search_executive_memory`, `organization_get_snapshot` | read only | no effect |
+| CEO | `ceo_get_organization_snapshot`, `ceo_list_managers`, `ceo_get_manager_status`, `ceo_list_pending_approvals`, `ceo_search_executive_memory`, `ceo_get_work_status`, `organization_get_snapshot` | read only | no effect |
 | Node | `ai-chat`, `ai-sentiment`, `ai-summarize`, `ai-translate`, `db-redis-get`, `file-csv-parse`, `file-json-parse` | read only | no effect |
 | Node | `db-redis-set` | non-idempotent | a relative `ttl` is applied again by a retry, so a rerun could extend the key's life (see below); every `db-redis-set` call is non-idempotent, with or without a `ttl` |
 | Node | `db-sqlite-query`, `http-request`, `msg-discord-send`, `msg-slack-send`, `msg-telegram-send`, `msg-webhook-notify` | non-idempotent | arbitrary SQL, requests or messages |
@@ -177,15 +179,19 @@ therefore carries an immutable epoch, `(execution_id, attempt)`:
 - Reads are not fenced and never touch the epoch. Two racing recovery workers get one winner:
   `chat_turns.claim` hands out the attempt atomically.
 
-### PR #69 and new write tools
+### New write tools
 
-Any tool added after this change (including those in PR #69, which this PR does not touch)
-must, when it rebases, declare: its `EffectClass`, which `ManagerTool` already requires at
+The work-lifecycle tools (`manager_assign_work`, `manager_review_work`, `ceo_get_work_status`) are
+classified in the table above. Any tool added after this change must declare: its `EffectClass`, which `ManagerTool` already requires at
 construction; the bridge invocation argument if it is exposed over the HTTP bridge, which
 `bridge_input_schema` adds for every write and which
 `test_every_bridged_write_tool_requires_its_invocation_argument_and_no_read_does` enforces; and
 its downstream idempotency behavior, which the `TABLE` check in `test_tool_effect_idempotency`
 enforces. A write tool that does none of these fails those tests.
+
+### Work attempts offer no tool
+
+A text work attempt runs as a chat turn with `work_mode="text"`, so its calls are ledgered like any chat turn, but it is offered no tool: `manager_tools.catalog` returns nothing for a context with a work mode (this covers the HTTP bridge, the governed loop and `MCPServer`), the governed vault write tool is not registered, and a CLI runs with its read-only flags. A code attempt (`write`, `read_only`) already ran under cataloged CLI flags without the bridge. A retry is a new attempt and a new turn, which is safe because no attempt can write through a tool.
 
 ## Recovery of a turn that already wrote
 

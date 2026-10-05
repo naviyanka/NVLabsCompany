@@ -1407,6 +1407,7 @@ async def _prepare(attempt: TaskAttempt, worker_id: str) -> tuple[Any, Any, Any]
                         agent,
                         build_text_prompt(attempt, task, spec, failed),
                         idempotency_key=f"attempt:{attempt.id}",
+                        work_mode="text",
                     )
                 turn_id = enqueued.turn.id
             if not await _update_held(attempt, worker_id, chat_turn_id=turn_id, status="running"):

@@ -1112,7 +1112,12 @@ async def _call_llm(
         # vault-grant, and writer path as every other governed tool. The
         # designated CEO gets none: its authority is only the MCP CEO tools,
         # so free-form <tool_call> text from a CEO turn executes nothing.
-        if hasattr(adapter, "register_tool") and not agent.is_ceo:
+        # A task attempt (work_mode set) is offered no tool at all.
+        if (
+            hasattr(adapter, "register_tool")
+            and not agent.is_ceo
+            and execution_context.work_mode is None
+        ):
             from nexus.database import tenant_session, tenant_session_factory
             from nexus.tools import (
                 OBSIDIAN_NOTE_REPLACE_NAME,

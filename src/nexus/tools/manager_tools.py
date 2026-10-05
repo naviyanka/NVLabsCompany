@@ -181,6 +181,7 @@ MANAGER_TOOLS: dict[str, ManagerTool] = {
         (),
         _assign_work,
         AssignWork,
+        effect=EffectClass.IDEMPOTENT_WRITE,
     ),
     "manager_review_work": ManagerTool(
         "Verify or reject a deliverable submitted by a direct report. Rejection needs a "
@@ -189,6 +190,7 @@ MANAGER_TOOLS: dict[str, ManagerTool] = {
         (),
         _review_work,
         ReviewWork,
+        effect=EffectClass.IDEMPOTENT_WRITE,
     ),
     "manager_task_evidence": ManagerTool(
         "Attempts, results and evidence of a task held by one of your direct reports.",
@@ -368,7 +370,8 @@ async def catalog(ctx: Any) -> dict[str, ManagerTool]:
     from nexus.tools.access import DENIED, check_tool_access, names_tool
     from nexus.tools.ceo_tools import CEO_TOOLS
 
-    if ctx.agent_id is None:
+    # A task attempt is work, not management: it is offered no governed tool.
+    if ctx.agent_id is None or ctx.work_mode is not None:
         return {}
     async with tenant_session(ctx.company_id) as db:
         if await ceo_service.is_ceo(db, ctx.company_id, ctx.agent_id):
