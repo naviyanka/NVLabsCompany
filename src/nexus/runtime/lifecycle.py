@@ -9,7 +9,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from nexus.models.agent import Agent
 from nexus.runtime.adapter import AgentAdapter, AgentSession, AgentStatus
-from nexus.tools.context import ExecutionContext
 
 
 # Adapter config keys that pick a directory or git behaviour on the server.
@@ -166,6 +165,10 @@ class AgentLifecycleManager:
         }
         session = await self._adapter.create_session(agent_id=agent_id, config=config)
         # Lifecycle work is autonomous: the agent acts as itself, in its own company.
+        # Deferred: nexus.tools imports nexus.obsidian, which imports nexus.models, which imports
+        # this package, so a module-level import breaks `import nexus.obsidian` on its own.
+        from nexus.tools.context import ExecutionContext
+
         session.context = ExecutionContext.for_agent(agent, source="lifecycle")
         self._sessions[agent_id] = session
 
