@@ -38,9 +38,11 @@ def finish(reason, usage=None):
 class Server:
     def __init__(self):
         self.calls = []
+        self.slots = []
 
-    async def call_tool(self, name, arguments):
+    async def call_tool(self, name, arguments, *, slot=None):
         self.calls.append((name, arguments))
+        self.slots.append(slot)
         return {"content": [{"text": "ok"}], "isError": False}
 
 

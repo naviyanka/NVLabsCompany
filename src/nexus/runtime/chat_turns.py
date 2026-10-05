@@ -950,6 +950,10 @@ class ChatTurnWorker:
 
         company_id = turn.company_id
         execution: dict[str, Any] = {"execution_id": turn.execution_id}
+        # The epoch of this execution, copied now from the row this worker claimed. It is never
+        # re-read: a worker that outlives its lease keeps the epoch it started with, so a
+        # recovery that advanced the turn makes every write it attempts stale.
+        epoch = (turn.execution_id, turn.attempt_count)
         partial: list[str] = []
         prompt = ""
         try:
@@ -1004,6 +1008,7 @@ class ChatTurnWorker:
                     execution=execution,
                     on_chunk=lambda text: (partial.append(text), self._emit(turn.id, text)),
                     turn_id=turn.id,
+                    turn_epoch=epoch,
                 )
             else:
                 call = chat._call_llm(
@@ -1015,6 +1020,7 @@ class ChatTurnWorker:
                     context=context,
                     execution=execution,
                     turn_id=turn.id,
+                    turn_epoch=epoch,
                 )
             outcome, value = await self._supervise(turn, asyncio.ensure_future(call))
         except HTTPException as exc:

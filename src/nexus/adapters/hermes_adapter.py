@@ -25,6 +25,7 @@ from typing import Any
 from nexus.adapters.base import BaseAdapter
 from nexus.governance.ssrf_protection import guard_url as _guard_url
 from nexus.runtime.adapter import AgentSession, TaskResult
+from nexus.tools.effects import ToolSlot
 
 logger = logging.getLogger(__name__)
 
@@ -94,13 +95,21 @@ class HermesAdapter(BaseAdapter):
         if config.get("ollama_host"):
             _guard_url(config["ollama_host"], "ollama_host")
 
-    def register_tool(self, name: str, handler: Any, schema: dict[str, Any] | None = None) -> None:
+    def register_tool(
+        self,
+        name: str,
+        handler: Any,
+        schema: dict[str, Any] | None = None,
+        effect: str | None = None,
+    ) -> None:
         """Register a tool that Hermes can call.
 
         Args:
             name: Tool name (matches what Hermes emits in <tool_call>).
             handler: Async callable to execute when tool is invoked.
             schema: Optional JSON schema for the tool's parameters.
+            effect: The tool's declared ``EffectClass``. Left out, the tool runs as a
+                non-idempotent write: an interrupted call is never rerun automatically.
 
         Raises:
             ValueError: For a governed control-plane tool name.
@@ -110,6 +119,7 @@ class HermesAdapter(BaseAdapter):
         self._tool_registry[name] = {
             "handler": handler,
             "schema": schema,
+            "effect": effect,
         }
 
     async def _do_create_session(self, session: AgentSession) -> None:
@@ -250,12 +260,18 @@ class HermesAdapter(BaseAdapter):
             # Execute tool calls
             messages.append({"role": "assistant", "content": response_text})
 
-            for call in tool_calls:
+            for position, call in enumerate(tool_calls):
                 tool_name = call.get("name", "")
                 tool_args = call.get("arguments", {})
 
+                # The call's durable position: model round, then the model's own order within
+                # the round. A recovered turn that reaches the same round replays the same slot.
                 tool_result = await self._execute_tool(
-                    tool_name, tool_args, agent_id=session.agent_id, context=session.context
+                    tool_name,
+                    tool_args,
+                    agent_id=session.agent_id,
+                    context=session.context,
+                    slot=ToolSlot(_round, position),
                 )
                 tool_results.append({
                     "tool": tool_name,
@@ -561,6 +577,7 @@ class HermesAdapter(BaseAdapter):
         arguments: dict[str, Any],
         agent_id: uuid.UUID | None = None,
         context: Any = None,
+        slot: ToolSlot | None = None,
     ) -> dict[str, Any]:
         """Execute a registered tool by name.
 
@@ -570,6 +587,8 @@ class HermesAdapter(BaseAdapter):
             agent_id: The session's agent, used only when there is no context.
             context: The session's server-built
                 :class:`~nexus.tools.context.ExecutionContext`.
+            slot: The call's model round and position in that round, its durable ledger
+                identity. A write inside a turn without one is refused.
 
         Returns:
             Tool execution result dict.
@@ -595,7 +614,14 @@ class HermesAdapter(BaseAdapter):
 
         try:
             return await guarded_call(
-                context, name, arguments, run, source="hermes", agent_id=agent_id
+                context,
+                name,
+                arguments,
+                run,
+                source="hermes",
+                agent_id=agent_id,
+                effect=self._tool_registry[name].get("effect"),
+                slot=slot,
             )
         except Exception as e:
             logger.error(f"Tool '{name}' execution failed: {e}")

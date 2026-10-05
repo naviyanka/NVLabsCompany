@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from types import SimpleNamespace
 from typing import Any
 
@@ -26,6 +26,15 @@ from pydantic import BaseModel, ValidationError
 from nexus.runtime.task_attempts import attempt_view
 from nexus.services import hiring_service, org_snapshot
 from nexus.services import manager_service as ms
+from nexus.tools.effects import (
+    BRIDGE_KEY_HINT,
+    BRIDGE_KEY_PATTERN,
+    EffectClass,
+    EffectNotStarted,
+    bridge_key_field,
+    downstream_key,
+    resolve_effect,
+)
 
 
 @dataclass(frozen=True)
@@ -36,6 +45,9 @@ class ManagerTool:
     run: Callable[[Any, uuid.UUID, uuid.UUID, Any, str], Awaitable[Any]]
     # Arguments other than UUIDs: validated by this model, which forbids extras.
     model: type[BaseModel] | None = None
+    # Required, with no default: a tool cannot be defined without saying whether a rerun of
+    # an interrupted call is safe (see nexus.tools.effects).
+    effect: EffectClass = field(kw_only=True)
 
 
 async def _list_reports(db, company_id, manager_id, args, actor):
@@ -102,7 +114,8 @@ async def _org_snapshot(db, company_id, manager_id, args, actor):
 
 MANAGER_TOOLS: dict[str, ManagerTool] = {
     "manager_list_reports": ManagerTool(
-        "List your direct reports.", "read", (), _list_reports
+        "List your direct reports.", "read", (), _list_reports,
+        effect=EffectClass.READ_ONLY,
     ),
     "manager_employee_status": ManagerTool(
         "Current state, active task, progress, evidence, last success and latest failure "
@@ -110,24 +123,28 @@ MANAGER_TOOLS: dict[str, ManagerTool] = {
         "read",
         ("employee_id",),
         _employee_status,
+        effect=EffectClass.READ_ONLY,
     ),
     "manager_delegate_task": ManagerTool(
         "Delegate an existing task to one of your direct reports. Idempotent.",
         "write",
         ("task_id", "employee_id"),
         _delegate,
+        effect=EffectClass.IDEMPOTENT_WRITE,
     ),
     "manager_task_evidence": ManagerTool(
         "Attempts, results and evidence of a task held by one of your direct reports.",
         "read",
         ("task_id",),
         _evidence,
+        effect=EffectClass.READ_ONLY,
     ),
     "manager_rollup": ManagerTool(
         "Your team roll-up: active, queued, completed, failed/blocked and stale work.",
         "read",
         (),
         _rollup,
+        effect=EffectClass.READ_ONLY,
     ),
     "manager_request_hire": ManagerTool(
         "Request a new direct report. The company's hiring policy decides: auto-approved "
@@ -137,18 +154,21 @@ MANAGER_TOOLS: dict[str, ManagerTool] = {
         (),
         _request_hire,
         hiring_service.HireRequest,
+        effect=EffectClass.IDEMPOTENT_WRITE,
     ),
     "manager_list_hiring_requests": ManagerTool(
         "Your hiring requests: status, policy decision, costs and the hired employee.",
         "read",
         (),
         _list_hires,
+        effect=EffectClass.READ_ONLY,
     ),
     "manager_get_hiring_request": ManagerTool(
         "One of your hiring requests.",
         "read",
         ("request_id",),
         _get_hire,
+        effect=EffectClass.READ_ONLY,
     ),
     org_snapshot.TOOL: ManagerTool(
         "The latest precomputed organization snapshot and its freshness: your team's "
@@ -157,6 +177,7 @@ MANAGER_TOOLS: dict[str, ManagerTool] = {
         "read",
         (),
         _org_snapshot,
+        effect=EffectClass.READ_ONLY,
     ),
 }
 
@@ -173,11 +194,62 @@ def input_schema(tool: ManagerTool) -> dict[str, Any]:
     }
 
 
+def is_write(tool: ManagerTool) -> bool:
+    """Whether the tool's declared effect class is anything but read-only (undeclared = write)."""
+    return resolve_effect(tool.effect) is not EffectClass.READ_ONLY
+
+
+def key_field(tool: ManagerTool) -> str:
+    """The argument a bridge write to ``tool`` takes its identity from."""
+    return bridge_key_field(tool.model.model_fields if tool.model is not None else ())
+
+
+def bridge_input_schema(tool: ManagerTool) -> dict[str, Any]:
+    """The ``inputSchema`` the HTTP bridge advertises: a write also requires its identity.
+
+    A client that cannot attach a per-call header (stock Claude Code) still sends the arguments
+    the schema declares, so the identity is declared here as a required argument. A read-only
+    tool is unchanged.
+    """
+    schema = input_schema(tool)
+    if not is_write(tool):
+        return schema
+    field = key_field(tool)
+    properties = dict(schema.get("properties", {}))
+    properties[field] = {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128,
+        "pattern": BRIDGE_KEY_PATTERN.pattern,
+        "description": BRIDGE_KEY_HINT,
+    }
+    required = list(schema.get("required", []))
+    if field not in required:
+        required.append(field)
+    return {**schema, "properties": properties, "required": required}
+
+
+def bridge_description(tool: ManagerTool) -> str:
+    """The tool description with the instruction to generate a key per intentional call."""
+    if not is_write(tool):
+        return tool.description
+    return (
+        f"{tool.description} Set `{key_field(tool)}` to a NEW unique value on every "
+        "intentional call; reuse a value only to retry a call whose outcome you did not see."
+    )
+
+
 async def call(ctx: Any, name: str, arguments: dict[str, Any]) -> Any:
     """Run manager or CEO tool ``name`` as the context's agent, in its company.
 
+    A tool that carries an ``idempotency_key`` has it replaced, inside a ledgered call, by the
+    call's ledger key. The model invents a fresh key on every rerun, so trusting its own would
+    let a recovered turn file a second hire or work order; the ledger key is the same for the
+    same logical call, so the service's own dedupe collapses the rerun.
+
     Raises:
-        ValueError: No agent identity, or a missing or malformed argument.
+        EffectNotStarted: No agent identity, or a missing or malformed argument. A ValueError,
+            and proven pre-effect: nothing was dispatched.
         fastapi.HTTPException: The service refused (not found, not a report).
     """
     from nexus.database import tenant_session
@@ -185,22 +257,26 @@ async def call(ctx: Any, name: str, arguments: dict[str, Any]) -> Any:
     from nexus.tools.ceo_tools import run as run_ceo_tool
 
     if ctx.agent_id is None:
-        raise ValueError("manager tools need an agent identity")
+        raise EffectNotStarted("manager tools need an agent identity")
     tool = MANAGER_TOOLS.get(name) or CEO_TOOLS[name]
     args: Any
     if tool.model is not None:
         try:
             args = tool.model.model_validate(arguments)
         except ValidationError as exc:
-            raise ValueError(f"invalid arguments: {exc.errors(include_url=False)}") from exc
+            raise EffectNotStarted(f"invalid arguments: {exc.errors(include_url=False)}") from exc
+        if hasattr(args, "idempotency_key"):
+            args = args.model_copy(
+                update={"idempotency_key": downstream_key(args.idempotency_key)}
+            )
     else:
         extra = set(arguments) - set(tool.params)
         if extra:
-            raise ValueError(f"unexpected arguments: {sorted(extra)}")
+            raise EffectNotStarted(f"unexpected arguments: {sorted(extra)}")
         try:
             args = {p: uuid.UUID(str(arguments[p])) for p in tool.params}
         except (KeyError, ValueError) as exc:
-            raise ValueError(f"expected UUID arguments {list(tool.params)}") from exc
+            raise EffectNotStarted(f"expected UUID arguments {list(tool.params)}") from exc
     if name not in MANAGER_TOOLS:
         return await run_ceo_tool(ctx, name, args)
     async with tenant_session(ctx.company_id) as db:

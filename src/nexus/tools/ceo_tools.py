@@ -28,6 +28,7 @@ from nexus.models.task import Goal, Task
 from nexus.runtime.task_attempts import WorkSpec, attempt_view
 from nexus.services import ceo_service, hiring_service, org_snapshot
 from nexus.services import manager_service as ms
+from nexus.tools.effects import EffectClass
 from nexus.tools.manager_tools import ManagerTool
 
 _NAMESPACE = uuid.UUID("5d0b8f3e-6c1a-4f53-9a57-3e1f0c2b7a90")
@@ -191,19 +192,23 @@ CEO_TOOLS: dict[str, ManagerTool] = {
         "The latest precomputed organization snapshot, its version, hash and freshness. "
         "Takes no arguments: call it with an empty object.",
         "read", (), _snapshot,
+        effect=EffectClass.READ_ONLY,
     ),
     "ceo_list_managers": ManagerTool(
         "Managers with their direct reports and work states, from the latest snapshot.",
         "read", (), _managers,
+        effect=EffectClass.READ_ONLY,
     ),
     "ceo_get_manager_status": ManagerTool(
         "One manager's team projection from the latest snapshot.",
         "read", (), _manager_status, ManagerRef,
+        effect=EffectClass.READ_ONLY,
     ),
     "ceo_list_pending_approvals": ManagerTool(
         "Approvals awaiting a human, from the latest snapshot. Read-only: the CEO "
         "cannot approve anything.",
         "read", (), _approvals,
+        effect=EffectClass.READ_ONLY,
     ),
     "ceo_search_executive_memory": ManagerTool(
         "Search active executive memory (directives, decisions, commitments, delegations, "
@@ -211,25 +216,30 @@ CEO_TOOLS: dict[str, ManagerTool] = {
         "archived, superseded and rejected entries are never returned. Memory is not "
         "status: the snapshot is.",
         "read", (), _search, SearchMemory,
+        effect=EffectClass.READ_ONLY,
     ),
     "ceo_delegate_task_to_manager": ManagerTool(
         "Delegate an existing work task to a manager who reports to you. Queues a task "
         "attempt; idempotent.",
         "write", (), _delegate, Delegate,
+        effect=EffectClass.IDEMPOTENT_WRITE,
     ),
     "ceo_create_goal_or_work_order": ManagerTool(
         "Create a company goal or a work order (task). Idempotent per idempotency_key.",
         "write", (), _create, GoalOrWorkOrder,
+        effect=EffectClass.IDEMPOTENT_WRITE,
     ),
     "ceo_record_decision": ManagerTool(
         "Record a decision, commitment, risk or outcome in executive memory. May supersede "
         "or resolve an earlier entry.",
         "write", (), _decide, Decision,
+        effect=EffectClass.NON_IDEMPOTENT_WRITE,
     ),
     "ceo_request_hire": ManagerTool(
         "Request a new direct report through the hiring workflow. The hiring policy and "
         "a human decide; you cannot approve it.",
         "write", (), _hire, hiring_service.HireRequest,
+        effect=EffectClass.IDEMPOTENT_WRITE,
     ),
 }
 WRITE_TOOLS = frozenset(n for n, t in CEO_TOOLS.items() if t.risk != "read")

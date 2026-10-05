@@ -274,6 +274,7 @@ async def _loop(
     on_tool_verified: Callable[[], None] | None,
 ) -> LoopResult:
     from nexus.tools import manager_bridge
+    from nexus.tools.effects import ToolSlot
 
     code = limits.code
     ctx, server = prepared.ctx, prepared.server
@@ -360,7 +361,7 @@ async def _loop(
         seen.update(ids)
         for call in calls:
             emit(Event(TOOL_REQUESTED, round=round_no, tool_call_id=call["id"], name=call["name"]))
-        for call in calls:
+        for position, call in enumerate(calls):
             check_cancel()
             # The turn must still be this execution's, live and uncancelled.
             try:
@@ -368,7 +369,11 @@ async def _loop(
             except manager_bridge.BridgeDeniedError:
                 raise ProviderError(f"{code}_CANCELLED: turn ended") from None
             emit(Event(TOOL_RUNNING, round=round_no, tool_call_id=call["id"], name=call["name"]))
-            result = await server.call_tool(call["name"], call["arguments"])
+            # The ledger identity is the call's place in the turn (this round, this position
+            # in the provider's order), never the provider's call id, which a rerun regenerates.
+            result = await server.call_tool(
+                call["name"], call["arguments"], slot=ToolSlot(round_no, position)
+            )
             text_out = "".join(p.get("text", "") for p in result["content"])
             if on_tool_verified:
                 on_tool_verified()

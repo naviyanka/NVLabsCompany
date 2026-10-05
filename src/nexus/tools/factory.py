@@ -9,6 +9,7 @@ a function instead of remembering six constructor arguments.
 
 from __future__ import annotations
 
+import asyncio
 import functools
 import logging
 import time
@@ -18,6 +19,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from nexus.guardrails import GuardrailChain, PolicyGuardrail, StructuralGuardrail
+from nexus.tools import effects
 from nexus.tools.audit import ToolAuditStore
 from nexus.tools.autonomy import AutonomyGate, db_policy_loader
 from nexus.tools.executor import RateLimitConfig, ToolExecutor
@@ -101,6 +103,7 @@ async def guard_tool_call(
     context: dict[str, Any] | None = None,
     agent_id: uuid.UUID | None = None,
     company_id: uuid.UUID | None = None,
+    invocation_key: str | None = None,
 ) -> dict[str, Any] | None:
     """Screen one tool call, for dispatch paths that cannot use a ToolExecutor.
 
@@ -119,6 +122,8 @@ async def guard_tool_call(
         company_id: The company the call was authorized for. The autonomy gate
             then runs under that tenant's RLS context, the same one
             :func:`nexus.tools.access.check_tool_access` used.
+        invocation_key: The ledger key of a ledgered write. The autonomy gate sends its
+            notification at most once per key, so a replay does not notify again.
 
     Returns:
         None when the call may proceed, or an error dict shaped like an ordinary
@@ -156,6 +161,7 @@ async def guard_tool_call(
                 tool_name=tool_name,
                 arguments=arguments,
                 company_id=company_id,
+                notice_key=invocation_key,
             )
     except Exception as exc:  # noqa: BLE001
         logger.warning("Autonomy check errored for tool %s, allowing: %s", tool_name, exc)
@@ -182,6 +188,8 @@ async def guarded_call(
     connection_id: uuid.UUID | None = None,
     endpoint_url: str | None = None,
     default_risk: str | None = None,
+    effect: str | None = None,
+    slot: effects.ToolSlot | None = None,
 ) -> dict[str, Any]:
     """Authorize, screen, run and record one tool call.
 
@@ -211,15 +219,35 @@ async def guarded_call(
         connection_id: The ``ToolConnection`` being called, when known.
         endpoint_url: MCP server URL, for calls into a ToolConnection.
         default_risk: Risk level of a tool with no catalog entry.
+        effect: The tool's declared :class:`~nexus.tools.effects.EffectClass`. ``None`` is
+            treated as a non-idempotent write: a missing declaration never makes a call
+            repeatable. Only a call inside a chat turn (``ctx.turn_id``) is ledgered.
+        slot: Where the call sits in the turn (model round and position). Required for a
+            write inside a turn: the ledger identity is the slot, and a write with none is
+            refused rather than run without a durable identity.
 
     Returns:
-        ``{"status": "success", "result": ...}`` when the call ran, or a
-        refusal dict with ``error`` and ``status`` (``denied``,
-        ``guardrail_blocked``, ``autonomy_blocked``) when it did not.
+        ``{"status": "success", "result": ...}`` when the call ran (or, with
+        ``"replayed": True``, when an earlier run of the same logical call in this turn is
+        returned instead of running it again), or a refusal dict with ``error`` and
+        ``status`` (``denied``, ``guardrail_blocked``, ``autonomy_blocked``,
+        ``effect_in_progress``, ``effect_recovery_required``, ``stale_execution``,
+        ``effect_ledger_unavailable``)
+        when it did not. A call that ran but whose result cannot be retained safely returns
+        ``effect_result_unavailable``; its effect is recorded as ambiguous, never rerun
+        automatically unless the tool is idempotent.
     """
     from nexus.tools.access import DENIED, AccessDecision, check_tool_access
 
     company_id = ctx.company_id if ctx is not None else None
+    turn_id = getattr(ctx, "turn_id", None)
+    # The slot's durable identity is known before the tool runs; it also names the temporary
+    # grant use this call may pay for, so a replay of the slot reads the grant as live.
+    slot_key = (
+        effects.invocation_key(company_id, turn_id, slot)
+        if company_id is not None and turn_id is not None and slot is not None
+        else None
+    )
     try:
         async with _access_session(company_id) as db:
             decision = await check_tool_access(
@@ -230,6 +258,7 @@ async def guarded_call(
                 connection_id=connection_id,
                 endpoint_url=endpoint_url,
                 default_risk=default_risk,
+                grant_key=slot_key,
             )
     except Exception as exc:  # noqa: BLE001
         # An error is a soft problem: audit mode keeps the pre-ws05
@@ -247,55 +276,188 @@ async def guarded_call(
 
     started = time.monotonic()
     refusal: dict[str, Any] | None = None
+    # Write-capable calls inside a chat turn are reserved durably before they run, so a
+    # recovered turn cannot repeat the effect (see nexus.tools.effects).
+    held = None
+    effect_class = effects.resolve_effect(effect)
+    ledgered = bool(
+        effect_class is not effects.EffectClass.READ_ONLY and turn_id and decision.company_id
+    )
+    ledger_key: str | None = None
     if not decision.allowed:
         logger.warning("Access denied for tool %s: %s", tool_name, decision.reason)
         refusal = {"error": f"Denied by access policy: {decision.reason}", "status": "denied"}
+    elif ledgered and slot is None:
+        # Without a durable position there is no identity that survives a rerun, so a write
+        # must not pretend to have recovery. Refused before any guard or notice side effect.
+        logger.error("Write tool %s called inside a turn with no durable slot", tool_name)
+        refusal = {
+            "error": "Tool call has no durable position in the turn, so the write was not run",
+            "status": "effect_ledger_unavailable",
+        }
     else:
+        stale = ""
+        if ledgered and slot is not None:
+            ledger_key = effects.invocation_key(decision.company_id, turn_id, slot)
+            # Fence first: an execution a recovery replaced must not reach the autonomy gate
+            # (which can create an approval or send a notice) or the grant. The claim repeats
+            # the check under a lock; this one keeps the earlier side effects from happening.
+            stale = await _stale_execution(ctx, decision.company_id, turn_id)
+        if stale:
+            refusal = {"error": f"Tool call not run: {stale}", "status": "stale_execution"}
         # Only an agent that passed the access check reaches the autonomy
         # gate, and it runs under the company the call was authorized for.
-        refusal = await guard_tool_call(
-            tool_name,
-            arguments,
-            agent_id=decision.agent_id,
-            company_id=decision.company_id,
-        )
-        if refusal is None and decision.temp_grant_id is not None:
-            refusal = await _spend_temp_grant(decision, ctx, tool_name, arguments)
+        if not stale:
+            refusal = await guard_tool_call(
+                tool_name,
+                arguments,
+                agent_id=decision.agent_id,
+                company_id=decision.company_id,
+                invocation_key=ledger_key,
+            )
+        if refusal is None and decision.temp_grant_id is not None and not (
+            ledgered and slot is not None
+        ):
+            # A ledgered call spends inside its claim, once it is known to run. Any other call
+            # pays here, under its slot key, or a fresh key when it has no slot.
+            refusal = await _spend_temp_grant(decision, slot_key or uuid.uuid4().hex)
 
     record = functools.partial(_record_invocation, decision, ctx, tool_name, arguments, source)
     if refusal is not None:
         await record(refusal["status"], started, error=refusal["error"])
         return refusal
 
+    if ledgered and slot is not None:
+        try:
+            held = await effects.claim(
+                decision.company_id,
+                turn_id,
+                slot,
+                tool_name,
+                effect_class,
+                arguments,
+                grant_id=decision.temp_grant_id,
+                epoch=_epoch_of(ctx),
+            )
+        except Exception as exc:  # noqa: BLE001 - no ledger, no write: fail closed
+            logger.error("Tool effect ledger unavailable for %s: %s", tool_name, exc)
+            refusal = {
+                "error": "Tool effect could not be recorded, so the call was not run",
+                "status": "effect_ledger_unavailable",
+            }
+            await record(refusal["status"], started, error=refusal["error"])
+            return refusal
+        if held.action == "replay":
+            try:
+                replayed = effects.decode_result(held.stored or {})
+            except Exception as exc:  # noqa: BLE001 - done once, but cannot be returned
+                logger.error("Stored effect for %s cannot be replayed: %s", tool_name, exc)
+                refusal = {
+                    "error": "Tool already ran in this turn and its result is unavailable",
+                    "status": "effect_ledger_unavailable",
+                }
+                await record(refusal["status"], started, error=refusal["error"])
+                return refusal
+            await record("replayed", started)
+            return {"status": "success", "result": replayed, "replayed": True}
+        if held.action == "denied":
+            refusal = {
+                "error": "Denied by access policy: temporary access is no longer valid",
+                "status": "denied",
+            }
+            await record(refusal["status"], started, error=refusal["error"])
+            return refusal
+        if held.action != "run":
+            refusal = {
+                "error": f"Tool call not run: {held.reason}",
+                "status": {
+                    "busy": "effect_in_progress",
+                    "stale": "stale_execution",
+                }.get(held.action, "effect_recovery_required"),
+            }
+            await record(refusal["status"], started, error=refusal["error"])
+            return refusal
+
     try:
-        result = await run()
-    except Exception as exc:
-        await record("error", started, error=str(exc))
+        with effects.bind_invocation(held.key if held is not None else None):
+            result = await run()
+    except BaseException as exc:
+        if held is not None:
+            # Cancellation included: the effect may have happened. Shielded so a second
+            # cancel cannot leave the row looking like a live holder.
+            await asyncio.shield(
+                # By type only: an exception message can carry request data or credentials.
+                effects.settle(held, effects.outcome_of_exception(exc), error=type(exc).__name__)
+            )
+        if isinstance(exc, Exception):
+            await record("error", started, error=str(exc))
         raise
+    if held is not None:
+        status, error = effects.outcome_of(result, tool_name)
+        if status == "succeeded":
+            # The replayable form is made once, here, and handed to this caller too, so the
+            # first run and every replay see exactly the same bounded, scrubbed result.
+            try:
+                stored = effects.seal_result(result)
+            except Exception as exc:  # noqa: BLE001 - the effect happened; never rerun it blind
+                reason = type(exc).__name__
+                logger.error("Result of %s cannot be retained: %s", tool_name, reason)
+                await asyncio.shield(
+                    effects.settle(held, "ambiguous", error=f"result not retainable: {reason}")
+                )
+                refusal = {
+                    "error": (
+                        "Tool ran but its result could not be retained safely; "
+                        "the outcome needs review"
+                    ),
+                    "status": "effect_result_unavailable",
+                }
+                await record("error", started, error=refusal["error"])
+                return refusal
+            await asyncio.shield(effects.settle(held, "succeeded", stored=stored))
+            result = effects.decode_result(stored)
+        else:
+            await asyncio.shield(effects.settle(held, status, error=error))
     # An MCP result reports a tool-side failure in-band rather than raising.
     failed = bool(getattr(result, "is_error", False))
     await record("error" if failed else "success", started)
     return {"status": "success", "result": result}
 
 
-async def _spend_temp_grant(
-    decision: Any, ctx: Any, tool_name: str, arguments: Any
-) -> dict[str, Any] | None:
-    """Use up one use of the temporary allow this call relies on, or refuse the call.
+def _epoch_of(ctx: Any) -> effects.Epoch | None:
+    """The execution epoch the server put on the context, or None when it has none."""
+    attempt = getattr(ctx, "turn_attempt", None)
+    if not isinstance(attempt, int) or isinstance(attempt, bool) or attempt < 1:
+        return None
+    return effects.Epoch(getattr(ctx, "turn_execution", None), attempt)
+
+
+async def _stale_execution(ctx: Any, company_id: uuid.UUID, turn_id: uuid.UUID) -> str:
+    """Why this call's execution of the turn is no longer the current one ("" if it is).
+
+    A database error is reported as stale too: with no way to tell, nothing is written.
+    """
+    try:
+        return await effects.is_current_execution(company_id, turn_id, _epoch_of(ctx))
+    except Exception as exc:  # noqa: BLE001 - fail closed
+        logger.error("Execution epoch check failed: %s", exc)
+        return "the turn's execution could not be verified, so the write was not run"
+
+
+async def _spend_temp_grant(decision: Any, key: str) -> dict[str, Any] | None:
+    """Use up one use of the temporary allow a call with no ledger claim relies on.
 
     One conditional UPDATE, so a revoke, an expiry or a parallel call that got there first
     leaves this call denied. The grant is spent just before the tool runs, not at check time,
-    and a later tool failure does not refund it. A replay of the same turn, tool and arguments
-    is not charged twice.
+    and a later tool failure does not refund it. ``key`` is the call's slot key, so a replay of
+    the same slot is not charged twice; a call with no slot gets a fresh key and is always
+    charged. Ledgered calls spend inside :func:`nexus.tools.effects.claim` instead.
     """
     from nexus.tools import governance_overlay
 
     async with _access_session(decision.company_id) as db:
         spent = await governance_overlay.consume_temp_grant(
-            db,
-            decision.company_id,
-            decision.temp_grant_id,
-            governance_overlay.invocation_key(getattr(ctx, "turn_id", None), tool_name, arguments),
+            db, decision.company_id, decision.temp_grant_id, key
         )
         await db.commit()
     if spent:
@@ -423,6 +585,7 @@ def build_autonomy_gate(db: Any, default_level: int = 1) -> AutonomyGate:
         approvals=ApprovalService(db),
         notifier=_log_notifier,
         default_level=default_level,
+        notice_once=effects.claim_notice,
     )
 
 

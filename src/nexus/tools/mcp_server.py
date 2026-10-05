@@ -52,7 +52,17 @@ from nexus.tools import manager_tools
 from nexus.tools.access import BUILTIN_ENDPOINT, DENIED, check_tool_access
 from nexus.tools.ceo_tools import CEO_TOOLS
 from nexus.tools.context import INBOUND_MCP, ExecutionContext
-from nexus.tools.factory import _access_session, guarded_call
+from nexus.tools.effects import (
+    BridgeSlotError,
+    EffectClass,
+    EffectKeyError,
+    EffectNotStarted,
+    ToolSlot,
+    reserve_bridge_slot,
+    resolve_bridge_identity,
+    resolve_effect,
+)
+from nexus.tools.factory import _access_session, _stale_execution, guarded_call
 
 logger = logging.getLogger(__name__)
 
@@ -88,6 +98,29 @@ _WRITE_CATEGORIES = frozenset(
 def risk_level_for(node: NodeDefinition) -> str:
     """Classify a node as ``read`` or ``write`` for policy evaluation."""
     return "write" if node.category in _WRITE_CATEGORIES else "read"
+
+
+# What a rerun of an interrupted call does, declared per exposed node (never derived from the
+# name or the category above). A node missing here runs as a non-idempotent write, and a test
+# fails when an executable node has no entry.
+NODE_EFFECTS: dict[str, EffectClass] = {
+    "ai-chat": EffectClass.READ_ONLY,
+    "ai-sentiment": EffectClass.READ_ONLY,
+    "ai-summarize": EffectClass.READ_ONLY,
+    "ai-translate": EffectClass.READ_ONLY,
+    "db-redis-get": EffectClass.READ_ONLY,
+    # Not idempotent: with a relative ``ttl`` a retry restarts the clock and so extends the key's
+    # life, and a SET with no ttl is not provably the same state if another writer ran between.
+    "db-redis-set": EffectClass.NON_IDEMPOTENT_WRITE,
+    "db-sqlite-query": EffectClass.NON_IDEMPOTENT_WRITE,
+    "file-csv-parse": EffectClass.READ_ONLY,
+    "file-json-parse": EffectClass.READ_ONLY,
+    "http-request": EffectClass.NON_IDEMPOTENT_WRITE,
+    "msg-discord-send": EffectClass.NON_IDEMPOTENT_WRITE,
+    "msg-slack-send": EffectClass.NON_IDEMPOTENT_WRITE,
+    "msg-telegram-send": EffectClass.NON_IDEMPOTENT_WRITE,
+    "msg-webhook-notify": EffectClass.NON_IDEMPOTENT_WRITE,
+}
 
 
 def exposed_nodes() -> dict[str, NodeDefinition]:
@@ -132,7 +165,14 @@ def input_schema_for(node: NodeDefinition) -> dict[str, Any]:
 class MCPServer:
     """Serves the exposed node tools over one stdio session."""
 
-    def __init__(self, ctx: ExecutionContext, *, node_tools: bool = True) -> None:
+    def __init__(
+        self,
+        ctx: ExecutionContext,
+        *,
+        node_tools: bool = True,
+        idempotency_key: str | None = None,
+        bridge: bool = False,
+    ) -> None:
         """Bind the server to one authenticated caller.
 
         Args:
@@ -140,9 +180,58 @@ class MCPServer:
                 every call to its company, principal, role and agent.
             node_tools: False serves only the manager tools (the manager
                 bridge, :mod:`nexus.tools.manager_bridge`).
+            idempotency_key: The bridge request's ``Idempotency-Key``. A write that arrives
+                without a caller-supplied slot is identified by it (see ``_slot_for``).
+            bridge: True for the HTTP bridge. Its manager and CEO write tools then declare
+                their identity as a required argument (for a client that cannot set a per-call
+                header), which is read, checked against the header and removed before dispatch.
         """
         self._ctx = ctx
         self._nodes = exposed_nodes() if node_tools else {}
+        self._idempotency_key = idempotency_key
+        self._bridge = bridge
+
+    async def _slot_for(
+        self,
+        effect: Any,
+        slot: ToolSlot | None,
+        name: str,
+        arguments: dict[str, Any],
+        field: str | None = None,
+    ) -> tuple[ToolSlot | None, dict[str, Any]]:
+        """The caller's slot, or the durable slot this request's identity maps to, and the
+        business arguments to dispatch.
+
+        A read-only call needs none. A write with no slot is identified through a durable
+        record (:func:`reserve_bridge_slot`), never by this object: the bridge builds a new
+        server per request, so nothing held here survives a retry. The identity is the
+        ``Idempotency-Key`` header and, for a tool that declares ``field`` (bridge mode), that
+        argument; both must agree. The returned arguments have the bridge-only argument
+        removed. A call with no turn is not ledgered and gets none.
+
+        Raises:
+            BridgeSlotError: The write has no usable identity, the sources disagree, the
+                identity names another call, or this execution of the turn was replaced.
+        """
+        if (
+            slot is not None
+            or resolve_effect(effect) is EffectClass.READ_ONLY
+            or self._ctx.turn_id is None
+        ):
+            return slot, arguments
+        # A replaced execution reserves nothing, not even an ordinal (guarded_call refuses it
+        # again, under the ledger lock, before anything else happens).
+        stale = await _stale_execution(self._ctx, self._ctx.company_id, self._ctx.turn_id)
+        if stale:
+            raise BridgeSlotError(f"stale_execution: Tool call not run: {stale}")
+        key: str | None = self._idempotency_key
+        business = arguments
+        if field is not None:
+            key, business = resolve_bridge_identity(self._idempotency_key, arguments, field)
+        slot = await reserve_bridge_slot(
+            self._ctx.company_id, self._ctx.turn_id, key, name, business
+        )
+        return slot, business
 
     async def list_tools(self) -> list[dict[str, Any]]:
         """The tools this caller may be offered, in MCP ``tools/list`` shape."""
@@ -173,24 +262,45 @@ class MCPServer:
                     tools.append(
                         {
                             "name": name,
-                            "description": tool.description,
-                            "inputSchema": manager_tools.input_schema(tool),
+                            "description": (
+                                manager_tools.bridge_description(tool)
+                                if self._bridge
+                                else tool.description
+                            ),
+                            "inputSchema": (
+                                manager_tools.bridge_input_schema(tool)
+                                if self._bridge
+                                else manager_tools.input_schema(tool)
+                            ),
                         }
                     )
         return tools
 
-    async def call_tool(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    async def call_tool(
+        self, name: str, arguments: dict[str, Any], slot: ToolSlot | None = None
+    ) -> dict[str, Any]:
         """Authorize and run one tool call, in MCP ``tools/call`` result shape.
 
         A refusal comes back as an ``isError`` result rather than a JSON-RPC
         error: the client asked a well-formed question and deserves to see why
         the answer is no.
+
+        ``slot`` is the call's durable position in the turn (model round and position in
+        that round) when the caller has one; otherwise a write is identified by the request's
+        idempotency key, and refused before dispatch when there is none.
         """
         if name in manager_tools.MANAGER_TOOLS or name in CEO_TOOLS:
-            return await self._call_manager_tool(name, arguments)
+            return await self._call_manager_tool(name, arguments, slot)
         node = self._nodes.get(name)
         if node is None:
             return _tool_error(f"Unknown tool '{name}'")
+        try:
+            slot, arguments = await self._slot_for(NODE_EFFECTS.get(name), slot, name, arguments)
+        except (BridgeSlotError, EffectKeyError) as exc:
+            return _tool_error(str(exc))
+        except Exception as exc:  # noqa: BLE001 - no durable identity, no write: fail closed
+            logger.error("Bridge slot unavailable for %s: %s", name, exc)
+            return _tool_error("effect_ledger_unavailable: the write was not run")
 
         outcome = await guarded_call(
             self._ctx,
@@ -200,6 +310,8 @@ class MCPServer:
             source=INBOUND_MCP,
             endpoint_url=BUILTIN_ENDPOINT,
             default_risk=risk_level_for(node),
+            effect=NODE_EFFECTS.get(name),
+            slot=slot,
         )
         if outcome["status"] != "success":
             logger.warning("Refused tool %s: %s", name, outcome["error"])
@@ -214,7 +326,9 @@ class MCPServer:
             "isError": False,
         }
 
-    async def _call_manager_tool(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    async def _call_manager_tool(
+        self, name: str, arguments: dict[str, Any], slot: ToolSlot | None = None
+    ) -> dict[str, Any]:
         """Run a manager or CEO tool through the same guarded boundary as a node tool.
 
         The access policy is checked (and audited) first; then only a tool of
@@ -223,12 +337,26 @@ class MCPServer:
         """
         from fastapi import HTTPException
 
+        tool = {**manager_tools.MANAGER_TOOLS, **CEO_TOOLS}[name]
+        try:
+            slot, arguments = await self._slot_for(
+                tool.effect,
+                slot,
+                name,
+                arguments,
+                manager_tools.key_field(tool) if self._bridge else None,
+            )
+        except (BridgeSlotError, EffectKeyError) as exc:
+            return _tool_error(str(exc))
+        except Exception as exc:  # noqa: BLE001 - no durable identity, no write: fail closed
+            logger.error("Bridge slot unavailable for %s: %s", name, exc)
+            return _tool_error("effect_ledger_unavailable: the write was not run")
         async def run() -> Any:
             if name not in await manager_tools.catalog(self._ctx):
-                raise ValueError(f"TOOL_NOT_OFFERED: '{name}' is not available to this agent")
+                # Proven pre-effect: the catalog check runs before anything is dispatched.
+                raise EffectNotStarted(f"TOOL_NOT_OFFERED: '{name}' is not available to this agent")
             return await manager_tools.call(self._ctx, name, arguments)
 
-        tool = {**manager_tools.MANAGER_TOOLS, **CEO_TOOLS}[name]
         try:
             outcome = await guarded_call(
                 self._ctx,
@@ -237,6 +365,8 @@ class MCPServer:
                 run,
                 source=INBOUND_MCP,
                 default_risk=tool.risk,
+                effect=tool.effect,
+                slot=slot,
             )
         except HTTPException as exc:
             detail = exc.detail if isinstance(exc.detail, dict) else {"message": exc.detail}

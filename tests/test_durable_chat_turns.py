@@ -284,6 +284,45 @@ class TestRecovery:
         assert await _rows(db, ChatMessage, ChatMessage.sender == "agent") == []
         assert (await _rows(db, ChatTurn))[0].status == "queued"
 
+    async def test_racing_recovery_workers_leave_one_current_epoch(self, db, t) -> None:
+        from nexus.tools.effects import Epoch, is_current_execution
+
+        turn = await _queue(db, t["acme"], t["acme_session"])
+        slow = await chat_turns.claim(turn.id, t["acme"], "slow")
+        old = Epoch(slow.execution_id, slow.attempt_count)
+        await chat_turns.recover_company(t["acme"], now=chat_turns._now() + LATER)
+        won = await asyncio.gather(
+            *(chat_turns.claim(turn.id, t["acme"], f"recovery-{i}") for i in range(5))
+        )
+        [winner] = [w for w in won if w is not None]
+        new = Epoch(winner.execution_id, winner.attempt_count)
+        assert (old.attempt, new.attempt) == (1, 2) and old.execution_id != new.execution_id
+        # Only the winner is the turn's current execution; the replaced worker is not, whatever
+        # it does next, and it cannot make itself current by asking again.
+        assert await is_current_execution(t["acme"], turn.id, new) == ""
+        assert await is_current_execution(t["acme"], turn.id, old) != ""
+        assert await is_current_execution(t["acme"], turn.id, old) != ""
+        assert await is_current_execution(t["acme"], turn.id, None) != ""
+
+    async def test_the_worker_hands_the_epoch_it_claimed_to_the_model_call(
+        self, db, t, monkeypatch
+    ) -> None:
+        epochs: list = []
+        inner = chat_routes._call_llm
+
+        async def spy(*args, **kw):
+            epochs.append((kw.get("turn_id"), kw.get("turn_epoch")))
+            return await inner(*args, **kw)
+
+        monkeypatch.setattr(chat_routes, "_call_llm", spy)
+        turn = await _queue(db, t["acme"], t["acme_session"])
+        await chat_turns.claim(turn.id, t["acme"], "crashed-worker")
+        await chat_turns.recover_company(t["acme"], now=chat_turns._now() + LATER)
+        chat_turns.get_worker().wake(t["acme"])
+        await chat_turns.drain()
+        stored = (await _rows(db, ChatTurn))[0]
+        assert epochs == [(turn.id, (stored.execution_id, 2))]
+
     async def test_stale_queued_turn_expires(self, db, t) -> None:
         turn = await _queue(db, t["acme"], t["acme_session"])
         ttl = timedelta(seconds=settings.chat_turn_queue_ttl_seconds + 1)

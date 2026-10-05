@@ -107,9 +107,12 @@ EXPECTED_TABLES = {
     "tasks",
     "teams",
     "tool_access",
+    "tool_bridge_slots",
     "tool_catalog_entries",
     "tool_connections",
+    "tool_effects",
     "tool_invocations",
+    "tool_notifications",
     "tool_policies",
     "tool_profile_bindings",
     "tool_profiles",
@@ -301,8 +304,8 @@ class TestChainExecution:
         with engine.connect() as conn:
             assert conn.execute(text("SELECT count(*) FROM memory_evidence")).scalar() == 1
         engine.dispose()
-
-        command.downgrade(cfg, "-1")
+        # Back out the evidence revision (not the head: later revisions sit above it).
+        command.downgrade(cfg, "b4d9f2a61c73-1")
         engine = create_engine(url)
         with engine.connect() as conn:
             left = conn.execute(
@@ -401,7 +404,7 @@ class TestChainExecution:
         # Downgrading one revision drops the evidence history with its tables and leaves the rest.
         memories, companies = rows("memory_records"), rows("companies")
         engine.dispose()
-        command.downgrade(cfg, "-1")
+        command.downgrade(cfg, "b4d9f2a61c73-1")
         engine = connect()
         with engine.connect() as conn:
             left = conn.execute(

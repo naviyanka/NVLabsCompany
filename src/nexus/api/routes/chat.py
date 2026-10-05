@@ -927,6 +927,7 @@ async def _call_llm(
     context: ExecutionContext | None = None,
     execution: dict[str, Any] | None = None,
     turn_id: uuid.UUID | None = None,
+    turn_epoch: tuple[str | None, int] | None = None,
 ) -> tuple[str, str, int]:
     """Call the LLM adapter to get a real response.
 
@@ -954,6 +955,9 @@ async def _call_llm(
             CLI backend and execution ID produced the reply.
         turn_id: The durable chat turn this call serves, set only by the turn
             worker; it becomes the source of any memory extracted from the reply.
+        turn_epoch: ``(execution_id, attempt_count)`` of the turn as the worker claimed it,
+            set only with ``turn_id``. It is what a ledgered write is fenced by: the write is
+            refused once a recovery has moved the turn on. Never taken from ``context``.
 
     Returns:
         Tuple of (response_text, model_used, tokens_used).
@@ -1001,6 +1005,17 @@ async def _call_llm(
             )
     except PermissionError as exc:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+    if turn_id is not None and execution_context.turn_id is None:
+        # The turn's stable id is what lets a recovered turn recognise a tool call it already
+        # made (nexus.tools.effects). Unlike the per-claim execution id, it survives requeue.
+        execution_context = replace(execution_context, turn_id=turn_id)
+    if turn_id is not None:
+        # Always overwritten, so a context that arrived carrying an epoch cannot choose one.
+        execution_context = replace(
+            execution_context,
+            turn_execution=turn_epoch[0] if turn_epoch else None,
+            turn_attempt=turn_epoch[1] if turn_epoch else None,
+        )
 
     # A session that holds a worktree runs its work in that worktree and
     # nowhere else. An unusable one (not activated, gone, off its branch) is a
@@ -1107,6 +1122,7 @@ async def _call_llm(
                 build_tool_executor,
                 register_obsidian_note_replace,
             )
+            from nexus.tools.effects import EffectClass
 
             tenant_factory = tenant_session_factory(agent.company_id)
             tool_registry = ToolRegistry(tenant_factory)
@@ -1150,6 +1166,9 @@ async def _call_llm(
                     "description": "Replace one existing Markdown note through governed vault write controls.",
                     "parameters": OBSIDIAN_NOTE_REPLACE_SCHEMA["properties"],
                 },
+                # Replaces a note only if it still has the hash the caller read, so a
+                # second run after success conflicts instead of writing again.
+                effect=EffectClass.IDEMPOTENT_WRITE,
             )
 
         # Tool calls act under the server-built context, never under anything
@@ -1405,6 +1424,7 @@ async def _stream_llm(
     execution: dict[str, Any],
     on_chunk: Any,
     turn_id: uuid.UUID | None = None,
+    turn_epoch: tuple[str | None, int] | None = None,
 ) -> tuple[str, str, int]:
     """One turn's model call, reporting text through ``on_chunk`` as it is generated.
 
@@ -1426,7 +1446,7 @@ async def _stream_llm(
     if adapter is None or not hasattr(adapter, "stream_execute"):
         return await _call_llm(
             agent, system_prompt, prompt, history, session_id=session_id, context=context,
-            execution=execution, turn_id=turn_id,
+            execution=execution, turn_id=turn_id, turn_epoch=turn_epoch,
         )
 
     execution.update(adapter=registry_key, backend=config.get("backend"))

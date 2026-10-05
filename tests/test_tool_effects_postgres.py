@@ -1,0 +1,920 @@
+"""Tool-effect ledger on real PostgreSQL: forced RLS, constraints, races, recovery.
+
+Migration ``c5e8a3b71d94``. Runs against a disposable PostgreSQL (testcontainers, or
+``TEST_DATABASE_URL``); skipped when neither is available. The races use real concurrent
+sessions as the RLS-bound application role and ``asyncio.gather``; the only waiting is a
+bounded poll for a worker to have started.
+"""
+# ruff: noqa: F811 -- pytest fixtures imported from test_postgres_integration
+
+import asyncio
+import uuid
+from dataclasses import replace
+from datetime import timedelta
+
+import alembic.command
+import alembic.config
+import pytest
+import sqlalchemy as sa
+from sqlalchemy.exc import DBAPIError, IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+
+from nexus.config import settings
+from nexus.database import tenant_session
+from nexus.models._time import utcnow
+from nexus.models.agent import Agent
+from nexus.models.chat_turn import ChatTurn
+from nexus.models.company import Company
+from nexus.models.governance import AuditLog
+from nexus.models.tool_effect import ToolBridgeSlot, ToolEffect
+from nexus.services.session_service import get_or_create_default_session
+from nexus.tools import effects
+from nexus.tools.context import ExecutionContext
+from nexus.tools.effects import BridgeSlotError, EffectClass, ToolSlot
+from nexus.tools.factory import guarded_call
+from tests.test_postgres_integration import (  # noqa: F401 -- fixtures
+    app_role,
+    app_user_postgres_url,
+    migrated_postgres_url,
+    postgres_container,
+)
+
+pytestmark = [pytest.mark.postgres, pytest.mark.integration]
+
+NON_IDEM = EffectClass.NON_IDEMPOTENT_WRITE
+IDEM = EffectClass.IDEMPOTENT_WRITE
+RACERS = 6
+SLOT = ToolSlot(0, 0)
+
+
+async def claim(*args, **kwargs):
+    """``effects.claim`` as a runtime that captured attempt 1 would call it."""
+    kwargs.setdefault("epoch", effects.Epoch(None, 1))
+    return await effects.claim(*args, **kwargs)
+
+
+class World:
+    """Two companies and an agent in the first, seeded as the superuser."""
+
+
+@pytest.fixture
+async def world(migrated_postgres_url, app_role, monkeypatch):
+    monkeypatch.setattr(settings, "tool_binding_enforcement", "audit")
+    engine = create_async_engine(migrated_postgres_url)
+    w = World()
+    w.engine = engine
+    w.acme, w.other = uuid.uuid4(), uuid.uuid4()
+    async with AsyncSession(engine, expire_on_commit=False) as db:
+        db.add_all([Company(id=w.acme, name="Acme"), Company(id=w.other, name="Other")])
+        await db.flush()
+        w.agent = Agent(company_id=w.acme, name="A", role="engineer")
+        db.add(w.agent)
+        await db.commit()
+    w.turn = uuid.uuid4()
+    w.ctx = replace(
+        ExecutionContext.for_agent(w.agent, source="hermes"), turn_id=w.turn, turn_attempt=1
+    )
+
+    async def rows(company):
+        async with AsyncSession(engine) as db:  # superuser: not bound to a tenant
+            stmt = sa.select(ToolEffect).where(ToolEffect.company_id == company)
+            return list((await db.execute(stmt)).scalars())
+
+    w.rows = rows
+    yield w
+    await engine.dispose()
+
+
+class Tool:
+    def __init__(self, result=None, raises=None, gate=None):
+        self.runs = 0
+        self.result = {"ok": True} if result is None else result
+        self.raises = raises
+        self.gate = gate
+
+    async def __call__(self):
+        self.runs += 1
+        if self.gate is not None:
+            await self.gate.wait()
+        if self.raises is not None:
+            raise self.raises
+        return self.result
+
+
+async def go(w, tool, effect=NON_IDEM, args=None, ctx=None, slot=SLOT, name="send-it"):
+    return await guarded_call(
+        ctx or w.ctx, name, args or {"n": 1}, tool, source="test", effect=effect.value,
+        slot=slot,
+    )
+
+
+async def started(tool):
+    for _ in range(500):
+        if tool.runs:
+            return
+        await asyncio.sleep(0.01)
+    raise AssertionError("tool never started")
+
+
+def _new_row(company, **over):
+    values = dict(
+        company_id=company, turn_id=uuid.uuid4(), round_index=0, invocation_index=0,
+        tool_name="t",
+        effect_class="idempotent_write",
+        invocation_key=uuid.uuid4().hex + uuid.uuid4().hex,
+        arguments_digest="0" * 64,
+        claim_token="tok", lease_expires_at=utcnow() + timedelta(minutes=5),
+    )
+    values.update(over)
+    return ToolEffect(**values)
+
+
+# --- schema, RLS, ownership ------------------------------------------------------------------
+
+
+async def _effects_state(engine):
+    async with engine.connect() as conn:
+        return [
+            tuple(r)
+            for r in (
+                await conn.execute(
+                    sa.text(
+                        "SELECT c.relname, c.relrowsecurity, c.relforcerowsecurity, "
+                        "(SELECT count(*) FROM pg_policies p WHERE p.tablename = c.relname "
+                        " AND p.policyname = 'tenant_isolation') "
+                        "FROM pg_class c WHERE c.relname IN ('tool_effects', 'tool_notifications', "
+                        "'tool_bridge_slots') "
+                        "ORDER BY c.relname"
+                    )
+                )
+            ).all()
+        ]
+
+
+LIVE = [
+    ("tool_bridge_slots", True, True, 1),
+    ("tool_effects", True, True, 1),
+    ("tool_notifications", True, True, 1),
+]
+
+
+@pytest.fixture
+async def migration(migrated_postgres_url):
+    cfg = alembic.config.Config("alembic.ini")
+    cfg.set_main_option("sqlalchemy.url", migrated_postgres_url)
+    engine = create_async_engine(migrated_postgres_url)
+    # What the provisioning script does for the migrator (the role-separation suite runs the
+    # real one): tables this role creates from now on are usable by the app role, DML only, so
+    # a re-upgrade needs no GRANT here and no migration names a role.
+    async with engine.begin() as conn:
+        await conn.execute(
+            sa.text(
+                "ALTER DEFAULT PRIVILEGES IN SCHEMA public "
+                "GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO nexus_app"
+            )
+        )
+    try:
+        yield cfg, engine
+    finally:
+        # Whatever a test did, leave the shared database at head for the tests after it.
+        await asyncio.to_thread(alembic.command.upgrade, cfg, "head")
+        await engine.dispose()
+
+
+async def _empty_the_ledger(engine):
+    """Test setup, as the superuser: a clean ledger so a downgrade is judged on its own rows."""
+    async with engine.begin() as conn:
+        await conn.execute(sa.text("DELETE FROM tool_bridge_slots"))
+        await conn.execute(sa.text("DELETE FROM tool_notifications"))
+        await conn.execute(sa.text("DELETE FROM tool_effects"))
+
+
+
+
+async def test_forced_rls_policy_is_live_on_both_tables(migrated_postgres_url):
+    engine = create_async_engine(migrated_postgres_url)
+    try:
+        assert await _effects_state(engine) == LIVE
+    finally:
+        await engine.dispose()
+
+
+async def test_application_role_does_not_own_the_table(world, app_user_postgres_url):
+    async with world.engine.connect() as conn:
+        owner = (
+            await conn.execute(
+                sa.text(
+                    "SELECT pg_get_userbyid(relowner) FROM pg_class WHERE relname = 'tool_effects'"
+                )
+            )
+        ).scalar_one()
+    assert owner != sa.engine.make_url(app_user_postgres_url).username
+
+
+async def test_force_rls_binds_the_table_owner(migrated_postgres_url):
+    """A non-superuser owner is subject to the policy because of FORCE; rolled back after."""
+    engine = create_async_engine(migrated_postgres_url)
+    try:
+        async with AsyncSession(engine) as db:
+            cid = uuid.uuid4()
+            db.add(Company(id=cid, name="Owner Corp"))
+            await db.flush()
+            db.add(_new_row(cid))
+            await db.flush()
+            await db.execute(sa.text("CREATE ROLE tmp_effects_owner NOSUPERUSER NOBYPASSRLS"))
+            await db.execute(sa.text("ALTER TABLE tool_effects OWNER TO tmp_effects_owner"))
+            await db.execute(sa.text("SET LOCAL ROLE tmp_effects_owner"))
+            count = "SELECT count(*) FROM tool_effects WHERE company_id = :c"
+            assert (await db.execute(sa.text(count), {"c": cid})).scalar_one() == 0
+            await db.execute(
+                sa.text("SELECT set_config('nexus.company_id', :c, true)"), {"c": str(cid)}
+            )
+            assert (await db.execute(sa.text(count), {"c": cid})).scalar_one() == 1
+            await db.rollback()
+    finally:
+        await engine.dispose()
+
+
+async def test_unbound_session_reads_nothing_and_cannot_insert(world, app_role):
+    await claim(world.acme, world.turn, SLOT, "t", NON_IDEM, {"a": 1})
+    async with app_role() as db:  # no tenant bound
+        assert (await db.execute(sa.select(ToolEffect))).scalars().all() == []
+        db.add(_new_row(world.acme))
+        with pytest.raises(DBAPIError, match="row-level security|own company"):
+            await db.commit()
+
+
+async def test_tenants_are_invisible_to_each_other(world):
+    await claim(world.acme, world.turn, SLOT, "t", NON_IDEM, {"a": 1})
+    async with tenant_session(world.other) as db:
+        assert (await db.execute(sa.select(ToolEffect))).scalars().all() == []
+        db.add(_new_row(world.acme))  # forged company id
+        with pytest.raises(DBAPIError, match="row-level security|own company"):
+            await db.commit()
+    assert await effects.list_open(world.other) == {"items": [], "next_cursor": None}
+
+
+async def test_same_call_in_two_tenants_is_two_rows(world):
+    a = await claim(world.acme, world.turn, SLOT, "t", NON_IDEM, {"a": 1})
+    b = await claim(world.other, world.turn, SLOT, "t", NON_IDEM, {"a": 1})
+    assert a.action == b.action == "run" and a.effect_id != b.effect_id
+
+
+@pytest.mark.parametrize(
+    ("over", "name"),
+    [
+        ({"status": "paused"}, "ck_tool_effects_status"),
+        ({"effect_class": "read_only"}, "ck_tool_effects_class"),
+        ({"attempt_count": 0}, "ck_tool_effects_attempts"),
+        ({"round_index": -2}, "ck_tool_effects_round"),
+        ({"invocation_index": -1}, "ck_tool_effects_position"),
+        ({"claim_token": None}, "ck_tool_effects_executing_claim"),
+        ({"lease_expires_at": None}, "ck_tool_effects_executing_claim"),
+    ],
+)
+async def test_check_constraints_hold(world, over, name):
+    async with tenant_session(world.acme) as db:
+        db.add(_new_row(world.acme, **over))
+        with pytest.raises(IntegrityError, match=name):
+            await db.commit()
+
+
+async def test_unique_key_per_tenant(world):
+    key = uuid.uuid4().hex + uuid.uuid4().hex
+    async with tenant_session(world.acme) as db:
+        db.add(_new_row(world.acme, invocation_key=key))
+        await db.commit()
+    async with tenant_session(world.acme) as db:
+        db.add(_new_row(world.acme, invocation_key=key))
+        with pytest.raises(IntegrityError, match="uq_tool_effects_key"):
+            await db.commit()
+
+
+# --- execute-once on PostgreSQL --------------------------------------------------------------
+
+
+async def test_concurrent_claims_have_one_winner(world):
+    claims = await asyncio.gather(
+        *[
+            claim(world.acme, world.turn, SLOT, "t", NON_IDEM, {"a": 1})
+            for _ in range(RACERS)
+        ]
+    )
+    assert sorted(c.action for c in claims) == ["busy"] * (RACERS - 1) + ["run"]
+    assert len(await world.rows(world.acme)) == 1
+
+
+async def test_concurrent_identical_calls_run_the_tool_once(world):
+    gate = asyncio.Event()
+    tool = Tool(gate=gate)
+    callers = [asyncio.create_task(go(world, tool)) for _ in range(RACERS)]
+    await started(tool)
+    for _ in range(500):
+        if sum(t.done() for t in callers) >= RACERS - 1:
+            break
+        await asyncio.sleep(0.01)
+    gate.set()
+    outs = await asyncio.gather(*callers)
+    assert tool.runs == 1
+    assert sorted(o["status"] for o in outs) == ["effect_in_progress"] * (RACERS - 1) + ["success"]
+
+
+async def test_replay_after_success_runs_nothing(world):
+    tool = Tool(result={"sent": "m1"})
+    first = await go(world, tool)
+    again = await go(world, tool)
+    assert tool.runs == 1 and again["replayed"] is True and again["result"] == first["result"]
+
+
+async def test_ambiguous_non_idempotent_waits_for_a_person_then_resolves(world):
+    with pytest.raises(RuntimeError):
+        await go(world, Tool(raises=RuntimeError("reset")))
+    (row,) = await world.rows(world.acme)
+    assert row.status == "ambiguous"
+
+    retry = Tool()
+    assert (await go(world, retry))["status"] == "effect_recovery_required"
+    assert retry.runs == 0
+    assert (await world.rows(world.acme))[0].status == "manual_recovery_required"
+
+    # Two operators racing on one decision: one wins, the other is refused.
+    results = await asyncio.gather(
+        effects.resolve_manual_recovery(world.acme, row.id, "applied", actor="a", reason="r"),
+        effects.resolve_manual_recovery(world.acme, row.id, "not_applied", actor="b", reason="r"),
+        return_exceptions=True,
+    )
+    assert sum(isinstance(r, dict) for r in results) == 1
+    assert sum(isinstance(r, effects.EffectStateError) for r in results) == 1
+    async with AsyncSession(world.engine) as db:
+        events = (
+            await db.execute(
+                sa.select(AuditLog).where(
+                    AuditLog.company_id == world.acme,
+                    AuditLog.action == "tool_effect.manual_recovery_resolved",
+                )
+            )
+        ).scalars().all()
+    assert len(events) == 1
+
+
+async def test_expired_lease_on_idempotent_call_is_retaken_once(world):
+    gate = asyncio.Event()
+    slow = Tool(gate=gate, result={"who": "zombie"})
+    task = asyncio.create_task(go(world, slow, effect=IDEM))
+    await started(slow)
+    (row,) = await world.rows(world.acme)
+    async with AsyncSession(world.engine) as db:
+        await db.execute(
+            sa.update(ToolEffect)
+            .where(ToolEffect.id == row.id)
+            .values(lease_expires_at=utcnow() - timedelta(seconds=1))
+        )
+        await db.commit()
+
+    takers = [Tool(result={"who": f"t{i}"}) for i in range(RACERS)]
+    outs = await asyncio.gather(*[go(world, t, effect=IDEM) for t in takers])
+    assert sum(t.runs for t in takers) == 1
+    assert sum(1 for o in outs if o["status"] == "success" and "replayed" not in o) == 1
+    gate.set()
+    await task  # the zombie's late settle changes nothing
+    (row,) = await world.rows(world.acme)
+    assert row.status == "succeeded" and row.attempt_count == 2
+    assert row.result["value"]["who"].startswith("t")
+
+
+async def test_ledger_audit_is_written_as_the_application_role(world):
+    with pytest.raises(RuntimeError):
+        await go(world, Tool(raises=RuntimeError("reset")))
+    async with AsyncSession(world.engine) as db:
+        actions = {
+            a.action
+            for a in (
+                await db.execute(
+                    sa.select(AuditLog).where(
+                        AuditLog.company_id == world.acme, AuditLog.action.like("tool_effect.%")
+                    )
+                )
+            ).scalars()
+        }
+    assert "tool_effect.ambiguous" in actions
+
+
+# --- position-aware identity -----------------------------------------------------------------
+
+
+async def test_identical_calls_at_different_positions_run_separately(world):
+    tool = Tool()
+    await go(world, tool, slot=ToolSlot(0, 0))
+    await go(world, tool, slot=ToolSlot(0, 1))
+    await go(world, tool, slot=ToolSlot(1, 0))
+    assert tool.runs == 3
+    assert sorted((r.round_index, r.invocation_index) for r in await world.rows(world.acme)) == [
+        (0, 0), (0, 1), (1, 0),
+    ]
+
+
+async def test_recovery_of_the_same_position_reuses_the_row(world):
+    tool = Tool(result={"sent": "m1"})
+    first = await go(world, tool, slot=ToolSlot(2, 3))
+    again = await go(world, tool, slot=ToolSlot(2, 3))
+    assert tool.runs == 1 and again["replayed"] is True and again["result"] == first["result"]
+    (row,) = await world.rows(world.acme)
+    assert row.attempt_count == 1 and row.tool_name == "send-it"
+
+
+async def test_a_different_call_at_an_occupied_slot_fails_closed(world):
+    await go(world, Tool())
+    other_tool, other_args = Tool(), Tool()
+    different_tool = await go(world, other_tool, name="other-tool")
+    different_args = await go(world, other_args, args={"n": 2})
+    assert different_tool["status"] == different_args["status"] == "effect_recovery_required"
+    assert other_tool.runs == other_args.runs == 0
+    (row,) = await world.rows(world.acme)
+    assert row.tool_name == "send-it" and row.status == "succeeded"
+
+
+async def test_concurrent_claims_for_one_slot_have_one_runner_per_position(world):
+    claims = await asyncio.gather(
+        *[
+            claim(world.acme, world.turn, ToolSlot(0, i % 2), "t", NON_IDEM, {"a": i % 2})
+            for i in range(RACERS)
+        ]
+    )
+    assert sorted(c.action for c in claims) == ["busy"] * (RACERS - 2) + ["run"] * 2
+    assert len(await world.rows(world.acme)) == 2
+
+
+async def _grant(world, max_uses):
+    from nexus.models.governance_studio import GovernanceTempAccess
+
+    row = GovernanceTempAccess(
+        company_id=world.acme, agent_id=world.agent.id, effect="allow", tool_name="send-it",
+        status="active", expires_at=utcnow() + timedelta(hours=1), requested_by="x",
+        approved_by="y", max_uses=max_uses,
+    )
+    async with AsyncSession(world.engine, expire_on_commit=False) as db:
+        db.add(row)
+        await db.commit()
+    return row.id
+
+
+async def _grant_state(world, grant_id):
+    from nexus.models.governance_studio import GovernanceGrantUse, GovernanceTempAccess
+
+    async with AsyncSession(world.engine) as db:
+        grant = await db.get(GovernanceTempAccess, grant_id)
+        uses = (
+            await db.execute(
+                sa.select(sa.func.count())
+                .select_from(GovernanceGrantUse)
+                .where(GovernanceGrantUse.grant_id == grant_id)
+            )
+        ).scalar_one()
+    return grant.used_count, grant.status, uses
+
+
+async def test_concurrent_slots_never_spend_past_max_uses(world):
+    grant_id = await _grant(world, max_uses=2)
+    claims = await asyncio.gather(
+        *[
+            claim(
+                world.acme, world.turn, ToolSlot(0, i), "send-it", NON_IDEM, {"n": 1},
+                grant_id=grant_id,
+            )
+            for i in range(RACERS)
+        ]
+    )
+    assert sorted(c.action for c in claims) == ["denied"] * (RACERS - 2) + ["run"] * 2
+    assert await _grant_state(world, grant_id) == (2, "used_up", 2)
+    # A denied claim leaves no ledger row behind, so nothing can later be retaken at its slot.
+    assert len(await world.rows(world.acme)) == 2
+
+
+async def test_a_racing_replay_of_a_spending_slot_pays_once(world):
+    grant_id = await _grant(world, max_uses=1)
+    claims = await asyncio.gather(
+        *[
+            claim(
+                world.acme, world.turn, SLOT, "send-it", NON_IDEM, {"n": 1}, grant_id=grant_id
+            )
+            for _ in range(RACERS)
+        ]
+    )
+    assert sorted(c.action for c in claims) == ["busy"] * (RACERS - 1) + ["run"]
+    assert await _grant_state(world, grant_id) == (1, "used_up", 1)
+
+
+async def test_the_same_slot_of_another_company_or_turn_does_not_share_a_use(world):
+    grant_id = await _grant(world, max_uses=1)
+    first = await claim(
+        world.acme, world.turn, SLOT, "send-it", NON_IDEM, {"n": 1}, grant_id=grant_id
+    )
+    other_turn = await claim(
+        world.acme, uuid.uuid4(), SLOT, "send-it", NON_IDEM, {"n": 1}, grant_id=grant_id
+    )
+    # Another company's identity differs, and the grant is not visible to its session at all.
+    other_company = await claim(
+        world.other, world.turn, SLOT, "send-it", NON_IDEM, {"n": 1}, grant_id=grant_id
+    )
+    assert (first.action, other_turn.action, other_company.action) == ("run", "denied", "denied")
+    assert first.key != other_company.key
+    assert await _grant_state(world, grant_id) == (1, "used_up", 1)
+
+
+# --- the database clock decides leases -------------------------------------------------------
+
+
+@pytest.mark.parametrize("skew", [timedelta(days=1), timedelta(days=-1)])
+async def test_a_skewed_worker_clock_does_not_move_a_lease(world, monkeypatch, skew):
+    gate = asyncio.Event()
+    holder = Tool(gate=gate)
+    task = asyncio.create_task(go(world, holder, effect=IDEM))
+    await started(holder)
+
+    real = effects.utcnow
+    monkeypatch.setattr(effects, "utcnow", lambda: real() + skew)
+    rival = Tool()
+    # The worker clock says the lease is long expired (or far from it); the database says
+    # it is live, so the rival is told to wait and does not run.
+    assert (await go(world, rival, effect=IDEM))["status"] == "effect_in_progress"
+    assert rival.runs == 0
+    monkeypatch.setattr(effects, "utcnow", real)
+    gate.set()
+    await task
+    (row,) = await world.rows(world.acme)
+    assert row.status == "succeeded" and row.attempt_count == 1
+
+
+async def test_a_lease_the_database_says_expired_is_retaken_despite_a_slow_clock(
+    world, monkeypatch
+):
+    gate = asyncio.Event()
+    holder = Tool(gate=gate)
+    task = asyncio.create_task(go(world, holder, effect=IDEM))
+    await started(holder)
+    (row,) = await world.rows(world.acme)
+    async with AsyncSession(world.engine) as db:
+        await db.execute(
+            sa.update(ToolEffect)
+            .where(ToolEffect.id == row.id)
+            .values(
+                lease_expires_at=sa.text("timezone('UTC', clock_timestamp()) - interval '1 second'")
+            )
+        )
+        await db.commit()
+    real = effects.utcnow
+    monkeypatch.setattr(effects, "utcnow", lambda: real() - timedelta(days=1))
+    taker = Tool()
+    assert (await go(world, taker, effect=IDEM))["status"] == "success" and taker.runs == 1
+    monkeypatch.setattr(effects, "utcnow", real)
+    gate.set()
+    await task
+    (row,) = await world.rows(world.acme)
+    assert row.attempt_count == 2
+
+
+# --- sealed results and notifications --------------------------------------------------------
+
+
+async def test_first_result_equals_the_replayed_result_after_sealing(world):
+    big = {"id": "m-77", "token": "sk-" + "a" * 40, "rows": [{"v": "x" * 400} for _ in range(300)]}
+    tool = Tool(result=big)
+    first = await go(world, tool)
+    again = await go(world, tool)
+    assert tool.runs == 1 and again["replayed"] is True
+    assert first["result"] == again["result"]
+    assert first["result"]["id"] == "m-77"
+    assert "sk-" + "a" * 40 not in str(first["result"])
+    assert first["result"]["token"] != big["token"]
+
+
+async def test_an_unserializable_result_is_ambiguous_and_not_rerun(world):
+    tool = Tool(result={"handle": object()})
+    out = await go(world, tool)
+    assert out["status"] == "effect_result_unavailable" and tool.runs == 1
+    (row,) = await world.rows(world.acme)
+    assert row.status == "ambiguous"
+    retry = Tool()
+    assert (await go(world, retry))["status"] == "effect_recovery_required" and retry.runs == 0
+
+
+async def test_a_notice_is_claimed_once_per_invocation_even_when_racing(world):
+    key = effects.invocation_key(world.acme, world.turn, SLOT)
+    results = await asyncio.gather(*[effects.claim_notice(world.acme, key) for _ in range(RACERS)])
+    assert results.count(True) == 1
+    other = effects.invocation_key(world.acme, world.turn, ToolSlot(0, 1))
+    assert await effects.claim_notice(world.acme, other) is True
+    assert await effects.claim_notice(world.other, key) is True  # another tenant is its own
+
+
+# --- durable bridge slots and recovery epoch ------------------------------------------------
+
+
+async def _bridge_slots(world, company=None):
+    async with AsyncSession(world.engine) as db:  # superuser: not bound to a tenant
+        stmt = sa.select(ToolBridgeSlot).where(ToolBridgeSlot.company_id == (company or world.acme))
+        return list((await db.execute(stmt)).scalars())
+
+
+async def test_concurrent_bridge_requests_get_distinct_slots(world):
+    keys = [f"write-{i}" for i in range(RACERS)]
+    slots = await asyncio.gather(
+        *[effects.reserve_bridge_slot(world.acme, world.turn, k, "t", {"n": 1}) for k in keys]
+    )
+    assert sorted(slot.invocation_index for slot in slots) == list(range(RACERS))
+    assert {slot.round_index for slot in slots} == {-1}
+    stored = await _bridge_slots(world)
+    assert len(stored) == RACERS and len({r.ordinal for r in stored}) == RACERS
+
+
+async def test_racing_retries_of_one_bridge_key_share_one_slot(world):
+    slots = await asyncio.gather(
+        *[
+            effects.reserve_bridge_slot(world.acme, world.turn, "same", "t", {"n": 1})
+            for _ in range(RACERS)
+        ]
+    )
+    assert len(set(slots)) == 1 and len(await _bridge_slots(world)) == 1
+
+
+async def test_bridge_slots_are_per_company_and_per_turn(world):
+    mine = await effects.reserve_bridge_slot(world.acme, world.turn, "k", "t", {})
+    theirs = await effects.reserve_bridge_slot(world.other, world.turn, "k", "t", {})
+    later = await effects.reserve_bridge_slot(world.acme, uuid.uuid4(), "k", "t", {})
+    assert mine == theirs == later == ToolSlot(-1, 0)
+    assert len(await _bridge_slots(world)) == 2
+    assert len(await _bridge_slots(world, world.other)) == 1
+
+
+async def test_a_bridge_key_reused_for_another_call_fails_closed(world):
+    await effects.reserve_bridge_slot(world.acme, world.turn, "k", "t", {"n": 1})
+    with pytest.raises(BridgeSlotError, match="IDEMPOTENCY_KEY_REUSED"):
+        await effects.reserve_bridge_slot(world.acme, world.turn, "k", "t", {"n": 2})
+    assert len(await _bridge_slots(world)) == 1
+
+
+async def test_the_database_refuses_a_second_key_on_one_ordinal(world):
+    async with AsyncSession(world.engine) as db:
+        db.add(
+            ToolBridgeSlot(
+                company_id=world.acme, turn_id=world.turn, idempotency_key="a", ordinal=0,
+                tool_name="t", arguments_digest="0" * 64,
+            )
+        )
+        await db.commit()
+        db.add(
+            ToolBridgeSlot(
+                company_id=world.acme, turn_id=world.turn, idempotency_key="b", ordinal=0,
+                tool_name="t", arguments_digest="0" * 64,
+            )
+        )
+        with pytest.raises(IntegrityError):
+            await db.commit()
+
+
+async def _recover(world, attempt):
+    """Put the turn row at execution number ``attempt`` (creating it on first use)."""
+    async with AsyncSession(world.engine, expire_on_commit=False) as db:
+        row = await db.get(ChatTurn, world.turn)
+        if row is None:
+            session = await get_or_create_default_session(db, world.agent)
+            db.add(
+                ChatTurn(
+                    id=world.turn, company_id=world.acme, agent_id=world.agent.id,
+                    session_id=session.id, idempotency_key=uuid.uuid4().hex, turn_seq=1,
+                    status="running", attempt_count=attempt,
+                )
+            )
+        else:
+            row.attempt_count = attempt
+        await db.commit()
+    # The execution that just took the turn over captured this attempt.
+    world.ctx = replace(world.ctx, turn_attempt=attempt)
+
+
+async def test_a_recovered_turn_replays_its_slot_but_not_a_shifted_write(world):
+    await _recover(world, 1)
+    first = Tool()
+    await go(world, first, slot=ToolSlot(0, 0))
+    await _recover(world, 2)
+    again, shifted = Tool(), Tool()
+    replay = await go(world, again, slot=ToolSlot(0, 0))
+    blocked = await go(world, shifted, slot=ToolSlot(1, 0))
+    assert replay["status"] == "success" and replay["replayed"] is True
+    assert blocked["status"] == "effect_recovery_required"
+    assert (first.runs, again.runs, shifted.runs) == (1, 0, 0)
+    assert len(await world.rows(world.acme)) == 1
+
+
+@pytest.mark.parametrize("effect", [NON_IDEM, IDEM])
+async def test_racing_recoveries_of_an_empty_slot_run_nothing(world, effect):
+    await _recover(world, 1)
+    await go(world, Tool(), effect=effect, slot=ToolSlot(0, 0))
+    await _recover(world, 2)
+    tools = [Tool() for _ in range(RACERS)]
+    out = await asyncio.gather(*[go(world, t, effect=effect, slot=ToolSlot(1, 0)) for t in tools])
+    assert {o["status"] for o in out} == {"effect_recovery_required"}
+    assert sum(t.runs for t in tools) == 0 and len(await world.rows(world.acme)) == 1
+
+
+async def test_racing_replays_of_an_occupied_slot_do_not_run_again(world):
+    await _recover(world, 1)
+    first = Tool()
+    await go(world, first, slot=ToolSlot(0, 0))
+    await _recover(world, 2)
+    tools = [Tool() for _ in range(RACERS)]
+    out = await asyncio.gather(*[go(world, t, slot=ToolSlot(0, 0)) for t in tools])
+    assert all(o["status"] == "success" and o["replayed"] for o in out)
+    assert first.runs == 1 and sum(t.runs for t in tools) == 0
+
+
+async def test_a_recovered_turn_with_no_earlier_write_may_write_first(world):
+    await _recover(world, 2)
+    fresh = Tool()
+    assert (await go(world, fresh, slot=ToolSlot(0, 0)))["status"] == "success"
+    assert fresh.runs == 1
+
+
+# --- a worker that a recovery replaced cannot write ------------------------------------------
+
+
+async def _expire_lease(world):
+    async with AsyncSession(world.engine) as db:  # superuser: test setup
+        await db.execute(
+            sa.update(ToolEffect)
+            .where(ToolEffect.company_id == world.acme)
+            .values(lease_expires_at=utcnow() - timedelta(seconds=5))
+        )
+        await db.commit()
+
+
+@pytest.mark.parametrize("effect", [NON_IDEM, IDEM])
+@pytest.mark.parametrize("slot", [ToolSlot(0, 0), ToolSlot(1, 0)], ids=["occupied", "new"])
+async def test_a_stale_worker_cannot_insert_or_replay_a_ledger_row(world, effect, slot):
+    await _recover(world, 1)
+    zombie = world.ctx
+    await go(world, Tool(), effect=effect, slot=ToolSlot(0, 0))
+    await _recover(world, 2)
+    before = await world.rows(world.acme)
+    tool = Tool()
+    out = await go(world, tool, effect=effect, ctx=zombie, slot=slot)
+    assert out["status"] == "stale_execution" and tool.runs == 0
+    after = await world.rows(world.acme)
+    assert [(r.id, r.status, r.attempt_count) for r in after] == [
+        (r.id, r.status, r.attempt_count) for r in before
+    ]
+    # And directly at the ledger, under the row lock: no row, no spend.
+    claimed = await claim(
+        world.acme, world.turn, slot, "send-it", effect, {"n": 1}, epoch=effects.Epoch(None, 1)
+    )
+    assert claimed.action == "stale"
+    assert len(await world.rows(world.acme)) == len(before)
+
+
+async def test_a_stale_holder_cannot_settle_a_claim_the_recovery_retook(world):
+    await _recover(world, 1)
+    old = await claim(world.acme, world.turn, SLOT, "t", IDEM, {"a": 1})
+    assert old.action == "run"
+    await _recover(world, 2)
+    await _expire_lease(world)
+    new = await claim(
+        world.acme, world.turn, SLOT, "t", IDEM, {"a": 1}, epoch=effects.Epoch(None, 2)
+    )
+    assert new.action == "run" and new.token != old.token
+    # The replaced worker finishes late: its settlement changes nothing.
+    assert await effects.settle(old, "succeeded", stored=effects.seal_result({"late": 1})) is False
+    (row,) = await world.rows(world.acme)
+    assert (row.status, row.claim_token) == ("executing", new.token)
+    stored = effects.seal_result({"current": 1})
+    assert await effects.settle(new, "succeeded", stored=stored) is True
+    (row,) = await world.rows(world.acme)
+    assert row.status == "succeeded" and row.attempt_count == 2
+
+
+async def test_racing_workers_claim_the_turn_once_and_only_the_winner_is_current(world):
+    from nexus.runtime import chat_turns
+
+    async with AsyncSession(world.engine, expire_on_commit=False) as db:
+        session = await get_or_create_default_session(db, world.agent)
+        db.add(
+            ChatTurn(
+                id=world.turn, company_id=world.acme, agent_id=world.agent.id,
+                session_id=session.id, idempotency_key=uuid.uuid4().hex, turn_seq=1,
+                status="queued", attempt_count=0,
+            )
+        )
+        await db.commit()
+    won = await asyncio.gather(
+        *(chat_turns.claim(world.turn, world.acme, f"worker-{i}") for i in range(RACERS))
+    )
+    winners = [t for t in won if t is not None]
+    assert len(winners) == 1
+    epoch = effects.Epoch(winners[0].execution_id, winners[0].attempt_count)
+    assert epoch.attempt == 1
+    assert await effects.is_current_execution(world.acme, world.turn, epoch) == ""
+    assert await effects.is_current_execution(world.acme, world.turn, effects.Epoch("other", 1))
+
+
+async def test_a_refused_grant_spend_leaves_no_ledger_row_only_the_notice(world):
+    # The autonomy gate's notice is sent before the claim spends a grant; a spend that is then
+    # refused rolls the claim back. The notice is the only residue and authorizes nothing.
+    key = effects.invocation_key(world.acme, world.turn, SLOT)
+    assert await effects.claim_notice(world.acme, key)
+    out = await claim(
+        world.acme, world.turn, SLOT, "t", NON_IDEM, {"a": 1}, grant_id=uuid.uuid4()
+    )
+    assert out.action == "denied" and await world.rows(world.acme) == []
+    other = await claim(
+        world.acme, world.turn, ToolSlot(0, 1), "t", NON_IDEM, {"a": 1}, grant_id=uuid.uuid4()
+    )
+    assert other.action == "denied" and await world.rows(world.acme) == []
+    assert not await effects.claim_notice(world.acme, key)  # and it is not sent twice
+
+
+# --- guarded downgrade -----------------------------------------------------------------------
+
+BEFORE = "b4d9f2a61c73"
+TABLES = ("tool_bridge_slots", "tool_effects", "tool_notifications")
+
+
+async def _counts(engine):
+    async with engine.connect() as conn:
+        return {
+            t: (await conn.execute(sa.text(f"SELECT count(*) FROM {t}"))).scalar_one()
+            for t in TABLES
+        }
+
+
+async def _populate(world, *, effect, notice):
+    """Leave state in the named ledger tables, written the way the runtime writes it."""
+    await effects.reserve_bridge_slot(world.acme, world.turn, "k", "t", {"a": 1})
+    if effect:
+        await claim(world.acme, world.turn, SLOT, "t", NON_IDEM, {"a": 1})
+    if notice:
+        key = effects.invocation_key(world.acme, world.turn, SLOT)
+        assert await effects.claim_notice(world.acme, key)
+
+
+async def test_downgrade_of_an_empty_ledger_round_trips(migration, app_role):
+    cfg, engine = migration
+    await _empty_the_ledger(engine)
+    assert await _effects_state(engine) == LIVE
+    await asyncio.to_thread(alembic.command.downgrade, cfg, BEFORE)
+    assert await _effects_state(engine) == []
+    await asyncio.to_thread(alembic.command.upgrade, cfg, "head")
+    assert await _effects_state(engine) == LIVE
+
+
+@pytest.mark.parametrize(
+    ("effect", "notice"),
+    [(True, False), (False, True), (True, True)],
+    ids=["effects-only", "notifications-only", "both"],
+)
+async def test_downgrade_refuses_while_either_table_has_state(
+    migration, world, monkeypatch, effect, notice
+):
+    cfg, engine = migration
+    monkeypatch.delenv("NEXUS_DESTROY_TOOL_EFFECTS", raising=False)
+    await _empty_the_ledger(engine)
+    await _populate(world, effect=effect, notice=notice)
+    before = await _counts(engine)
+    with pytest.raises(RuntimeError, match="Refusing to downgrade"):
+        await asyncio.to_thread(alembic.command.downgrade, cfg, BEFORE)
+    # Transactional: nothing was deleted and FORCE row level security is back on everywhere.
+    assert await _counts(engine) == before and await _effects_state(engine) == LIVE
+    # Anything but the exact acknowledgement is not an override.
+    monkeypatch.setenv("NEXUS_DESTROY_TOOL_EFFECTS", "yes")
+    with pytest.raises(RuntimeError, match="Refusing to downgrade"):
+        await asyncio.to_thread(alembic.command.downgrade, cfg, BEFORE)
+    assert await _counts(engine) == before
+
+
+async def test_a_bridge_slot_alone_does_not_block_the_downgrade(migration, world, monkeypatch):
+    # Slots only map client keys to ordinals; with no effect or notice behind them nothing
+    # can be repeated, so they are not a reason to refuse.
+    cfg, engine = migration
+    monkeypatch.delenv("NEXUS_DESTROY_TOOL_EFFECTS", raising=False)
+    await _empty_the_ledger(engine)
+    await _populate(world, effect=False, notice=False)
+    assert (await _counts(engine))["tool_bridge_slots"] == 1
+    await asyncio.to_thread(alembic.command.downgrade, cfg, BEFORE)
+    assert await _effects_state(engine) == []
+
+
+async def test_destructive_override_reports_row_counts_and_reupgrade_is_empty(
+    migration, world, monkeypatch, capfd
+):
+    cfg, engine = migration
+    await _empty_the_ledger(engine)
+    await _populate(world, effect=True, notice=True)
+    monkeypatch.setenv("NEXUS_DESTROY_TOOL_EFFECTS", "destroy-ledger")
+    await asyncio.to_thread(alembic.command.downgrade, cfg, BEFORE)
+    # Alembic's own logging config owns the logger, so the report is read where it lands.
+    report = capfd.readouterr().err
+    assert "DESTRUCTIVE DOWNGRADE" in report and "LOST" in report
+    assert "tool_effects (1 row(s))" in report and "tool_notifications (1 row(s))" in report
+    assert await _effects_state(engine) == []
+    monkeypatch.delenv("NEXUS_DESTROY_TOOL_EFFECTS")
+    await asyncio.to_thread(alembic.command.upgrade, cfg, "head")
+    assert await _effects_state(engine) == LIVE
+    assert await _counts(engine) == dict.fromkeys(TABLES, 0)

@@ -226,4 +226,12 @@ async def bind(
         kind="run", company_id=company_id, role="agent", run_id=execution_id, agent_id=agent_id
     )
     ctx = ExecutionContext.for_principal(principal, source=INBOUND_MCP, session_id=turn.session_id)
-    return replace(ctx, turn_id=turn.id)
+    # The epoch is the execution the credential names: a claim sets the execution id and the
+    # attempt count together, so a row that still matches this id is at this attempt, and a
+    # recovery (new id) is refused above and again, against the live row, when a write claims.
+    return replace(
+        ctx,
+        turn_id=turn.id,
+        turn_execution=str(execution_id),
+        turn_attempt=max(turn.attempt_count or 1, 1),
+    )
