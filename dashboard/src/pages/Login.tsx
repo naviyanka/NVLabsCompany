@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { AlertTriangle, Loader2, Lock, LogIn, Mail } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
@@ -7,8 +7,15 @@ import { ApiClientError } from '@/api/client';
 const INPUT_CLASS =
   'w-full bg-[#141416] border border-white/[0.12] rounded-[6px] pl-9 pr-3 py-2.5 text-sm text-[#F2F1EE] placeholder-[#6B6B6E] focus:outline-none focus:border-[#FFB020] transition-colors';
 
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 interface LocationState {
   from?: string;
+}
+
+interface FieldErrors {
+  email?: string;
+  password?: string;
 }
 
 export function Login() {
@@ -18,11 +25,22 @@ export function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [submitting, setSubmitting] = useState(false);
+  const emailRef = useRef<HTMLInputElement>(null);
+  const passwordRef = useRef<HTMLInputElement>(null);
+  const errorRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     document.title = 'Sign in · NEXUS Mission Control';
   }, []);
+
+  // A server error belongs to the form, not one field (unknown email and wrong
+  // password look identical), so move focus to it instead of leaving focus on
+  // the submit button. tabIndex=-1 keeps it out of tab order.
+  useEffect(() => {
+    if (error) errorRef.current?.focus();
+  }, [error]);
 
   // A fresh install has no account to sign in with; send the operator to setup.
   if (status === 'setup-required') {
@@ -36,8 +54,26 @@ export function Login() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setSubmitting(true);
+    if (submitting) return;
     setError('');
+
+    const nextFieldErrors: FieldErrors = {};
+    if (!email.trim()) {
+      nextFieldErrors.email = 'Enter your operator email.';
+    } else if (!EMAIL_PATTERN.test(email.trim())) {
+      nextFieldErrors.email = 'Enter a valid email address.';
+    }
+    if (!password) {
+      nextFieldErrors.password = 'Enter your password.';
+    }
+    if (nextFieldErrors.email || nextFieldErrors.password) {
+      setFieldErrors(nextFieldErrors);
+      if (nextFieldErrors.email) emailRef.current?.focus();
+      else passwordRef.current?.focus();
+      return;
+    }
+    setFieldErrors({});
+    setSubmitting(true);
     try {
       await login(email.trim(), password);
       navigate((location.state as LocationState | null)?.from || '/', { replace: true });
@@ -60,7 +96,7 @@ export function Login() {
         {/* Brand */}
         <div className="mb-8 text-center">
           <div className="inline-flex items-center justify-center w-11 h-11 rounded-[8px] bg-[#FFB020]/12 border border-[#FFB020]/25 mb-4">
-            <Lock className="w-5 h-5 text-[#FFB020]" />
+            <Lock aria-hidden="true" className="w-5 h-5 text-[#FFB020]" />
           </div>
           <h1 className="text-lg font-display font-medium text-[#F2F1EE] tracking-tight">
             NEXUS Mission Control
@@ -72,14 +108,21 @@ export function Login() {
 
         <form
           onSubmit={handleSubmit}
+          aria-busy={submitting}
           className="bg-[#101012] border border-white/[0.08] rounded-[10px] p-6 space-y-4 shadow-xl"
         >
           {error && (
             <div
+              ref={errorRef}
+              id="login-error"
               role="alert"
-              className="flex items-start gap-2 p-3 bg-[#EF4444]/10 border border-[#EF4444]/25 rounded-[6px]"
+              tabIndex={-1}
+              className="flex items-start gap-2 p-3 bg-[#EF4444]/10 border border-[#EF4444]/25 rounded-[6px] focus:outline-none"
             >
-              <AlertTriangle className="w-3.5 h-3.5 text-[#EF4444] mt-0.5 shrink-0" />
+              <AlertTriangle
+                aria-hidden="true"
+                className="w-3.5 h-3.5 text-[#EF4444] mt-0.5 shrink-0"
+              />
               <p className="text-xs text-[#F2F1EE] leading-relaxed">{error}</p>
             </div>
           )}
@@ -92,19 +135,39 @@ export function Login() {
               Operator Email
             </label>
             <div className="relative">
-              <Mail className="w-4 h-4 text-[#6B6B6E] absolute left-3 top-1/2 -translate-y-1/2" />
+              <Mail
+                aria-hidden="true"
+                className="w-4 h-4 text-[#6B6B6E] absolute left-3 top-1/2 -translate-y-1/2"
+              />
               <input
                 id="login-email"
+                ref={emailRef}
                 type="email"
                 value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                onChange={(e) => {
+                  setEmail(e.target.value);
+                  if (fieldErrors.email) {
+                    setFieldErrors((prev) => ({ ...prev, email: undefined }));
+                  }
+                }}
                 placeholder="you@company.com"
                 autoComplete="username"
                 autoFocus
                 required
+                aria-invalid={fieldErrors.email ? true : undefined}
+                aria-describedby={fieldErrors.email ? 'login-email-error' : undefined}
                 className={INPUT_CLASS}
               />
             </div>
+            {fieldErrors.email && (
+              <p
+                id="login-email-error"
+                role="alert"
+                className="mt-1.5 text-[11px] leading-relaxed text-[#EF4444]"
+              >
+                {fieldErrors.email}
+              </p>
+            )}
           </div>
 
           <div>
@@ -115,18 +178,38 @@ export function Login() {
               Password
             </label>
             <div className="relative">
-              <Lock className="w-4 h-4 text-[#6B6B6E] absolute left-3 top-1/2 -translate-y-1/2" />
+              <Lock
+                aria-hidden="true"
+                className="w-4 h-4 text-[#6B6B6E] absolute left-3 top-1/2 -translate-y-1/2"
+              />
               <input
                 id="login-password"
+                ref={passwordRef}
                 type="password"
                 value={password}
-                onChange={(e) => setPassword(e.target.value)}
+                onChange={(e) => {
+                  setPassword(e.target.value);
+                  if (fieldErrors.password) {
+                    setFieldErrors((prev) => ({ ...prev, password: undefined }));
+                  }
+                }}
                 placeholder="••••••••••••"
                 autoComplete="current-password"
                 required
+                aria-invalid={fieldErrors.password ? true : undefined}
+                aria-describedby={fieldErrors.password ? 'login-password-error' : undefined}
                 className={INPUT_CLASS}
               />
             </div>
+            {fieldErrors.password && (
+              <p
+                id="login-password-error"
+                role="alert"
+                className="mt-1.5 text-[11px] leading-relaxed text-[#EF4444]"
+              >
+                {fieldErrors.password}
+              </p>
+            )}
           </div>
 
           <button
@@ -136,12 +219,12 @@ export function Login() {
           >
             {submitting ? (
               <>
-                <Loader2 className="w-4 h-4 animate-spin" />
+                <Loader2 aria-hidden="true" className="w-4 h-4 animate-spin" />
                 Opening session...
               </>
             ) : (
               <>
-                <LogIn className="w-4 h-4" />
+                <LogIn aria-hidden="true" className="w-4 h-4" />
                 Sign in
               </>
             )}
