@@ -1,9 +1,15 @@
 """Deterministic tests for scripts/project_facts.py (read-only project-facts auditor).
 
 Every test builds a throwaway repository under tmp_path and points the auditor at it, so no
-fixture ever touches src/nexus, the primary checkout, or the network. The auditor itself is
+fixture ever touches src/nexus, the primary checkout, or the network (the single real-
+repository test only reads workflow files from the PR checkout). The auditor itself is
 loaded by path (scripts/ is not a package), following the convention in test_arch_guard.py;
 the module is registered in sys.modules before exec_module per the repo convention.
+
+Coverage: the original 40 auditor areas plus the correction set - runtime test-total
+claims are never compared with the static function count, generic table/page claims are
+never compared with class/file counts, App.tsx route metrics are scanned statically, and
+GitHub action references carry per-file/line provenance with full classification.
 """
 
 import ast
@@ -63,10 +69,15 @@ def dump(report: dict) -> str:
     return json.dumps(report, sort_keys=True)
 
 
-def model_src(class_names: list) -> str:
+def claims_for(root: Path, needle: str) -> list:
+    return [c for c in collect(root)["docs_claims"]["claims"] if needle in c["claim"]]
+
+
+def model_src(class_names: list, tablename: str | None = None) -> str:
+    extra = f'\n    __tablename__ = "{tablename}"\n' if tablename else ""
     body = "from sqlmodel import SQLModel\n"
     for name in class_names:
-        body += f"\n\nclass {name}(SQLModel, table=True):\n    id: int = 0\n"
+        body += f"\n\nclass {name}(SQLModel, table=True):{extra}\n    id: int = 0\n"
     return body
 
 
@@ -88,10 +99,38 @@ _PG_MARKED = "import pytest\npytestmark = pytest.mark.postgres\n\n\ndef test_x()
 _PG_SLOW = "import pytest\npytestmark = pytest.mark.slow\n\n\ndef test_w():\n    pass\n"
 
 
-def doc_repo(tmp_path: Path, readme: str) -> Path:
-    """A repo with two SQLModel table classes, the baseline for claim comparisons."""
-    return make_repo(tmp_path, {"src/nexus/models/thing.py": model_src(["Thing", "Other"]),
-                                "README.md": readme})
+def doc_repo(tmp_path: Path, readme: str, model: str | None = None) -> Path:
+    """A repo whose model classes back the table-claim comparisons."""
+    files = {"README.md": readme,
+             "src/nexus/models/thing.py": model or model_src(["Thing", "Other"])}
+    return make_repo(tmp_path, files)
+
+
+def app_tsx(pages: list, route_body: str, lazy_page: str | None = None) -> str:
+    imports = "".join(f"import {{ {p} }} from '@/pages/{p}';\n" for p in pages)
+    lazy = f"const Lazy{lazy_page} = lazy(() => import('@/pages/{lazy_page}'));\n" \
+        if lazy_page else ""
+    return (imports + lazy + "import { Routes, Route } from 'react-router-dom';\n\n"
+            "export default function App() {\n  return (\n    <Routes>\n"
+            + route_body + "    </Routes>\n  );\n}\n")
+
+
+def route_repo(tmp_path: Path, pages: list, route_body: str, lazy_page: str | None = None) -> dict:
+    files = {f"dashboard/src/pages/{p}.tsx": "export default null\n" for p in pages}
+    files["dashboard/src/App.tsx"] = app_tsx(pages, route_body, lazy_page)
+    return collect(make_repo(tmp_path, files))["frontend"]
+
+
+def action_repo(tmp_path: Path, content: str, name: str = "ci.yml") -> dict:
+    files = {f".github/workflows/{name}": content}
+    root = make_repo(tmp_path / f"repo_{name.replace('.', '_')}", files)
+    return pf.action_refs_facts(pf._tracked_files(root), root, [])
+
+
+def ref_entry(refs: dict, uses_value: str) -> dict:
+    matches = [r for r in refs["references"] if r["uses"] == uses_value]
+    assert matches, f"missing reference {uses_value!r} in {refs['references']}"
+    return matches[0]
 
 
 # 1. Stable output ordering ---
@@ -131,7 +170,7 @@ def test_sqlmodel_table_detection(tmp_path):
            "class Also(SQLModel, table=True):\n    id: int = 0\n")
     database = collect(make_repo(tmp_path, {"src/nexus/models/t.py": src}))["database"]
     assert database["sqlmodel_table_class_count"] == 2
-    assert "not a guaranteed physical-table count" in database["physical_table_note"]
+    assert "not a physical-table count" in database["physical_table_note"]
 
 
 def test_table_true_in_comments_and_strings_ignored(tmp_path):
@@ -250,13 +289,14 @@ def test_raw_company_id_audit_signal(tmp_path):
 # 15-16. Frontend ---
 
 def test_frontend_page_counting(tmp_path):
-    files = {"dashboard/src/pages/A.tsx": "export default function A() { return null }\n",
-             "dashboard/src/pages/B.tsx": "export default function B() { return null }\n",
+    files = {"dashboard/src/pages/A.tsx": "export default null\n",
+             "dashboard/src/pages/B.tsx": "export default null\n",
              "dashboard/src/pages/__tests__/A.test.tsx": "test('a', () => {});\n",
              "dashboard/src/components/C.tsx": "export const C = () => null\n"}
     frontend = collect(make_repo(tmp_path, files))["frontend"]
-    assert frontend["dashboard_page_count"] == 2  # test files under pages/ are not pages
+    assert frontend["page_component_file_count"] == 2  # test files under pages/ are not pages
     assert frontend["dashboard_unit_test_file_count"] == 1
+    assert frontend["mounted_route_count"] is None  # no App.tsx: mounted metrics unknown
 
 
 def test_mock_detection_outside_tests(tmp_path):
@@ -277,7 +317,7 @@ def test_test_function_count_without_parametrize_expansion(tmp_path):
            "class TestGroup:\n    def test_member(self):\n        pass\n")
     tests = collect(make_repo(tmp_path, {"tests/test_a.py": src}))["tests"]
     assert tests["python_test_file_count"] == 1
-    assert tests["test_function_count_static"] == 3  # parametrization is not expanded
+    assert tests["static_test_function_count"] == 3  # parametrization is not expanded
     assert "parametrization" in tests["parametrization_note"].lower()
 
 
@@ -298,16 +338,15 @@ def test_postgres_marker_detection(tmp_path):
 def test_workflow_postgres_split_agreement(tmp_path):
     files = {"tests/test_pg_module.py": _PG_MARKED,
              ".github/workflows/test.yml": (
-            "name: Tests\n"
-            "jobs:\n"
-            "  backend:\n"
-            "    steps:\n"
-            "      - run: pytest tests/ --ignore=tests/test_pg_module.py -x -q\n"
-            "  postgres-integration:\n"
-            "    steps:\n"
-            "      - run: pytest tests/test_pg_module.py -v\n"
-        ),
-    }
+                 "name: Tests\n"
+                 "jobs:\n"
+                 "  backend:\n"
+                 "    steps:\n"
+                 "      - run: pytest tests/ --ignore=tests/test_pg_module.py -x -q\n"
+                 "  postgres-integration:\n"
+                 "    steps:\n"
+                 "      - run: pytest tests/test_pg_module.py -v\n"
+             )}
     report = collect(make_repo(tmp_path, files))
     ci, split = report["ci"], report["ci"]["postgres_split"]
     assert ci["workflow_file_count"] == 1
@@ -327,18 +366,20 @@ def test_workflow_postgres_split_agreement(tmp_path):
 
 def test_mutable_action_reference_detection(tmp_path):
     wf = "name: CI\njobs:\n  build:\n    steps:\n      - uses: actions/checkout@main\n"
-    ci = collect(make_repo(tmp_path, {".github/workflows/ci.yml": wf}))["ci"]
-    assert ci["action_refs"]["branch_or_other"] == ["actions/checkout@main"]
-    assert ci["action_refs"]["sha_pinned"] == []
-    assert "mutable" in ci["action_ref_note"].lower()
+    refs = action_repo(tmp_path, wf)
+    entry = ref_entry(refs, "actions/checkout@main")
+    assert entry["kind"] == "branch"
+    assert refs["by_kind"]["branch"] == 1
+    assert refs["by_kind"]["sha_pinned"] == 0
+    assert "mutable" in refs["note"].lower()
 
 
 def test_major_tag_action_reference_not_immutable(tmp_path):
     wf = "name: CI\njobs:\n  build:\n    steps:\n      - uses: actions/checkout@v4\n"
-    ci = collect(make_repo(tmp_path, {".github/workflows/ci.yml": wf}))["ci"]
-    assert ci["action_refs"]["major_tag"] == ["actions/checkout@v4"]
-    assert ci["action_refs"]["sha_pinned"] == []
-    assert "mutable" in ci["action_ref_note"].lower()
+    refs = action_repo(tmp_path, wf)
+    assert ref_entry(refs, "actions/checkout@v4")["kind"] == "major_tag"
+    assert refs["by_kind"]["sha_pinned"] == 0
+    assert "mutable" in refs["note"].lower()
 
 
 # 22. Release hygiene ---
@@ -365,23 +406,23 @@ def test_release_hygiene_presence_and_tags(tmp_path):
 # 23-26. Documentation claims ---
 
 def test_doc_claim_match(tmp_path):
-    claims = collect(doc_repo(tmp_path, "The schema has 2 database tables today.\n"))[
-        "docs_claims"]["claims"]
-    row = [c for c in claims if c["category"] == "database_tables"][0]
+    row = claims_for(doc_repo(tmp_path, "The schema has 2 SQLModel table=True classes.\n"),
+                     "SQLModel table=True classes")[0]
     assert (row["claimed"], row["measured"], row["status"]) == (2, 2, "matches")
 
 
 def test_doc_claim_stale(tmp_path):
-    docs = collect(doc_repo(tmp_path, "The schema has 9 database tables today.\n"))["docs_claims"]
+    docs = collect(doc_repo(tmp_path, "There are 9 static test functions in the suite.\n"))[
+        "docs_claims"]
     assert docs["stale_count"] == 1
     assert docs["claims"][0]["status"] == "stale"
 
 
 def test_doc_claim_unverifiable(tmp_path):
-    claims = collect(doc_repo(tmp_path, "There are 40 test scenarios covered.\n"))[
-        "docs_claims"]["claims"]
-    assert claims[0]["status"] == "not_statically_verifiable"
-    assert claims[0]["measured"] is None
+    row = claims_for(doc_repo(tmp_path, "There are 40 test scenarios covered.\n"),
+                     "40 test scenarios")[0]
+    assert row["status"] == "not_statically_verifiable"
+    assert row["measured"] is None
 
 
 def test_subjective_readiness_claim(tmp_path):
@@ -395,9 +436,9 @@ def test_subjective_readiness_claim(tmp_path):
 
 def test_check_docs_exit_behavior(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    matching = doc_repo(tmp_path / "c", "The schema has 2 database tables today.\n")
+    matching = doc_repo(tmp_path / "c", "The schema has 2 SQLModel table=True classes.\n")
     assert pf.main(["--repo", str(matching), "--check-docs"]) == 0
-    stale = doc_repo(tmp_path / "s", "The schema has 9 database tables today.\n")
+    stale = doc_repo(tmp_path / "s", "There are 9 static test functions in the suite.\n")
     assert pf.main(["--repo", str(stale), "--check-docs"]) == 1
     subjective = doc_repo(tmp_path / "j", "NEXUS is enterprise-grade.\n")
     assert pf.main(["--repo", str(subjective), "--check-docs"]) == 0
@@ -408,7 +449,7 @@ def test_check_docs_exit_behavior(tmp_path, monkeypatch):
 def test_json_schema_and_deterministic_ordering(tmp_path):
     root = make_repo(tmp_path, {"README.md": "# x\n", "src/nexus/a.py": "x = 1\n"})
     report = collect(root)
-    assert report["schema_version"] == 1
+    assert report["schema_version"] == 2
     assert {"api", "backend", "ci", "database", "docs_claims", "frontend", "git",
             "parse_diagnostics", "release", "schema_version", "tests"} <= set(report)
     assert dump(report) == dump(collect(root))
@@ -562,3 +603,323 @@ def test_malformed_files_sanitized_diagnostic(tmp_path):
     for message in diags.values():
         assert str(tmp_path) not in message  # diagnostics stay repository-relative
     assert pf.main(["--repo", str(root)]) == 0
+
+
+# ---- Correction 1: runtime test totals are never compared with static counts ---------------
+
+def test_runtime_test_total_claim_not_verifiable(tmp_path):
+    row = claims_for(doc_repo(tmp_path, "3,109 tests passed in CI.\n"), "3,109 tests passed")[0]
+    assert row["status"] == "not_statically_verifiable"
+    assert row["measured"] is None
+
+
+def test_tests_passing_ratio_claim_not_verifiable(tmp_path):
+    row = claims_for(doc_repo(tmp_path, "3,109 / 3,109 tests passing cleanly.\n"),
+                     "3,109 / 3,109 tests passing")[0]
+    assert row["status"] == "not_statically_verifiable"
+    assert row["measured"] is None
+
+
+def test_tests_plus_floor_claim_not_verifiable(tmp_path):
+    row = claims_for(doc_repo(tmp_path, "Pytest (3,232+ tests) runs on every push.\n"),
+                     "3,232+ tests")[0]
+    assert row["status"] == "not_statically_verifiable"
+    assert row["measured"] is None
+
+
+def test_static_test_function_claim_is_comparable(tmp_path):
+    src = "def test_a():\n    pass\n\n\ndef test_b():\n    pass\n"
+    root = make_repo(tmp_path, {"tests/test_a.py": src,
+                                "README.md": "The suite defines 2 static test functions.\n"
+                                             "Docs once claimed 9 static test functions.\n"})
+    claims = collect(root)["docs_claims"]["claims"]
+    statuses = {c["claimed"]: c["status"] for c in claims
+                if c["category"] == "static_test_functions"}
+    assert statuses == {2: "matches", 9: "stale"}
+
+
+def test_parametrize_proves_static_count_not_collected(tmp_path):
+    src = 'import pytest\n\n\n@pytest.mark.parametrize("n", [1, 2, 3])\ndef test_n(n):\n    pass\n'
+    root = make_repo(tmp_path, {"tests/test_a.py": src, "README.md": "It runs 300 tests.\n"})
+    report = collect(root)
+    assert report["tests"]["static_test_function_count"] == 1  # one function, many items
+    row = claims_for(root, "300 tests")[0]
+    assert row["status"] == "not_statically_verifiable"
+
+
+def test_check_docs_ignores_runtime_test_totals(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    root = doc_repo(tmp_path / "r", "3,109 tests passed in CI.\n")
+    assert pf.main(["--repo", str(root), "--check-docs"]) == 0
+
+
+def test_json_distinguishes_static_counts_from_runtime_claims(tmp_path):
+    root = doc_repo(tmp_path, "3,109 tests passed in CI.\n")
+    report = collect(root)
+    assert "static_test_function_count" in report["tests"]
+    row = claims_for(root, "3,109 tests passed")[0]
+    assert row["claimed"] == 3109 and row["measured"] is None
+    assert row["status"] == "not_statically_verifiable"
+
+
+# ---- Correction 2: table claims are only comparable in explicit class wording --------------
+
+def test_generic_table_claim_not_compared(tmp_path):
+    row = claims_for(doc_repo(tmp_path, "The schema has 69 database tables.\n"),
+                     "69 database tables")[0]
+    assert row["status"] == "not_statically_comparable"
+    assert row["measured"] is None
+
+
+def test_explicit_table_class_claim_matches(tmp_path):
+    row = claims_for(doc_repo(tmp_path, "The schema has 2 SQLModel table=True classes.\n"),
+                     "SQLModel table=True classes")[0]
+    assert row["status"] == "matches" and row["measured"] == 2
+
+
+def test_shared_tablename_classes_not_two_physical_tables(tmp_path):
+    src = model_src(["A", "B"], tablename="shared_table")
+    root = make_repo(tmp_path, {"src/nexus/models/t.py": src,
+                                "README.md": "The schema has 2 database tables.\n"})
+    database = collect(root)["database"]
+    assert database["sqlmodel_table_class_count"] == 2  # two classes, by definition of the metric
+    row = claims_for(root, "2 database tables")[0]
+    assert row["status"] == "not_statically_comparable"  # never proof of two physical tables
+
+
+def test_link_models_do_not_inflate_physical_claims(tmp_path):
+    src = ("from sqlmodel import SQLModel\n\n\n"
+           "class TaskLink(SQLModel, table=True):\n    task_id: int = 0\n\n\n"
+           "class Real(SQLModel, table=True):\n    id: int = 0\n")
+    root = make_repo(tmp_path, {"src/nexus/models/t.py": src,
+                                "README.md": "There are 2 physical tables and "
+                                             "2 SQLModel table=True classes.\n"})
+    claims = collect(root)["docs_claims"]["claims"]
+    by_cat = {c["category"]: c for c in claims}
+    assert by_cat["database_tables"]["status"] == "not_statically_comparable"
+    assert by_cat["sqlmodel_table_classes"]["status"] == "matches"  # link models count as classes
+
+
+def test_check_docs_ignores_generic_table_claim(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    root = doc_repo(tmp_path / "r", "The schema has 69 database tables.\n")
+    assert pf.main(["--repo", str(root), "--check-docs"]) == 0
+
+
+# ---- Correction 3: page claims need a semantically matching metric --------------------------
+
+def test_page_files_vs_mounted_components(tmp_path):
+    frontend = route_repo(tmp_path, ["A", "B", "C"],
+                          '      <Route path="/a" element={<A />} />\n'
+                          '      <Route path="/b" element={<B />} />\n')
+    assert frontend["page_component_file_count"] == 3
+    assert frontend["mounted_route_count"] == 2
+    assert frontend["unique_mounted_page_components"] == 2  # C is never mounted
+
+
+def test_two_routes_one_component(tmp_path):
+    frontend = route_repo(tmp_path, ["A"],
+                          '      <Route path="/a" element={<A />} />\n'
+                          '      <Route path="/overview" element={<A />} />\n')
+    assert frontend["mounted_route_count"] == 2
+    assert frontend["unique_mounted_page_components"] == 1
+
+
+def test_parameterized_route_counts(tmp_path):
+    frontend = route_repo(tmp_path, ["A"],
+                          '      <Route path="/a/:id" element={<A />} />\n')
+    assert frontend["mounted_route_count"] == 1  # a parameterized route is one route
+    assert frontend["unique_mounted_page_components"] == 1
+
+
+def test_lazy_route_detected(tmp_path):
+    body = ('      <Route path="/office" element={'
+            '<Suspense fallback={null}><LazyOffice /></Suspense>} />\n')
+    frontend = route_repo(tmp_path, ["Office"], body, lazy_page="Office")
+    assert frontend["mounted_route_count"] == 1
+    assert frontend["unique_mounted_page_components"] == 1
+    assert frontend["route_scan_files"] == ["dashboard/src/App.tsx"]
+
+
+def test_unmounted_page_excluded_from_mounted_count(tmp_path):
+    frontend = route_repo(tmp_path, ["A", "Orphan"],
+                          '      <Route path="/a" element={<A />} />\n')
+    assert frontend["page_component_file_count"] == 2
+    assert frontend["unique_mounted_page_components"] == 1
+
+
+def test_test_files_under_pages_excluded(tmp_path):
+    frontend = route_repo(tmp_path, ["A", "B"],
+                          '      <Route path="/a" element={<A />} />\n')
+    assert frontend["page_component_file_count"] == 2
+    assert frontend["mounted_route_count"] == 1
+
+
+def test_page_component_files_wording_compares(tmp_path):
+    files = {"dashboard/src/pages/A.tsx": "x\n", "dashboard/src/pages/B.tsx": "x\n",
+             "dashboard/src/pages/C.tsx": "x\n",
+             "dashboard/src/App.tsx": app_tsx(["A"], '      <Route path="/a" element={<A />} />\n'),
+             "README.md": "There are 3 page component files today.\n"}
+    root = make_repo(tmp_path, files)
+    row = claims_for(root, "3 page component files")[0]
+    assert row["status"] == "matches" and row["measured"] == 3
+
+
+def test_mounted_wordings_compare_with_matching_metrics(tmp_path):
+    frontend_files = {"dashboard/src/pages/A.tsx": "x\n",
+                      "dashboard/src/App.tsx": app_tsx(
+                          ["A"],
+                          '      <Route path="/a" element={<A />} />\n'
+                          '      <Route path="/a2" element={<A />} />\n'),
+                      "README.md": "It registers 2 mounted routes and 1 mounted page "
+                                   "component.\n"}
+    root = make_repo(tmp_path, frontend_files)
+    claims = collect(root)["docs_claims"]["claims"]
+    by_cat = {c["category"]: c for c in claims}
+    assert by_cat["mounted_routes"]["status"] == "matches"
+    assert by_cat["mounted_routes"]["measured"] == 2
+    assert by_cat["mounted_page_components"]["status"] == "matches"
+    assert by_cat["mounted_page_components"]["measured"] == 1
+
+
+def test_ambiguous_ui_pages_not_stale(tmp_path):
+    row = claims_for(doc_repo(tmp_path, "The dashboard has 25 React UI pages.\n"),
+                     "25 React UI pages")[0]
+    assert row["status"] == "not_statically_comparable"
+    assert row["measured"] is None
+
+
+# ---- Correction 4: action-reference provenance and classification ----------------------------
+
+def test_nested_job_step_uses_detected(tmp_path):
+    refs = action_repo(tmp_path, "name: CI\njobs:\n  build:\n    steps:\n"
+                                 "      - uses: actions/checkout@v4\n")
+    entry = ref_entry(refs, "actions/checkout@v4")
+    assert (entry["file"], entry["line"]) == (".github/workflows/ci.yml", 5)
+
+
+def test_reusable_workflow_uses_detected(tmp_path):
+    wf = "name: CI\njobs:\n  call:\n    uses: owner/repo/.github/workflows/w.yml@v1\n"
+    entry = ref_entry(action_repo(tmp_path, wf), "owner/repo/.github/workflows/w.yml@v1")
+    assert (entry["file"], entry["line"], entry["kind"]) == (
+        ".github/workflows/ci.yml", 4, "major_tag")
+
+
+def test_action_ref_main_is_branch(tmp_path):
+    refs = action_repo(tmp_path, "jobs:\n  b:\n    steps:\n      - uses: actions/x@main\n")
+    assert ref_entry(refs, "actions/x@main")["kind"] == "branch"
+
+
+def test_action_ref_master_is_branch(tmp_path):
+    refs = action_repo(tmp_path, "jobs:\n  b:\n    steps:\n      - uses: actions/x@master\n")
+    assert ref_entry(refs, "actions/x@master")["kind"] == "branch"
+
+
+def test_action_ref_v4_is_mutable_major_tag(tmp_path):
+    refs = action_repo(tmp_path, "jobs:\n  b:\n    steps:\n      - uses: actions/x@v4\n")
+    assert ref_entry(refs, "actions/x@v4")["kind"] == "major_tag"
+
+
+def test_action_ref_semantic_tag_is_movable(tmp_path):
+    refs = action_repo(tmp_path, "jobs:\n  b:\n    steps:\n      - uses: actions/x@v4.2.1\n")
+    assert ref_entry(refs, "actions/x@v4.2.1")["kind"] == "semantic_tag"
+    assert refs["by_kind"]["sha_pinned"] == 0
+
+
+def test_action_ref_full_sha_is_immutable(tmp_path):
+    sha = "a" * 40
+    refs = action_repo(tmp_path, f"jobs:\n  b:\n    steps:\n      - uses: actions/x@{sha}\n")
+    assert ref_entry(refs, f"actions/x@{sha}")["kind"] == "sha_pinned"
+
+
+def test_action_ref_short_sha_not_immutable(tmp_path):
+    refs = action_repo(tmp_path, "jobs:\n  b:\n    steps:\n      - uses: actions/x@1a2b3c4\n")
+    entry = ref_entry(refs, "actions/x@1a2b3c4")
+    assert entry["kind"] != "sha_pinned"
+    assert entry["kind"] == "unknown"  # abbreviated pins require review
+
+
+def test_docker_digest_vs_untagged(tmp_path):
+    digest = "sha256:" + "a" * 64
+    wf = ("jobs:\n  b:\n    steps:\n"
+          f"      - uses: docker://alpine@{digest}\n"
+          "      - uses: docker://alpine:3.18\n")
+    refs = action_repo(tmp_path, wf)
+    assert ref_entry(refs, f"docker://alpine@{digest}")["kind"] == "docker_digest"
+    assert ref_entry(refs, "docker://alpine:3.18")["kind"] == "docker"
+
+
+def test_local_action_detected(tmp_path):
+    refs = action_repo(tmp_path, "jobs:\n  b:\n    steps:\n"
+                                 "      - uses: ./.github/actions/my-action\n")
+    assert ref_entry(refs, "./.github/actions/my-action")["kind"] == "local"
+
+
+def test_quoted_and_unquoted_uses(tmp_path):
+    wf = ("jobs:\n  b:\n    steps:\n"
+          '      - uses: "actions/checkout@v4"\n'
+          "      - uses: actions/setup-node@v4\n")
+    refs = action_repo(tmp_path, wf)
+    assert ref_entry(refs, "actions/checkout@v4")["kind"] == "major_tag"
+    assert ref_entry(refs, "actions/setup-node@v4")["kind"] == "major_tag"
+
+
+def test_yaml_and_yml_extensions_scanned(tmp_path):
+    yml = action_repo(tmp_path, "jobs:\n  b:\n    steps:\n      - uses: actions/x@v4\n",
+                      name="one.yml")
+    yaml_ = action_repo(tmp_path, "jobs:\n  b:\n    steps:\n      - uses: actions/x@v4\n",
+                        name="two.yaml")
+    assert yml["by_kind"]["major_tag"] == 1 and yaml_["by_kind"]["major_tag"] == 1
+
+
+def test_uses_detection_deduplicated(tmp_path):
+    wf = ("jobs:\n  b:\n    steps:\n"
+          "      - uses: actions/checkout@v4\n"
+          "      - uses: actions/checkout@v4\n")
+    refs = action_repo(tmp_path, wf)
+    entries = [r for r in refs["references"] if r["uses"] == "actions/checkout@v4"]
+    assert len(entries) == 2  # two lines: YAML- and source-level detections are deduplicated
+    assert len({(r["file"], r["line"]) for r in entries}) == 2
+    assert refs["by_kind"]["major_tag"] == 2
+
+
+def test_dynamic_expression_unknown(tmp_path):
+    wf = ("jobs:\n  b:\n    steps:\n"
+          "      - uses: ${{ env.ACTION_REF }}\n"
+          "      - uses: owner/repo@${{ env.REF }}\n")
+    refs = action_repo(tmp_path, wf)
+    assert ref_entry(refs, "${{ env.ACTION_REF }}")["kind"] == "unknown"
+    assert ref_entry(refs, "owner/repo@${{ env.REF }}")["kind"] == "unknown"
+
+
+def test_real_repository_trivy_findings():
+    files = pf._tracked_files(REPO_ROOT)
+    refs = pf.action_refs_facts(files, REPO_ROOT, [])
+    trivy = [r for r in refs["references"] if r["uses"] == "aquasecurity/trivy-action@master"]
+    assert [(r["file"], r["line"]) for r in trivy] == [
+        (".github/workflows/deploy-pipeline.yml", 231),
+        (".github/workflows/deploy-pipeline.yml", 261)]
+    assert all(r["kind"] == "branch" for r in trivy)
+    for value in ("actions/checkout@v4", "actions/setup-python@v5"):
+        entries = [r for r in refs["references"] if r["uses"] == value]
+        assert entries and all(r["kind"] == "major_tag" for r in entries)
+    total = sum(refs["by_kind"].values())
+    assert refs["by_kind"]["sha_pinned"] < total  # no false "all immutable" conclusion
+
+
+# ---- Correction 5: the five statuses and exit behavior ----------------------------------------
+
+def test_all_five_statuses_present_and_exit(tmp_path, monkeypatch):
+    readme = ("The schema has 2 SQLModel table=True classes.\n"      # matches
+              "There are 9 static test functions in the suite.\n"    # stale
+              "3,109 tests passed in CI.\n"                          # not_statically_verifiable
+              "The schema has 69 database tables.\n"                 # not_statically_comparable
+              "NEXUS is enterprise-grade.\n")                        # subjective
+    root = doc_repo(tmp_path, readme)
+    docs = collect(root)["docs_claims"]
+    assert {c["status"] for c in docs["claims"]} == {
+        "matches", "stale", "not_statically_verifiable", "not_statically_comparable",
+        "subjective"}
+    assert docs["stale_count"] == 1
+    monkeypatch.chdir(tmp_path)
+    assert pf.main(["--repo", str(root), "--check-docs"]) == 1

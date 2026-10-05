@@ -7,6 +7,15 @@ of tracked files parsed with ast / tomllib / PyYAML (the repository's declared Y
 dependency). Counts are static approximations; docs/testing/PROJECT_FACTS_AUDITOR.md
 documents the counting rules and their limits.
 
+Claim statuses (non-overlapping):
+    matches                     - claim and measured fact share the same unit and scope.
+    stale                       - comparable claim that disagrees with the measured fact.
+    not_statically_verifiable   - runtime semantics static scanning cannot adjudicate.
+    not_statically_comparable   - the documented metric is not the claimed unit.
+    subjective                  - judgment language, reported but never objectively matched.
+
+--check-docs exits nonzero only for `stale`.
+
 Usage: python scripts/project_facts.py [--repo PATH] [--json PATH] [--markdown PATH]
                                        [--check-docs] [--overwrite]
 """
@@ -25,11 +34,12 @@ from pathlib import Path
 
 import yaml
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 BACKEND_ROOT = "src/nexus"
 API_ROOT = "src/nexus/api"
 DASH_ROOT = "dashboard"
 PAGES_DIR = "dashboard/src/pages"
+APP_TSX = "dashboard/src/App.tsx"
 DOC_FILES = ("README.md", "ARCHITECTURE.md", "FEATURES.md", "docs/FINAL-STATUS-SUMMARY.md")
 ROUTE_METHODS = ("delete", "get", "head", "options", "patch", "post", "put")
 HEX40 = re.compile(r"^[0-9a-f]{40}$")
@@ -38,14 +48,22 @@ MAX_FILE_BYTES = 1_000_000
 CLAIM_EXCERPT_CHARS = 120
 COMMAND_CAP = 200
 LOC_RULE = "non-blank lines (lines containing at least one non-whitespace character)"
+STATUS_NOTE = ("statuses: matches | stale | not_statically_verifiable | "
+               "not_statically_comparable | subjective; --check-docs fails only on stale")
 RAW_COMPANY_NOTE = "A raw company_id parameter is an audit signal, not proof of a vulnerability."
-TABLE_NOTE = "Static class count with table=True; not a guaranteed physical-table count."
-ACTION_NOTE = "Only a 40-hex SHA pins action content; tags and branches are mutable pointers."
-TEST_NOTE = "Static test-function count; parametrization not expanded, not a 'tests passed' figure."
-DOCS_NOTE = "--check-docs fails only on 'stale' claims; subjective/unverifiable never fail it."
-TEST_CLAIM_RULE = ("Test-count claims: below the static function count is stale, equal matches, "
-                   "above is not statically verifiable (parametrization expands at collection); "
-                   "an 'N+' floor claim matches once the static count reaches N.")
+TABLE_NOTE = ("Static count of SQLModel class definitions carrying table=True; not a physical-"
+              "table count, and generic 'tables' claims are never compared against it.")
+ACTION_NOTE = ("Only a 40-hex commit SHA or a Docker digest pins action content; branches, "
+               "major tags and semantic tags are mutable; short SHAs and dynamic refs need review.")
+TEST_NOTE = ("Static count of Python functions named test_*; parametrization is not expanded. "
+             "This is never a collected, executed or passed-test figure.")
+TEST_CLAIM_NOTE = ("Runtime test totals ('N tests', 'N+ tests', 'N tests passed/passing') are "
+                   "never statically verifiable; only explicit 'N static test functions' claims "
+                   "compare with static_test_function_count.")
+PAGE_NOTE = ("Page-component files, mounted routes and unique mounted page components are "
+             "separate metrics derived from App.tsx route registrations; generic 'UI pages' "
+             "claims are not statically comparable.")
+DOCS_NOTE = "--check-docs fails only on 'stale' claims; the other four statuses never fail it."
 
 
 class AuditError(Exception):
@@ -325,6 +343,63 @@ def _is_ts_test(rel: str) -> bool:
     return any(marker in name for marker in (".test.", ".spec.")) or "/__tests__/" in f"/{rel}"
 
 
+# Page imports in App.tsx: named/default `import {X} from '.../pages/X'` and
+# `const X = lazy(() => import('.../pages/X')...)`.
+_PAGE_NAMED_IMPORT = re.compile(
+    r"import\s+(?:\{([^}]*)\}|(\w+))\s+from\s*['\"][^'\"]*pages/([\w/-]+)['\"]")
+_PAGE_LAZY_IMPORT = re.compile(
+    r"(\w+)\s*=\s*lazy\(\s*\(\)\s*=>\s*import\(\s*['\"][^'\"]*pages/([\w/-]+)['\"]")
+_ROUTE_TAG = re.compile(r"<Route\b")
+
+
+def _element_blocks(text: str) -> list[str]:
+    """Brace-matched contents of every element={ ... } JSX attribute (approximation)."""
+    blocks = []
+    for marker in re.finditer(r"element=\{", text):
+        depth, i = 1, marker.end()
+        while i < len(text) and depth:
+            depth += (text[i] == "{") - (text[i] == "}")
+            i += 1
+        blocks.append(text[marker.end(): i - 1])
+    return blocks
+
+
+def route_facts(files, repo) -> dict:
+    """Static scan of dashboard/src/App.tsx route registrations; never executed."""
+    if APP_TSX not in set(files):
+        return {"route_scan_files": [], "mounted_route_count": None,
+                "unique_mounted_page_components": None,
+                "route_scan_note": "dashboard/src/App.tsx not tracked; mounted metrics unknown."}
+    text, why = _read(repo, APP_TSX)
+    if text is None:
+        return {"route_scan_files": [APP_TSX], "mounted_route_count": None,
+                "unique_mounted_page_components": None,
+                "route_scan_note": f"App.tsx unreadable ({why}); mounted metrics unknown."}
+    page_modules: dict = {}
+    for match in _PAGE_NAMED_IMPORT.finditer(text):
+        names = [n.strip() for n in match.group(1).split(",")] if match.group(1) \
+            else [match.group(2)]
+        for name in names:
+            if name:
+                page_modules[name] = match.group(3)
+    for match in _PAGE_LAZY_IMPORT.finditer(text):
+        page_modules[match.group(1)] = match.group(2)
+    routes = len(_ROUTE_TAG.findall(text))
+    mounted: set = set()
+    for block in _element_blocks(text):
+        for name, module in page_modules.items():
+            if re.search(rf"\b{re.escape(name)}\b", block):
+                mounted.add(module)
+    if routes == 0:
+        return {"route_scan_files": [APP_TSX], "mounted_route_count": None,
+                "unique_mounted_page_components": None,
+                "route_scan_note": "No <Route> registrations found; mounted metrics unknown."}
+    return {"route_scan_files": [APP_TSX], "mounted_route_count": routes,
+            "unique_mounted_page_components": len(mounted),
+            "route_scan_note": ("Static scan of App.tsx <Route> registrations; routes include "
+                                "parameterized and layout routes, deduplicated by component.")}
+
+
 def frontend_facts(files, repo, diags) -> dict:
     ts_files = [f for f in files if f.endswith((".ts", ".tsx"))]
     ts_loc = 0
@@ -346,11 +421,15 @@ def frontend_facts(files, repo, diags) -> dict:
              and not _is_ts_test(f)]
     unit = [f for f in ts_files if f.startswith(DASH_ROOT + "/") and _is_ts_test(f)]
     e2e = [f for f in ts_files if "/e2e/" in f"/{f}"]
-    return {"ts_tsx_file_count": len(ts_files), "ts_tsx_loc": ts_loc, "loc_rule": LOC_RULE,
-            "dashboard_page_count": len(pages), "dashboard_unit_test_file_count": len(unit),
-            "playwright_e2e_file_count": len(e2e), "mock_declaration_paths": sorted(decls),
-            "mock_comment_paths": sorted(comments),
-            "mock_note": "Mock findings list relative paths only, outside test and e2e files."}
+    facts = {"ts_tsx_file_count": len(ts_files), "ts_tsx_loc": ts_loc, "loc_rule": LOC_RULE,
+             "page_component_file_count": len(pages),
+             "dashboard_unit_test_file_count": len(unit),
+             "playwright_e2e_file_count": len(e2e),
+             "mock_declaration_paths": sorted(decls), "mock_comment_paths": sorted(comments),
+             "mock_note": "Mock findings list relative paths only, outside test and e2e files."}
+    facts.update(route_facts(files, repo))
+    facts["page_metrics_note"] = PAGE_NOTE
+    return facts
 
 
 def _decorator_name(dec) -> str:
@@ -392,20 +471,87 @@ def tests_facts(files, trees) -> dict:
         functions += sum(1 for n in defs if n.name.startswith("test_"))
         if _is_postgres_marked(tree):
             marked.append(rel)
-    return {"python_test_file_count": len(test_files), "test_function_count_static": functions,
-            "parametrization_note": TEST_NOTE, "postgres_marked_file_count": len(marked),
-            "postgres_marked_files": marked}
+    return {"python_test_file_count": len(test_files),
+            "static_test_function_count": functions, "parametrization_note": TEST_NOTE,
+            "postgres_marked_file_count": len(marked), "postgres_marked_files": marked}
+
+
+_ACTION_KINDS = ("branch", "docker", "docker_digest", "local", "major_tag", "semantic_tag",
+                 "sha_pinned", "unknown")
+# Source-level `uses:` detection runs beside the YAML parse so that a parser quirk can never
+# silently drop a valid action line; results from both are deduplicated by file, line, value.
+_USES_LINE = re.compile(r"^\s*(?:-\s*)?uses\s*:\s*(.+?)\s*(?:#.*)?$")
+_USES_YAML_KEY = "uses"
 
 
 def _classify_action(uses: str) -> str:
-    if "@" not in uses:
+    if uses.startswith("./"):
         return "local"
+    if "${{" in uses:
+        return "unknown"
+    if uses.startswith("docker://"):
+        return "docker_digest" if re.search(r"@sha256:[0-9a-f]{6,}", uses, re.I) else "docker"
+    if "@" not in uses:
+        return "unknown"
     ref = uses.rsplit("@", 1)[1]
     if HEX40.match(ref):
         return "sha_pinned"
     if re.fullmatch(r"v\d+", ref):
         return "major_tag"
-    return "other_tag" if re.fullmatch(r"v[\w.-]+", ref) else "branch_or_other"
+    if re.fullmatch(r"v?\d+\.\d+[\w.+-]*", ref):
+        return "semantic_tag"
+    if re.fullmatch(r"[0-9a-f]{7,39}", ref):
+        return "unknown"  # abbreviated SHA: mutable, not a verified immutable pin
+    return "branch"
+
+
+def _uses_lines_source(text: str) -> list[tuple[int, str]]:
+    found = []
+    for lineno, line in enumerate(text.splitlines(), start=1):
+        match = _USES_LINE.match(line)
+        if not match:
+            continue
+        raw = match.group(1).strip()
+        if raw[:1] in ("\"", "'") and len(raw) >= 2 and raw[-1:] == raw[:1]:
+            raw = raw[1:-1]
+        else:
+            raw = raw.split()[0] if raw.split() else ""
+        if raw:
+            found.append((lineno, raw))
+    return found
+
+
+def _uses_lines_yaml(text: str) -> list[tuple[int, str]]:
+    found = []
+    try:
+        tokens = list(yaml.scan(text))
+    except yaml.YAMLError:
+        return found
+    for index in range(len(tokens) - 2):
+        key, sep, value = tokens[index:index + 3]
+        if isinstance(key, yaml.ScalarToken) and key.value == _USES_YAML_KEY \
+                and isinstance(sep, yaml.ValueToken) and isinstance(value, yaml.ScalarToken) \
+                and value.value:
+            found.append((value.start_mark.line + 1, value.value))
+    return found
+
+
+def action_refs_facts(files, repo, diags) -> dict:
+    wf_paths = sorted(f for f in files
+                      if f.startswith(".github/workflows/") and f.endswith((".yml", ".yaml")))
+    entries: dict = {}
+    for rel in wf_paths:
+        text, why = _read(repo, rel)
+        if text is None:
+            diags.append({"file": rel, "error": f"skipped: {why}"})
+            continue
+        detected = _uses_lines_source(text) + _uses_lines_yaml(text)
+        for lineno, value in detected:
+            entries[(rel, lineno, value)] = _classify_action(value)
+    references = [{"file": rel, "line": lineno, "uses": value, "kind": kind}
+                  for (rel, lineno, value), kind in sorted(entries.items())]
+    by_kind = {kind: sum(1 for r in references if r["kind"] == kind) for kind in _ACTION_KINDS}
+    return {"note": ACTION_NOTE, "by_kind": by_kind, "references": references}
 
 
 def _pytest_commands(steps, rel, job_name) -> list:
@@ -446,11 +592,10 @@ def _declared_yaml_dependency(repo, diags):
 def ci_facts(files, repo, marked, diags) -> dict:
     workflows: list = []
     commands: list = []
-    refs: dict = {}
     sbom = release_wf = False
-    wf = sorted(f for f in files
-                if f.startswith(".github/workflows/") and f.endswith((".yml", ".yaml")))
-    for rel in wf:
+    wf_paths = sorted(f for f in files
+                      if f.startswith(".github/workflows/") and f.endswith((".yml", ".yaml")))
+    for rel in wf_paths:
         text, why = _read(repo, rel)
         if text is None:
             diags.append({"file": rel, "error": f"skipped: {why}"})
@@ -459,7 +604,7 @@ def ci_facts(files, repo, marked, diags) -> dict:
             data = yaml.safe_load(text)
         except yaml.YAMLError as exc:
             diags.append({"file": rel, "error": _clean(exc, repo)})
-            continue
+            data = None
         data = data if isinstance(data, dict) else {}
         name = str(data.get("name") or rel.rsplit("/", 1)[-1])
         jobs = data.get("jobs") if isinstance(data.get("jobs"), dict) else {}
@@ -470,23 +615,18 @@ def ci_facts(files, repo, marked, diags) -> dict:
         for job_name in sorted(jobs):
             job = jobs[job_name] if isinstance(jobs[job_name], dict) else {}
             steps = job.get("steps") if isinstance(job.get("steps"), list) else []
-            uses = [job["uses"]] if isinstance(job.get("uses"), str) else []
-            uses += [s.get("uses") for s in steps if isinstance(s, dict)]
-            for use in (u for u in uses if isinstance(u, str)):
-                refs.setdefault(_classify_action(use), set()).add(use)
             commands.extend(_pytest_commands(steps, rel, job_name))
     ignore = sorted({f for c in commands for f in c["ignore_files"]})
     integ = sorted({f for c in commands if "postgres" in c["job"] for f in c["test_files"]})
     marked_set = set(marked)
-    buckets = ("branch_or_other", "local", "major_tag", "other_tag", "sha_pinned")
     split = {"ci_ignore_files": ignore, "ci_integration_files": integ,
              "static_marked_files": marked,
              "marked_not_in_ignore": sorted(marked_set - set(ignore)),
              "marked_not_in_integration": sorted(marked_set - set(integ)),
              "listed_not_marked": sorted((set(ignore) | set(integ)) - marked_set)}
-    return {"workflow_file_count": len(wf), "workflows": workflows,
-            "action_refs": {b: sorted(refs.get(b, ())) for b in buckets},
-            "action_ref_note": ACTION_NOTE, "pytest_commands": commands,
+    return {"workflow_file_count": len(wf_paths), "workflows": workflows,
+            "action_refs": action_refs_facts(files, repo, diags),
+            "pytest_commands": commands,
             "declared_yaml_dependency": _declared_yaml_dependency(repo, diags),
             "release_workflow_named": release_wf, "sbom_signal_in_workflows": sbom,
             "postgres_split": split}
@@ -510,37 +650,52 @@ def release_facts(files, repo, ci) -> dict:
 
 
 _NUM = r"(?:\d{1,3}(?:,\d{3})+|\d+)"
-# "N" in each pattern stands in for the number-capture group _NUM.
+# "N" in each pattern stands in for the number-capture group _NUM. Order matters: explicit,
+# unit-matched wordings come first; generic wordings after them are suppressed on a line when
+# an explicit match subsumes their span. `(?!=)` keeps "table=True classes" out of the generic
+# tables pattern.
 _CLAIM_TABLE = (
-    ("database_tables", r"\b(N)\s+(?:database\s+|sqlmodel\s+)?tables?\b", "sqlmodel_table_classes"),
-    ("sqlmodel_schemas", r"\b(N)\s+sqlmodel\s+schemas?\b", "sqlmodel_table_classes"),
-    ("api_routers", r"\b(N)\s+(?:router\s+modules?|routers?)\b", "api_router_modules"),
-    ("api_endpoints", r"\b(N)\s+(?:routes?|endpoints?)\b", "route_functions"),
-    ("dashboard_pages", r"\b(N)\s+(?:dashboard\s+|react\s+)?pages?\b", "dashboard_pages"),
-    ("migrations", r"\b(N)\s+(?:alembic\s+)?migrations?\b", "alembic_migration_files"),
-    ("tests", r"\b(N)(\+?)\s+tests?\b", "test_functions_static"),
-    ("test_scenarios", r"\b(N)\s+test\s+scenarios\b", None),
+    ("sqlmodel_table_classes", r"\b(N)\s+(?:sqlmodel\s+)?table=true\s+classes?\b",
+     "sqlmodel_table_classes", "not_statically_comparable"),
+    ("static_test_functions", r"\b(N)\s+static\s+test\s+functions?\b",
+     "static_test_functions", "not_statically_verifiable"),
+    ("page_component_files", r"\b(N)\s+page\s+component\s+files?\b",
+     "page_component_files", "not_statically_comparable"),
+    ("mounted_page_components", r"\b(N)\s+mounted\s+page\s+components?\b",
+     "unique_mounted_page_components", "not_statically_verifiable"),
+    ("mounted_routes", r"\b(N)\s+mounted\s+routes?\b",
+     "mounted_route_count", "not_statically_verifiable"),
+    ("mounted_pages", r"\b(N)\s+mounted\s+pages?\b",
+     "unique_mounted_page_components", "not_statically_verifiable"),
+    ("api_routers", r"\b(N)\s+(?:router\s+modules?|routers?)\b",
+     "api_router_modules", "not_statically_comparable"),
+    ("api_endpoints", r"\b(N)\s+(?:routes?|endpoints?)\b",
+     "route_functions", "not_statically_comparable"),
+    ("migrations", r"\b(N)\s+(?:alembic\s+)?migrations?\b",
+     "alembic_migration_files", "not_statically_comparable"),
+    ("database_tables", r"\b(N)\s+(?:database\s+|sqlmodel\s+|physical\s+)?tables?\b(?!=)",
+     None, "not_statically_comparable"),
+    ("sqlmodel_schemas", r"\b(N)\s+sqlmodel\s+schemas?\b",
+     None, "not_statically_comparable"),
+    ("dashboard_pages", r"\b(N)\s+(?:(?:dashboard|react|ui)\s+)*pages?\b",
+     None, "not_statically_comparable"),
+    ("tests", r"\b(N)\+?\s+tests?\b", None, "not_statically_verifiable"),
+    ("test_scenarios", r"\b(N)\s+test\s+scenarios\b", None, "not_statically_verifiable"),
 )
-CLAIM_PATTERNS = tuple((name, re.compile(rx.replace("N", _NUM), re.I), metric)
-                       for name, rx, metric in _CLAIM_TABLE)
+CLAIM_PATTERNS = tuple((name, re.compile(rx.replace("N", _NUM), re.I), metric, inc)
+                       for name, rx, metric, inc in _CLAIM_TABLE)
 READINESS_PATTERNS = (
     ("production_readiness", re.compile(r"production[-\s]ready|ready\s+for\s+production", re.I)),
     ("enterprise_readiness", re.compile(r"enterprise[-\s](?:ready|grade)", re.I)),
 )
 
 
-def _claim_status(claimed, metric, measured, plus=False):
+def _claim_status(claimed, metric, measured, incomparable_status):
     if metric is None:
-        return "not_statically_verifiable", None
+        return incomparable_status, None
     value = measured.get(metric)
     if value is None:
-        return "not_statically_verifiable", None
-    if metric == "test_functions_static":
-        if plus:  # "N+ tests" is a floor claim: satisfied once the count reaches N.
-            return ("matches", value) if value >= claimed else ("stale", value)
-        if claimed < value:
-            return "stale", value
-        return ("matches", value) if claimed == value else ("not_statically_verifiable", value)
+        return "not_statically_verifiable", None  # metric exists but was not derivable
     return ("matches" if claimed == value else "stale"), value
 
 
@@ -564,11 +719,15 @@ def docs_claims_facts(files, repo, measured) -> dict:
             stripped = line.strip()
             if not stripped:
                 continue
-            for category, pattern, metric in CLAIM_PATTERNS:
+            accepted: list = []
+            for category, pattern, metric, inc_status in CLAIM_PATTERNS:
                 for match in pattern.finditer(stripped):
+                    span = (match.start(), match.end())
+                    if any(s <= span[0] and span[1] <= e for s, e in accepted):
+                        continue  # a more specific claim already covers this span
+                    accepted.append(span)
                     number = int(match.group(1).replace(",", ""))
-                    plus = (match.lastindex or 0) >= 2
-                    status, value = _claim_status(number, metric, measured, plus)
+                    status, value = _claim_status(number, metric, measured, inc_status)
                     claim(rel, lineno, stripped, category, number, value, status)
             for category, pattern in READINESS_PATTERNS:
                 if pattern.search(stripped):
@@ -576,7 +735,8 @@ def docs_claims_facts(files, repo, measured) -> dict:
     claims.sort(key=lambda c: (c["file"], c["line"], c["category"]))
     return {"scanned_files": scanned, "missing_files": missing, "claims": claims,
             "stale_count": sum(1 for c in claims if c["status"] == "stale"),
-            "comparable_note": DOCS_NOTE, "test_claim_rule": TEST_CLAIM_RULE}
+            "status_model": STATUS_NOTE, "comparable_note": DOCS_NOTE,
+            "test_claim_rule": TEST_CLAIM_NOTE, "page_claim_rule": PAGE_NOTE}
 
 
 def collect(repo) -> dict:
@@ -592,9 +752,11 @@ def collect(repo) -> dict:
     measured = {"sqlmodel_table_classes": database["sqlmodel_table_class_count"],
                 "api_router_modules": api["route_module_count"],
                 "route_functions": api["route_function_count"],
-                "dashboard_pages": frontend["dashboard_page_count"],
+                "page_component_files": frontend["page_component_file_count"],
+                "mounted_route_count": frontend["mounted_route_count"],
+                "unique_mounted_page_components": frontend["unique_mounted_page_components"],
                 "alembic_migration_files": database["alembic_migration_file_count"],
-                "test_functions_static": tests["test_function_count_static"]}
+                "static_test_functions": tests["static_test_function_count"]}
     return {"schema_version": SCHEMA_VERSION, "git": git_facts(repo),
             "backend": backend_facts(files, trees, loc), "database": database, "api": api,
             "frontend": frontend, "tests": tests, "ci": ci,
