@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Navigate, useNavigate } from 'react-router-dom';
 import { AlertTriangle, Building2, Loader2, Mail, ShieldCheck, User } from 'lucide-react';
 import { authApi } from '@/api/auth';
@@ -16,6 +16,14 @@ const LABEL_CLASS = 'block text-xs font-mono text-[#A8A8AB] uppercase mb-1.5';
  */
 const MIN_PASSWORD_LENGTH = 12;
 
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+interface FieldErrors {
+  email?: string;
+  password?: string;
+  confirm?: string;
+}
+
 export function Setup() {
   const { status, adoptIdentity } = useAuth();
   const navigate = useNavigate();
@@ -25,12 +33,24 @@ export function Setup() {
   const [companyName, setCompanyName] = useState('NVLabs');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [error, setError] = useState('');
+  const [serverError, setServerError] = useState('');
+  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [submitting, setSubmitting] = useState(false);
+  const emailRef = useRef<HTMLInputElement>(null);
+  const passwordRef = useRef<HTMLInputElement>(null);
+  const confirmRef = useRef<HTMLInputElement>(null);
+  const errorRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     document.title = 'First-run setup · NEXUS Mission Control';
   }, []);
+
+  // Server errors belong to the form as a whole; move focus so keyboard and
+  // screen reader users land on the explanation. tabIndex=-1 keeps it out of
+  // tab order.
+  useEffect(() => {
+    if (serverError) errorRef.current?.focus();
+  }, [serverError]);
 
   if (status === 'authenticated') {
     return <Navigate to="/" replace />;
@@ -52,17 +72,29 @@ export function Setup() {
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
-    setError('');
+    if (submitting) return;
+    setServerError('');
 
+    const nextFieldErrors: FieldErrors = {};
+    if (!email.trim()) {
+      nextFieldErrors.email = 'Enter your administrator email.';
+    } else if (!EMAIL_PATTERN.test(email.trim())) {
+      nextFieldErrors.email = 'Enter a valid email address.';
+    }
     if (password !== confirmPassword) {
-      setError('The two passwords do not match.');
-      return;
+      nextFieldErrors.confirm = 'The two passwords do not match.';
+    } else if (password.length < MIN_PASSWORD_LENGTH) {
+      nextFieldErrors.password = `Password must be at least ${MIN_PASSWORD_LENGTH} characters.`;
     }
-    if (password.length < MIN_PASSWORD_LENGTH) {
-      setError(`Password must be at least ${MIN_PASSWORD_LENGTH} characters.`);
+    if (nextFieldErrors.email || nextFieldErrors.password || nextFieldErrors.confirm) {
+      setFieldErrors(nextFieldErrors);
+      if (nextFieldErrors.email) emailRef.current?.focus();
+      else if (nextFieldErrors.password) passwordRef.current?.focus();
+      else confirmRef.current?.focus();
       return;
     }
 
+    setFieldErrors({});
     setSubmitting(true);
     try {
       // Setup signs the new administrator in as it creates them, so the response
@@ -77,7 +109,7 @@ export function Setup() {
       adoptIdentity(me);
       navigate('/', { replace: true });
     } catch (err) {
-      setError(
+      setServerError(
         err instanceof ApiClientError
           ? err.detail
           : 'Cannot reach the control plane. Check that the API is running.'
@@ -93,7 +125,7 @@ export function Setup() {
         {/* Brand */}
         <div className="mb-7 text-center">
           <div className="inline-flex items-center justify-center w-11 h-11 rounded-[8px] bg-[#22C55E]/12 border border-[#22C55E]/25 mb-4">
-            <ShieldCheck className="w-5 h-5 text-[#22C55E]" />
+            <ShieldCheck aria-hidden="true" className="w-5 h-5 text-[#22C55E]" />
           </div>
           <h1 className="text-lg font-display font-medium text-[#F2F1EE] tracking-tight">
             Claim this deployment
@@ -106,12 +138,22 @@ export function Setup() {
 
         <form
           onSubmit={handleSubmit}
+          aria-busy={submitting}
           className="bg-[#101012] border border-white/[0.08] rounded-[10px] p-6 space-y-4"
         >
-          {error && (
-            <div className="flex items-start gap-2 p-3 bg-[#EF4444]/10 border border-[#EF4444]/25 rounded-[6px]">
-              <AlertTriangle className="w-3.5 h-3.5 text-[#EF4444] mt-0.5 shrink-0" />
-              <p className="text-xs text-[#F2F1EE] leading-relaxed">{error}</p>
+          {serverError && (
+            <div
+              ref={errorRef}
+              id="setup-error"
+              role="alert"
+              tabIndex={-1}
+              className="flex items-start gap-2 p-3 bg-[#EF4444]/10 border border-[#EF4444]/25 rounded-[6px] focus:outline-none"
+            >
+              <AlertTriangle
+                aria-hidden="true"
+                className="w-3.5 h-3.5 text-[#EF4444] mt-0.5 shrink-0"
+              />
+              <p className="text-xs text-[#F2F1EE] leading-relaxed">{serverError}</p>
             </div>
           )}
 
@@ -120,19 +162,39 @@ export function Setup() {
               Administrator Email
             </label>
             <div className="relative">
-              <Mail className="w-4 h-4 text-[#6B6B6E] absolute left-3 top-1/2 -translate-y-1/2" />
+              <Mail
+                aria-hidden="true"
+                className="w-4 h-4 text-[#6B6B6E] absolute left-3 top-1/2 -translate-y-1/2"
+              />
               <input
                 id="setup-email"
+                ref={emailRef}
                 type="email"
                 value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                onChange={(e) => {
+                  setEmail(e.target.value);
+                  if (fieldErrors.email) {
+                    setFieldErrors((prev) => ({ ...prev, email: undefined }));
+                  }
+                }}
                 placeholder="admin@nvlabs.dev"
-                autoComplete="username"
+                autoComplete="email"
                 autoFocus
                 required
+                aria-invalid={fieldErrors.email ? true : undefined}
+                aria-describedby={fieldErrors.email ? 'setup-email-error' : undefined}
                 className={`${INPUT_CLASS} pl-9`}
               />
             </div>
+            {fieldErrors.email && (
+              <p
+                id="setup-email-error"
+                role="alert"
+                className="mt-1.5 text-[11px] leading-relaxed text-[#EF4444]"
+              >
+                {fieldErrors.email}
+              </p>
+            )}
           </div>
 
           <div className="grid grid-cols-2 gap-3">
@@ -141,7 +203,10 @@ export function Setup() {
                 First Name
               </label>
               <div className="relative">
-                <User className="w-4 h-4 text-[#6B6B6E] absolute left-3 top-1/2 -translate-y-1/2" />
+                <User
+                  aria-hidden="true"
+                  className="w-4 h-4 text-[#6B6B6E] absolute left-3 top-1/2 -translate-y-1/2"
+                />
                 <input
                   id="setup-first"
                   type="text"
@@ -174,13 +239,17 @@ export function Setup() {
               Company Workspace
             </label>
             <div className="relative">
-              <Building2 className="w-4 h-4 text-[#6B6B6E] absolute left-3 top-1/2 -translate-y-1/2" />
+              <Building2
+                aria-hidden="true"
+                className="w-4 h-4 text-[#6B6B6E] absolute left-3 top-1/2 -translate-y-1/2"
+              />
               <input
                 id="setup-company"
                 type="text"
                 value={companyName}
                 onChange={(e) => setCompanyName(e.target.value)}
                 placeholder="NVLabs"
+                autoComplete="organization"
                 className={`${INPUT_CLASS} pl-9`}
               />
             </div>
@@ -197,15 +266,32 @@ export function Setup() {
               </label>
               <input
                 id="setup-password"
+                ref={passwordRef}
                 type="password"
                 value={password}
-                onChange={(e) => setPassword(e.target.value)}
+                onChange={(e) => {
+                  setPassword(e.target.value);
+                  if (fieldErrors.password) {
+                    setFieldErrors((prev) => ({ ...prev, password: undefined }));
+                  }
+                }}
                 placeholder={`${MIN_PASSWORD_LENGTH}+ characters`}
                 autoComplete="new-password"
                 minLength={MIN_PASSWORD_LENGTH}
                 required
+                aria-invalid={fieldErrors.password ? true : undefined}
+                aria-describedby={fieldErrors.password ? 'setup-password-error' : undefined}
                 className={INPUT_CLASS}
               />
+              {fieldErrors.password && (
+                <p
+                  id="setup-password-error"
+                  role="alert"
+                  className="mt-1.5 text-[11px] leading-relaxed text-[#EF4444]"
+                >
+                  {fieldErrors.password}
+                </p>
+              )}
             </div>
             <div>
               <label htmlFor="setup-confirm" className={LABEL_CLASS}>
@@ -213,14 +299,31 @@ export function Setup() {
               </label>
               <input
                 id="setup-confirm"
+                ref={confirmRef}
                 type="password"
                 value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
+                onChange={(e) => {
+                  setConfirmPassword(e.target.value);
+                  if (fieldErrors.confirm) {
+                    setFieldErrors((prev) => ({ ...prev, confirm: undefined }));
+                  }
+                }}
                 placeholder="Repeat password"
                 autoComplete="new-password"
                 required
+                aria-invalid={fieldErrors.confirm ? true : undefined}
+                aria-describedby={fieldErrors.confirm ? 'setup-confirm-error' : undefined}
                 className={INPUT_CLASS}
               />
+              {fieldErrors.confirm && (
+                <p
+                  id="setup-confirm-error"
+                  role="alert"
+                  className="mt-1.5 text-[11px] leading-relaxed text-[#EF4444]"
+                >
+                  {fieldErrors.confirm}
+                </p>
+              )}
             </div>
           </div>
 
@@ -231,12 +334,12 @@ export function Setup() {
           >
             {submitting ? (
               <>
-                <Loader2 className="w-4 h-4 animate-spin" />
+                <Loader2 aria-hidden="true" className="w-4 h-4 animate-spin" />
                 Creating administrator...
               </>
             ) : (
               <>
-                <ShieldCheck className="w-4 h-4" />
+                <ShieldCheck aria-hidden="true" className="w-4 h-4" />
                 Create administrator &amp; sign in
               </>
             )}
