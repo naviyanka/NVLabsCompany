@@ -674,6 +674,133 @@ async def test_up_down_up_and_new_objects_keep_the_ownership_contract(fresh):
     await _exec(fresh.dsn(fresh.migrator), "DROP TABLE public.zz_probe")
 
 
+# --- the tool-effect ledger tables under the real provisioning --------------------------
+
+LEDGER = ("tool_bridge_slots", "tool_effects", "tool_notifications")
+BEFORE_LEDGER = "b4d9f2a61c73"  # the revision before the tool-effect ledger migration
+
+LEDGER_ATTACKS = {
+    "disable-rls": "ALTER TABLE {t} DISABLE ROW LEVEL SECURITY",
+    "no-force-rls": "ALTER TABLE {t} NO FORCE ROW LEVEL SECURITY",
+    "drop-policy": "DROP POLICY tenant_isolation ON {t}",
+    "alter-policy": "ALTER POLICY tenant_isolation ON {t} USING (true)",
+    "add-open-policy": "CREATE POLICY open_all ON {t} USING (true)",
+    "truncate": "TRUNCATE {t}",
+    "drop-table": "DROP TABLE {t}",
+    "alter-table": "ALTER TABLE {t} ADD COLUMN extra integer",
+    "change-owner": "ALTER TABLE {t} OWNER TO {app}",
+}
+
+
+async def _ledger_contract(dep: Deployment) -> None:
+    """The migrator owns each ledger table; the app role holds DML only, by default privileges."""
+    dsn = dep.dsn()
+    for table in LEDGER:
+        rel = f"public.{table}"
+        owner = await _val(
+            dsn, "SELECT pg_get_userbyid(relowner) FROM pg_class WHERE oid = $1::regclass", rel
+        )
+        assert owner == dep.migrator, table
+        flags = await _fetch(
+            dsn,
+            "SELECT relrowsecurity, relforcerowsecurity FROM pg_class WHERE oid = $1::regclass",
+            rel,
+        )
+        assert tuple(flags[0]) == (True, True), table
+        assert await _val(
+            dsn,
+            "SELECT count(*) FROM pg_policies "
+            "WHERE tablename = $1 AND policyname = 'tenant_isolation'",
+            table,
+        ) == 1
+        granted = sorted(
+            r[0]
+            for r in await _fetch(
+                dsn,
+                "SELECT a.privilege_type FROM pg_class c "
+                "CROSS JOIN LATERAL aclexplode(c.relacl) a WHERE c.oid = $1::regclass "
+                "AND a.grantee = (SELECT oid FROM pg_roles WHERE rolname = $2)",
+                rel, dep.app,
+            )
+        )
+        assert granted == ["DELETE", "INSERT", "SELECT", "UPDATE"], (table, granted)
+    owned = await _val(
+        dsn,
+        "SELECT count(*) FROM pg_class WHERE relname = ANY($1) "
+        "AND relowner = (SELECT oid FROM pg_roles WHERE rolname = $2)",
+        list(LEDGER), dep.app,
+    )
+    assert owned == 0
+
+
+async def test_ledger_tables_follow_the_ownership_and_default_privilege_contract(deployed):
+    await _ledger_contract(deployed)
+    # The privileges come from the provisioning script's default privileges for the migrator.
+    assert await _val(
+        deployed.dsn(),
+        "SELECT count(*) FROM pg_default_acl d CROSS JOIN LATERAL aclexplode(d.defaclacl) a "
+        "WHERE d.defaclrole = (SELECT oid FROM pg_roles WHERE rolname = $1) "
+        "AND d.defaclobjtype = 'r' AND a.grantee = (SELECT oid FROM pg_roles WHERE rolname = $2)",
+        deployed.migrator, deployed.app,
+    ) == 4
+
+
+def test_the_ledger_migration_names_no_role_and_grants_nothing():
+    import re
+
+    path = next((ROOT / "alembic" / "versions").glob("c5e8a3b71d94_*.py"))
+    source = path.read_text(encoding="utf-8")
+    assert not re.search(r"\bGRANT\b|\bOWNER TO\b|\bnexus_(app|system|migrator)\b", source, re.I)
+
+
+@pytest.mark.parametrize("sql", LEDGER_ATTACKS.values(), ids=LEDGER_ATTACKS.keys())
+@pytest.mark.parametrize("table", LEDGER)
+async def test_app_role_cannot_weaken_a_ledger_table(deployed, table, sql):
+    conn = await asyncpg.connect(deployed.dsn(deployed.app))
+    try:
+        with pytest.raises(DENIED):
+            await conn.execute(sql.format(t=table, app=deployed.app))
+    finally:
+        await conn.close()
+    await _ledger_contract(deployed)
+
+
+async def test_a_refused_downgrade_and_a_reupgrade_keep_the_ledger_role_contract(
+    fresh, monkeypatch
+):
+    from nexus.models._time import utcnow
+    from nexus.models.tool_effect import ToolEffect
+
+    monkeypatch.delenv("NEXUS_DESTROY_TOOL_EFFECTS", raising=False)
+    company = uuid.uuid4()
+    url = fresh.admin.set(drivername="postgresql+asyncpg", database=fresh.db)
+    admin = create_async_engine(url.render_as_string(hide_password=False), poolclass=NullPool)
+    try:
+        async with AsyncSession(admin, expire_on_commit=False) as s:
+            s.add(Company(id=company, name="Ledgered"))
+            await s.flush()
+            s.add(
+                ToolEffect(
+                    company_id=company, turn_id=uuid.uuid4(), round_index=0, invocation_index=0,
+                    tool_name="t", effect_class="idempotent_write", invocation_key="k" * 64,
+                    arguments_digest="0" * 64, claim_token="tok", lease_expires_at=utcnow(),
+                )
+            )
+            await s.commit()
+    finally:
+        await admin.dispose()
+    with pytest.raises(RuntimeError, match="Refusing to downgrade"):
+        await asyncio.to_thread(_alembic, fresh, fresh.migrator, "downgrade", BEFORE_LEDGER)
+    await _ledger_contract(fresh)  # the refusal rolled back: ownership, grants, FORCE RLS intact
+    monkeypatch.setenv("NEXUS_DESTROY_TOOL_EFFECTS", "destroy-ledger")
+    await asyncio.to_thread(_alembic, fresh, fresh.migrator, "downgrade", BEFORE_LEDGER)
+    assert await _val(fresh.dsn(), "SELECT to_regclass('public.tool_effects')") is None
+    monkeypatch.delenv("NEXUS_DESTROY_TOOL_EFFECTS")
+    await asyncio.to_thread(_alembic, fresh, fresh.migrator, "upgrade", "head")
+    await _ledger_contract(fresh)  # recreated tables got the same owner and default privileges
+    await _assert_owned_and_granted_as_designed(fresh)
+
+
 # --- the migration entry point's preflight ---------------------------------------------
 
 

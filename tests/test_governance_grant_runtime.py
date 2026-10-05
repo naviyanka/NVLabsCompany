@@ -66,6 +66,8 @@ async def _row(factory, grant_id) -> GovernanceTempAccess:  # noqa: F811
 
 
 def _call(t, tool=READ, args=None, slot=ToolSlot(0, 0), effect=None, **ctx_over):  # noqa: F811
+    if "turn_id" in ctx_over:
+        ctx_over.setdefault("turn_attempt", 1)  # the epoch the runtime captured at the claim
     context = dataclasses.replace(ctx(t), **ctx_over)
     ran: list[int] = []
 
@@ -319,7 +321,7 @@ class TestUseIsScopedToTheSlot:
 
     async def test_a_busy_concurrent_claimant_spends_nothing(self, api, factory, t):  # noqa: F811
         g = await _active_allow(api, t, max_uses=3)
-        context = dataclasses.replace(ctx(t), turn_id=uuid.uuid4())
+        context = dataclasses.replace(ctx(t), turn_id=uuid.uuid4(), turn_attempt=1)
         started, release = asyncio.Event(), asyncio.Event()
         ran: list[int] = []
 
@@ -363,7 +365,7 @@ class TestUseIsScopedToTheSlot:
         held = await effects.claim(
             t["acme"], turn, ToolSlot(0, 0), HIRE,
             effect or EffectClass.NON_IDEMPOTENT_WRITE, {},
-            grant_id=uuid.UUID(g["id"]),
+            grant_id=uuid.UUID(g["id"]), epoch=effects.Epoch(None, 1),
         )
         assert held.action == "run"
         assert (await _row(factory, g["id"])).used_count == 1
@@ -411,3 +413,83 @@ class TestUseIsScopedToTheSlot:
             out = await guarded_call(ctx(t), HIRE, {}, run, source="test", default_risk="write")
             assert out["status"] == "success"
         assert (await _row(factory, g["id"])).used_count == 2
+
+
+class TestNoticeAndApprovalBeforeTheGrantSpend:
+    """The autonomy gate runs before the claim spends a grant. What can it leave behind?
+
+    A level-2 notice for a slot whose spend is then refused (the grant was revoked or used up in
+    between) is the only residue: one notice for that ledger key, no approval, no ledger row
+    (PostgreSQL). It
+    authorizes nothing: another slot is judged on its own and a level-3 refusal never reaches
+    the grant at all. Recorded as a follow-up in the runbook; it needs no fix.
+    """
+
+    @staticmethod
+    def _gate(monkeypatch, level, after_notice=None):
+        from nexus.tools import factory as tool_factory
+        from nexus.tools.autonomy import AutonomyGate
+
+        sent: list[dict] = []
+        asked: list[dict] = []
+
+        class Approvals:
+            async def get_async(self, approval_id):
+                return None
+
+            async def request_approval(self, **kwargs):
+                asked.append(kwargs)
+
+        async def loader(agent_id):
+            return {}
+
+        async def notifier(payload):
+            sent.append(payload)
+            if after_notice is not None:
+                await after_notice()
+
+        monkeypatch.setattr(
+            tool_factory,
+            "build_autonomy_gate",
+            lambda db, **kw: AutonomyGate(
+                loader, approvals=Approvals(), notifier=notifier, default_level=level,
+                notice_once=effects.claim_notice,
+            ),
+        )
+        return sent, asked
+
+    async def test_a_notice_for_a_refused_spend_is_the_only_residue_and_authorizes_nothing(
+        self, api, factory, t, monkeypatch  # noqa: F811
+    ):
+        g = await _active_allow(api, t, max_uses=1)
+
+        async def revoke():
+            await api("POST", f"/grants/{g['id']}/revoke", {"reason": "revoked mid-call"})
+
+        sent, asked = self._gate(monkeypatch, 2, after_notice=revoke)
+        turn = uuid.uuid4()
+        first, ran = _call(t, HIRE, {"k": 1}, turn_id=turn)
+        assert (await first())["status"] == "denied" and ran == []
+        # One notice for that slot; no approval; nothing spent. (The savepoint rollback that
+        # leaves no ledger row is a PostgreSQL behaviour: see test_tool_effects_postgres.)
+        assert len(sent) == 1 and asked == []
+        assert (await _row(factory, g["id"])).used_count == 0
+        # Another slot gets no authority from it: refused at the access check, before the gate.
+        other, ran_other = _call(t, HIRE, {"k": 1}, slot=ToolSlot(0, 1), turn_id=turn)
+        assert (await other())["status"] == "denied" and ran_other == []
+        assert len(sent) == 1 and asked == []
+        # Retrying the same slot does not notify again.
+        assert (await first())["status"] == "denied" and len(sent) == 1
+
+    async def test_a_level_three_refusal_never_reaches_the_grant(
+        self, api, factory, t, monkeypatch  # noqa: F811
+    ):
+        g = await _active_allow(api, t, max_uses=1)
+        sent, asked = self._gate(monkeypatch, 3)
+        go, ran = _call(t, HIRE, turn_id=uuid.uuid4())
+        assert (await go())["status"] == "autonomy_blocked" and ran == []
+        # It asks for an approval (and notifies) but never reaches the grant.
+        assert len(asked) == 1 and len(sent) == 1
+        row = await _row(factory, g["id"])
+        assert (row.used_count, row.status) == (0, "active")
+        assert await _uses(factory, g["id"]) == []
