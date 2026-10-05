@@ -8,6 +8,25 @@ request. It shells out only to local read-only git plumbing (`rev-parse`, `statu
 `ls-files`, `tag`) and reads tracked files from the checkout it is pointed at, with
 `--repo PATH` (default: the current directory).
 
+## Claim status model
+
+Five statuses with non-overlapping meanings:
+
+- `matches` - the claim and the measured fact have the same defined unit and scope, and
+  the numbers agree.
+- `stale` - the claim is comparable (same unit and scope) but disagrees with the measured
+  fact. This is the only status that makes `--check-docs` exit nonzero.
+- `not_statically_verifiable` - the claim describes runtime semantics (collected or passed
+  tests, totals produced by collection hooks) that static scanning cannot adjudicate.
+- `not_statically_comparable` - the claim's unit differs from every metric the auditor
+  derives (for example generic "database tables" or "UI pages" claims), so no comparison
+  is attempted rather than a wrong one being made.
+- `subjective` - judgment language ("production-ready", "enterprise-grade"), reported for
+  visibility but never objectively matched.
+
+Where several patterns can fire on one line, the explicit unit-matched wording wins and
+the generic wording is suppressed, so a line produces at most one claim per span.
+
 ## What is measured
 
 - **Git state**: HEAD SHA, branch, a dirty/clean boolean, and the names of tracked dirty
@@ -19,53 +38,73 @@ request. It shells out only to local read-only git plumbing (`rev-parse`, `statu
 - **Database**: Alembic migration count, revision IDs, heads, branch points, revision
   cycles and dangling `down_revision` references - all derived statically from
   `revision` / `down_revision` assignments parsed with `ast`; migration modules are never
-  imported. Plus the count of SQLModel classes declared with `table=True`.
+  imported. Plus `sqlmodel_table_class_count` (see below). No physical-table-name
+  approximation is derived at all: `__tablename__` overrides, SQLModel default naming and
+  migration-side DDL each contribute table sources the auditor deliberately does not try
+  to unify.
 - **API** (`src/nexus/api`): route modules, route functions, counts by HTTP method,
   `company_id` parameter forms (see below).
-- **Frontend**: TypeScript/TSX file count and LOC, dashboard page components
-  (`dashboard/src/pages`), dashboard unit-test files, Playwright e2e files, and
+- **Frontend**: TypeScript/TSX file count and LOC, `page_component_file_count`
+  (`dashboard/src/pages`, tests excluded), `mounted_route_count` and
+  `unique_mounted_page_components` derived by statically scanning `dashboard/src/App.tsx`
+  route registrations (see below), dashboard unit-test files, Playwright e2e files, and
   `MOCK_*` declarations or explicit "mock data" comments outside test files (relative
   paths only).
-- **Tests**: Python test-file count, statically detected test functions, files carrying
+- **Tests**: Python test-file count, `static_test_function_count`, files carrying
   `pytest.mark.postgres` (decorator or `pytestmark` assignment), dashboard test files.
-- **CI** (`.github/workflows`): workflow count, names, job names, action-reference
-  classification, the backend pytest command and whether `-x` is present, and the
-  PostgreSQL file split (backend `--ignore=` list vs `postgres-integration` file list)
-  cross-checked against the statically marked files.
+- **CI** (`.github/workflows`): workflow count, names, job names, GitHub action
+  references with per-file/line provenance and an eight-way classification (see below),
+  the backend pytest command and whether `-x` is present, and the PostgreSQL file split
+  (backend `--ignore=` list vs `postgres-integration` file list) cross-checked against
+  the statically marked files.
 - **Release hygiene**: local git tag count and presence of LICENSE, SECURITY.md,
   CHANGELOG.md, CODEOWNERS, `.github/dependabot.yml`, a release workflow, and any SBOM
   configuration signal.
 - **Documentation claims** in README.md, ARCHITECTURE.md, FEATURES.md and
-  docs/FINAL-STATUS-SUMMARY.md: numeric claims about tables, routers, routes/endpoints,
-  pages, migrations and tests, plus categorical readiness claims.
+  docs/FINAL-STATUS-SUMMARY.md, classified with the status model above.
 
 ## What is only a static approximation
 
 Every count here is a static approximation of a runtime truth, and the report says so
 next to the numbers it affects.
 
-**Table classes vs physical tables.** The auditor counts Python class definitions
-carrying a literal `table=True` keyword. That is a source-level fact. It is not a
-physical-table count: Alembic migrations can create or drop tables the models no longer
-declare, a model can map to a table that fails to migrate, and SQL-side objects (views,
-tables created by raw SQL in migrations) never appear as classes at all. The two numbers
-answer different questions - "what does the ORM declare today" versus "what exists in a
-migrated database" - and only a real migration run against a real database answers the
-second.
+**Static test functions vs test totals.** `static_test_function_count` is the count of
+Python functions named `test_*` in test files. Parametrization is not expanded: one
+function can become many collected items (or none, if collection fails), fixtures and
+hooks affect totals, frontend and e2e suites are separate, and "passed" is a runtime
+result that static scanning can neither measure nor imply. The count is therefore never
+labeled collected, executed, passed or baseline. Documentation claims are treated
+accordingly: "N tests", "N+ tests" and "N tests passed/passing" are runtime claims and
+are always `not_statically_verifiable`, even as floor claims. Only a claim that
+explicitly counts "N static test functions" is compared with the static count.
 
-**Static test functions vs pytest totals.** A test function is counted once, even when
-`@pytest.mark.parametrize` would expand it into many collected items at runtime. The
-static count is therefore a floor on collected items and has no relation to pass/fail
-outcomes; it must never be quoted as "N tests passed". Conversely, a documentation claim
-of "N tests" is compared against this floor: a claim below the static count is impossible
-and stale, a claim equal to it can match, and a claim above it may be explained by
-parametrization and is reported as not statically verifiable rather than as a match.
+**Table classes vs physical tables.** `sqlmodel_table_class_count` is the number of class
+definitions carrying a literal `table=True` keyword - a source-level fact. It is not a
+physical-table count: link tables, shared or overridden `__tablename__` values, inherited
+mappers and migration-side DDL all break any direct mapping, so the auditor derives no
+physical-table metric whatsoever. A generic claim such as "69 database tables" or
+"69 physical tables" is `not_statically_comparable` - never compared against the class
+count, no matter how close the numbers look. Only a claim explicitly worded as
+"N SQLModel table=True classes" is compared with the class count.
 
-**Route and mock detection.** Route decorators are recognized syntactically
-(`@<something>.get/post/...`), so unusual wiring (routers built dynamically, routes
-added outside `src/nexus/api`) is not counted. Mock detection greps for `MOCK_*`
-identifiers and the phrase "mock data" outside test files; it can neither prove a mock
-reaches production code paths nor find every simulation.
+**Page files vs mounted pages.** `page_component_file_count` counts `.ts/.tsx` files under
+`dashboard/src/pages` excluding tests - a source-file count, not the number of mounted UI
+pages. Two further metrics are derived by statically reading `dashboard/src/App.tsx`
+(never executed, never imported): `mounted_route_count` (each `<Route>` registration,
+including parameterized and layout routes) and `unique_mounted_page_components` (distinct
+page modules reachable from an `element={...}`, including lazy imports, deduplicated when
+several routes point at one component). An unmounted page file is excluded from the
+mounted metrics; the scan is a regex-level approximation, so if no route registrations
+are found the mounted metrics are reported as unknown. Claims are compared only when the
+wording matches the metric: "N page component files", "N mounted routes",
+"N mounted pages" (compared with the unique mounted page-component count) and
+"N mounted page components" are comparable; a generic "N React UI pages" claim matches no
+single metric and is `not_statically_comparable` by documented rule.
+
+**Route and mock detection.** API route decorators are recognized syntactically
+(`@<something>.get/post/...`), so unusual wiring is not counted. Mock detection greps for
+`MOCK_*` identifiers and the phrase "mock data" outside test files; it can neither prove
+a mock reaches production code paths nor find every simulation.
 
 ## Raw `company_id` findings
 
@@ -77,10 +116,32 @@ a vulnerability**: the parameter may be scoped downstream (a tenant-scoped sessi
 explicit filter assembled across statements), and the dedicated arch-guard rule R5
 enforces query-level scoping separately. Treat the list as a starting point for review.
 
+## GitHub action references
+
+Every tracked `.github/workflows/*.yml` and `*.yaml` is scanned twice for `uses:` values -
+once through the YAML parser and once with a narrow source-level line regex - and the
+results are deduplicated by file, line and value, so a parser quirk cannot silently drop
+an action line. Each reference is reported with its relative file and line number and
+classified:
+
+- full 40-hex commit SHA -> `sha_pinned` (the only action pin the auditor calls immutable;
+  a Docker digest (`docker://image@sha256:...`, kind `docker_digest`) is the other
+  immutable form);
+- branch names such as `main` or `master` -> `branch` (mutable);
+- major tags such as `v4` -> `major_tag` (mutable);
+- semantic tags such as `v4.2.1` -> `semantic_tag` (still movable - never called
+  immutable);
+- local paths (`./...`) -> `local`;
+- Docker references without a digest -> `docker` (mutable);
+- abbreviated SHAs, dynamic expressions and anything unparseable -> `unknown`
+  (requiring review; in particular a short SHA is never treated as an immutable pin).
+
+Inputs, secrets, environment values and surrounding workflow content are never printed.
+
 ## Output modes
 
 - Default: human-readable text on stdout.
-- `--json PATH`: full report as JSON with an explicit `schema_version` (currently 1).
+- `--json PATH`: full report as JSON with an explicit `schema_version` (currently 2).
   This is the canonical, machine-readable form; all paths are repository-relative and all
   lists are sorted, so identical repository states produce byte-identical output.
 - `--markdown PATH`: the same report as stable Markdown.
@@ -95,18 +156,16 @@ enforces query-level scoping separately. Treat the list as a starting point for 
 
 ## `--check-docs`
 
-`--check-docs` exits nonzero only when at least one claim is **stale** - an objectively
-comparable numeric claim that disagrees with the measured fact. Claims classified as
-`subjective` (for example "production-ready", "enterprise-grade") and
-`not_statically_verifiable` are reported but never alone make the check fail, because
-neither can be adjudicated by static measurement. Unverifiable claims are never reported
-as matches.
+`--check-docs` exits nonzero only when at least one claim is `stale` - a claim whose unit
+and scope match a measured fact and whose number disagrees. Runtime test-total claims are
+never stale from static evidence, generic table/page claims are never stale from class or
+file counts, and subjective claims are reported without ever failing the check.
 
 ## Why the auditor does not rewrite documentation
 
 A stale claim usually needs a human decision, not a mechanical substitution: the
 documentation may be describing a milestone, a target, or a differently scoped metric
-(ORM classes vs migrated tables; collected items vs test functions). Auto-rewriting risks
+(ORM classes vs migrated tables; mounted routes vs page files). Auto-rewriting risks
 silently replacing one wrong number with another wrong-but-current number and destroys
 the audit trail of what was claimed. The auditor's job is to surface the contradiction
 with evidence (file, line, quoted claim, measured value); fixing the prose stays with the
