@@ -95,7 +95,7 @@ Where each path gets its slot:
 | Hermes loop | `(round, position)`: the loop round and the call's index in that round's list |
 | Governed loop | `(round_no, position)` |
 | MCP adapter, ToolConnection calls | `(0, position)` |
-| Inbound MCP bridge (agent CLI) | `(-1, ordinal)`: the ordinal is allocated durably per client `Idempotency-Key` (see "Inbound MCP bridge identity") |
+| Inbound MCP bridge (agent CLI) | `(-1, ordinal)`: the ordinal is allocated durably per invocation key, from the `Idempotency-Key` header or the declared `nexus_invocation_key` argument (see "Inbound MCP bridge identity") |
 | REST node calls | none: no turn, not ledgered |
 
 Parallel calls in one round have distinct positions fixed when the model's batch is read, so
@@ -109,8 +109,23 @@ A path that cannot supply a slot does not get recovery it cannot provide.
 
 The bridge builds a new `MCPServer` for every HTTP request, and a turn's agent process can be
 restarted, so nothing in memory can say "this is the same write". The identity of a bridge
-write is therefore the client's own `Idempotency-Key` request header, mapped to a slot in the
-database table `tool_bridge_slots`:
+write is therefore a client-supplied invocation key, mapped to a slot in the database table
+`tool_bridge_slots`. The key comes from either of two places:
+
+- the `Idempotency-Key` HTTP request header, for clients that can set a header per call;
+- a tool argument declared in the tool's MCP input schema: the tool's own `idempotency_key`
+  when it has one, otherwise the reserved `nexus_invocation_key`. Every manager or CEO write
+  tool exposed through the bridge lists it under `required` and tells the model to generate a
+  new unique value for each intentional call; read tools do not declare it. A field that is not
+  in the declared schema is never read.
+
+Stock Claude Code cannot set a per-call header, but it sends the arguments the schema declares,
+so it writes through the declared argument. The generated MCP config carries one static header,
+the bearer credential; dynamic headers are optional and nothing here depends on them.
+
+If a call carries both, they must be exactly equal; otherwise the call fails with
+`IDEMPOTENCY_KEY_CONFLICT` before dispatch and nothing is reserved. The server never picks one
+silently.
 
 - The primary key is `(company_id, turn_id, idempotency_key)`; a second unique constraint on
   `(company_id, turn_id, ordinal)` makes the ordinal unique. The first request with a key takes
@@ -124,16 +139,53 @@ database table `tool_bridge_slots`:
 - The row stores the tool name and the digest of the arguments. A retry that reuses a key for a
   different tool or different arguments is refused with `IDEMPOTENCY_KEY_REUSED` and nothing
   runs.
-- A write with no `Idempotency-Key` is refused with `IDEMPOTENCY_KEY_REQUIRED` before any
-  dispatch, and no slot is reserved. A key that is not 1 to 128 characters of `A-Z a-z 0-9 . _
-  : ~ -` is a 400 from the route. Read-only calls need no key and take no slot.
+- A write with neither a header nor the argument is refused with `IDEMPOTENCY_KEY_REQUIRED`
+  before any dispatch, and no slot is reserved. A key that is not 1 to 128 characters of
+  `A-Z a-z 0-9 . _ : ~ -` is `IDEMPOTENCY_KEY_INVALID` (a malformed header is a 400 from the
+  route). Read-only calls need no key and take no slot.
 - Keys are scoped to the turn, so the same key in another turn is another write.
+- The client's value is only a lookup key for the slot. It is never the downstream business
+  idempotency key: the v2 ledger key stays authoritative, and the bridge-only argument is
+  stripped before a handler that does not declare it is called.
 
-Client requirement: the client must send a fresh, unique `Idempotency-Key` for every intended
-write and send the same key again when it retries that write. Two intentional identical writes
-need two keys. A stock agent CLI that cannot set a per-request header cannot make a bridge write
-with this design; its writes fail closed with `IDEMPOTENCY_KEY_REQUIRED` rather than run without
-a durable identity.
+Client requirement: the client must use a fresh, unique key for every intended write and send
+the same key and arguments again when it retries that write (a transport retry). Two intentional
+identical writes need two keys. Keys are per intentional call, not per session or per tool.
+
+Clients that still cannot write through the bridge: one that neither sets the header nor sends
+the declared argument (for example a client that strips or ignores tool arguments outside its
+own schema cache, or a custom script that skips `tools/list`), and any model that reuses one key
+for two intended writes. Those writes fail closed (`IDEMPOTENCY_KEY_REQUIRED` or
+`IDEMPOTENCY_KEY_REUSED`) rather than run without a durable identity.
+
+### Execution epoch
+
+A recovered chat turn can have an old worker still running (a zombie). Every ledgered write
+therefore carries an immutable epoch, `(execution_id, attempt)`:
+
+- It is captured when the execution claims or starts the turn (`chat_turns.claim`, the legacy
+  chat path and the bridge credential check) and travels on the server-built context through
+  Hermes, the governed loop, the MCP adapter, the inbound bridge and any direct `guarded_call`.
+  It is never refreshed from the database. No model, argument, header, service key or MCP client
+  can set it, and a forged value in arguments is ignored.
+- Before the autonomy gate, a grant, an approval, a notification, a ledger insert or a
+  dispatch, `guarded_call` compares it with the turn's current attempt, and `claim` compares it
+  again under the row lock. A difference is `stale_execution`: nothing is inserted, spent,
+  approved, notified or run, and a stale `settle` cannot overwrite the current claim.
+- The current recovery replays occupied slots exactly as described below. A write with no epoch
+  on a chat turn is refused the same way.
+- Reads are not fenced and never touch the epoch. Two racing recovery workers get one winner:
+  `chat_turns.claim` hands out the attempt atomically.
+
+### PR #69 and new write tools
+
+Any tool added after this change (including those in PR #69, which this PR does not touch)
+must, when it rebases, declare: its `EffectClass`, which `ManagerTool` already requires at
+construction; the bridge invocation argument if it is exposed over the HTTP bridge, which
+`bridge_input_schema` adds for every write and which
+`test_every_bridged_write_tool_requires_its_invocation_argument_and_no_read_does` enforces; and
+its downstream idempotency behavior, which the `TABLE` check in `test_tool_effect_idempotency`
+enforces. A write tool that does none of these fails those tests.
 
 ## Recovery of a turn that already wrote
 
@@ -362,7 +414,12 @@ POST /api/v1/tool-effects/{effect_id}/resolve
 - **Migration.** `c5e8a3b71d94` creates `tool_effects`, `tool_notifications` and
   `tool_bridge_slots` with forced row level security and the usual `tenant_isolation` policy on
   PostgreSQL. `tool_effects.turn_attempt` records the execution that claimed each slot. No
-  existing table, policy or the memory tables change.
+  existing table, policy or the memory tables change. The migration names no role and has no
+  GRANT or OWNER statement: `nexus_migrator` owns the three tables, `nexus_app` owns none and
+  reaches them through the default privileges of `deploy/postgres/provision-roles.sql`
+  (SELECT, INSERT, UPDATE, DELETE). `nexus_app` cannot disable RLS, drop protections, truncate
+  or alter a policy; `tests/test_db_role_separation_postgres.py` proves this, and that a
+  refused downgrade and a re-upgrade keep the contract.
 
 ### Downgrade
 
@@ -392,10 +449,15 @@ external systems first. Nothing is cleaned up silently.
 
 - Only calls inside a chat turn are ledgered. REST node calls and background task attempts are
   not; task-attempt recovery has its own idempotency key.
-- A bridge write is only as safe as its client's `Idempotency-Key`: a client that sends a new
-  key when it retries the same write executes it twice, and a client that cannot send the
-  header cannot write through the bridge at all. The server enforces uniqueness and replay of a
-  key; it cannot know that two different keys meant one intended write.
+- A bridge write is only as safe as its client's invocation key: a client that sends a new key
+  when it retries the same write executes it twice. A client that sends neither the header nor
+  the declared argument cannot write through the bridge. The server enforces uniqueness and
+  replay of a key; it cannot know that two different keys meant one intended write.
+- A level-2 notice, or a level-3 approval request and notice, is created before the grant is
+  spent. If the spend is then refused (a grant revoked in between), the notice stays for a call
+  that did not run. It authorizes nothing: approvals and grants are matched per slot, a refused
+  spend leaves no ledger row, and another slot sends its own notice. This is cosmetic noise and
+  a follow-up, not an authorization gap.
 - A recovered turn that already made writes can make no new write (`effect_recovery_required`),
   idempotent or not, because no durable plan record says which slots the first run planned.
   The blocked call leaves no ledger row for an operator to resolve.
