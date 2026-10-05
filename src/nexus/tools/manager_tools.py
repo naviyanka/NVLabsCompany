@@ -26,7 +26,15 @@ from pydantic import BaseModel, ValidationError
 from nexus.runtime.task_attempts import attempt_view
 from nexus.services import hiring_service, org_snapshot
 from nexus.services import manager_service as ms
-from nexus.tools.effects import EffectClass, EffectNotStarted, downstream_key
+from nexus.tools.effects import (
+    BRIDGE_KEY_HINT,
+    BRIDGE_KEY_PATTERN,
+    EffectClass,
+    EffectNotStarted,
+    bridge_key_field,
+    downstream_key,
+    resolve_effect,
+)
 
 
 @dataclass(frozen=True)
@@ -184,6 +192,51 @@ def input_schema(tool: ManagerTool) -> dict[str, Any]:
         "required": list(tool.params),
         "additionalProperties": False,
     }
+
+
+def is_write(tool: ManagerTool) -> bool:
+    """Whether the tool's declared effect class is anything but read-only (undeclared = write)."""
+    return resolve_effect(tool.effect) is not EffectClass.READ_ONLY
+
+
+def key_field(tool: ManagerTool) -> str:
+    """The argument a bridge write to ``tool`` takes its identity from."""
+    return bridge_key_field(tool.model.model_fields if tool.model is not None else ())
+
+
+def bridge_input_schema(tool: ManagerTool) -> dict[str, Any]:
+    """The ``inputSchema`` the HTTP bridge advertises: a write also requires its identity.
+
+    A client that cannot attach a per-call header (stock Claude Code) still sends the arguments
+    the schema declares, so the identity is declared here as a required argument. A read-only
+    tool is unchanged.
+    """
+    schema = input_schema(tool)
+    if not is_write(tool):
+        return schema
+    field = key_field(tool)
+    properties = dict(schema.get("properties", {}))
+    properties[field] = {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128,
+        "pattern": BRIDGE_KEY_PATTERN.pattern,
+        "description": BRIDGE_KEY_HINT,
+    }
+    required = list(schema.get("required", []))
+    if field not in required:
+        required.append(field)
+    return {**schema, "properties": properties, "required": required}
+
+
+def bridge_description(tool: ManagerTool) -> str:
+    """The tool description with the instruction to generate a key per intentional call."""
+    if not is_write(tool):
+        return tool.description
+    return (
+        f"{tool.description} Set `{key_field(tool)}` to a NEW unique value on every "
+        "intentional call; reuse a value only to retry a call whose outcome you did not see."
+    )
 
 
 async def call(ctx: Any, name: str, arguments: dict[str, Any]) -> Any:

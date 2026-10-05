@@ -65,8 +65,17 @@ async def world(factory):
     return {"acme": acme.id, "other": other.id, "agent": agent, "ctx": ctx, "turn": uuid.uuid4()}
 
 
-def turn_ctx(world, turn=None) -> ExecutionContext:
-    return replace(world["ctx"], turn_id=turn or world["turn"])
+def turn_ctx(world, turn=None, attempt=None) -> ExecutionContext:
+    """A context for the turn's execution number ``attempt`` (default: the world's current one).
+
+    The epoch is what the runtime would have captured when it claimed the turn; tests that move
+    the turn on build a stale context by passing the old ``attempt`` explicitly.
+    """
+    return replace(
+        world["ctx"],
+        turn_id=turn or world["turn"],
+        turn_attempt=attempt or world.get("attempt", 1),
+    )
 
 
 class Tool:
@@ -570,7 +579,8 @@ async def test_tenants_do_not_share_keys(factory, world):
         db.add(other_agent)
         await db.commit()
     other_ctx = replace(
-        ExecutionContext.for_agent(other_agent, source="hermes"), turn_id=world["turn"]
+        ExecutionContext.for_agent(other_agent, source="hermes"),
+        turn_id=world["turn"], turn_attempt=1,
     )
     a, b = Tool(), Tool()
     await go(world, a)

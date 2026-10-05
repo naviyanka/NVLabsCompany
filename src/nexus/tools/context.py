@@ -44,6 +44,13 @@ class ExecutionContext:
     manager_tools_required: bool = False
     # The chat turn a manager-bridge call belongs to (tool audit detail only).
     turn_id: uuid.UUID | None = None
+    # Which execution of that turn this context belongs to, fixed when the runtime claimed the
+    # turn (or when the bridge credential was verified): the claimed ``ChatTurn.execution_id``
+    # and ``attempt_count``. A ledgered write compares them with the turn's current values, so
+    # a worker that a recovery replaced cannot write. Only server code sets them; they are
+    # never read from a model, an argument, a header or a stored context.
+    turn_execution: str | None = None
+    turn_attempt: int | None = None
 
     @classmethod
     def for_principal(

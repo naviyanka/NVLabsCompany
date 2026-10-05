@@ -219,13 +219,16 @@ async def manager_bridge_rpc(request: Request) -> Response:
     from nexus.tools.effects import valid_bridge_key
     from nexus.tools.mcp_server import MCPServer
 
-    # A write needs this to be retried safely (see ``effects.reserve_bridge_slot``); a read
-    # does not. A malformed key is refused rather than ignored, so a typo cannot turn a
-    # retryable write into an unkeyed one.
+    # A write names its intentional call with this header or with the ``nexus_invocation_key``
+    # argument its schema declares (stock Claude Code can only send the argument); both must
+    # agree. A read needs neither. A malformed header is refused rather than ignored, so a typo
+    # cannot turn a retryable write into an unkeyed one.
     key = request.headers.get("idempotency-key")
     if key is not None and not valid_bridge_key(key):
         return _rpc_error(400, -32600, "Invalid Idempotency-Key")
-    reply = await MCPServer(ctx, node_tools=False, idempotency_key=key).handle(body)
+    reply = await MCPServer(
+        ctx, node_tools=False, idempotency_key=key, bridge=True
+    ).handle(body)
     if reply is None:
         return Response(status_code=status.HTTP_202_ACCEPTED)
     return JSONResponse(reply)

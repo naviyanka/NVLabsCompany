@@ -106,7 +106,7 @@ async def env(tmp_path, monkeypatch):
     async def stuck_effect() -> uuid.UUID:
         """A non-idempotent write whose run died mid-flight, so its row is ambiguous."""
         ctx = replace(
-            ExecutionContext.for_agent(agent, source="hermes"), turn_id=uuid.uuid4()
+            ExecutionContext.for_agent(agent, source="hermes"), turn_id=uuid.uuid4(), turn_attempt=1
         )
 
         async def body():

@@ -144,6 +144,26 @@ def test_the_classification_table_is_complete_and_consistent():
     check_classification(NODE_EFFECTS, _all_tools())
 
 
+def test_every_bridged_write_tool_requires_its_invocation_argument_and_no_read_does():
+    """The contract a new write tool (for example PR #69's) must meet to be callable by Claude.
+
+    Each tool declares its ``EffectClass`` (a required field, so omitting it cannot construct),
+    a write tool's bridge schema requires the invocation argument, a read tool's never does, and
+    a tool with its own ``idempotency_key`` reuses that field instead of adding a second one.
+    """
+    for name, tool in _all_tools().items():
+        schema = manager_tools.bridge_input_schema(tool)
+        field = manager_tools.key_field(tool)
+        assert isinstance(tool.effect, EffectClass), name
+        if tool.effect is EffectClass.READ_ONLY:
+            assert field not in schema.get("required", []), name
+            assert effects.BRIDGE_KEY_ARG not in schema.get("properties", {}), name
+            continue
+        assert field in schema["required"] and field in schema["properties"], name
+        assert field == ("idempotency_key" if _model_keyed(tool) else effects.BRIDGE_KEY_ARG), name
+        assert "NEW unique value" in manager_tools.bridge_description(tool), name
+
+
 def test_a_new_unclassified_tool_fails_the_guard():
     tools = {**_all_tools(), "manager_new_thing": _all_tools()["manager_list_reports"]}
     assert "manager_new_thing" not in TABLE
@@ -281,7 +301,9 @@ async def _turn(db, agent_id) -> uuid.UUID:  # noqa: F811
 
 
 def _server(c, turn, who="chief"):  # noqa: F811
-    return MCPServer(replace(_ctx(c["acme"], c[who]), turn_id=turn), node_tools=False)
+    return MCPServer(
+        replace(_ctx(c["acme"], c[who]), turn_id=turn, turn_attempt=1), node_tools=False
+    )
 
 
 HIRE = {
@@ -403,14 +425,16 @@ async def test_a_manager_hire_rerun_is_one_request_too(db, c, monkeypatch):  # n
     await _staffed(c)
     await _allow(db, c["acme"], "manager_request_hire")
     turn = await _turn(db, c["lead"])
-    manager = MCPServer(replace(_ctx(c["acme"], c["lead"]), turn_id=turn), node_tools=False)
+    manager = MCPServer(
+        replace(_ctx(c["acme"], c["lead"]), turn_id=turn, turn_attempt=1), node_tools=False
+    )
     real = effects.settle
     await _drop_settlement(monkeypatch)
     first = _payload(await manager.call_tool("manager_request_hire", HIRE, slot=ToolSlot(0, 0)))
     monkeypatch.setattr(effects, "settle", real)
     await _expire(db, c["acme"])
     again = _payload(await MCPServer(
-        replace(_ctx(c["acme"], c["lead"]), turn_id=turn), node_tools=False
+        replace(_ctx(c["acme"], c["lead"]), turn_id=turn, turn_attempt=1), node_tools=False
     ).call_tool("manager_request_hire", HIRE, slot=ToolSlot(0, 0)))
     assert (first["created"], again["created"]) == (True, False)
     assert len(await _rows(db, Approval, Approval.company_id == c["acme"])) == 1
@@ -430,7 +454,9 @@ async def test_a_delegation_rerun_after_a_crash_is_one_attempt(db, c, monkeypatc
     turn = await _turn(db, c[who])
 
     def server():
-        return MCPServer(replace(_ctx(c["acme"], c[who]), turn_id=turn), node_tools=False)
+        return MCPServer(
+            replace(_ctx(c["acme"], c[who]), turn_id=turn, turn_attempt=1), node_tools=False
+        )
 
     real = effects.settle
     await _drop_settlement(monkeypatch)

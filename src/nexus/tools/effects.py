@@ -34,9 +34,19 @@ and nothing durable records which positions were planned. Such a call is ``block
 model sees ``effect_recovery_required``), idempotent or not, because an idempotent write's
 downstream key follows the slot. Reads are never ledgered and are unaffected.
 
-The inbound MCP bridge has no rounds: a write names itself with the client's
-``Idempotency-Key``, which :func:`reserve_bridge_slot` maps durably to the slot
-``(-1, ordinal)`` of the turn.
+Every execution of a turn carries an immutable epoch (:class:`Epoch`): the ``execution_id`` and
+attempt the runtime copied from the turn row when it claimed the turn (the inbound bridge copies
+them when it verifies its credential). Before any write effect is claimed it is compared, under
+a share lock on the turn row, with the turn's current attempt. A worker a recovery replaced
+(a zombie) is ``stale``: nothing is inserted, spent, approved, notified or run, idempotent or
+not, and its epoch is never refreshed. Reads are not fenced. No model, argument, header or MCP
+client can set the epoch.
+
+The inbound MCP bridge has no rounds: a write names itself with the HTTP ``Idempotency-Key``
+header or with the declared ``nexus_invocation_key`` tool argument (a tool's own
+``idempotency_key`` when it has one), see :func:`resolve_bridge_identity`. Both must agree when
+both are sent. :func:`reserve_bridge_slot` maps that key durably to the slot ``(-1, ordinal)``
+of the turn; the client's value is never the downstream business key.
 
 A write-capable call inside a turn with no slot is refused rather than run without a durable
 identity. A call without a turn id (a plain REST request) is not ledgered: nothing requeues it.
@@ -57,7 +67,7 @@ import logging
 import re
 import secrets
 import uuid
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
@@ -86,7 +96,7 @@ LEASE_SECONDS = 900
 MAX_RESULT_BYTES = 16_384
 MAX_TEXT_CHARS = 500
 
-Action = Literal["run", "replay", "busy", "blocked", "denied"]
+Action = Literal["run", "replay", "busy", "blocked", "denied", "stale"]
 
 
 class EffectClass(StrEnum):
@@ -502,8 +512,15 @@ async def claim(
     effect_class: EffectClass,
     arguments: Any,
     grant_id: uuid.UUID | None = None,
+    *,
+    epoch: Epoch | None = None,
 ) -> Claim:
     """Reserve the call at ``slot``, or say why it must not run now.
+
+    ``epoch`` is the execution of the turn this caller was started as. It is compared, under a
+    share lock on the turn row, with the execution the database currently holds; any
+    difference (or no epoch at all) is ``stale`` and nothing is inserted, spent or run. The
+    lock keeps a recovery from advancing the turn until this claim has committed.
 
     With ``grant_id`` the temporary allow the call relies on is spent in the same transaction,
     and only when the decision is ``run``: a replay, a busy or blocked slot and a slot mismatch
@@ -522,8 +539,14 @@ async def claim(
     digest = arguments_digest(arguments)
     token = secrets.token_hex(16)
     async with database.tenant_session(company_id) as db:
+        stale = await _stale_reason(db, company_id, turn_id, epoch)
+        if stale:
+            logger.warning("stale execution of turn %s refused a write: %s", turn_id, stale)
+            await db.rollback()
+            return Claim("stale", company_id, effect_class, key=key, reason=stale)
+        assert epoch is not None  # a missing epoch was stale above
+        attempt = epoch.attempt
         lease = (await _db_now(db)) + timedelta(seconds=LEASE_SECONDS)
-        attempt = await _turn_attempt(db, company_id, turn_id)
         new = ToolEffect(
             company_id=company_id,
             turn_id=turn_id,
@@ -590,16 +613,60 @@ class _NewSlotInRecovery(Exception):  # noqa: N818 - rolls back the savepoint, n
     """A recovered execution reached an empty slot while earlier writes exist."""
 
 
-async def _turn_attempt(db: Any, company_id: uuid.UUID, turn_id: uuid.UUID) -> int:
-    """Which execution of the turn this is: 1 for the first run and for a call with no turn row."""
-    count = (
+@dataclass(frozen=True)
+class Epoch:
+    """Which execution of a turn a caller is: fixed when the turn was claimed, never refreshed.
+
+    ``execution_id`` and ``attempt`` come from the ``ChatTurn`` row the runtime claimed (or,
+    for the MCP bridge, from the turn the bridge credential was minted for). A model, an
+    argument, a header or a service key cannot supply either.
+    """
+
+    execution_id: str | None
+    attempt: int
+
+
+async def _stale_reason(
+    db: Any, company_id: uuid.UUID, turn_id: uuid.UUID, epoch: Epoch | None
+) -> str:
+    """Why ``epoch`` is not the turn's current execution, or ``""`` when it is.
+
+    Reads the turn row under a share lock, so a recovery (an UPDATE of the same row) waits for
+    the caller's transaction. A turn with no row (a direct call that was never queued) has the
+    single execution 1.
+    """
+    if epoch is None:
+        return "this call carries no execution epoch, so it cannot be fenced"
+    row = (
         await db.execute(
-            select(ChatTurn.attempt_count).where(
-                ChatTurn.id == turn_id, ChatTurn.company_id == company_id
-            )
+            select(ChatTurn.execution_id, ChatTurn.attempt_count)
+            .where(ChatTurn.id == turn_id, ChatTurn.company_id == company_id)
+            .with_for_update(read=True)
         )
-    ).scalar_one_or_none()
-    return max(count or 1, 1)
+    ).first()
+    if row is None:
+        return "" if epoch.attempt == 1 else "the turn no longer exists for this execution"
+    current_id, current_attempt = row
+    if max(current_attempt or 1, 1) != epoch.attempt or (
+        epoch.execution_id is not None and str(current_id) != epoch.execution_id
+    ):
+        return (
+            f"this execution (attempt {epoch.attempt}) was replaced by a recovery; "
+            "only the current execution of a turn may write"
+        )
+    return ""
+
+
+async def is_current_execution(
+    company_id: uuid.UUID, turn_id: uuid.UUID, epoch: Epoch | None
+) -> str:
+    """Early, advisory form of the fence for callers that act before claiming (``""`` = current)."""
+    from nexus import database
+
+    async with database.tenant_session(company_id) as db:
+        reason = await _stale_reason(db, company_id, turn_id, epoch)
+        await db.rollback()
+        return reason
 
 
 async def _earlier_execution_wrote(db: Any, row: ToolEffect, attempt: int) -> bool:
@@ -629,6 +696,66 @@ def valid_bridge_key(key: Any) -> bool:
     return isinstance(key, str) and BRIDGE_KEY_PATTERN.fullmatch(key) is not None
 
 
+# The tool argument that carries a bridge write's identity for a client that cannot set a
+# per-call header (stock Claude Code). A tool that already declares ``idempotency_key`` uses
+# that argument instead; every other bridge write tool advertises this one as required.
+BRIDGE_KEY_ARG = "nexus_invocation_key"
+_OWN_KEY_ARG = "idempotency_key"
+BRIDGE_KEY_HINT = (
+    "Required: a fresh unique value (1-128 characters from A-Z a-z 0-9 . _ : ~ -) for each "
+    "intentional call of this tool, even when every other argument is the same as an earlier "
+    "call. Repeat the exact same value and arguments only to retry a call whose outcome you "
+    "did not see."
+)
+
+
+def bridge_key_field(declared_fields: Iterable[str]) -> str:
+    """The argument name a bridge write tool takes its identity from."""
+    return _OWN_KEY_ARG if _OWN_KEY_ARG in set(declared_fields) else BRIDGE_KEY_ARG
+
+
+def resolve_bridge_identity(
+    header: str | None, arguments: dict[str, Any], field: str
+) -> tuple[str, dict[str, Any]]:
+    """The call's identity from the header and/or the declared argument, plus its arguments.
+
+    Either source alone is enough; both must match exactly, because silently preferring one
+    could attach a retry to the wrong slot. The returned arguments are the business arguments:
+    the bridge-only argument is removed, and a header-only call to a tool that declares its own
+    ``idempotency_key`` has the header value filled in so the tool's schema is satisfied.
+
+    Raises:
+        BridgeSlotError: ``IDEMPOTENCY_KEY_REQUIRED``, ``_INVALID`` or ``_CONFLICT``.
+    """
+    business = dict(arguments)
+    from_arg = business.get(field)
+    if header is not None and not valid_bridge_key(header):
+        raise BridgeSlotError(
+            f"IDEMPOTENCY_KEY_INVALID: the Idempotency-Key header is malformed. {BRIDGE_KEY_HINT}"
+        )
+    if field in business and not valid_bridge_key(from_arg):
+        raise BridgeSlotError(
+            f"IDEMPOTENCY_KEY_INVALID: `{field}` is malformed. {BRIDGE_KEY_HINT}"
+        )
+    if header is None and field not in business:
+        raise BridgeSlotError(
+            f"IDEMPOTENCY_KEY_REQUIRED: this write needs the `{field}` argument "
+            f"(or an Idempotency-Key header). {BRIDGE_KEY_HINT}"
+        )
+    if header is not None and field in business and header != from_arg:
+        raise BridgeSlotError(
+            f"IDEMPOTENCY_KEY_CONFLICT: the Idempotency-Key header and `{field}` disagree; "
+            "send one value, or the same value in both"
+        )
+    key = header if header is not None else from_arg
+    if field == BRIDGE_KEY_ARG:
+        business.pop(field, None)
+    else:
+        business[field] = key
+    assert isinstance(key, str)
+    return key, business
+
+
 async def reserve_bridge_slot(
     company_id: uuid.UUID,
     turn_id: uuid.UUID,
@@ -654,7 +781,7 @@ async def reserve_bridge_slot(
 
     if not valid_bridge_key(key):
         raise BridgeSlotError(
-            "IDEMPOTENCY_KEY_REQUIRED: a write needs an Idempotency-Key header "
+            "IDEMPOTENCY_KEY_REQUIRED: a write needs a bridge identity "
             "(1-128 characters from A-Z a-z 0-9 . _ : ~ -), unique per intended write"
         )
     digest = arguments_digest(arguments)

@@ -59,9 +59,10 @@ from nexus.tools.effects import (
     EffectNotStarted,
     ToolSlot,
     reserve_bridge_slot,
+    resolve_bridge_identity,
     resolve_effect,
 )
-from nexus.tools.factory import _access_session, guarded_call
+from nexus.tools.factory import _access_session, _stale_execution, guarded_call
 
 logger = logging.getLogger(__name__)
 
@@ -170,6 +171,7 @@ class MCPServer:
         *,
         node_tools: bool = True,
         idempotency_key: str | None = None,
+        bridge: bool = False,
     ) -> None:
         """Bind the server to one authenticated caller.
 
@@ -180,33 +182,56 @@ class MCPServer:
                 bridge, :mod:`nexus.tools.manager_bridge`).
             idempotency_key: The bridge request's ``Idempotency-Key``. A write that arrives
                 without a caller-supplied slot is identified by it (see ``_slot_for``).
+            bridge: True for the HTTP bridge. Its manager and CEO write tools then declare
+                their identity as a required argument (for a client that cannot set a per-call
+                header), which is read, checked against the header and removed before dispatch.
         """
         self._ctx = ctx
         self._nodes = exposed_nodes() if node_tools else {}
         self._idempotency_key = idempotency_key
+        self._bridge = bridge
 
     async def _slot_for(
-        self, effect: Any, slot: ToolSlot | None, name: str, arguments: dict[str, Any]
-    ) -> ToolSlot | None:
-        """The caller's slot, or the durable slot this request's key maps to.
+        self,
+        effect: Any,
+        slot: ToolSlot | None,
+        name: str,
+        arguments: dict[str, Any],
+        field: str | None = None,
+    ) -> tuple[ToolSlot | None, dict[str, Any]]:
+        """The caller's slot, or the durable slot this request's identity maps to, and the
+        business arguments to dispatch.
 
-        A read-only call needs none. A write with no slot is identified by the request's
-        idempotency key through a durable record (:func:`reserve_bridge_slot`), never by this
-        object: the bridge builds a new server per request, so nothing held here survives
-        a retry. A call with no turn is not ledgered and gets none.
+        A read-only call needs none. A write with no slot is identified through a durable
+        record (:func:`reserve_bridge_slot`), never by this object: the bridge builds a new
+        server per request, so nothing held here survives a retry. The identity is the
+        ``Idempotency-Key`` header and, for a tool that declares ``field`` (bridge mode), that
+        argument; both must agree. The returned arguments have the bridge-only argument
+        removed. A call with no turn is not ledgered and gets none.
 
         Raises:
-            BridgeSlotError: The write has no usable key, or the key names another call.
+            BridgeSlotError: The write has no usable identity, the sources disagree, the
+                identity names another call, or this execution of the turn was replaced.
         """
         if (
             slot is not None
             or resolve_effect(effect) is EffectClass.READ_ONLY
             or self._ctx.turn_id is None
         ):
-            return slot
-        return await reserve_bridge_slot(
-            self._ctx.company_id, self._ctx.turn_id, self._idempotency_key, name, arguments
+            return slot, arguments
+        # A replaced execution reserves nothing, not even an ordinal (guarded_call refuses it
+        # again, under the ledger lock, before anything else happens).
+        stale = await _stale_execution(self._ctx, self._ctx.company_id, self._ctx.turn_id)
+        if stale:
+            raise BridgeSlotError(f"stale_execution: Tool call not run: {stale}")
+        key: str | None = self._idempotency_key
+        business = arguments
+        if field is not None:
+            key, business = resolve_bridge_identity(self._idempotency_key, arguments, field)
+        slot = await reserve_bridge_slot(
+            self._ctx.company_id, self._ctx.turn_id, key, name, business
         )
+        return slot, business
 
     async def list_tools(self) -> list[dict[str, Any]]:
         """The tools this caller may be offered, in MCP ``tools/list`` shape."""
@@ -237,8 +262,16 @@ class MCPServer:
                     tools.append(
                         {
                             "name": name,
-                            "description": tool.description,
-                            "inputSchema": manager_tools.input_schema(tool),
+                            "description": (
+                                manager_tools.bridge_description(tool)
+                                if self._bridge
+                                else tool.description
+                            ),
+                            "inputSchema": (
+                                manager_tools.bridge_input_schema(tool)
+                                if self._bridge
+                                else manager_tools.input_schema(tool)
+                            ),
                         }
                     )
         return tools
@@ -262,7 +295,7 @@ class MCPServer:
         if node is None:
             return _tool_error(f"Unknown tool '{name}'")
         try:
-            slot = await self._slot_for(NODE_EFFECTS.get(name), slot, name, arguments)
+            slot, arguments = await self._slot_for(NODE_EFFECTS.get(name), slot, name, arguments)
         except (BridgeSlotError, EffectKeyError) as exc:
             return _tool_error(str(exc))
         except Exception as exc:  # noqa: BLE001 - no durable identity, no write: fail closed
@@ -304,20 +337,26 @@ class MCPServer:
         """
         from fastapi import HTTPException
 
+        tool = {**manager_tools.MANAGER_TOOLS, **CEO_TOOLS}[name]
+        try:
+            slot, arguments = await self._slot_for(
+                tool.effect,
+                slot,
+                name,
+                arguments,
+                manager_tools.key_field(tool) if self._bridge else None,
+            )
+        except (BridgeSlotError, EffectKeyError) as exc:
+            return _tool_error(str(exc))
+        except Exception as exc:  # noqa: BLE001 - no durable identity, no write: fail closed
+            logger.error("Bridge slot unavailable for %s: %s", name, exc)
+            return _tool_error("effect_ledger_unavailable: the write was not run")
         async def run() -> Any:
             if name not in await manager_tools.catalog(self._ctx):
                 # Proven pre-effect: the catalog check runs before anything is dispatched.
                 raise EffectNotStarted(f"TOOL_NOT_OFFERED: '{name}' is not available to this agent")
             return await manager_tools.call(self._ctx, name, arguments)
 
-        tool = {**manager_tools.MANAGER_TOOLS, **CEO_TOOLS}[name]
-        try:
-            slot = await self._slot_for(tool.effect, slot, name, arguments)
-        except (BridgeSlotError, EffectKeyError) as exc:
-            return _tool_error(str(exc))
-        except Exception as exc:  # noqa: BLE001 - no durable identity, no write: fail closed
-            logger.error("Bridge slot unavailable for %s: %s", name, exc)
-            return _tool_error("effect_ledger_unavailable: the write was not run")
         try:
             outcome = await guarded_call(
                 self._ctx,

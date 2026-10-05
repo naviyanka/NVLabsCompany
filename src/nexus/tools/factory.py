@@ -231,7 +231,8 @@ async def guarded_call(
         ``"replayed": True``, when an earlier run of the same logical call in this turn is
         returned instead of running it again), or a refusal dict with ``error`` and
         ``status`` (``denied``, ``guardrail_blocked``, ``autonomy_blocked``,
-        ``effect_in_progress``, ``effect_recovery_required``, ``effect_ledger_unavailable``)
+        ``effect_in_progress``, ``effect_recovery_required``, ``stale_execution``,
+        ``effect_ledger_unavailable``)
         when it did not. A call that ran but whose result cannot be retained safely returns
         ``effect_result_unavailable``; its effect is recorded as ambiguous, never rerun
         automatically unless the tool is idempotent.
@@ -295,17 +296,25 @@ async def guarded_call(
             "status": "effect_ledger_unavailable",
         }
     else:
+        stale = ""
         if ledgered and slot is not None:
             ledger_key = effects.invocation_key(decision.company_id, turn_id, slot)
+            # Fence first: an execution a recovery replaced must not reach the autonomy gate
+            # (which can create an approval or send a notice) or the grant. The claim repeats
+            # the check under a lock; this one keeps the earlier side effects from happening.
+            stale = await _stale_execution(ctx, decision.company_id, turn_id)
+        if stale:
+            refusal = {"error": f"Tool call not run: {stale}", "status": "stale_execution"}
         # Only an agent that passed the access check reaches the autonomy
         # gate, and it runs under the company the call was authorized for.
-        refusal = await guard_tool_call(
-            tool_name,
-            arguments,
-            agent_id=decision.agent_id,
-            company_id=decision.company_id,
-            invocation_key=ledger_key,
-        )
+        if not stale:
+            refusal = await guard_tool_call(
+                tool_name,
+                arguments,
+                agent_id=decision.agent_id,
+                company_id=decision.company_id,
+                invocation_key=ledger_key,
+            )
         if refusal is None and decision.temp_grant_id is not None and not (
             ledgered and slot is not None
         ):
@@ -328,6 +337,7 @@ async def guarded_call(
                 effect_class,
                 arguments,
                 grant_id=decision.temp_grant_id,
+                epoch=_epoch_of(ctx),
             )
         except Exception as exc:  # noqa: BLE001 - no ledger, no write: fail closed
             logger.error("Tool effect ledger unavailable for %s: %s", tool_name, exc)
@@ -360,9 +370,10 @@ async def guarded_call(
         if held.action != "run":
             refusal = {
                 "error": f"Tool call not run: {held.reason}",
-                "status": (
-                    "effect_in_progress" if held.action == "busy" else "effect_recovery_required"
-                ),
+                "status": {
+                    "busy": "effect_in_progress",
+                    "stale": "stale_execution",
+                }.get(held.action, "effect_recovery_required"),
             }
             await record(refusal["status"], started, error=refusal["error"])
             return refusal
@@ -411,6 +422,26 @@ async def guarded_call(
     failed = bool(getattr(result, "is_error", False))
     await record("error" if failed else "success", started)
     return {"status": "success", "result": result}
+
+
+def _epoch_of(ctx: Any) -> effects.Epoch | None:
+    """The execution epoch the server put on the context, or None when it has none."""
+    attempt = getattr(ctx, "turn_attempt", None)
+    if not isinstance(attempt, int) or isinstance(attempt, bool) or attempt < 1:
+        return None
+    return effects.Epoch(getattr(ctx, "turn_execution", None), attempt)
+
+
+async def _stale_execution(ctx: Any, company_id: uuid.UUID, turn_id: uuid.UUID) -> str:
+    """Why this call's execution of the turn is no longer the current one ("" if it is).
+
+    A database error is reported as stale too: with no way to tell, nothing is written.
+    """
+    try:
+        return await effects.is_current_execution(company_id, turn_id, _epoch_of(ctx))
+    except Exception as exc:  # noqa: BLE001 - fail closed
+        logger.error("Execution epoch check failed: %s", exc)
+        return "the turn's execution could not be verified, so the write was not run"
 
 
 async def _spend_temp_grant(decision: Any, key: str) -> dict[str, Any] | None:

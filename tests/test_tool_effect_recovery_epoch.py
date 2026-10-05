@@ -34,7 +34,12 @@ READ = EffectClass.READ_ONLY
 
 
 async def _epoch(factory, world, attempt: int) -> None:
-    """Put the turn in execution number ``attempt`` (creating its row on first use)."""
+    """Put the turn in execution number ``attempt`` (creating its row on first use).
+
+    The world's current execution moves with it, so ``go`` runs as the live worker; a test of a
+    stale worker passes ``ctx=turn_ctx(world, attempt=<old>)`` itself.
+    """
+    world["attempt"] = attempt
     async with factory() as db:
         done = await db.execute(
             update(ChatTurn).where(ChatTurn.id == world["turn"]).values(attempt_count=attempt)
@@ -131,8 +136,8 @@ async def test_the_recovery_epoch_cannot_be_supplied_by_the_caller(factory, worl
     tool = Tool()
     out = await go(world, tool, args=forged, slot=ToolSlot(1, 0))
     assert out["status"] == "effect_recovery_required" and tool.runs == 0
-    # The context has no such field to set, and a serialized one cannot carry it in.
-    assert not {"attempt_count", "turn_attempt", "recovering"} & set(ExecutionContext.__slots__)
+    # The only epoch field on the context is the one server code captured; no flag can relax it.
+    assert not {"attempt_count", "recovering"} & set(ExecutionContext.__slots__)
     with pytest.raises(TypeError):
         ExecutionContext.from_dict({**_ctx(world).to_dict(), "recovering": False})
 
