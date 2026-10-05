@@ -598,3 +598,87 @@ class TestCLIBackendInfoBuildArgs:
         )
         args = backend.build_args("hello", ["--verbose", "--fast"])
         assert args == ["custom-cli", "--verbose", "--fast", "hello"]
+
+
+def _work_context(work_mode):
+    """A server-built task-attempt context, as the runtime hands the adapter."""
+    from nexus.tools.context import ExecutionContext
+
+    return ExecutionContext(
+        company_id=uuid.uuid4(), principal_id="p", principal_role="agent",
+        source="chat", agent_id=uuid.uuid4(), work_mode=work_mode,
+    )
+
+
+class TestWorkModeFlagProtection:
+    """Caller-supplied extra args cannot override the work-mode catalogue's flags."""
+
+    @pytest.mark.parametrize("work_mode", ["text", "read_only", "write"])
+    @pytest.mark.parametrize(
+        ("backend_id", "extra"),
+        [
+            ("agy", ["--mode", "accept-edits"]),
+            ("agy", ["--mode=accept-edits"]),
+            ("agy", ["--MODE=accept-edits"]),
+            ("agy", ["--mod=accept-edits"]),
+            ("claude", ["--permission-mode", "bypassPermissions"]),
+            ("claude", ["--permission-mode=bypassPermissions"]),
+            ("claude", ["--allowedTools=Bash(*)"]),
+            ("claude", ["--allowedtools", "Bash(*)"]),
+        ],
+    )
+    def test_override_is_refused(self, backend_id, extra, work_mode):
+        backend = CLIRegistry(auto_detect=False).get_backend(backend_id)
+        with pytest.raises(ValueError, match="controlled by the work mode"):
+            backend.build_args("p", extra, work_mode=work_mode)
+
+    def test_every_cataloged_work_flag_is_protected(self):
+        checked = 0
+        for backend in CLIRegistry(auto_detect=False).get_all():
+            for mode, args in backend.work_args:
+                for flag in (a for a in args if a.startswith("-")):
+                    for extra in ([flag, "x"], [f"{flag.split('=', 1)[0]}=x"]):
+                        with pytest.raises(ValueError):
+                            backend.build_args("p", extra, work_mode=mode)
+                        checked += 1
+        assert checked >= 6
+
+    def test_unrelated_extra_args_and_non_work_runs_are_unchanged(self):
+        agy = CLIRegistry(auto_detect=False).get_backend("agy")
+        cmd = agy.build_args("p", ["--verbose", "--model-x"], work_mode="text")
+        assert cmd[:6] == ["agy", "--mode", "plan", "--verbose", "--model-x", "-p"]
+        # Outside a work attempt the catalogue controls nothing, so nothing is refused here.
+        assert "--mode" in agy.build_args("p", ["--mode", "other"])
+
+    @pytest.mark.parametrize("where", ["config", "payload"])
+    @patch("asyncio.create_subprocess_exec")
+    def test_attempt_is_refused_before_the_cli_starts(self, mock_exec, where):
+        adapter = CLIAdapter()
+        override = ["--mode=accept-edits"]
+        config = {"backend": "agy", "workspace": "/tmp/test_cli"}
+        payload = {"prompt": "do it"}
+        if where == "config":
+            config["extra_args"] = override
+        else:
+            payload["args"] = override
+        session = _run(adapter.create_session(uuid.uuid4(), config))
+        session.context = _work_context("text")
+
+        result = _run(adapter.execute_task(session, uuid.uuid4(), payload))
+
+        assert result.success is False
+        assert "controlled by the work mode" in result.error
+        mock_exec.assert_not_called()
+
+    @patch("asyncio.create_subprocess_exec")
+    def test_claude_permission_override_is_still_refused(self, mock_exec):
+        adapter = CLIAdapter()
+        config = {"backend": "claude", "workspace": "/tmp/test_cli"}
+        session = _run(adapter.create_session(uuid.uuid4(), config))
+        session.context = _work_context("write")
+        payload = {"prompt": "x", "args": ["--dangerously-skip-permissions"]}
+
+        result = _run(adapter.execute_task(session, uuid.uuid4(), payload))
+
+        assert result.success is False and "not allowed" in result.error
+        mock_exec.assert_not_called()

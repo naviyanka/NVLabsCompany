@@ -108,6 +108,7 @@ class CLIBackendInfo:
         cmd = [executable or self.command, *self.safe_non_interactive_args]
         if work_mode is not None:
             cmd.extend(self.work_mode_args(work_mode))
+            self._refuse_work_flag_override(extra_args)
         if model and self.supports_model and self.model_flag:
             cmd.extend([self.model_flag, model])
         if extra_args:
@@ -121,6 +122,28 @@ class CLIBackendInfo:
         else:
             cmd.append(safe_prompt)
         return cmd
+
+    def _refuse_work_flag_override(self, extra_args: list[str] | None) -> None:
+        """Refuse extra args that name a flag the work-mode catalogue controls.
+
+        A later duplicate (``--mode x`` or ``--mode=x``) or an abbreviation
+        (``--mod``) could otherwise override the server-selected permission flag.
+
+        Raises:
+            ValueError: If an extra arg collides with a cataloged work-mode flag.
+        """
+        owned = {
+            arg.split("=", 1)[0].lower()
+            for _, args in self.work_args
+            for arg in args
+            if arg.startswith("-")
+        }
+        for arg in extra_args or []:
+            flag = arg.split("=", 1)[0].lower()
+            if flag in owned or (
+                flag.startswith("--") and len(flag) > 2 and any(o.startswith(flag) for o in owned)
+            ):
+                raise ValueError(f"argument {flag} is controlled by the work mode")
 
     def work_mode_args(self, work_mode: str) -> tuple[str, ...]:
         """This backend's cataloged flags for a work mode.
