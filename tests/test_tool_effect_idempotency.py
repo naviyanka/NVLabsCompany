@@ -557,5 +557,3 @@ async def test_an_obsidian_replace_repeated_with_its_hash_is_refused_not_rewritt
         with pytest.raises(WriteConflictError):
             await replace()
         assert path.read_text(encoding="utf-8") == new
-
-
