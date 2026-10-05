@@ -230,3 +230,15 @@ async def test_refusals_publish_nothing(world) -> None:
     finally:
         event_bus.unsubscribe("__all__", queue)
     assert queue.empty()
+
+
+async def test_agent_delegate_route_refuses_a_target_that_cannot_take_work(world) -> None:
+    async with world["factory"]() as db:
+        lee = await db.get(Agent, world["lee"])
+        lee.status = "paused"
+        db.add(lee)
+        await db.commit()
+    before = await _tasks(world)
+    res = await _agent_delegate(world, "manager")
+    assert (res.status_code, res.json()["detail"]["code"]) == (409, "AGENT_NOT_ASSIGNABLE")
+    assert await _tasks(world) == before

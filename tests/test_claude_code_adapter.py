@@ -663,3 +663,173 @@ class TestCommandArgOrdering:
         resume_idx = call_args.index("--resume")
         worktree_idx = call_args.index("--worktree")
         assert fmt_idx < resume_idx < worktree_idx
+
+
+def _work_context(work_mode):
+    """A server-built task-attempt context, as the runtime hands the adapter."""
+    from nexus.tools.context import ExecutionContext
+
+    return ExecutionContext(
+        company_id=uuid.uuid4(), principal_id="p", principal_role="agent",
+        source="chat", agent_id=uuid.uuid4(), work_mode=work_mode,
+    )
+
+
+def _claude_session(alias, work_mode, config=None):
+    """The adapter and session a Claude employee gets for ``alias``, as chat builds them."""
+    from nexus.adapters.registry import AdapterRegistry
+    from nexus.adapters.uastl import resolve_provider
+
+    key, resolved = resolve_provider(alias, None, connection=None, adapter_config=None)
+    adapter = AdapterRegistry().create_adapter(key)
+    session_config = {**resolved, "workspace": "/tmp/test_claude_work", **(config or {})}
+    session = _run(adapter.create_session(uuid.uuid4(), session_config))
+    session.context = _work_context(work_mode) if work_mode else None
+    return key, adapter, session
+
+
+def _spawned(mock_exec, adapter, session, payload):
+    """Run one task with a mocked subprocess; return (result, argv or None)."""
+    proc = AsyncMock()
+    proc.communicate = AsyncMock(return_value=(b'{"type":"result","result":"ok"}\n', b""))
+    proc.returncode = 0
+    mock_exec.return_value = proc
+    result = _run(adapter.execute_task(session, uuid.uuid4(), payload))
+    return result, (list(mock_exec.call_args[0]) if mock_exec.call_args else None)
+
+
+def _claude_backend():
+    from nexus.adapters.cli_registry import get_cli_registry
+
+    return get_cli_registry().get_backend("claude")
+
+
+@pytest.mark.parametrize("alias", ["claude", "claude_code"])
+class TestClaudeWorkModeRestrictions:
+    """A Claude employee's task attempt runs with the canonical work-mode flags."""
+
+    @pytest.mark.parametrize("work_mode", ["text", "read_only", "write"])
+    @patch("asyncio.create_subprocess_exec")
+    def test_attempt_gets_exactly_the_canonical_flags(self, mock_exec, alias, work_mode):
+        key, adapter, session = _claude_session(alias, work_mode)
+        assert key == "claude_code"
+        _, argv = _spawned(mock_exec, adapter, session, {"prompt": "hi"})
+        canonical = list(_claude_backend().work_mode_args(work_mode))
+        assert argv == ["claude", "-p", "hi", "--output-format", "stream-json", "--verbose",
+                        *canonical]
+        # No manager bridge: a work attempt is offered no governed tool.
+        assert "--mcp-config" not in argv and "--strict-mcp-config" not in argv
+
+    @patch("asyncio.create_subprocess_exec")
+    def test_text_attempt_is_read_only(self, mock_exec, alias):
+        _, adapter, session = _claude_session(alias, "text")
+        _, argv = _spawned(mock_exec, adapter, session, {"prompt": "hi"})
+        assert argv[-2:] == ["--permission-mode", "plan"]
+
+    @patch("asyncio.create_subprocess_exec")
+    def test_safe_extra_args_are_kept_after_the_work_flags(self, mock_exec, alias):
+        _, adapter, session = _claude_session(alias, "text")
+        _, argv = _spawned(mock_exec, adapter, session,
+                           {"prompt": "hi", "args": ["--model", "sonnet"]})
+        assert argv[-4:] == ["--permission-mode", "plan", "--model", "sonnet"]
+
+    @pytest.mark.parametrize(
+        "override",
+        [
+            ["--permission-mode", "bypassPermissions"],
+            ["--permission-mode=bypassPermissions"],
+            ["--PERMISSION-MODE=bypassPermissions"],
+            ["--permission=bypassPermissions"],
+            ["--perm", "bypassPermissions"],
+            ["--allowedTools=Bash(*)"],
+            ["--allowedtools", "Bash(*)"],
+            ["--allowed=Bash(*)"],
+            ["--dangerously-skip-permissions"],
+            ["--settings", "x.json"],
+            ["--mcp-config", "x.json"],
+        ],
+    )
+    @pytest.mark.parametrize("work_mode", ["text", "write"])
+    @patch("asyncio.create_subprocess_exec")
+    def test_payload_override_is_refused_before_the_process_starts(
+        self, mock_exec, alias, work_mode, override
+    ):
+        _, adapter, session = _claude_session(alias, work_mode)
+        result, _ = _spawned(mock_exec, adapter, session, {"prompt": "hi", "args": override})
+        assert result.success is False and result.error
+        mock_exec.assert_not_called()
+
+    @patch("asyncio.create_subprocess_exec")
+    def test_agent_config_cannot_add_arguments(self, mock_exec, alias):
+        """This adapter never reads stored extra args, so config cannot override a flag."""
+        config = {"extra_args": ["--permission-mode", "bypassPermissions"]}
+        _, adapter, session = _claude_session(alias, "text", config)
+        _, argv = _spawned(mock_exec, adapter, session, {"prompt": "hi"})
+        assert "bypassPermissions" not in argv
+        assert argv.count("--permission-mode") == 1
+
+    @patch("asyncio.create_subprocess_exec")
+    def test_unsupported_work_mode_fails_before_the_process_starts(self, mock_exec, alias):
+        _, adapter, session = _claude_session(alias, "yolo")
+        result, _ = _spawned(mock_exec, adapter, session, {"prompt": "hi"})
+        assert result.success is False and "yolo" in result.error
+        mock_exec.assert_not_called()
+
+    @patch("asyncio.create_subprocess_exec")
+    def test_non_work_run_keeps_its_command(self, mock_exec, alias):
+        _, adapter, session = _claude_session(alias, None)
+        _, argv = _spawned(mock_exec, adapter, session,
+                           {"prompt": "hi", "args": ["--model", "sonnet"]})
+        assert argv == ["claude", "-p", "hi", "--output-format", "stream-json", "--verbose",
+                        "--model", "sonnet"]
+
+    def test_work_context_has_no_manager_tools_or_bridge(self, alias):
+        from nexus.tools import manager_bridge, manager_tools
+
+        ctx = _work_context("text")
+        assert _run(manager_tools.catalog(ctx)) == {}
+        assert _run(manager_bridge.open_bridge(ctx, uuid.uuid4(), _claude_backend(), 5.0)) is None
+
+
+class TestClaudeAndCliAdaptersShareTheCatalogue:
+    """Both adapters consume the one work-mode catalogue and override check."""
+
+    @pytest.mark.parametrize("work_mode", ["text", "read_only", "write"])
+    @patch("asyncio.create_subprocess_exec")
+    def test_same_work_flags_from_both_adapters(self, mock_exec, work_mode):
+        backend = _claude_backend()
+        cli_argv = backend.build_args("hi", work_mode=work_mode)
+        canonical = list(backend.work_mode_args(work_mode))
+        assert canonical and canonical[0] in cli_argv
+        _, adapter, session = _claude_session("claude", work_mode)
+        _, argv = _spawned(mock_exec, adapter, session, {"prompt": "hi"})
+        assert argv[-len(canonical):] == canonical
+
+    def test_claude_adapter_has_no_flag_list_of_its_own(self):
+        import inspect
+
+        src = inspect.getsource(ClaudeCodeAdapter)
+        assert "work_mode_args" in src and "refuse_work_flag_override" in src
+        assert "plan" not in src and "acceptEdits" not in src
+
+    @patch("asyncio.create_subprocess_exec")
+    def test_the_shared_override_check_stops_both_adapters(self, mock_exec):
+        from nexus.adapters.cli_adapter import CLIAdapter
+        from nexus.adapters.cli_registry import CLIBackendInfo
+
+        def refuse(self, extra_args):
+            raise ValueError("shared check ran")
+
+        with patch.object(CLIBackendInfo, "refuse_work_flag_override", refuse):
+            _, adapter, session = _claude_session("claude", "text")
+            result, _ = _spawned(mock_exec, adapter, session, {"prompt": "hi"})
+            assert result.error == "shared check ran"
+
+            cli = CLIAdapter()
+            cli_session = _run(cli.create_session(
+                uuid.uuid4(), {"backend": "claude", "workspace": "/tmp/test_claude_work"}
+            ))
+            cli_session.context = _work_context("text")
+            cli_result = _run(cli.execute_task(cli_session, uuid.uuid4(), {"prompt": "hi"}))
+            assert cli_result.error == "shared check ran"
+        mock_exec.assert_not_called()

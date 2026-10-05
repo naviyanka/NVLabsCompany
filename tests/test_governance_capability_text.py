@@ -23,10 +23,10 @@ SUPPORT = {"enforced", "approval_only", "display_only", "unsupported"}
 
 
 class TestCompleteness:
-    def test_all_44_capabilities_have_complete_metadata(self):
+    def test_all_47_capabilities_have_complete_metadata(self):
         caps = catalog.build_catalog()
-        assert len(caps) == 44
-        assert len({c["id"] for c in caps}) == 44
+        assert len(caps) == 47
+        assert len({c["id"] for c in caps}) == 47
         for c in caps:
             assert c["display_name"].strip(), c["id"]
             assert len(c["description"].split()) >= 5, c["id"]
@@ -137,7 +137,7 @@ class TestDisplayNamesAreNotAuthorizationKeys:
         cat = (await api("GET", "/catalog")).json()["capabilities"]
         matrix = (await api("GET", f"/agents/{t['a']}/effective-access")).json()["capabilities"]
         for rows in (cat, matrix):
-            assert len(rows) == 44
+            assert len(rows) == 47
             for c in rows:
                 assert c["id"] and c["display_name"] and c["description"]
                 assert "limitations" in c and "examples" in c

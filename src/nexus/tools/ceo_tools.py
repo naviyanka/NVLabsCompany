@@ -24,9 +24,10 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from nexus.models.task import Goal, Task
+from nexus.models.task import Goal
+from nexus.runtime import task_attempts
 from nexus.runtime.task_attempts import WorkSpec, attempt_view
-from nexus.services import ceo_service, hiring_service, org_snapshot
+from nexus.services import ceo_service, hiring_service, org_snapshot, work_service
 from nexus.services import manager_service as ms
 from nexus.tools.effects import EffectClass
 from nexus.tools.manager_tools import ManagerTool
@@ -62,6 +63,10 @@ class GoalOrWorkOrder(_Args):
     goal_id: uuid.UUID | None = None
     priority: int = Field(default=0, ge=0, le=10)
     work_spec: WorkSpec | None = None
+
+
+class WorkStatus(_Args):
+    work_id: uuid.UUID | None = None
 
 
 class Decision(_Args):
@@ -106,6 +111,25 @@ async def _search(db, company_id, ceo_id, args, actor, ctx):
 
 
 async def _delegate(db, company_id, ceo_id, args, actor, ctx):
+    task = await task_attempts._load_task(db, company_id, args.task_id)
+    if work_service.is_work_order(task) or not task.work_spec:
+        # A work order (an ordinary task is refused there): one hand-off to the manager.
+        task, created = await work_service.delegate_to_manager(
+            db, company_id, ceo_id, args.manager_id, args.task_id, actor
+        )
+        if created:
+            await ceo_service.remember(
+                db, company_id,
+                ceo_service.MemoryEntry(
+                    type="delegation",
+                    content=f"Delegated work order {args.task_id} to {args.manager_id}",
+                    refs={"task_id": args.task_id, "manager_id": args.manager_id},
+                ),
+                recorded_by=actor, origin="tool", source=_source(ctx),
+            )
+            await db.commit()
+        return {"created": created, "work": {"id": str(task.id), "status": task.status,
+                                             "manager_id": str(task.assigned_agent_id)}}
     principal = SimpleNamespace(kind="agent", display_name=actor)
     attempt, created = await ms.delegate(
         db, company_id, ceo_id, args.manager_id, args.task_id, principal
@@ -123,10 +147,31 @@ async def _delegate(db, company_id, ceo_id, args, actor, ctx):
     return {"created": created, "attempt": attempt_view(attempt)}
 
 
+async def _work_status(db, company_id, ceo_id, args, actor, ctx):
+    return await work_service.status(db, company_id, args.work_id)
+
+
 async def _create(db, company_id, ceo_id, args, actor, ctx):
+    if args.kind == "work_order":
+        task, created = await work_service.create_work_order(
+            db, company_id, scope=str(ceo_id), actor=actor, title=args.title,
+            idempotency_key=args.idempotency_key, description=args.description,
+            goal_id=args.goal_id, priority=args.priority, ceo_id=ceo_id,
+            work_spec=args.work_spec and args.work_spec.model_dump(mode="json"),
+        )
+        if created:
+            await ceo_service.remember(
+                db, company_id,
+                ceo_service.MemoryEntry(
+                    type="commitment", content=f"Created work order: {args.title}",
+                    refs={"task_id": task.id},
+                ),
+                recorded_by=actor, origin="tool", source=_source(ctx),
+            )
+            await db.commit()
+        return {"created": created, "kind": args.kind, "id": str(task.id)}
     new_id = uuid.uuid5(_NAMESPACE, f"{company_id}:{ceo_id}:{args.kind}:{args.idempotency_key}")
-    model = Goal if args.kind == "goal" else Task
-    existing = await db.get(model, new_id)
+    existing = await db.get(Goal, new_id)
     if existing is not None:
         if existing.title != args.title:
             raise ms._error(409, "IDEMPOTENCY_KEY_REUSED",
@@ -138,23 +183,17 @@ async def _create(db, company_id, ceo_id, args, actor, ctx):
         goal = await db.get(Goal, args.goal_id)
         if goal is None or goal.company_id != company_id:
             raise ms._error(404, "GOAL_NOT_FOUND", f"Goal {args.goal_id} not found")
-    if args.kind == "goal":
-        db.add(Goal(id=new_id, company_id=company_id, title=args.title,
-                    description=args.description, level="company", parent_id=args.goal_id,
-                    owner_agent_id=args.owner_agent_id))
-    else:
-        db.add(Task(id=new_id, company_id=company_id, title=args.title,
-                    description=args.description, priority=args.priority, goal_id=args.goal_id,
-                    work_spec=args.work_spec and args.work_spec.model_dump(mode="json")))
+    db.add(Goal(id=new_id, company_id=company_id, title=args.title,
+                description=args.description, level="company", parent_id=args.goal_id,
+                owner_agent_id=args.owner_agent_id))
     await db.flush()
-    await ms.audit(db, company_id, f"ceo.{args.kind}_created", actor,
-                   "goal" if args.kind == "goal" else "task", new_id, ceo_id=ceo_id,
-                   idempotency_key=args.idempotency_key)
+    await ms.audit(db, company_id, "ceo.goal_created", actor, "goal", new_id,
+                   ceo_id=ceo_id, idempotency_key=args.idempotency_key)
     await ceo_service.remember(
         db, company_id,
         ceo_service.MemoryEntry(
-            type="commitment", content=f"Created {args.kind.replace('_', ' ')}: {args.title}",
-            refs={"goal_id" if args.kind == "goal" else "task_id": new_id},
+            type="commitment", content=f"Created goal: {args.title}",
+            refs={"goal_id": new_id},
         ),
         recorded_by=actor, origin="tool", source=_source(ctx),
     )
@@ -218,9 +257,17 @@ CEO_TOOLS: dict[str, ManagerTool] = {
         "read", (), _search, SearchMemory,
         effect=EffectClass.READ_ONLY,
     ),
+    "ceo_get_work_status": ManagerTool(
+        "Live status of the company's work orders, read from the database right now: "
+        "owner, tasks, attempts, whether a deliverable awaits review, failures and "
+        "verified results. Pass work_id for one work order. Prefer this over the snapshot "
+        "when asked what is happening or done.",
+        "read", (), _work_status, WorkStatus,
+        effect=EffectClass.READ_ONLY,
+    ),
     "ceo_delegate_task_to_manager": ManagerTool(
-        "Delegate an existing work task to a manager who reports to you. Queues a task "
-        "attempt; idempotent.",
+        "Delegate a work order to a manager who reports to you; the manager assigns the "
+        "work. (A task that has a work spec is delegated as an attempt.) Idempotent.",
         "write", (), _delegate, Delegate,
         effect=EffectClass.IDEMPOTENT_WRITE,
     ),

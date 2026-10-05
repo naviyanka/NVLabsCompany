@@ -760,6 +760,8 @@ def test_every_manager_and_ceo_tool_declares_its_class():
     expected = {
         "manager_delegate_task": IDEM,
         "manager_request_hire": IDEM,
+        "manager_assign_work": IDEM,
+        "manager_review_work": IDEM,
         "ceo_delegate_task_to_manager": IDEM,
         "ceo_create_goal_or_work_order": IDEM,
         "ceo_request_hire": IDEM,

@@ -104,6 +104,8 @@ SYSTEM_ACTOR = "system:task-attempts"
 MAX_ARTIFACTS = 200
 MAX_REPORT_BYTES = 64_000
 MAX_DIFF_CHARS = 20_000
+MAX_DELIVERABLE_CHARS = 4000
+DEFAULT_MAX_ATTEMPTS = 2  # a text task: the first try and one retry
 MAX_SEQ = 1_000_000
 _SWEEP_EVERY_SECONDS = 15.0
 _BATCH = 50
@@ -213,9 +215,14 @@ class WorkSpec(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    mode: Literal["write", "read_only"] = "write"
-    repository_id: uuid.UUID
+    mode: Literal["write", "read_only", "text"] = "write"
+    # Required for write/read_only; a text task has no repository.
+    repository_id: uuid.UUID | None = None
     base_ref: str = Field(default="HEAD", min_length=1, max_length=200)
+    # Text mode only: what the manager expects back, and the attempt/size caps.
+    expected_deliverable: str | None = Field(default=None, max_length=500)
+    max_deliverable_chars: int | None = Field(default=None, ge=100, le=MAX_DELIVERABLE_CHARS)
+    max_attempts: int | None = Field(default=None, ge=1, le=5)
     review_of_task_id: uuid.UUID | None = None
     objective: str | None = Field(default=None, max_length=4000)
     deliverables: list[RelPath] = Field(default_factory=list, max_length=50)
@@ -228,6 +235,18 @@ class WorkSpec(BaseModel):
     def _consistent(self) -> WorkSpec:
         if self.base_ref.startswith("-") or any(c.isspace() for c in self.base_ref):
             raise ValueError("base_ref is not a ref")
+        if self.mode == "text":
+            if not self.objective:
+                raise ValueError("a text task needs an objective")
+            if self.repository_id is not None or self.deliverables or self.verification:
+                raise ValueError("a text task has no repository, deliverable paths or checks")
+            if self.review_of_task_id is not None:
+                raise ValueError("review_of_task_id is for read_only tasks")
+            return self
+        if self.repository_id is None:
+            raise ValueError("a write or read_only task needs a repository_id")
+        if self.expected_deliverable or self.max_deliverable_chars or self.max_attempts:
+            raise ValueError("expected_deliverable and the caps are for text tasks")
         if self.mode == "write":
             if not self.deliverables:
                 raise ValueError("a write task needs at least one deliverable")
@@ -242,6 +261,18 @@ class WorkSpec(BaseModel):
             if criterion.kind == "command_passes" and criterion.command not in commands:
                 raise ValueError(f"{criterion.command} is not a verification step")
         return self
+
+
+WORK_ORDER_KIND = "work_order"
+
+
+def is_work_order_spec(raw: Any) -> bool:
+    """The one place that reads the work-order marker (``{"kind": "work_order"}``).
+
+    A ``WorkSpec`` forbids the ``kind`` key, so only the work service can write it. Anything
+    else, an unknown kind or a non-dict included, is not a work order.
+    """
+    return isinstance(raw, dict) and raw.get("kind") == WORK_ORDER_KIND
 
 
 def parse_work_spec(raw: Any) -> WorkSpec:
@@ -396,8 +427,20 @@ def _sha256(path: Path) -> str:
 # ---------------------------------------------------------------------------
 
 
-def attempt_view(a: TaskAttempt) -> dict[str, Any]:
-    """The API shape of an attempt. No absolute paths, no environment."""
+SUMMARY_VIEW_CHARS = 500
+
+
+def bounded_summary(text: str | None) -> str | None:
+    """A stored deliverable cut to a summary: what a model or tool may be shown."""
+    return text[:SUMMARY_VIEW_CHARS] if text else text
+
+
+def attempt_view(a: TaskAttempt, *, full: bool = False) -> dict[str, Any]:
+    """The API shape of an attempt. No absolute paths, no environment.
+
+    ``output_summary`` is cut to :data:`SUMMARY_VIEW_CHARS` unless ``full``: only a route that
+    has checked ``work_service.can_view_work_deliverable`` passes it, never a model tool.
+    """
 
     def iso(value: datetime | None) -> str | None:
         return value.isoformat() if value else None
@@ -430,7 +473,7 @@ def attempt_view(a: TaskAttempt) -> dict[str, Any]:
         "started_at": iso(a.started_at),
         "completed_at": iso(a.completed_at),
         "updated_at": iso(a.updated_at),
-        "output_summary": a.output_summary,
+        "output_summary": a.output_summary if full else bounded_summary(a.output_summary),
         "completion_reason": a.completion_reason,
         "error_code": a.error_code,
         "error": a.error,
@@ -509,8 +552,16 @@ def _system_principal(company_id: uuid.UUID) -> Any:
 
 
 def check_employee(agent: Any, mode: str) -> None:
-    """The employee must be a CLI employee whose backend can do this kind of work."""
+    """The employee must be a CLI employee whose backend can do this kind of work.
+
+    A text task needs no CLI: any active company employee can write the answer.
+    """
     from nexus.adapters.cli_registry import get_cli_registry
+
+    if mode == "text":
+        if agent.status in ("terminated", "archived", "paused"):
+            raise _error(422, "EMPLOYEE_UNAVAILABLE", "The employee cannot take work")
+        return
 
     backend_id = (agent.adapter_config or {}).get("backend")
     info = get_cli_registry().get_backend(backend_id) if backend_id else None
@@ -585,6 +636,8 @@ async def start_attempt(
     task = await _load_task(db, company_id, task_id)
     if not task.work_spec:
         raise _error(422, "TASK_NOT_WORK", "The task has no work spec")
+    if is_work_order_spec(task.work_spec):
+        raise _error(409, "WORK_ORDER_NOT_EXECUTABLE", "A work order is delegated, not executed")
     spec = parse_work_spec(task.work_spec)
     if idempotency_key:
         existing = await _by_key(db, company_id, task_id, idempotency_key)
@@ -620,6 +673,8 @@ async def start_attempt(
             )
         )
     ).scalar() or 0
+    if spec.mode == "text" and number >= (spec.max_attempts or DEFAULT_MAX_ATTEMPTS):
+        raise _error(409, "ATTEMPTS_EXHAUSTED", f"The task has used its {number} attempts")
     attempt = TaskAttempt(
         company_id=company_id,
         task_id=task_id,
@@ -673,13 +728,16 @@ async def cancel_attempt(
         return attempt
     by = principal.display_name
     now = _now()
-    if attempt.status == "queued":
+    if attempt.status == "queued" or (attempt.status == "verifying" and attempt.claimed_by is None):
+        # Queued, or a submitted deliverable no worker holds: nothing will finish it later.
         done = await _finish_in(
             db,
             attempt,
             "cancelled",
             "cancelled",
             None,
+            TaskAttempt.status == attempt.status,
+            TaskAttempt.claimed_by.is_(None),
             cancel_requested_at=now,
             cancelled_by=by,
             error_code="CANCELLED",
@@ -1001,6 +1059,10 @@ async def _finish_in(
         if record is not None and record.status in session_service.OPEN_STATUSES:
             session_service.transition(record, "completed")
             await release_session_worktree(db, record)
+    if (fresh.context_snapshot or {}).get("work_spec", {}).get("mode") == "text":
+        from nexus.services import work_service
+
+        await work_service.after_terminal(db, fresh)
     attempt.status = attempt_status
     return True
 
@@ -1330,6 +1392,30 @@ async def _prepare(attempt: TaskAttempt, worker_id: str) -> tuple[Any, Any, Any]
         ):
             return None
 
+        if spec.mode == "text":
+            turn_id = attempt.chat_turn_id
+            if turn_id is None:
+                async with tenant_session(company_id) as db:
+                    failed = (
+                        await _failed_checks(db, attempt) if attempt.attempt_number > 1 else []
+                    )
+                    record = await _session_for(db, attempt, agent, task)
+                    agent = await chat._load_agent(db, attempt.agent_id, company_id)
+                    enqueued = await chat_turns.create_turn(
+                        db,
+                        record,
+                        agent,
+                        build_text_prompt(attempt, task, spec, failed),
+                        idempotency_key=f"attempt:{attempt.id}",
+                        work_mode="text",
+                    )
+                turn_id = enqueued.turn.id
+            if not await _update_held(attempt, worker_id, chat_turn_id=turn_id, status="running"):
+                return None
+            chat_turns.get_worker().wake(company_id)
+            await _publish(attempt)
+            return spec, turn_id, None
+
         async with tenant_session(company_id) as db:
             service = WorktreeService(db, _system_principal(company_id))
             row = await held_worktree(db, company_id, session_id)
@@ -1424,6 +1510,34 @@ async def _failed_checks(db: Any, attempt: TaskAttempt) -> list[str]:
         for c in verification.get("checks") or []
         if isinstance(c, dict) and not c.get("passed")
     ][:20]
+
+
+def build_text_prompt(
+    attempt: TaskAttempt, task: Any, spec: WorkSpec, failed_checks: list[str] | None = None
+) -> str:
+    """Bounded instructions for a text task. The reply itself is the deliverable."""
+    limit = spec.max_deliverable_chars or MAX_DELIVERABLE_CHARS
+    lines = [
+        f'You are working on the task "{task.title[:200]}" (attempt {attempt.attempt_number}).',
+        "",
+        "Objective:",
+        (spec.objective or task.title)[:4000],
+        "",
+    ]
+    if spec.expected_deliverable:
+        lines += ["Expected deliverable:", spec.expected_deliverable[:500], ""]
+    if failed_checks:
+        lines += [
+            "Your manager rejected the previous attempt:",
+            *[f"- {item}" for item in failed_checks],
+            "Address this in your new answer.",
+            "",
+        ]
+    lines.append(
+        f"Reply with the deliverable only, in at most {limit} characters. "
+        "Your manager reviews it before the task counts as done."
+    )
+    return "\n".join(lines)
 
 
 def build_prompt(
@@ -2002,19 +2116,21 @@ class TaskAttemptWorker:
         if prepared is None:
             return
         spec, turn_id, worktree_id = prepared
-        async with tenant_session(attempt.company_id) as db:
-            worktree = (
-                await db.execute(
-                    select(AgentWorktree).where(
-                        AgentWorktree.id == worktree_id,
-                        AgentWorktree.company_id == attempt.company_id,
+        worktree = root = None
+        if worktree_id is not None:
+            async with tenant_session(attempt.company_id) as db:
+                worktree = (
+                    await db.execute(
+                        select(AgentWorktree).where(
+                            AgentWorktree.id == worktree_id,
+                            AgentWorktree.company_id == attempt.company_id,
+                        )
                     )
-                )
-            ).scalar_one()
-        from nexus.runtime.git_runner import GitRunner
-        from nexus.services.worktree_service import worktree_path
+                ).scalar_one()
+            from nexus.services.worktree_service import worktree_path
 
-        root = worktree_path(worktree.company_id, worktree.relative_path)
+            root = worktree_path(worktree.company_id, worktree.relative_path)
+        from nexus.runtime.git_runner import GitRunner
         interval = max(0.5, min(_settings().task_attempt_lease_seconds / 3, 5.0))
         deadline = (attempt.started_at or _now()) + timedelta(seconds=spec.timeout_seconds)
         poke = self._pokes.setdefault(attempt.id, asyncio.Event())
@@ -2079,6 +2195,13 @@ class TaskAttemptWorker:
                 error_code=turn.error_code or f"TURN_{turn.status.upper()}",
                 error=(turn.error_message or f"The employee's turn {turn.status}")[:2000],
             )
+            return
+
+        if spec.mode == "text":
+            # Submission is not completion: the manager verifies in a separate step.
+            from nexus.services import work_service
+
+            await work_service.submit_from_turn(attempt, me, spec, turn)
             return
 
         if not await _update_held(attempt, me, status="verifying"):

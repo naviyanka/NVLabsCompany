@@ -81,7 +81,8 @@ class TaskExecutor:
         """
         from nexus.models.agent import Agent
 
-        stmt = select(Agent).where(Agent.id == agent_id)
+        # A session's agent must belong to the task's company.
+        stmt = select(Agent).where(Agent.id == agent_id, Agent.company_id == company_id)
         result = await self._db.execute(stmt)
         agent = result.scalar_one_or_none()
 
@@ -226,8 +227,19 @@ class TaskExecutor:
                 f"Agent {agent_id} is not permitted to execute task {task.id}"
             )
 
+        # Work orders and work children belong to the work lifecycle: only a verified attempt
+        # moves their status, result or owner. This legacy executor reports on them and writes
+        # none of it.
+        from nexus.services import work_service
+
+        work_owned = await work_service.is_work_owned(self._db, task.company_id, task.id)
+
+        async def set_status(*args: Any, **kwargs: Any) -> None:
+            if not work_owned:
+                await self._update_task_status(*args, **kwargs)
+
         # 3. Update task to running
-        await self._update_task_status(task.id, "running")
+        await set_status(task.id, "running")
 
         # 4. Execute with smart retry and escalation
         from nexus.orchestration.smart_retry import SmartRetryWithEscalation, EscalationAction
@@ -262,15 +274,21 @@ class TaskExecutor:
             # 5. Record cost
             await self._record_cost(result, task.company_id, task)
             # 6. Update task status
-            await self._update_task_status(
-                task.id, "completed", result_text=str(result.output)
-            )
+            await set_status(task.id, "completed", result_text=str(result.output))
             return result
 
         # Smart retry exhausted — handle escalation
         escalation = retry_result.escalation_action
         diagnosis = retry_result.diagnosis
         last_error = diagnosis.diagnosis_detail if diagnosis else "Unknown error after retries"
+
+        # A retry escalation may not move a work task's owner or add children behind the
+        # lifecycle's back: it is reported as a blocker instead.
+        if work_owned and escalation in (
+            EscalationAction.REASSIGN,
+            EscalationAction.DECOMPOSE,
+        ):
+            escalation = EscalationAction.REPORT_BLOCKER
 
         # Act on escalation (not just log)
         if escalation == EscalationAction.REASSIGN:
@@ -344,5 +362,5 @@ class TaskExecutor:
             last_error = f"[BLOCKER] {last_error}"
 
         # All retries exhausted
-        await self._update_task_status(task.id, "failed", error_text=last_error)
+        await set_status(task.id, "failed", error_text=last_error)
         raise TaskExecutionError(task.id, self._max_retries, last_error)

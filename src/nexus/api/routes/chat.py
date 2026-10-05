@@ -1112,7 +1112,12 @@ async def _call_llm(
         # vault-grant, and writer path as every other governed tool. The
         # designated CEO gets none: its authority is only the MCP CEO tools,
         # so free-form <tool_call> text from a CEO turn executes nothing.
-        if hasattr(adapter, "register_tool") and not agent.is_ceo:
+        # A task attempt (work_mode set) is offered no tool at all.
+        if (
+            hasattr(adapter, "register_tool")
+            and not agent.is_ceo
+            and execution_context.work_mode is None
+        ):
             from nexus.database import tenant_session, tenant_session_factory
             from nexus.tools import (
                 OBSIDIAN_NOTE_REPLACE_NAME,
@@ -1384,14 +1389,20 @@ async def _record_chat_audit(
     tokens_used: int,
     session_id: uuid.UUID,
     execution_id: str | None = None,
+    previews: bool = True,
 ) -> None:
-    """Audit both sides of a turn and record its spend on the in-process tracker."""
+    """Audit both sides of a turn and record its spend on the in-process tracker.
+
+    ``previews=False`` (task-attempt turns) records sizes instead of text: a work
+    prompt and its deliverable never reach the audit log.
+    """
     from nexus.governance.audit_service import record_audit
 
     await record_audit(
         company_id, "chat.message_sent",
         actor_type="user", resource_type="agent", resource_id=str(agent_id),
-        details={"prompt_preview": prompt[:100], "model": model_used, "tokens": tokens_used, "session_id": str(session_id),
+        details={**({"prompt_preview": prompt[:100]} if previews else {"prompt_chars": len(prompt)}),
+                 "model": model_used, "tokens": tokens_used, "session_id": str(session_id),
                  "execution_id": execution_id},
         db=db,
     )
@@ -1399,7 +1410,10 @@ async def _record_chat_audit(
         company_id, "chat.response_generated",
         actor_type="agent", actor_id=str(agent_id),
         resource_type="chat", resource_id=str(session_id),
-        details={"model": model_used, "tokens": tokens_used, "response_preview": response_text[:100], "session_id": str(session_id),
+        details={"model": model_used, "tokens": tokens_used,
+                 **({"response_preview": response_text[:100]} if previews
+                    else {"response_chars": len(response_text)}),
+                 "session_id": str(session_id),
                  "execution_id": execution_id},
         db=db,
     )

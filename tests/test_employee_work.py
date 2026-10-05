@@ -489,8 +489,8 @@ class TestStart:
         assert exc.value.status_code == 404
         async with db() as s:
             for coro in (
-                attempt_routes.get_attempt(w["task"], attempt.id, s, w["other"]),
-                attempt_routes.list_attempts(w["task"], s, w["other"]),
+                attempt_routes.get_attempt(w["task"], attempt.id, s, w["other"], _me(w["other"])),
+                attempt_routes.list_attempts(w["task"], s, w["other"], _me(w["other"])),
                 attempt_routes.cancel_attempt(
                     w["task"], attempt.id, s, w["other"], _me(w["other"])
                 ),
@@ -992,6 +992,9 @@ class TestHardening:
         assert write[-1] == "do it" and "--dangerously-skip-permissions" not in write
         assert "plan" in claude.build_args("look", work_mode="read_only")
         assert agy.work_mode_args("read_only") == ("--mode", "plan")
+        # Text work runs read-only on a CLI too: no edits, no commands, no manager bridge.
+        assert claude.work_mode_args("text") == claude.work_mode_args("read_only")
+        assert agy.work_mode_args("text") == agy.work_mode_args("read_only")
         assert claude.build_args("chat") == [claude.command, "-p", "chat"]
         with pytest.raises(ValueError):
             claude.build_args("x", work_mode="yolo")

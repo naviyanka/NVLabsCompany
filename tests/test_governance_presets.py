@@ -156,7 +156,8 @@ class TestCapabilityDiffMatchesRuntime:
         assert "manager_request_hire" in allowed[4] and "manager_request_hire" not in allowed[3]
         assert not any(n.startswith("ceo_") and n not in (
             "ceo_get_organization_snapshot", "ceo_list_managers", "ceo_get_manager_status",
-            "ceo_list_pending_approvals", "ceo_search_executive_memory") for n in allowed[4])
+            "ceo_list_pending_approvals", "ceo_search_executive_memory",
+            "ceo_get_work_status") for n in allowed[4])
 
 
 class TestNeverBypasses:

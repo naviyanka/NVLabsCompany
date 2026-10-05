@@ -85,6 +85,8 @@ TABLE: dict[str, Proof] = {
     "msg-webhook-notify": Proof(NON_IDEM, NONE, "a webhook fires each time"),
     "manager_delegate_task": Proof(IDEM, INTRINSIC, "one task attempt per manager/employee key"),
     "manager_request_hire": Proof(IDEM, LEDGER_KEY, "hiring dedupes on the ledger key"),
+    "manager_assign_work": Proof(IDEM, LEDGER_KEY, "child task id derives from the ledger key"),
+    "manager_review_work": Proof(IDEM, INTRINSIC, "one conditional update decides"),
     "ceo_delegate_task_to_manager": Proof(IDEM, INTRINSIC, "one task attempt per key"),
     "ceo_create_goal_or_work_order": Proof(IDEM, LEDGER_KEY, "id derives from the ledger key"),
     "ceo_request_hire": Proof(IDEM, LEDGER_KEY, "hiring dedupes on the ledger key"),
@@ -96,7 +98,7 @@ TABLE: dict[str, Proof] = {
             "manager_rollup", "manager_list_hiring_requests", "manager_get_hiring_request",
             "ceo_get_organization_snapshot", "ceo_list_managers", "ceo_get_manager_status",
             "ceo_list_pending_approvals", "ceo_search_executive_memory",
-            "organization_get_snapshot",
+            "ceo_get_work_status", "organization_get_snapshot",
         )
     },
 }
@@ -234,6 +236,10 @@ MODEL_ARGS = {
     },
     "ceo_create_goal_or_work_order": {
         "kind": "goal", "title": "t", "idempotency_key": "model-chosen",
+    },
+    "manager_assign_work": {
+        "work_id": str(uuid.uuid4()), "employee_id": str(uuid.uuid4()), "title": "t",
+        "objective": "o", "idempotency_key": "model-chosen",
     },
 }
 
