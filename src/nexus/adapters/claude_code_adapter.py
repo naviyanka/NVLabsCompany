@@ -197,6 +197,25 @@ class ClaudeCodeAdapter(BaseAdapter):
             return TaskResult(
                 task_id=task_id, agent_id=session.agent_id, success=False, error=refused
             )
+        # A task attempt's permission mode comes from the server-built context and
+        # maps to the Claude backend's cataloged flags only, the same catalogue and
+        # override check the generic CLI adapter uses. An unsupported mode or an
+        # override is refused before any process starts.
+        work_args: list[str] = []
+        work_mode = getattr(getattr(session, "context", None), "work_mode", None)
+        if work_mode is not None:
+            from nexus.adapters.cli_registry import get_cli_registry
+
+            backend = get_cli_registry().get_backend("claude")
+            try:
+                if backend is None:
+                    raise ValueError("claude backend is not cataloged")
+                work_args = list(backend.work_mode_args(work_mode))
+                backend.refuse_work_flag_override(extra_args)
+            except ValueError as exc:
+                return TaskResult(
+                    task_id=task_id, agent_id=session.agent_id, success=False, error=str(exc)
+                )
         # The session's agent worktree when it has one, else the directory the
         # session was created with. Never the server's own working directory.
         workspace = session.worktree_path or self._workspaces.get(session.session_id)
@@ -236,6 +255,8 @@ class ClaudeCodeAdapter(BaseAdapter):
         # Add worktree isolation support
         if payload.get("worktree"):
             cmd.append("--worktree")
+
+        cmd.extend(work_args)
 
         if extra_args:
             cmd.extend(extra_args)

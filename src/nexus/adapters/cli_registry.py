@@ -108,7 +108,7 @@ class CLIBackendInfo:
         cmd = [executable or self.command, *self.safe_non_interactive_args]
         if work_mode is not None:
             cmd.extend(self.work_mode_args(work_mode))
-            self._refuse_work_flag_override(extra_args)
+            self.refuse_work_flag_override(extra_args)
         if model and self.supports_model and self.model_flag:
             cmd.extend([self.model_flag, model])
         if extra_args:
@@ -123,7 +123,7 @@ class CLIBackendInfo:
             cmd.append(safe_prompt)
         return cmd
 
-    def _refuse_work_flag_override(self, extra_args: list[str] | None) -> None:
+    def refuse_work_flag_override(self, extra_args: list[str] | None) -> None:
         """Refuse extra args that name a flag the work-mode catalogue controls.
 
         A later duplicate (``--mode x`` or ``--mode=x``) or an abbreviation
