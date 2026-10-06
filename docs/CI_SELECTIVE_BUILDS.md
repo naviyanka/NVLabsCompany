@@ -135,5 +135,7 @@ until the allowlist is narrowed.
 
 Unchanged: Trivy scans the `linux/amd64` image of each service for `CRITICAL`
 and `HIGH` findings with `exit-code: '0'` (report only). A scan step that
-errors still fails the build job and therefore the gate. Tightening the exit
-code, pinning `trivy-action` and scanning arm64 are separate follow-ups.
+errors still fails the build job and therefore the gate. The Trivy Action is
+pinned to the reviewed v0.36.0 commit. Tightening the vulnerability exit code,
+completing repository-wide immutable action pinning, and scanning arm64 remain
+separate follow-ups.
