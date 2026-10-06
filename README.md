@@ -97,7 +97,7 @@ Startup is fail-closed: the API refuses to start on a disallowed `AUTH_ENABLED=f
 - **Authorization** — RBAC roles and per-route permission requirements. The Work API's mutating routes (create, delegate, review and cancel) refuse run-token principals with `AGENT_USES_TOOLS`; manager-agent actions use governed work tools, while employee execution proceeds through the task-attempt runtime.
 - **Tool policy** — tool access control with binding enforcement on by default; MCP and declared tool schemas are validated before dispatch, and undeclared external tools default to the most conservative effect class.
 - **Network and secrets** — SSRF guards on outbound URLs with an operator allowlist for internal hosts; a secret backend (encrypted at rest by default) for credentials; governed Azure providers read keys only through the secret backend and authenticate with Entra by default.
-- **Idempotency** — mutating requests are guarded by an idempotency middleware, and work-order creation requires an `Idempotency-Key` header (`400 IDEMPOTENCY_KEY_REQUIRED` when absent) so a retried request does not create a duplicate order.
+- **Idempotency** — mutating requests are guarded by an idempotency middleware, and work-order creation requires an `Idempotency-Key` header (`422 IDEMPOTENCY_KEY_REQUIRED` when absent) so a retried request does not create a duplicate order.
 - **Audit** — four separate records exist, and only the second is the hash-chained audit table:
   - *Request logs* — the governance middleware emits a structured `audit:` log line (method, path, company, status, duration) for mutating HTTP requests it serves. It is a log line, not a stored audit row.
   - *Persistent audit events* — selected governance, work-lifecycle, task-attempt, chat-turn, tool-effect and security-sensitive operations call the audit recorder explicitly (for example `work.created`, `work.delegated`, `work.assigned`, `work.cancelled`, `task.attempt_queued` and `tool_effect.*` recovery decisions). Each row joins its company's hash-chained, append-only log, and a row whose chain link cannot be allocated is not written unchained. Persistence is best-effort by default: a failed write is logged and the operation continues, unless the caller requires it. Work-order creation, delegation, assignment and cancellation, and the manual-recovery, resolution and retake decisions of the tool-effect ledger, do require it and fail closed; attempt, deliverable, review and chat-turn events do not. Not every operation or state change writes an audit row.
@@ -118,11 +118,11 @@ The Work API does not start code attempts. Code attempts for generic tasks are a
 
 Tool effects inside chat turns are covered by the recovery ledger described under [Current limitations](#current-limitations); legacy task, goal, and orchestration surfaces remain available and behave as before.
 
-The Work API itself (human principals and service keys only — an agent run token is refused with `403 AGENT_USES_TOOLS`, and a work order from another company is a plain 404):
+The Work API's mutating routes refuse run-token principals with `403 AGENT_USES_TOOLS`. Its read routes permit run tokens but omit full deliverable text; a request for another company's work order returns a plain `404`.
 
 | Method | Endpoint | Purpose |
 | :--- | :--- | :--- |
-| `POST` | `/api/v1/work` | Create a work order (requires an `Idempotency-Key` header; `400 IDEMPOTENCY_KEY_REQUIRED` without it) |
+| `POST` | `/api/v1/work` | Create a work order (requires an `Idempotency-Key` header; `422 IDEMPOTENCY_KEY_REQUIRED` without it) |
 | `GET` | `/api/v1/work` | List the company's work orders |
 | `GET` | `/api/v1/work/{work_id}` | Work-order detail with attempts |
 | `POST` | `/api/v1/work/{work_id}/delegate` | Hand the order to a manager agent |
