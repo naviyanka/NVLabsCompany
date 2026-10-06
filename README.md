@@ -1,6 +1,6 @@
 # NEXUS
 
-NEXUS is a self-hosted operating and governance system for durable AI-company and workforce execution: it organizes agents into a tenant-isolated company, runs their work as durable, reviewable orders, controls authority and spend, preserves institutional memory, and keeps an auditable record of everything they did.
+NEXUS is a self-hosted operating and governance system for durable AI-company and workforce execution: it organizes agents into a tenant-isolated company, runs their work as durable, reviewable orders, controls authority and spend, preserves institutional memory, and records selected governance, work and security events in a hash-chained audit log.
 
 [![CI](https://github.com/naviyanka/NVLabsCompany/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/naviyanka/NVLabsCompany/actions/workflows/test.yml)
 [![Python](https://img.shields.io/badge/python-3.12+-blue)](https://www.python.org)
@@ -15,11 +15,11 @@ Implemented and tested on current `main`:
 - **Tenants and organization** — companies as isolation boundaries, departments and squads, human invitations, agent hiring from templates, org snapshots.
 - **Durable text-first work execution** — a human operator creates work orders, delegates them through managers, and employees execute them as work attempts that survive process restarts; managers review deliverables and verify or reject them (see [Work execution lifecycle](#work-execution-lifecycle)).
 - **Governance** — RBAC, policy evaluation, autonomy levels with notifications and approval gates, tool policy with binding enforcement, kill switches and circuit breakers.
-- **Budgets and cost** — per-company spending limits with pre-execution checks, holds that reserve before a model call and settle from authoritative usage.
+- **Budgets and cost** — per-company spending limits with pre-execution checks, chat model calls reserve an estimated hold before the request and settle it to the reported cost afterwards, or release it when nothing was billed. If the budget ledger is unreachable the call is refused unless the operator opts into `BUDGET_FAIL_OPEN`.
 - **Memory** — tiered memory with search, a memory graph, and an evidence workflow with governed trust promotion.
-- **Audit and incidents** — an append-only, hash-chained audit log per company, incident tracking, activity feeds.
+- **Audit and incidents** — an append-only, hash-chained audit log per company for selected events (not every operation), incident tracking, activity feeds.
 - **PostgreSQL tenant isolation** — forced row-level security with separated database roles; a dedicated, process-isolated system runtime is the only holder of the privileged role.
-- **Durable tool-effect recovery** — tool calls inside employee chat turns are ledgered so an interrupted write is never silently repeated.
+- **Durable tool-effect recovery** — tool calls inside employee chat turns are ledgered so an interrupted non-idempotent write is not automatically rerun and waits for operator recovery.
 - **Dashboard and API** — a React operations dashboard over a documented REST/SSE API, with accessibility and form-reliability improvements in the login, setup, and invite flows.
 - **CLI and provider integrations** — employee CLIs (including Claude Code) as execution backends, plus model adapters for major providers (see [Interfaces and providers](#interfaces-and-providers)).
 - **Verification tooling** — a deterministic sequential pytest runner for memory-bounded local runs, and a read-only project-facts auditor that measures repository facts and flags stale documentation claims.
@@ -97,30 +97,36 @@ Startup is fail-closed: the API refuses to start on a disallowed `AUTH_ENABLED=f
 - **Authorization** — RBAC roles and per-route permission requirements; the Work API accepts only human principals or service keys, while agents act exclusively through governed tools.
 - **Tool policy** — tool access control with binding enforcement on by default; MCP and declared tool schemas are validated before dispatch, and undeclared external tools default to the most conservative effect class.
 - **Network and secrets** — SSRF guards on outbound URLs with an operator allowlist for internal hosts; a secret backend (encrypted at rest by default) for credentials; governed Azure providers read keys only through the secret backend and authenticate with Entra by default.
-- **Idempotency** — mutating requests are guarded by an idempotency middleware, and the work lifecycle accepts an `Idempotency-Key` header so a retried request does not create a duplicate order.
-- **Audit** — state-changing calls are recorded in their company's hash-chained audit log; audit writes without a tenant are refused rather than written unchained.
+- **Idempotency** — mutating requests are guarded by an idempotency middleware, and work-order creation requires an `Idempotency-Key` header (`400 IDEMPOTENCY_KEY_REQUIRED` when absent) so a retried request does not create a duplicate order.
+- **Audit** — four separate records exist, and only the second is the hash-chained audit table:
+  - *Request logs* — the governance middleware emits a structured `audit:` log line (method, path, company, status, duration) for mutating HTTP requests it serves. It is a log line, not a stored audit row.
+  - *Persistent audit events* — selected governance, work-lifecycle, task-attempt, chat-turn, tool-effect and security-sensitive operations call the audit recorder explicitly (for example `work.created`, `work.delegated`, `work.assigned`, `work.cancelled`, `task.attempt_queued` and `tool_effect.*` recovery decisions). Each row joins its company's hash-chained, append-only log, and a row whose chain link cannot be allocated is not written unchained. Persistence is best-effort by default: a failed write is logged and the operation continues, unless the caller requires it. Work-order creation, delegation, assignment and cancellation, and the manual-recovery, resolution and retake decisions of the tool-effect ledger, do require it and fail closed; attempt, deliverable, review and chat-turn events do not. Not every operation or state change writes an audit row.
+  - *Work and task-attempt state* — orders, attempts, verification results and deliverables are durable database rows of their own, whether or not an audit event was written.
+  - *Tool-effect ledger* — ledgered tool calls keep their own durable rows (see [Current limitations](#current-limitations)).
 
 ## Work execution lifecycle
 
 The text-first work loop, operated through the dashboard's Company Work surface or `POST /api/v1/work`:
 
 1. **Create** — an operator opens a work order with a title, description, optional goal link, and priority.
-2. **Delegate** — the order is assigned to a manager agent, which delegates an attempt to an employee agent through its governed `manager_assign_work` tool (idempotent by ledger key).
-3. **Execute** — the attempt runs as a durable chat turn: claimed and leased in the database, renewed while it works, and recovered by another worker if a process dies. Text attempts run tool-free; code attempts run an employee CLI inside a per-company isolated worktree. Verification output is stored as evidence under a per-company root.
-4. **Review** — the manager reviews the deliverable and verifies or rejects it with a reason; a rejected attempt can be retried as a new attempt.
-5. **Audit** — the order, attempts, decisions, and tool effects are all visible in the audit log and the work API.
+2. **Delegate** — the order is assigned to a manager agent, which delegates an attempt to an employee agent through its governed `manager_assign_work` tool (idempotent by ledger key). Only the manager that owns the order can act on its tasks; any other manager gets the same 404 as for a missing task, and the order itself is delegated, never executed.
+3. **Execute** — the work order's child tasks are created in text mode. Each attempt runs as a durable chat turn: claimed and leased in the database, renewed while it works, and recovered by another worker if a process dies. Text attempts run tool-free.
+4. **Review** — a human or service key reviews through the Work API (`verify` or `reject` with a reason). An agent manager reviews through its governed `manager_review_work` tool; it must be the executing employee's manager and can never review its own work. A rejected attempt can be retried as a new attempt. Review through the Work API covers text work only.
+5. **Record** — orders, attempts, verification results and deliverables are durable database rows exposed by the Work API. Selected lifecycle events also write persistent audit events (see **Audit** under [Security and tenant isolation](#security-and-tenant-isolation)); not every transition is an audit row.
 
-Tool effects inside those chat turns are covered by the recovery ledger described under [Current limitations](#current-limitations); legacy task, goal, and orchestration surfaces remain available and behave as before.
+The Work API does not start code attempts. Code attempts for generic tasks are a separate route, `POST /api/v1/tasks/{task_id}/attempts`, in `write` or `read_only` mode. Preparing one binds the attempt to an agent session and a Git worktree (the session's held worktree is reused, otherwise one is created), and the attempt's turn runs with that worktree as its working directory. A session whose worktree is unusable is refused rather than run somewhere else. This is a Git worktree and working-directory boundary, not an operating-system sandbox. Verification output for these attempts is stored as evidence under a per-company evidence root.
+
+Tool effects inside chat turns are covered by the recovery ledger described under [Current limitations](#current-limitations); legacy task, goal, and orchestration surfaces remain available and behave as before.
 
 The Work API itself (human principals and service keys only — an agent run token is refused with `403 AGENT_USES_TOOLS`, and a work order from another company is a plain 404):
 
 | Method | Endpoint | Purpose |
 | :--- | :--- | :--- |
-| `POST` | `/api/v1/work` | Create a work order (accepts `Idempotency-Key`) |
+| `POST` | `/api/v1/work` | Create a work order (requires an `Idempotency-Key` header; `400 IDEMPOTENCY_KEY_REQUIRED` without it) |
 | `GET` | `/api/v1/work` | List the company's work orders |
 | `GET` | `/api/v1/work/{work_id}` | Work-order detail with attempts |
 | `POST` | `/api/v1/work/{work_id}/delegate` | Hand the order to a manager agent |
-| `POST` | `/api/v1/work/attempts/{attempt_id}/review` | Manager review: `verify` or `reject`, optional retry |
+| `POST` | `/api/v1/work/attempts/{attempt_id}/review` | Human/service review endpoint: `verify` or `reject`, optional retry (agent managers use the `manager_review_work` tool) |
 | `POST` | `/api/v1/work/{work_id}/cancel` | Cancel an order |
 
 ## Interfaces and providers
@@ -217,8 +223,8 @@ It is a static scanner: it never imports the application or touches a network. D
 ## Current limitations
 
 - **Pre-release** — no tags, no releases, no release workflow, and no SBOM signal exist in the repository.
-- **Tool-effect recovery boundaries** — the ledger covers chat-turn paths only. REST node calls and background task attempts are outside that guarantee (task attempts carry their own idempotency keys). A client that retries with a new idempotency key creates a new logical write. A call whose lease lapses is treated as interrupted and follows recovery semantics: proven-idempotent calls retry automatically; non-idempotent ambiguity waits for an operator decision through admin-only routes.
-- **Notifications are at-most-once** — a crash between marking and sending loses the notification; nothing resends it. The ledger and audit log, not the notification channel, are the recovery record.
+- **Tool-effect recovery boundaries** — the ledger covers chat-turn paths only. REST node calls and background task attempts are outside that guarantee (task attempts carry their own idempotency keys). A client that retries with a new idempotency key creates a new logical write. A call whose lease lapses is treated as interrupted and follows recovery semantics: proven-idempotent calls may be retried automatically under the ledger and lease rules, while an ambiguous non-idempotent write is not rerun and waits for an operator decision through admin-only routes.
+- **Notifications are at-most-once** — a crash between marking and sending loses the notification; nothing resends it. The ledger rows, not the notification channel, are the recovery record.
 - **Voice is not a product** — browser voice and channel gateways are not implemented; the Azure Speech transport has no consumer. Azure experiments and acceptance probes do not constitute an available feature.
 - **Memory lifecycle is phased** — evidence and governed trust promotion are implemented; later phases of the memory lifecycle are not yet on main.
 - **Providers default to off** — Azure OpenAI and Azure Speech are disabled by default, and their production enablement (managed identity, service principals) is unvalidated.
