@@ -84,7 +84,7 @@ flowchart TB
 
 Three database roles keep the isolation structural rather than conventional:
 
-- **Application role (`nexus_app`)** — the runtime identity of the API and workers. It owns no schema objects and is bound by forced row-level security; every tenant-scoped query runs in a tenant session that sets the company context per transaction. While authentication is enabled, the caller's tenant comes from the authenticated credential rather than a request header.
+- **Application role (`nexus_app`)** — the runtime identity of the API and workers. It owns no schema objects and is bound by forced row-level security; tenant-scoped database access uses tenant sessions that set the PostgreSQL company context before queries. While authentication is enabled, the caller's tenant comes from the authenticated credential rather than a request header.
 - **Migrator role (`nexus_migrator`)** — owns the schema and runs Alembic in a one-shot migration job. A runtime process handed the migration credential refuses to start.
 - **System role (`nexus_system`)** — the only identity with `BYPASSRLS`, held exclusively by the system-runtime process, which publishes no ports. It discovers which tenants need maintenance and publishes work hints; company data is only ever touched through tenant sessions.
 
@@ -94,7 +94,7 @@ Startup is fail-closed: the API refuses to start on a disallowed `AUTH_ENABLED=f
 
 - **Authentication** — httpOnly session cookie with CSRF protection on mutating requests, or tenant-scoped API keys. Disabling authentication is refused outside test environments, and in development only with an explicit acknowledgement.
 - **Tenant binding** — the tenant context is derived exclusively from the authenticated principal; explicit tenant-override headers are ignored while authentication is enabled. Authenticated API requests bind a company context, and tenant-scoped PostgreSQL sessions use forced row-level security to restrict tenant-table rows to that company; SQLite, used for the backend test suite, does not enforce it. HTTP concealment and error semantics are route-specific.
-- **Authorization** — RBAC roles and per-route permission requirements; the Work API accepts only human principals or service keys, while agents act exclusively through governed tools.
+- **Authorization** — RBAC roles and per-route permission requirements. The Work API's mutating routes (create, delegate, review and cancel) refuse run-token principals with `AGENT_USES_TOOLS`; manager-agent actions use governed work tools, while employee execution proceeds through the task-attempt runtime.
 - **Tool policy** — tool access control with binding enforcement on by default; MCP and declared tool schemas are validated before dispatch, and undeclared external tools default to the most conservative effect class.
 - **Network and secrets** — SSRF guards on outbound URLs with an operator allowlist for internal hosts; a secret backend (encrypted at rest by default) for credentials; governed Azure providers read keys only through the secret backend and authenticate with Entra by default.
 - **Idempotency** — mutating requests are guarded by an idempotency middleware, and work-order creation requires an `Idempotency-Key` header (`400 IDEMPOTENCY_KEY_REQUIRED` when absent) so a retried request does not create a duplicate order.
