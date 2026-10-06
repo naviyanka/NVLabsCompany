@@ -109,7 +109,7 @@ Startup is fail-closed: the API refuses to start on a disallowed `AUTH_ENABLED=f
 The text-first work loop, operated through the dashboard's Company Work surface or `POST /api/v1/work`:
 
 1. **Create** — an operator opens a work order with a title, description, optional goal link, and priority.
-2. **Delegate** — the order is assigned to a manager agent, which delegates an attempt to an employee agent through its governed `manager_assign_work` tool (idempotent by ledger key). Only the manager that owns the order can act on its tasks; any other manager gets the same 404 as for a missing task, and the order itself is delegated, never executed.
+2. **Delegate** — the order is assigned to a manager agent, which delegates an attempt to an employee agent through its governed `manager_assign_work` tool (idempotent by ledger key).
 3. **Execute** — the work order's child tasks are created in text mode. Each attempt runs as a durable chat turn: claimed and leased in the database, renewed while it works, and recovered by another worker if a process dies. Text attempts run tool-free.
 4. **Review** — a human or service key reviews through the Work API (`verify` or `reject` with a reason). An agent manager reviews through its governed `manager_review_work` tool; it must be the executing employee's manager and can never review its own work. A rejected attempt can be retried as a new attempt. Review through the Work API covers text work only.
 5. **Record** — orders, attempts, verification results and deliverables are durable database rows exposed by the Work API. Selected lifecycle events also write persistent audit events (see **Audit** under [Security and tenant isolation](#security-and-tenant-isolation)); not every transition is an audit row.
