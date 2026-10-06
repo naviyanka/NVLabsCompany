@@ -5,8 +5,10 @@ repository facts and reports stale or contradictory documentation claims. It per
 static repository inspection only: it never imports the NEXUS application, reads settings,
 connects to a database, starts containers, calls Azure or GitHub, or makes any network
 request. It shells out only to local read-only git plumbing (`rev-parse`, `status`,
-`ls-files`, `tag`) and reads tracked files from the checkout it is pointed at, with
-`--repo PATH` (default: the current directory).
+`ls-files`, `tag`) — every invocation runs as `git --no-optional-locks …`, so a read-only
+audit can never trigger an index refresh or take an optional lock, and no environment is
+constructed, passed or logged — and reads tracked files from the checkout it is pointed
+at, with `--repo PATH` (default: the current directory).
 
 ## Claim status model
 
@@ -25,7 +27,12 @@ Five statuses with non-overlapping meanings:
   visibility but never objectively matched.
 
 Where several patterns can fire on one line, the explicit unit-matched wording wins and
-the generic wording is suppressed, so a line produces at most one claim per span.
+the generic wording is suppressed, so a line produces at most one claim per span. Rule
+statuses are also authoritative over metrics: a rule explicitly marked incomparable never
+compares, even when it carries a metric that could be resolved. Concretely for the API
+surface, "N router modules" and "N route functions" compare with their corresponding
+metrics, while generic "N routes" / "N endpoints" wording does not (its unit is not the
+route-function count) and is always `not_statically_comparable`.
 
 ## What is measured
 
@@ -141,6 +148,15 @@ Inputs, secrets, environment values and surrounding workflow content are never p
 ## Output modes
 
 - Default: human-readable text on stdout.
+- Console safety: stdout and stderr are written through the stream's own encoding. On a
+  console whose codec cannot represent a character (for example a cp1252 Windows console
+  meeting an emoji in a claim excerpt), the character is emitted as a deterministic
+  backslash escape instead of crashing with a traceback; nothing is dropped and UTF-8
+  consoles receive the full text. JSON and Markdown files are always written as UTF-8 and
+  keep full Unicode regardless of the console.
+- Exit codes: `0` clean run, `1` only when `--check-docs` found objectively stale claims,
+  `2` for refusals and operational failures (unsafe output paths, unwritable targets,
+  missing repository) — an operational failure never masquerades as a stale finding.
 - `--json PATH`: full report as JSON with an explicit `schema_version` (currently 2).
   This is the canonical, machine-readable form; all paths are repository-relative and all
   lists are sorted, so identical repository states produce byte-identical output.
