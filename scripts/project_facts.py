@@ -71,9 +71,12 @@ class AuditError(Exception):
 
 
 def _git(repo, *args):
+    # --no-optional-locks keeps every read-only invocation from refreshing/locking the
+    # index; no environment is constructed, passed or logged, and execution stays an
+    # argument array with the existing timeout.
     try:
-        proc = subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True,
-                              timeout=60, check=True)
+        proc = subprocess.run(["git", "--no-optional-locks", "-C", str(repo), *args],
+                              capture_output=True, text=True, timeout=60, check=True)
     except (OSError, subprocess.SubprocessError):
         return None
     return proc.stdout
@@ -655,24 +658,30 @@ _NUM = r"(?:\d{1,3}(?:,\d{3})+|\d+)"
 # an explicit match subsumes their span. `(?!=)` keeps "table=True classes" out of the generic
 # tables pattern.
 _CLAIM_TABLE = (
+    # override=None rules compare against their metric; a non-None override is the
+    # authoritative status and wins even when the metric resolves (see _claim_status).
     ("sqlmodel_table_classes", r"\b(N)\s+(?:sqlmodel\s+)?table=true\s+classes?\b",
-     "sqlmodel_table_classes", "not_statically_comparable"),
+     "sqlmodel_table_classes", None),
     ("static_test_functions", r"\b(N)\s+static\s+test\s+functions?\b",
-     "static_test_functions", "not_statically_verifiable"),
+     "static_test_functions", None),
     ("page_component_files", r"\b(N)\s+page\s+component\s+files?\b",
-     "page_component_files", "not_statically_comparable"),
+     "page_component_files", None),
     ("mounted_page_components", r"\b(N)\s+mounted\s+page\s+components?\b",
-     "unique_mounted_page_components", "not_statically_verifiable"),
+     "unique_mounted_page_components", None),
     ("mounted_routes", r"\b(N)\s+mounted\s+routes?\b",
-     "mounted_route_count", "not_statically_verifiable"),
+     "mounted_route_count", None),
     ("mounted_pages", r"\b(N)\s+mounted\s+pages?\b",
-     "unique_mounted_page_components", "not_statically_verifiable"),
+     "unique_mounted_page_components", None),
     ("api_routers", r"\b(N)\s+(?:router\s+modules?|routers?)\b",
-     "api_router_modules", "not_statically_comparable"),
+     "api_router_modules", None),
+    ("route_functions", r"\b(N)\s+route\s+functions?\b",
+     "route_functions", None),
+    # Generic "N routes"/"N endpoints" wording carries a resolvable metric on purpose, to
+    # prove that the explicit incomparable status wins over it (see _claim_status).
     ("api_endpoints", r"\b(N)\s+(?:routes?|endpoints?)\b",
      "route_functions", "not_statically_comparable"),
     ("migrations", r"\b(N)\s+(?:alembic\s+)?migrations?\b",
-     "alembic_migration_files", "not_statically_comparable"),
+     "alembic_migration_files", None),
     ("database_tables", r"\b(N)\s+(?:database\s+|sqlmodel\s+|physical\s+)?tables?\b(?!=)",
      None, "not_statically_comparable"),
     ("sqlmodel_schemas", r"\b(N)\s+sqlmodel\s+schemas?\b",
@@ -691,7 +700,9 @@ READINESS_PATTERNS = (
 
 
 def _claim_status(claimed, metric, measured, incomparable_status):
-    if metric is None:
+    # An explicit rule status is authoritative: a rule marked incomparable never compares,
+    # even when it also carries (or could resolve) a metric.
+    if incomparable_status is not None:
         return incomparable_status, None
     value = measured.get(metric)
     if value is None:
@@ -830,6 +841,26 @@ def _write_output(raw, content, overwrite) -> None:
         handle.write(content)
 
 
+def _console_print(text, stream=None) -> None:
+    """Print without crashing on consoles whose codec cannot represent the text.
+
+    Unencodable characters become deterministic backslash escapes (still identifying the
+    claim), so restricted Windows consoles never see a traceback. Streams without a usable
+    encoding attribute (StringIO capture) and UTF-8 consoles receive the text unchanged.
+    """
+    stream = stream if stream is not None else sys.stdout
+    encoding = getattr(stream, "encoding", None)
+    if encoding:
+        try:
+            text.encode(encoding)
+        except UnicodeEncodeError:
+            text = text.encode(encoding, errors="backslashreplace").decode(
+                encoding, errors="replace")
+        except LookupError:
+            pass  # unknown codec: leave the text intact for text-capable streams
+    print(text, file=stream)
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(
         description="Read-only project-facts and documentation-drift auditor.")
@@ -842,15 +873,21 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
     repo = Path(args.repo).resolve()
     if not repo.is_dir():
-        print(f"error: repository directory not found: {args.repo}", file=sys.stderr)
+        _console_print(f"error: repository directory not found: {args.repo}", sys.stderr)
         return 2
-    report = collect(repo)
-    if args.json:
-        _write_output(args.json, json.dumps(report, indent=2, sort_keys=True) + "\n",
-                      args.overwrite)
-    if args.markdown:
-        _write_output(args.markdown, render(report, md=True), args.overwrite)
-    print(render(report))
+    try:
+        report = collect(repo)
+        if args.json:
+            _write_output(args.json, json.dumps(report, indent=2, sort_keys=True) + "\n",
+                          args.overwrite)
+        if args.markdown:
+            _write_output(args.markdown, render(report, md=True), args.overwrite)
+    except AuditError:
+        raise
+    except OSError as error:
+        _console_print(f"error: {type(error).__name__}: {error}", sys.stderr)
+        return 2
+    _console_print(render(report))
     if args.check_docs:
         return 1 if report["docs_claims"]["stale_count"] else 0
     return 0
@@ -860,5 +897,5 @@ if __name__ == "__main__":
     try:
         sys.exit(main())
     except AuditError as error:
-        print(f"error: {error}", file=sys.stderr)
+        _console_print(f"error: {error}", sys.stderr)
         sys.exit(2)

@@ -923,3 +923,167 @@ def test_all_five_statuses_present_and_exit(tmp_path, monkeypatch):
     assert docs["stale_count"] == 1
     monkeypatch.chdir(tmp_path)
     assert pf.main(["--repo", str(root), "--check-docs"]) == 1
+
+
+# ---- Corrective follow-up A: restricted-console output safety -------------------------------
+
+class _FakeConsole:
+    """A stream behaving like a Windows console with a restricted text codec."""
+
+    def __init__(self, encoding):
+        self.encoding = encoding
+        self.value = ""
+
+    def write(self, text):
+        text.encode(self.encoding)  # strict, exactly like a real console
+        self.value += text
+        return len(text)
+
+    def flush(self):
+        pass
+
+
+_EMOJI_README = "There are 9 static test functions \U0001f3af in the suite.\n"
+
+
+def _emoji_repo(tmp_path: Path) -> Path:
+    # 9 claimed vs 0 measured static test functions: an objective stale claim.
+    return make_repo(tmp_path, {"README.md": _EMOJI_README})
+
+
+def test_console_emoji_under_cp1252_no_crash(tmp_path, monkeypatch):
+    fake = _FakeConsole("cp1252")
+    monkeypatch.setattr(sys, "stdout", fake)
+    rc = pf.main(["--repo", str(_emoji_repo(tmp_path)), "--check-docs"])
+    assert rc == 1  # stale finding still reported, no exception escapes
+    assert "static test functions" in fake.value  # the claim is identified, not dropped
+
+
+def test_console_restricted_no_traceback(tmp_path, monkeypatch):
+    fake = _FakeConsole("cp1252")
+    monkeypatch.setattr(sys, "stdout", fake)
+    pf.main(["--repo", str(_emoji_repo(tmp_path)), "--check-docs"])
+    assert "Traceback" not in fake.value
+
+
+def test_console_restricted_stale_exit_is_1(tmp_path, monkeypatch):
+    fake = _FakeConsole("cp1252")
+    monkeypatch.setattr(sys, "stdout", fake)
+    assert pf.main(["--repo", str(_emoji_repo(tmp_path)), "--check-docs"]) == 1
+
+
+def test_console_utf8_preserves_emoji(tmp_path, monkeypatch):
+    fake = _FakeConsole("utf-8")
+    monkeypatch.setattr(sys, "stdout", fake)
+    pf.main(["--repo", str(_emoji_repo(tmp_path)), "--check-docs"])
+    assert "\U0001f3af" in fake.value  # full Unicode preserved on UTF-8 output
+
+
+def test_console_restricted_output_deterministic(tmp_path, monkeypatch):
+    root = _emoji_repo(tmp_path)
+    first, second = _FakeConsole("cp1252"), _FakeConsole("cp1252")
+    monkeypatch.setattr(sys, "stdout", first)
+    pf.main(["--repo", str(root), "--check-docs"])
+    monkeypatch.setattr(sys, "stdout", second)
+    pf.main(["--repo", str(root), "--check-docs"])
+    assert first.value == second.value
+    assert "\\U0001f3af" in first.value  # deterministic escaped form identifies the claim
+
+
+def test_json_markdown_remain_utf8_with_emoji(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    rc = pf.main(["--repo", str(_emoji_repo(tmp_path)), "--check-docs",
+                  "--json", "out.json", "--markdown", "out.md"])
+    assert rc == 1
+    payload = json.loads((tmp_path / "out.json").read_text(encoding="utf-8"))
+    assert payload["docs_claims"]["stale_count"] == 1
+    markdown = (tmp_path / "out.md").read_text(encoding="utf-8")
+    assert "\U0001f3af" in markdown  # files keep full Unicode regardless of the console
+
+
+def test_operational_failure_exit_is_2_not_stale(tmp_path, monkeypatch):
+    def broken_write(raw, content, overwrite):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(pf, "_write_output", broken_write)
+    monkeypatch.chdir(tmp_path)
+    rc = pf.main(["--repo", str(_emoji_repo(tmp_path)),
+                  "--check-docs", "--json", "out.json"])
+    assert rc == 2  # operational failure is distinguishable from the stale exit
+
+
+# ---- Corrective follow-up B: explicit incomparable status wins over metrics ------------------
+
+def _api_repo(tmp_path: Path, readme: str, modules: int = 1) -> Path:
+    files = {"README.md": readme}
+    for index in range(modules):
+        files[f"src/nexus/api/routes/m{index}.py"] = (
+            "from fastapi import APIRouter\nrouter = APIRouter()\n\n"
+            "@router.get('/a')\nasync def a():\n    return None\n")
+    return make_repo(tmp_path, files)
+
+
+def test_generic_routes_and_endpoints_incomparable(tmp_path):
+    root = _api_repo(tmp_path, "The API exposes 5 endpoints.\nIt serves 3 routes today.\n")
+    claims = [c for c in collect(root)["docs_claims"]["claims"]
+              if c["category"] == "api_endpoints"]
+    assert [c["status"] for c in claims] == ["not_statically_comparable"] * 2
+    assert all(c["measured"] is None for c in claims)
+
+
+def test_explicit_route_function_claim_match_and_stale(tmp_path):
+    root = _api_repo(tmp_path, "The API defines 1 route function.\n"
+                               "Docs once claimed 9 route functions.\n")
+    claims = [c for c in collect(root)["docs_claims"]["claims"]
+              if c["category"] == "route_functions"]
+    assert {c["claimed"]: c["status"] for c in claims} == {1: "matches", 9: "stale"}
+
+
+def test_router_module_claim_match_and_stale(tmp_path):
+    root = _api_repo(tmp_path, "The API has 2 router modules.\n"
+                               "Docs once claimed 9 router modules.\n", modules=2)
+    claims = [c for c in collect(root)["docs_claims"]["claims"]
+              if c["category"] == "api_routers"]
+    assert {c["claimed"]: c["status"] for c in claims} == {2: "matches", 9: "stale"}
+
+
+def test_incomparable_rule_with_metric_stays_incomparable(tmp_path):
+    root = _api_repo(tmp_path, "The API defines 1 route function.\n"
+                               "The API exposes 5 endpoints.\n")
+    claims = {c["category"]: c for c in collect(root)["docs_claims"]["claims"]
+              if c["category"] in ("route_functions", "api_endpoints")}
+    assert claims["route_functions"]["status"] == "matches"  # metric is available
+    assert claims["api_endpoints"]["status"] == "not_statically_comparable"  # override wins
+
+
+def test_real_repo_router_claims_stale_unchanged():
+    docs = collect(REPO_ROOT)["docs_claims"]
+    stale = [(c["category"], c["claimed"], c["measured"], c["file"], c["line"])
+             for c in docs["claims"] if c["status"] == "stale"]
+    assert stale == [
+        ("api_routers", 54, 69, "ARCHITECTURE.md", 36),
+        ("api_routers", 54, 69, "ARCHITECTURE.md", 79),
+        ("api_routers", 54, 69, "docs/FINAL-STATUS-SUMMARY.md", 17),
+    ]
+    assert docs["stale_count"] == 3
+
+
+# ---- Corrective follow-up C: git optional-lock suppression ------------------------------------
+
+def test_git_invocations_suppress_optional_locks(tmp_path, monkeypatch):
+    captured = {}
+    real_run = pf.subprocess.run
+
+    def spy(argv, **kwargs):
+        captured["argv"] = argv
+        captured["kwargs"] = kwargs
+        return real_run(argv, **kwargs)
+
+    monkeypatch.setattr(pf.subprocess, "run", spy)
+    root = make_repo(tmp_path, {"README.md": "# x\n"})
+    pf._git(root, "status", "--porcelain", "-uno")
+    assert captured["argv"][:3] == ["git", "--no-optional-locks", "-C"]
+    assert captured["argv"][3] == str(root)
+    assert captured["kwargs"].get("timeout") == 60
+    assert not captured["kwargs"].get("shell")
+    assert "env" not in captured["kwargs"]  # no environment is constructed, passed or logged
