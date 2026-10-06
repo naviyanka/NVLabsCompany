@@ -228,7 +228,7 @@ jobs:
           "
 
       - name: Trivy Vulnerability Scan (Backend)
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: 'nexus-api-scan:latest'
           format: 'table'
@@ -258,7 +258,7 @@ jobs:
           tags: nexus-frontend-scan:latest
 
       - name: Trivy Vulnerability Scan (Frontend)
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: 'nexus-frontend-scan:latest'
           format: 'table'

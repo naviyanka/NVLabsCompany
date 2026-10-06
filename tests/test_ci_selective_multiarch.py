@@ -3,11 +3,15 @@
 A documentation-only PR may skip the image build, but only on positive evidence, and the
 required check "Multi-Arch Build & Vulnerability Scan" must exist on every run. See
 docs/CI_SELECTIVE_BUILDS.md.
+
+It also pins both Trivy scan steps to one reviewed action release and freezes their inputs.
 """
 
 import importlib.util
 import re
 import subprocess
+import sys
+from collections import Counter
 from pathlib import Path
 
 import pytest
@@ -21,6 +25,14 @@ SHA_B = "b" * 40
 _spec = importlib.util.spec_from_file_location("ci_changes", ROOT / "scripts" / "ci_changes.py")
 ci = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(ci)
+
+# project_facts carries the action-reference classifier: the pin guard must agree with the same
+# definition of "branch" and "sha_pinned" the auditor reports, not a second, drifting one.
+PF_SCRIPT = ROOT / "scripts" / "project_facts.py"
+_spec = importlib.util.spec_from_file_location("project_facts", PF_SCRIPT)
+pf = importlib.util.module_from_spec(_spec)
+sys.modules["project_facts"] = pf
+_spec.loader.exec_module(pf)
 
 
 def _classify(paths, event="pull_request", base=SHA_A, head=SHA_B, force=""):
@@ -306,6 +318,104 @@ def test_trivy_scans_still_cover_critical_and_high(pipeline):
     assert len(scans) == 2
     for scan in scans:
         assert scan["with"]["severity"] == "CRITICAL,HIGH"
+
+
+# --- Trivy action pinning -----------------------------------------------------------------
+#
+# Both Trivy scan steps used to run aquasecurity/trivy-action@master, a mutable branch. They now
+# run one reviewed stable release, pinned to the full commit its annotated tag points at, and
+# the reference carries the reviewed tag so a reader can see what was reviewed. See the pinning
+# PR for the tag -> commit verification.
+
+TRIVY_ACTION = "aquasecurity/trivy-action"
+TRIVY_RELEASE = "v0.36.0"
+TRIVY_COMMIT = "ed142fd0673e97e23eac54620cfb913e5ce36c25"
+TRIVY_REF = f"{TRIVY_ACTION}@{TRIVY_COMMIT}"
+# Every other action reference in deploy-pipeline.yml, frozen in file order: this change may not
+# touch an unrelated reference, and neither may anything that rides along with it.
+UNRELATED_REFS = (
+    "actions/checkout@v4",
+    "actions/setup-python@v5",
+    "hadolint/hadolint-action@v3.1.0",
+    "hadolint/hadolint-action@v3.1.0",
+    "actions/checkout@v4",
+    "azure/setup-helm@v4.2.0",
+    "actions/checkout@v4",
+    "actions/checkout@v4",
+    "docker/setup-qemu-action@v3",
+    "docker/setup-buildx-action@v3",
+    "docker/login-action@v3",
+    "docker/metadata-action@v5",
+    "docker/metadata-action@v5",
+    "docker/build-push-action@v5",
+    "docker/build-push-action@v5",
+    "docker/build-push-action@v5",
+    "docker/build-push-action@v5",
+    "actions/checkout@v4",
+)
+
+
+def _workflow_uses(pipeline):
+    return [step["uses"] for job in pipeline["jobs"].values()
+            for step in job.get("steps", []) if "uses" in step]
+
+
+def _trivy_uses(pipeline):
+    return [u for u in _workflow_uses(pipeline) if u.startswith(f"{TRIVY_ACTION}@")]
+
+
+def test_no_trivy_reference_uses_a_mutable_ref_and_both_share_one_full_sha(pipeline):
+    refs = _trivy_uses(pipeline)
+    assert len(refs) == 2
+    assert set(refs) == {TRIVY_REF}  # one SHA for both: no branch, tag, or shortened ref
+    assert re.fullmatch(r"[0-9a-f]{40}", TRIVY_COMMIT)  # a full lowercase commit, not a tag
+    for ref in refs:
+        kind = pf._classify_action(ref)  # the auditor's classifier, not a second opinion
+        assert kind != "branch", f"mutable reference: {ref}"
+        assert kind == "sha_pinned", f"not an immutable pin: {ref}"
+
+
+def test_each_pinned_trivy_reference_carries_its_reviewed_release_comment():
+    path = ROOT / ".github" / "workflows" / "deploy-pipeline.yml"
+    lines = [ln for ln in path.read_text(encoding="utf-8").splitlines()
+             if f"{TRIVY_ACTION}@" in ln]
+    assert len(lines) == 2  # no extra or duplicated Trivy reference hides in the file
+    for line in lines:
+        code, _, comment = line.partition("#")
+        assert code.strip() == f"uses: {TRIVY_REF}"
+        assert comment.strip() == TRIVY_RELEASE, f"missing reviewed release comment: {line!r}"
+
+
+def test_trivy_scan_steps_keep_their_security_inputs_and_permissions(pipeline):
+    steps = pipeline["jobs"]["image-build"]["steps"]
+    scans = [s for s in steps if s.get("uses", "").startswith(f"{TRIVY_ACTION}@")]
+    assert [s["name"] for s in scans] == [
+        "Trivy Vulnerability Scan (Backend)",
+        "Trivy Vulnerability Scan (Frontend)",
+    ]
+    # Exact maps: severity, format, and the report-only exit code stay as they were, and no scan
+    # gains ignore-unfixed, a token, or an artifact/debug input.
+    assert [s["with"] for s in scans] == [
+        {"image-ref": "nexus-api-scan:latest", "format": "table", "exit-code": "0",
+         "severity": "CRITICAL,HIGH"},
+        {"image-ref": "nexus-frontend-scan:latest", "format": "table", "exit-code": "0",
+         "severity": "CRITICAL,HIGH"},
+    ]
+    for scan in scans:
+        assert "continue-on-error" not in scan
+        assert "permissions" not in scan  # a scan step cannot widen the job token
+    assert pipeline["permissions"] == {"contents": "read", "packages": "write",
+                                       "security-events": "write"}
+    declared = {name: job["permissions"] for name, job in pipeline["jobs"].items()
+                if "permissions" in job}
+    assert declared == {"classify": {"contents": "read"}, "build-and-scan": {"contents": "read"}}
+
+
+def test_no_unrelated_action_reference_in_the_deploy_pipeline_changed(pipeline):
+    uses = _workflow_uses(pipeline)
+    assert len(uses) == len(UNRELATED_REFS) + 2  # only the two Trivy references changed
+    unrelated = [u for u in uses if not u.startswith(f"{TRIVY_ACTION}@")]
+    assert Counter(unrelated) == Counter(UNRELATED_REFS)
 
 
 def test_images_are_pushed_only_by_push_events(pipeline):

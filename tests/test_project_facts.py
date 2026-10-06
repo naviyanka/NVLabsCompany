@@ -895,11 +895,16 @@ def test_dynamic_expression_unknown(tmp_path):
 def test_real_repository_trivy_findings():
     files = pf._tracked_files(REPO_ROOT)
     refs = pf.action_refs_facts(files, REPO_ROOT, [])
-    trivy = [r for r in refs["references"] if r["uses"] == "aquasecurity/trivy-action@master"]
+    # The pinning PR replaced both branch references with the reviewed v0.36.0 commit, so no
+    # branch reference is left anywhere in the repository.
+    assert not [r for r in refs["references"] if r["kind"] == "branch"]
+    trivy = [r for r in refs["references"] if r["uses"].startswith("aquasecurity/trivy-action@")]
     assert [(r["file"], r["line"]) for r in trivy] == [
         (".github/workflows/deploy-pipeline.yml", 231),
         (".github/workflows/deploy-pipeline.yml", 261)]
-    assert all(r["kind"] == "branch" for r in trivy)
+    assert all(r["kind"] == "sha_pinned" for r in trivy)
+    assert len({r["uses"] for r in trivy}) == 1  # one reviewed commit for both steps
+    assert refs["by_kind"]["branch"] == 0 and refs["by_kind"]["sha_pinned"] == 2
     for value in ("actions/checkout@v4", "actions/setup-python@v5"):
         entries = [r for r in refs["references"] if r["uses"] == value]
         assert entries and all(r["kind"] == "major_tag" for r in entries)
