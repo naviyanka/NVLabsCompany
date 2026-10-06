@@ -14,13 +14,15 @@
 | Metric | Measured Value |
 | :--- | :--- |
 | **SQLModel Database Tables** | **69 tables** |
-| **FastAPI Router Modules** | **54 routers** |
+| **FastAPI Router Modules** | Modular router architecture (audited by [`scripts/project_facts.py`](../scripts/project_facts.py)) |
 | **React Dashboard Pages** | **25 pages** |
 | **Automated Pytest Suite** | **3,109 passed** (100% pass rate) |
 | **LLM / Runtime Adapters** | 12 (Anthropic, OpenAI, Gemini, Azure, Bedrock, Ollama, Claude Code CLI, MCP, etc.) |
 | **Governance Safety Controls** | Budget Enforcer, Kill Switches, Persistent Circuit Breakers, Rate Limiters, Immutable Audit Log |
 | **3D Virtual Office Engines** | Dual support: Three.js (Isometric) & Babylon.js (Birdseye) |
 | **Documentation Package** | `README.md`, `INSTALLATION.md`, `FEATURES.md`, `ARCHITECTURE.md`, `API_GUIDE.md`, `CONTRIBUTING.md` |
+
+> Note: Current static repository facts are measured dynamically by the project facts auditor (`python scripts/project_facts.py --repo .`; see [`docs/testing/PROJECT_FACTS_AUDITOR.md`](testing/PROJECT_FACTS_AUDITOR.md)). Static test function counts are not runtime test totals or executed test pass counts, and SQLModel table=True classes are not equated with physical database tables.
 
 ---
 
