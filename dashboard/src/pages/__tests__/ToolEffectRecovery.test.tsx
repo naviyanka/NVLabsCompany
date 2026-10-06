@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { http, HttpResponse } from 'msw';
 
 import { server } from '@/test/setup';
-import { ToolEffectRecovery } from '../ToolEffectRecovery';
+import { ToolEffectRecovery, validateDecision } from '../ToolEffectRecovery';
 
 const authState = vi.hoisted(() => ({ isAdmin: true }));
 
@@ -39,6 +39,7 @@ const REVIEW_A = `Review and resolve ${EFFECT_A.tool_name} effect ${EFFECT_A.id}
 let getUrls: string[];
 let postCount: number;
 let capturedResolveHeaders: Headers | null;
+let capturedResolveBody: unknown;
 
 function listPage(items: unknown[], nextCursor: string | null): Response {
   return HttpResponse.json({ items, next_cursor: nextCursor });
@@ -63,14 +64,19 @@ function stubConsole(): { calls: () => string; restore: () => void } {
   };
 }
 
-/** Render with data, open the resolve dialog for EFFECT_A and fill a valid decision. */
-async function openResolveDialog(): Promise<void> {
+/** Render with data and open the resolve dialog for EFFECT_A, filling only the reason. */
+async function openDialogWithReason(): Promise<void> {
   renderPage();
   fireEvent.click(await screen.findByRole('button', { name: REVIEW_A }));
   await screen.findByRole('dialog');
   fireEvent.change(screen.getByLabelText(/Reason \(required/), {
     target: { value: 'checked the provider; no message was sent' },
   });
+}
+
+/** Open the resolve dialog with a reason and the not_applied outcome selected. */
+async function openResolveDialog(): Promise<void> {
+  await openDialogWithReason();
   fireEvent.click(screen.getByRole('radio', { name: /Not applied/ }));
 }
 
@@ -80,6 +86,7 @@ describe('Tool Effect Recovery page', () => {
     getUrls = [];
     postCount = 0;
     capturedResolveHeaders = null;
+    capturedResolveBody = null;
     document.cookie = 'nv_csrf=test-csrf-token';
     server.use(
       http.get('*/api/v1/tool-effects/open', ({ request }) => {
@@ -88,11 +95,17 @@ describe('Tool Effect Recovery page', () => {
         if (cursor === 'cursor-page-2') return listPage([EFFECT_B], null);
         return listPage([EFFECT_A], 'cursor-page-2');
       }),
-      http.post('*/api/v1/tool-effects/:effectId/resolve', ({ request }) => {
+      http.post('*/api/v1/tool-effects/:effectId/resolve', async ({ request }) => {
         postCount++;
         capturedResolveHeaders = request.headers;
+        const body = (await request.json()) as { outcome?: string; reason?: string; note?: string | null };
+        capturedResolveBody = body;
         const effectId = new URL(request.url).pathname.split('/')[4] ?? EFFECT_A.id;
-        return HttpResponse.json({ id: effectId, status: 'failed', outcome: 'not_applied' });
+        return HttpResponse.json({
+          id: effectId,
+          status: body.outcome === 'applied' ? 'succeeded' : 'failed',
+          outcome: body.outcome,
+        });
       })
     );
   });
@@ -204,6 +217,111 @@ describe('Tool Effect Recovery page', () => {
     expect(await screen.findByText('send_slack_message')).toBeInTheDocument();
   });
 
+  it('selects no outcome when the dialog opens', async () => {
+    renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: REVIEW_A }));
+    await screen.findByRole('dialog');
+    expect(screen.getByRole('radio', { name: /Applied/ })).not.toBeChecked();
+    expect(screen.getByRole('radio', { name: /Not applied/ })).not.toBeChecked();
+    expect(screen.getByRole('button', { name: 'Record decision' })).toBeDisabled();
+  });
+
+  it('keeps confirmation disabled until an outcome is explicitly selected', async () => {
+    renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: REVIEW_A }));
+    await screen.findByRole('dialog');
+    const confirm = screen.getByRole('button', { name: 'Record decision' });
+    expect(confirm).toBeDisabled();
+    fireEvent.change(screen.getByLabelText(/Reason \(required/), {
+      target: { value: 'a reason alone is not enough' },
+    });
+    expect(confirm).toBeDisabled();
+    fireEvent.click(screen.getByRole('radio', { name: /Applied/ }));
+    expect(confirm).toBeEnabled();
+    expect(postCount).toBe(0);
+  });
+
+  it('rejects an incomplete decision at the shared guard, which the handler also uses', () => {
+    const missingOutcome = validateDecision(null, 'a reason is present');
+    expect(missingOutcome.ok).toBe(false);
+    if (!missingOutcome.ok) expect(missingOutcome.message).toMatch(/Select an outcome/);
+
+    const missingReason = validateDecision('applied', '   ');
+    expect(missingReason.ok).toBe(false);
+    if (!missingReason.ok) expect(missingReason.message).toMatch(/reason is required/);
+
+    expect(validateDecision('not_applied', 'verified nothing happened')).toEqual({
+      ok: true,
+      outcome: 'not_applied',
+    });
+  });
+
+  it('cannot be bypassed by DOM manipulation: nothing is sent without an explicit outcome', async () => {
+    await openDialogWithReason();
+    const confirm = screen.getByRole('button', {
+      name: 'Record decision',
+    }) as HTMLButtonElement;
+    // React dispatches events against the rendered props, so removing the
+    // disabled attribute in the DOM cannot reach the handler. Prove that no
+    // request is sent and no error path is entered.
+    confirm.disabled = false;
+    fireEvent.click(confirm);
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    expect(postCount).toBe(0);
+    expect(capturedResolveBody).toBeNull();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('sends exactly outcome "applied" when that is what the administrator selects', async () => {
+    renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: REVIEW_A }));
+    await screen.findByRole('dialog');
+    fireEvent.click(screen.getByRole('radio', { name: /Applied/ }));
+    fireEvent.change(screen.getByLabelText(/Reason \(required/), {
+      target: { value: 'confirmed delivered in the provider console' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Record decision' }));
+    expect(await screen.findByRole('status')).toHaveTextContent(/the effect was applied/);
+    expect(capturedResolveBody).toEqual({
+      outcome: 'applied',
+      reason: 'confirmed delivered in the provider console',
+      note: null,
+    });
+    expect(postCount).toBe(1);
+  });
+
+  it('sends exactly outcome "not_applied" when that is what the administrator selects', async () => {
+    await openResolveDialog();
+    fireEvent.click(screen.getByRole('button', { name: 'Record decision' }));
+    expect(await screen.findByRole('status')).toHaveTextContent(/the effect was not applied/);
+    expect(capturedResolveBody).toEqual({
+      outcome: 'not_applied',
+      reason: 'checked the provider; no message was sent',
+      note: null,
+    });
+    expect(postCount).toBe(1);
+  });
+
+  it('resets the outcome and fields when the dialog is closed and reopened', async () => {
+    renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: REVIEW_A }));
+    await screen.findByRole('dialog');
+    fireEvent.click(screen.getByRole('radio', { name: /Not applied/ }));
+    fireEvent.change(screen.getByLabelText(/Reason \(required/), {
+      target: { value: 'a decision that must not leak into the next dialog' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: REVIEW_A }));
+    await screen.findByRole('dialog');
+    expect(screen.getByRole('radio', { name: /Applied/ })).not.toBeChecked();
+    expect(screen.getByRole('radio', { name: /Not applied/ })).not.toBeChecked();
+    expect(screen.getByLabelText(/Reason \(required/)).toHaveValue('');
+    expect(screen.getByRole('button', { name: 'Record decision' })).toBeDisabled();
+    expect(postCount).toBe(0);
+  });
+
   it('records a server-confirmed resolution and refreshes the row away', async () => {
     const resolved = { done: false };
     server.use(
@@ -261,7 +379,9 @@ describe('Tool Effect Recovery page', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Record decision' }));
     const alert = await screen.findByRole('alert');
     expect(alert).toHaveTextContent(/session has expired/i);
-    expect(document.activeElement).toHaveAttribute('role', 'alert');
+    // Focus moves to the alert once React's effects flush; poll for it rather
+    // than race the commit.
+    await waitFor(() => expect(document.activeElement).toHaveAttribute('role', 'alert'));
     expect(screen.getByRole('dialog')).toBeInTheDocument();
   });
 
@@ -292,6 +412,7 @@ describe('Tool Effect Recovery page', () => {
     fireEvent.click(screen.getByRole('button', { name: REVIEW_A }));
     await screen.findByRole('dialog');
     fireEvent.change(screen.getByLabelText(/Reason \(required/), { target: { value: 'r' } });
+    fireEvent.click(screen.getByRole('radio', { name: /Not applied/ }));
     fireEvent.click(screen.getByRole('button', { name: 'Record decision' }));
     const alert = await screen.findByRole('alert');
     expect(alert).toHaveTextContent(/no such effect awaiting a decision/);
@@ -317,6 +438,7 @@ describe('Tool Effect Recovery page', () => {
     fireEvent.click(screen.getByRole('button', { name: REVIEW_A }));
     await screen.findByRole('dialog');
     fireEvent.change(screen.getByLabelText(/Reason \(required/), { target: { value: 'r' } });
+    fireEvent.click(screen.getByRole('radio', { name: /Not applied/ }));
     fireEvent.click(screen.getByRole('button', { name: 'Record decision' }));
     const alert = await screen.findByRole('alert');
     expect(alert).toHaveTextContent(/Another decision was recorded first/);
@@ -324,7 +446,7 @@ describe('Tool Effect Recovery page', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     await waitFor(() => expect(getUrls).toHaveLength(2));
     expect(postCount).toBe(1);
-    expect(document.activeElement).toHaveAttribute('role', 'alert');
+    await waitFor(() => expect(document.activeElement).toHaveAttribute('role', 'alert'));
   });
 
   it('shows a generic sanitized failure and leaks nothing on an unexpected error', async () => {
@@ -355,18 +477,23 @@ describe('Tool Effect Recovery page', () => {
     const trigger = await screen.findByRole('button', { name: REVIEW_A });
     fireEvent.click(trigger);
     const dialog = await screen.findByRole('dialog');
-    expect(dialog.contains(document.activeElement)).toBe(true);
+    await waitFor(() => expect(dialog.contains(document.activeElement)).toBe(true));
     fireEvent.keyDown(dialog, { key: 'Escape' });
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-    expect(document.activeElement).toBe(trigger);
+    await waitFor(() => expect(document.activeElement).toBe(trigger));
   });
 
-  it('requires the reason before a decision can be sent', async () => {
+  it('keeps confirmation disabled until the required reason is provided', async () => {
     renderPage();
     fireEvent.click(await screen.findByRole('button', { name: REVIEW_A }));
     await screen.findByRole('dialog');
-    fireEvent.click(screen.getByRole('button', { name: 'Record decision' }));
-    expect(await screen.findByRole('alert')).toHaveTextContent(/A reason is required/);
+    fireEvent.click(screen.getByRole('radio', { name: /Applied/ }));
+    const confirm = screen.getByRole('button', { name: 'Record decision' });
+    expect(confirm).toBeDisabled();
+    fireEvent.change(screen.getByLabelText(/Reason \(required/), {
+      target: { value: 'provider shows no message' },
+    });
+    expect(confirm).toBeEnabled();
     expect(postCount).toBe(0);
   });
 

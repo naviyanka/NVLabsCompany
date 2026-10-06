@@ -105,6 +105,32 @@ function statusLabel(status: string): string {
   return status === 'manual_recovery_required' ? 'manual recovery required' : status;
 }
 
+/**
+ * The one decision guard, shared by the confirm button's disabled state and
+ * the submit handler, so they can never drift apart. An explicit outcome and
+ * a reason are both required; the handler refuses what the button would.
+ */
+export function validateDecision(
+  outcome: ResolutionOutcome | null,
+  reason: string
+): { ok: true; outcome: ResolutionOutcome } | { ok: false; message: string } {
+  if (!outcome) {
+    return {
+      ok: false,
+      message:
+        'Select an outcome: record what you verified in the external system before confirming.',
+    };
+  }
+  if (reason.trim().length === 0) {
+    return {
+      ok: false,
+      message:
+        'A reason is required: describe what you checked in the external system and what you found.',
+    };
+  }
+  return { ok: true, outcome };
+}
+
 export function ToolEffectRecovery() {
   const { isAdmin } = useAuth();
   const queryClient = useQueryClient();
@@ -116,7 +142,10 @@ export function ToolEffectRecovery() {
   const [pageHistory, setPageHistory] = useState<(string | null)[]>([]);
 
   const [selected, setSelected] = useState<ToolEffectItem | null>(null);
-  const [outcome, setOutcome] = useState<ResolutionOutcome>('applied');
+  // No default outcome: recording either consequence is the operator's explicit
+  // finding, so nothing is selected when the dialog opens and the confirm
+  // button stays disabled until they have chosen.
+  const [outcome, setOutcome] = useState<ResolutionOutcome | null>(null);
   const [reason, setReason] = useState('');
   const [note, setNote] = useState('');
   const [resolving, setResolving] = useState(false);
@@ -173,10 +202,7 @@ export function ToolEffectRecovery() {
   const openDialog = (item: ToolEffectItem, trigger: HTMLButtonElement) => {
     lastTriggerRef.current = trigger;
     setSelected(item);
-    // Default to "applied": for a non-idempotent effect, marking it applied
-    // (no rerun) is the fail-safe answer to a careless confirm — the ledger's
-    // own principle is that an unknown effect is never rerun.
-    setOutcome('applied');
+    setOutcome(null);
     setReason('');
     setNote('');
     setDialogError(null);
@@ -185,15 +211,20 @@ export function ToolEffectRecovery() {
 
   const closeDialog = () => {
     setSelected(null);
+    setOutcome(null);
+    setReason('');
+    setNote('');
     setDialogError(null);
   };
 
   const submitDecision = async () => {
     if (!selected || resolvingRef.current) return;
-    if (reason.trim().length === 0) {
-      setDialogError(
-        'A reason is required: describe what you checked in the external system and what you found.'
-      );
+    // Defense in depth: the confirm button is disabled until the decision is
+    // valid, and the handler re-checks through the same guard, so a
+    // manipulated DOM can never send an incomplete decision.
+    const decision = validateDecision(outcome, reason);
+    if (!decision.ok) {
+      setDialogError(decision.message);
       return;
     }
     resolvingRef.current = true;
@@ -202,7 +233,7 @@ export function ToolEffectRecovery() {
     try {
       const trimmedNote = note.trim();
       const result = await resolveEffect(selected.id, {
-        outcome,
+        outcome: decision.outcome,
         reason: reason.trim(),
         note: trimmedNote ? trimmedNote : null,
       });
@@ -454,7 +485,7 @@ export function ToolEffectRecovery() {
 
             <fieldset className="space-y-2" disabled={resolving}>
               <legend className="text-xs font-medium text-[#F2F1EE]">
-                What did you find in the external system?
+                What did you find in the external system? (required — neither choice is a default)
               </legend>
               <label className="flex items-start gap-2.5 p-2.5 bg-[#141416] border border-white/[0.08] rounded-[6px] cursor-pointer hover:border-white/[0.16] transition-colors">
                 <input
@@ -467,8 +498,9 @@ export function ToolEffectRecovery() {
                   className="mt-0.5 accent-[#FFB020]"
                 />
                 <span className="text-xs text-[#F2F1EE] leading-relaxed">
-                  <span className="font-medium">Applied</span> — the effect happened. The call
-                  settles as succeeded; a replay returns this recorded outcome.
+                  <span className="font-medium">Applied</span> — the effect happened. The ledger
+                  records it as succeeded and the platform will not rerun it; a replay returns
+                  this recorded outcome.
                 </span>
               </label>
               <label className="flex items-start gap-2.5 p-2.5 bg-[#141416] border border-white/[0.08] rounded-[6px] cursor-pointer hover:border-white/[0.16] transition-colors">
@@ -482,8 +514,8 @@ export function ToolEffectRecovery() {
                   className="mt-0.5 accent-[#FFB020]"
                 />
                 <span className="text-xs text-[#F2F1EE] leading-relaxed">
-                  <span className="font-medium">Not applied</span> — verified that nothing
-                  happened. The call settles as failed and the platform may run it again.
+                  <span className="font-medium">Not applied</span> — the effect did not happen.
+                  The ledger records it as failed; the backend may then run the call again.
                 </span>
               </label>
             </fieldset>
@@ -534,7 +566,13 @@ export function ToolEffectRecovery() {
               <Button variant="secondary" size="sm" onClick={closeDialog} disabled={resolving}>
                 Cancel
               </Button>
-              <Button variant="primary" size="sm" loading={resolving} onClick={() => void submitDecision()}>
+              <Button
+                variant="primary"
+                size="sm"
+                loading={resolving}
+                disabled={!validateDecision(outcome, reason).ok || resolving}
+                onClick={() => void submitDecision()}
+              >
                 Record decision
               </Button>
             </div>
