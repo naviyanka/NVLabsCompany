@@ -84,7 +84,7 @@ flowchart TB
 
 Three database roles keep the isolation structural rather than conventional:
 
-- **Application role (`nexus_app`)** — the runtime identity of the API and workers. It owns no schema objects and is bound by forced row-level security; every tenant-scoped query runs in a tenant session that sets the company context per transaction. The caller's tenant always comes from the authenticated credential, never from a request header.
+- **Application role (`nexus_app`)** — the runtime identity of the API and workers. It owns no schema objects and is bound by forced row-level security; every tenant-scoped query runs in a tenant session that sets the company context per transaction. While authentication is enabled, the caller's tenant comes from the authenticated credential rather than a request header.
 - **Migrator role (`nexus_migrator`)** — owns the schema and runs Alembic in a one-shot migration job. A runtime process handed the migration credential refuses to start.
 - **System role (`nexus_system`)** — the only identity with `BYPASSRLS`, held exclusively by the system-runtime process, which publishes no ports. It discovers which tenants need maintenance and publishes work hints; company data is only ever touched through tenant sessions.
 
@@ -133,7 +133,7 @@ The Work API itself (human principals and service keys only — an agent run tok
 
 | Interface / provider | Status on `main` | Configuration | Notes |
 | :--- | :--- | :--- | :--- |
-| REST API + SSE | Available | Authenticated session or API key | OpenAPI docs at `/docs`; company always from the credential |
+| REST API + SSE | Available | Authenticated session or API key | OpenAPI docs at `/docs`; company from the authenticated credential while authentication is enabled |
 | React dashboard | Available | Local Compose port 3000; behind ingress in production | Company Work, agents, governance, budgets, memory, audit surfaces |
 | Anthropic | Available | API key / company connections | Streaming chat adapter on the API chat path |
 | OpenAI-compatible | Available | API key / company connections | Also the wire format for self-hosted gateways |
