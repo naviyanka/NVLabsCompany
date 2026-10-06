@@ -228,7 +228,7 @@ It is a static scanner: it never imports the application or touches a network. D
 - **Voice is not a product** — browser voice and channel gateways are not implemented; the Azure Speech transport has no consumer. Azure experiments and acceptance probes do not constitute an available feature.
 - **Memory lifecycle is phased** — evidence and governed trust promotion are implemented; later phases of the memory lifecycle are not yet on main.
 - **Providers default to off** — Azure OpenAI and Azure Speech are disabled by default, and their production enablement (managed identity, service principals) is unvalidated.
-- **Supply-chain hygiene is partial** — CI action references are mutable: two `trivy-action@master` branch references and 32 major-tag references remain, with no SHA-pinned actions.
+- **Supply-chain hygiene is partial** — the two Trivy Action references are pinned to one reviewed full commit SHA. Thirty-two major-tag and three semantic-tag action references remain movable, so repository-wide immutable action pinning is incomplete.
 - **Documentation drift exists outside this README** — some other documents still carry stale objective claims (counts, readiness language); the auditor's `--check-docs` reports them, and they are corrected outside this README.
 - **Evaluation artifacts** — startup seeds demo data, and some dashboard surfaces include demo or fallback content.
 - **No certification** — external production operation has not been certified, and no third-party security review is claimed.

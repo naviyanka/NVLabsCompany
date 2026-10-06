@@ -1,9 +1,10 @@
 # Selective multi-arch image builds
 
-The `Multi-Arch Build & Vulnerability Scan` check builds the backend and
-dashboard images for `linux/amd64` and `linux/arm64` and scans them with
-Trivy. It takes 12-14 minutes, so a pull request that cannot change an image
-skips that work. The check itself is never skipped.
+The workflow builds images for `linux/amd64` and `linux/arm64`. The loaded
+`linux/amd64` backend and frontend images are scanned with Trivy; the arm64
+images are built but are not currently loaded or scanned. It takes 12-14
+minutes, so a pull request that cannot change an image skips that work. The
+check itself is never skipped.
 
 ## How it works
 
@@ -135,5 +136,7 @@ until the allowlist is narrowed.
 
 Unchanged: Trivy scans the `linux/amd64` image of each service for `CRITICAL`
 and `HIGH` findings with `exit-code: '0'` (report only). A scan step that
-errors still fails the build job and therefore the gate. Tightening the exit
-code, pinning `trivy-action` and scanning arm64 are separate follow-ups.
+errors still fails the build job and therefore the gate. The Trivy Action is
+pinned to the reviewed v0.36.0 commit. Tightening the vulnerability exit code,
+completing repository-wide immutable action pinning, and scanning arm64 remain
+separate follow-ups.
