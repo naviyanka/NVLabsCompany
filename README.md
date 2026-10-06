@@ -10,7 +10,7 @@ NEXUS sits above model providers and agent runtimes — it is an application and
 
 ## Key capabilities
 
-Implemented and tested on current `main`:
+Present on current `main` (validation status and limits are noted per item):
 
 - **Tenants and organization** — companies as isolation boundaries, departments and squads, human invitations, agent hiring from templates, org snapshots.
 - **Durable text-first work execution** — a human operator creates work orders, delegates them through managers, and employees execute them as work attempts that survive process restarts; managers review deliverables and verify or reject them (see [Work execution lifecycle](#work-execution-lifecycle)).
@@ -26,7 +26,7 @@ Implemented and tested on current `main`:
 
 | State | Capabilities |
 | :--- | :--- |
-| Implemented and tested | Everything listed above, enforced by CI (backend, PostgreSQL/RLS, frontend, API parity, E2E, compose boot) |
+| Reflects current source | The items above reflect current source; validation status, live-provider coverage and operational limits are noted per item. CI is the validation reference |
 | Present but limited or opt-in | Azure OpenAI and Azure Speech providers (disabled by default, operator-configured), Obsidian vault integration, Temporal durability, optional self-hosted LLM gateway |
 | Planned or not shipped | Browser voice and channel gateways, further memory-lifecycle phases, releases and SBOMs — no voice product ships today |
 
@@ -93,7 +93,7 @@ Startup is fail-closed: the API refuses to start on a disallowed `AUTH_ENABLED=f
 ## Security and tenant isolation
 
 - **Authentication** — httpOnly session cookie with CSRF protection on mutating requests, or tenant-scoped API keys. Disabling authentication is refused outside test environments, and in development only with an explicit acknowledgement.
-- **Tenant binding** — the tenant context is derived exclusively from the authenticated principal; explicit tenant-override headers are ignored while authentication is enabled. A record from another company is indistinguishable from one that does not exist.
+- **Tenant binding** — the tenant context is derived exclusively from the authenticated principal; explicit tenant-override headers are ignored while authentication is enabled. Authenticated API requests bind a company context, and tenant-scoped PostgreSQL sessions use forced row-level security to restrict tenant-table rows to that company; SQLite, used for the backend test suite, does not enforce it. HTTP concealment and error semantics are route-specific: for example, a mismatched company in a `/companies/{id}/...` path is a 403, except on memory routes, which answer 404.
 - **Authorization** — RBAC roles and per-route permission requirements; the Work API accepts only human principals or service keys, while agents act exclusively through governed tools.
 - **Tool policy** — tool access control with binding enforcement on by default; MCP and declared tool schemas are validated before dispatch, and undeclared external tools default to the most conservative effect class.
 - **Network and secrets** — SSRF guards on outbound URLs with an operator allowlist for internal hosts; a secret backend (encrypted at rest by default) for credentials; governed Azure providers read keys only through the secret backend and authenticate with Entra by default.
