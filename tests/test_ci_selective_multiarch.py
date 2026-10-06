@@ -322,8 +322,8 @@ def test_trivy_scans_still_cover_critical_and_high(pipeline):
 
 # --- Trivy action pinning -----------------------------------------------------------------
 #
-# Both Trivy scan steps used to run aquasecurity/trivy-action@master, a mutable branch. They now
-# run one reviewed stable release, pinned to the full commit its annotated tag points at, and
+# Both Trivy scan steps used to run a mutable branch reference. They now run one reviewed stable
+# release of aquasecurity/trivy-action, pinned to the full commit its annotated tag points at, and
 # the reference carries the reviewed tag so a reader can see what was reviewed. See the pinning
 # PR for the tag -> commit verification.
 

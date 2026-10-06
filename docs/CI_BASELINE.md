@@ -195,8 +195,9 @@ giving the reason. None of them is suppressed by a global skip.
 
 - #44: migrate timestamps to timezone-aware UTC, then lift the SQLModel bound.
 - #45: pay down the ruff baseline and return CI to `ruff check .`.
-- `aquasecurity/trivy-action@master` is unpinned. v0.36.0 is commit
-  `ed142fd0673e97e23eac54620cfb913e5ce36c25`.
+- The two Trivy scan steps are pinned to the reviewed v0.36.0 commit
+  `ed142fd0673e97e23eac54620cfb913e5ce36c25`. Repository-wide immutable
+  action pinning remains incomplete.
 - Backend startup logs asyncpg "attached to a different loop" errors while the
   pool closes connections. Boot and health are unaffected.
 - On main, `IdempotencyMiddleware` opens plain sessions with no tenant set,
