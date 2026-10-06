@@ -10,6 +10,7 @@ import {
   DollarSign,
   GitBranch,
   GitPullRequest,
+  History,
   LayoutDashboard,
   PanelsTopLeft,
   Network,
@@ -30,6 +31,7 @@ import {
 import { useEffect, useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 
+import { useAuth } from '@/contexts/AuthContext';
 import type { LucideIcon } from 'lucide-react';
 
 export interface SidebarProps {
@@ -41,6 +43,8 @@ interface NavItem {
   name: string;
   to: string;
   icon: LucideIcon;
+  /** Shown only to administrators; hiding it is convenience, the API enforces the role. */
+  adminOnly?: boolean;
 }
 
 interface NavGroup {
@@ -79,6 +83,7 @@ const navGroups: NavGroup[] = [
     label: 'GOVERNANCE & DATA',
     items: [
       { name: 'Approval Gate', to: '/approvals', icon: ShieldAlert },
+      { name: 'Tool Effect Recovery', to: '/tool-effects', icon: History, adminOnly: true },
       { name: 'Access Governance', to: '/governance/access', icon: Shield },
       { name: 'Budgets & Limits', to: '/budgets', icon: DollarSign },
       { name: 'Evolution & Evals', to: '/evolution', icon: TrendingUp },
@@ -102,6 +107,7 @@ export function Sidebar({ isMobileOpen = false, onCloseMobile }: SidebarProps) {
   });
 
   const location = useLocation();
+  const { isAdmin } = useAuth();
 
   useEffect(() => {
     try {
@@ -168,6 +174,7 @@ export function Sidebar({ isMobileOpen = false, onCloseMobile }: SidebarProps) {
                 </div>
               )}
               {group.items.map((item) => {
+                if (item.adminOnly && !isAdmin) return null;
                 const Icon = item.icon;
                 const isActive =
                   item.to === '/'
