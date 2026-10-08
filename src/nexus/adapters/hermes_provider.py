@@ -165,7 +165,7 @@ class HermesProviderAdapter(BaseAdapter):
             async with asyncio.timeout(TOTAL_TIMEOUT_SECONDS):
                 output, artifacts, usage = await self._run(session, task_id, payload, key)
         except ProviderError as exc:
-            return self._fail(session, task_id, str(exc), key)
+            return self._fail(session, task_id, str(exc), key, exc.usage)
         except TimeoutError:
             return self._fail(session, task_id, "HERMES_NATIVE_TIMEOUT", key)
         except httpx.HTTPError as exc:
@@ -182,10 +182,21 @@ class HermesProviderAdapter(BaseAdapter):
         )
 
     @staticmethod
-    def _fail(session: AgentSession, task_id: uuid.UUID, error: str, key: str) -> TaskResult:
+    def _fail(
+        session: AgentSession, task_id: uuid.UUID, error: str, key: str,
+        usage: dict[str, int] | None = None,
+    ) -> TaskResult:
         if key:
             error = error.replace(key, REDACTED)
-        return TaskResult(task_id=task_id, agent_id=session.agent_id, success=False, error=error)
+        # Rounds finished before the failure were billed; report them so they are metered.
+        # ponytail: a timeout cancels the loop and its usage is lost; meter per round
+        # (as azure_openai_native does) if that becomes material.
+        usage = usage or {}
+        return TaskResult(
+            task_id=task_id, agent_id=session.agent_id, success=False, error=error,
+            input_tokens=int(usage.get("prompt_tokens") or 0),
+            output_tokens=int(usage.get("completion_tokens") or 0),
+        )
 
     async def _run(
         self, session: AgentSession, task_id: uuid.UUID, payload: dict[str, Any], key: str
