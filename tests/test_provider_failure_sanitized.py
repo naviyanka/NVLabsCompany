@@ -472,3 +472,17 @@ async def test_a_callback_failure_reaches_the_same_sanitized_boundary(monkeypatc
     assert stored["error_code"] == "EXECUTION_ERROR" and stored["error_message"] == MESSAGE
     _assert_clean(json.dumps(stored, default=str) + logs.text + ledger.blob())
     assert adapter.terminated == 1 and ledger.open_holds == []
+
+
+async def test_a_budget_refusal_is_not_reported_as_a_provider_outage(db, t, monkeypatch):  # noqa: F811
+    from nexus.models_router.preflight import BudgetExceededError
+
+    async def refused(*a, **kw):
+        raise BudgetExceededError("m", 0.01, 5.0, 5.0)
+
+    monkeypatch.setattr(chat, "_call_llm", refused)
+    with pytest.raises(HTTPException) as err:
+        await _send(db, t["acme"], t["acme_session"])
+    assert err.value.status_code == 429
+    assert err.value.detail["code"] == "BUDGET_EXCEEDED"
+    assert err.value.detail["message"] != MESSAGE
