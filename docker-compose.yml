@@ -63,6 +63,9 @@ services:
       - "3000:3000"
     environment:
       - NEXUS_API_URL=http://backend:8000
+      # Forward every /api call to the backend; without it the dev server answers
+      # from its built-in mock and the dashboard shows fake data.
+      - PROXY_API=true
     depends_on:
       - backend
 
