@@ -15,6 +15,7 @@ All configuration is done via environment variables. Copy `.env.example` → `.e
 | `ANTHROPIC_API_KEY` | No | — | Anthropic API key for Claude models |
 | `OPENAI_API_KEY` | No | — | OpenAI API key for GPT models |
 | `REDIS_URL` | No | — | Redis connection URL. Enables distributed rate limiting & leader election. |
+| `COMPANY_RATE_LIMIT_PER_MINUTE` | No | `100` | API requests per minute for one company, shared by all of its users and open tabs; beyond it requests get 429. One dashboard page load makes about 20 requests and an idle tab about 25 a minute, so size it for the number of concurrent operators. |
 | `EMBEDDING_PROVIDER` | No | `none` | Embedding provider: `openai`, `ollama`, or `none` |
 | `OPENAI_EMBED_MODEL` | No | `text-embedding-3-small` | Embedding model when using OpenAI |
 | `OLLAMA_EMBED_MODEL` | No | `nomic-embed-text` | Embedding model when using Ollama |

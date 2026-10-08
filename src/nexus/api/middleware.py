@@ -26,6 +26,7 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from nexus.api.readiness import GovernanceUnavailable, ensure_company_governance_ready
 from nexus.auth.middleware import get_principal_from_scope, is_public_path
+from nexus.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +34,7 @@ logger = logging.getLogger(__name__)
 MUTATING_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 
 # Default rate limit values
-DEFAULT_RATE_LIMIT = 100
+DEFAULT_RATE_LIMIT = settings.company_rate_limit_per_minute
 DEFAULT_RATE_WINDOW_SECONDS = 60
 
 

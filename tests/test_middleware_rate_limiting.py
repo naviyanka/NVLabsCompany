@@ -86,3 +86,13 @@ def test_lazy_init_handles_bad_config(monkeypatch):
 
     result = mw._get_redis_rate_limiter()
     assert result is None or isinstance(result, object)
+
+
+
+def test_the_company_limit_is_an_operator_setting(monkeypatch):
+    from nexus.config import Settings, settings
+
+    monkeypatch.setenv("COMPANY_RATE_LIMIT_PER_MINUTE", "600")
+    assert Settings().company_rate_limit_per_minute == 600
+    assert mw.DEFAULT_RATE_LIMIT == settings.company_rate_limit_per_minute
+    assert mw._rate_limiter.limit == mw.DEFAULT_RATE_LIMIT
