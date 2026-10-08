@@ -12,11 +12,10 @@ const PORT = Number(process.env.PORT) || 3000;
 
 // ──────────────── Real API Proxy ────────────────
 //
-// The mock API below answers most of `/api/v1/*` so the dashboard can run with
-// no backend. Auth is the exception: sessions, CSRF tokens, and password hashes
-// only exist in the real service, so `/api/v1/auth/*` is always forwarded there.
-// Set `PROXY_API=true` to forward every `/api/*` call instead and bypass the
-// mock entirely.
+// The mock API below answers `/api/v1/*` so the dashboard can run with no
+// backend (auth included: it is mocked too). Set `PROXY_API=true` to forward
+// every `/api/*` call to the real backend instead and bypass the mock entirely;
+// docker-compose.yml does.
 //
 // This must be registered before `express.json()` — that parser consumes the
 // request stream, and a proxied body has to reach the backend byte for byte.
