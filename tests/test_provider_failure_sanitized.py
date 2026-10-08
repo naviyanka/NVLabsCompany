@@ -198,6 +198,8 @@ class _Adapter:
         self.spy.outbound += 1
         if isinstance(self.outcome, BaseException):
             raise self.outcome
+        if isinstance(self.outcome, TaskResult):
+            return self.outcome
         if isinstance(self.outcome, str):
             return TaskResult(
                 task_id=task_id, agent_id=uuid.uuid4(), success=False, error=self.outcome
@@ -288,6 +290,21 @@ async def test_a_second_request_gets_its_own_reservation(monkeypatch, ledger):
     await _call(agent)
     assert len(ledger.reserved) == 2 and len(set(ledger.holds)) == 4
     assert sorted(h for h, _ in ledger.released) == sorted(ledger.holds)  # each exactly once
+    assert ledger.open_holds == []
+
+
+async def test_a_failure_after_billed_rounds_settles_their_cost(monkeypatch, ledger):
+    # A tool loop that hit its iteration cap: the provider billed every finished round.
+    failed = TaskResult(task_id=uuid.uuid4(), agent_id=uuid.uuid4(), success=False,
+                        error="HERMES_NATIVE_LIMIT: too many model iterations",
+                        input_tokens=40_000, output_tokens=800)
+    _wire(monkeypatch, run=failed)
+    text, _, tokens = await _call(_agent())
+    assert text == MESSAGE and tokens == 0  # the reply is still the stable fallback
+    ((rid, cents, kw),) = ledger.settle_calls
+    assert cents >= 1 and kw["input_tokens"] == 40_000 and kw["output_tokens"] == 800
+    assert kw["model"] == "gpt-4o"
+    assert ledger.committed == ledger.holds and ledger.released == []  # billed, not released
     assert ledger.open_holds == []
 
 
