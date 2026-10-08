@@ -22,6 +22,7 @@ import sys
 from pathlib import Path
 
 import pytest
+import yaml
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SCRIPT_PATH = REPO_ROOT / "scripts" / "project_facts.py"
@@ -1061,16 +1062,81 @@ def test_incomparable_rule_with_metric_stays_incomparable(tmp_path):
     assert claims["api_endpoints"]["status"] == "not_statically_comparable"  # override wins
 
 
-def test_real_repo_router_claims_stale_unchanged():
+def test_real_repo_documentation_drift_resolved():
+    """Verify that the three stale router-count claims are resolved and no stale claims remain."""
     docs = collect(REPO_ROOT)["docs_claims"]
     stale = [(c["category"], c["claimed"], c["measured"], c["file"], c["line"])
              for c in docs["claims"] if c["status"] == "stale"]
-    assert stale == [
-        ("api_routers", 54, 69, "ARCHITECTURE.md", 36),
-        ("api_routers", 54, 69, "ARCHITECTURE.md", 79),
-        ("api_routers", 54, 69, "docs/FINAL-STATUS-SUMMARY.md", 17),
-    ]
-    assert docs["stale_count"] == 3
+    # 4. the three stale claims are gone
+    assert stale == []
+    assert docs["stale_count"] == 0
+
+    # 5. README still contributes no stale claim
+    readme_claims = [c for c in docs["claims"] if c["file"] == "README.md"]
+    assert not any(c["status"] == "stale" for c in readme_claims)
+
+    # 6. runtime test totals remain unverifiable
+    test_claims = [c for c in docs["claims"] if c["category"] in ("tests", "test_scenarios")]
+    assert test_claims, "sanity: real repo contains test claims"
+    assert all(c["status"] == "not_statically_verifiable" for c in test_claims)
+
+    incomparable_cats = (
+        "database_tables", "sqlmodel_schemas", "dashboard_pages", "api_endpoints"
+    )
+    incomparable_claims = [c for c in docs["claims"] if c["category"] in incomparable_cats]
+    assert incomparable_claims, "sanity: real repo contains generic table/page claims"
+    assert all(c["status"] == "not_statically_comparable" for c in incomparable_claims)
+
+
+def test_ci_workflow_documentation_drift_gate():
+    """Verify the CI workflow invokes project_facts.py --check-docs safely."""
+    workflow_path = REPO_ROOT / ".github" / "workflows" / "test.yml"
+    assert workflow_path.is_file(), "test.yml must exist"
+    content = workflow_path.read_text(encoding="utf-8")
+    data = yaml.safe_load(content)
+
+    # 1. the CI workflow invokes project_facts.py --check-docs
+    jobs = data.get("jobs", {})
+    matching_steps = []
+    for job_name, job in jobs.items():
+        if not isinstance(job, dict):
+            continue
+        job_continue_on_error = job.get("continue-on-error", False)
+        steps = job.get("steps", [])
+        for step in steps:
+            if not isinstance(step, dict):
+                continue
+            run_cmd = step.get("run", "")
+            if "scripts/project_facts.py" in run_cmd and "--check-docs" in run_cmd:
+                matching_steps.append((job_name, job, step, run_cmd, job_continue_on_error))
+
+    assert len(matching_steps) == 1, (
+        f"Expected 1 project_facts.py --check-docs invocation, found {len(matching_steps)}"
+    )
+
+    job_name, job, step, run_cmd, job_coe = matching_steps[0]
+
+    # Verify command is python scripts/project_facts.py --repo . --check-docs
+    assert "python scripts/project_facts.py --repo . --check-docs" in run_cmd
+
+    # 2. it does not use continue-on-error
+    assert step.get("continue-on-error") is not True, "step must not set continue-on-error: true"
+    assert job_coe is not True, f"job {job_name} must not set continue-on-error: true"
+
+    # 3. the invocation is not hidden behind a permanently false condition
+    step_if = str(step.get("if", "")).strip().lower()
+    job_if = str(job.get("if", "")).strip().lower()
+    for cond in (step_if, job_if):
+        if cond:
+            assert cond not in ("false", "0", "${{ false }}", "always() && false")
+            assert not cond.startswith("false")
+
+    # In arch-guard Linux job, with pyyaml installed
+    assert job_name == "arch-guard"
+    step_runs = [s.get("run", "") for s in job.get("steps", []) if isinstance(s, dict)]
+    assert any("pip install pyyaml" in r.lower() for r in step_runs), (
+        "arch-guard job must install pyyaml"
+    )
 
 
 # ---- Corrective follow-up C: git optional-lock suppression ------------------------------------

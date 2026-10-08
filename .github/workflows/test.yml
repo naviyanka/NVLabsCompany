@@ -14,9 +14,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - run: pip install pyyaml
       - run: python scripts/arch_guard.py
       - run: python scripts/check_generated_artifacts.py
       - run: python scripts/check_test_invocations.py
+      - run: python scripts/project_facts.py --repo . --check-docs
 
   compose-boot:
     runs-on: ubuntu-latest

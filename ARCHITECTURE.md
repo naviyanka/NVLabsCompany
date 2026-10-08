@@ -33,9 +33,11 @@ The system is organized into four architectural bands:
 | **Database ORM** | SQLModel (SQLAlchemy 2.0 async) | 69 table definitions, Alembic migrations |
 | **Datastores** | PostgreSQL 16 & Redis 7 | PostgreSQL (primary), Redis (hot memory & rate limits) |
 | **Frontend Framework** | React 18 + TypeScript | Vite, TailwindCSS, Three.js, Babylon.js |
-| **API Endpoints** | 54 Router Modules | Full REST, SSE (`/events/stream`), WebSockets (`/ws/{id}`) |
+| **API Endpoints** | Modular FastAPI routers | Full REST, SSE (`/events/stream`), WebSockets (`/ws/{id}`); dynamically audited by [`scripts/project_facts.py`](scripts/project_facts.py) |
 | **Dashboard UI** | 25 Dedicated Pages | Complete org chart, 3D office, plaza, governance control |
 | **Test Baseline** | Pytest 9.x | 3,109 passed unit & integration tests |
+
+> Current static codebase metrics (route modules, static test functions, SQLModel table classes) are measured dynamically by the project facts auditor (`python scripts/project_facts.py --repo .`; see [auditor documentation](docs/testing/PROJECT_FACTS_AUDITOR.md)). Static test function counts are not runtime test pass counts, and SQLModel classes with `table=True` are distinct from physical database tables.
 
 ---
 
@@ -76,7 +78,7 @@ graph TB
 
     subgraph Edge["ASGI Edge Layer — src/nexus/main.py"]
         MW["Middleware Chain (Outer → Inner)<br/>RequestID · Metrics · APIVersion · Auth · Governance · CORS"]
-        Routes["api/routes — 54 Router Modules<br/>agents, tasks, goals, approvals, budgets,<br/>memory, plaza, RAG, hiring, evolution,<br/>adapters, workflows, secrets, incidents…"]
+        Routes["api/routes — Modular Router Handlers<br/>agents, tasks, goals, approvals, budgets,<br/>memory, plaza, RAG, hiring, evolution,<br/>adapters, workflows, secrets, incidents…"]
         MW --> Routes
     end
 
