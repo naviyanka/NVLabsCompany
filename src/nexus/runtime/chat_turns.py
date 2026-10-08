@@ -1126,7 +1126,7 @@ def _failure(exc: BaseException) -> dict[str, Any]:
         # A cap refusal is not a provider outage: retrying cannot help, and the call never left.
         return {
             "error_code": "BUDGET_EXCEEDED",
-            "error_message": "Budget cap reached; the call was refused before reaching the provider",
+            "error_message": "Budget cap reached; the call never reached the provider",
             "result": {"http_status": 429},
         }
     from nexus.api.routes.chat import PROVIDER_UNAVAILABLE_MESSAGE
