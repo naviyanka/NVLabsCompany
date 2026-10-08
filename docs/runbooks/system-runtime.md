@@ -71,6 +71,7 @@ an audit entry, and is idempotent and restart safe. "Discovery" is the only use 
 | `task_attempt_recovery` | 15 s | 50 | 60 s | Same, for task attempts | `task_attempts.recover_company`. Publishes hints |
 | `watchdog_patrol` | 60 s | 20 | 60 s | Distinct company ids that have agents, 20 per run, resuming after the last one handled (a rotating cursor). Ids only | Read the company's agents and active runs, patrol, file escalations and close confirmed-dead runs, all in its tenant session |
 | `org_snapshot_refresh` | 60 s | 20 | 120 s | Company ids with their snapshot state, to find those due; at most 20 are regenerated per run | Regenerate the snapshot per company |
+| `tool_effect_lease_expiry` | 60 s | 50 | 60 s | Companies with an `executing` tool effect whose lease expired | `effects.expire_leases`: mark those rows `ambiguous` (audited) so the recovery console lists them |
 
 Interval is the minimum time between starts. The runtime wakes every 5 seconds and runs what is
 due; it has no polling loop of its own (it shares the scheduler loop through its `ticks` hook,

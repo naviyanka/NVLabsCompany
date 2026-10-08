@@ -953,6 +953,46 @@ async def settle(
         return False
 
 
+async def expire_leases(company_id: uuid.UUID, limit: int = 100) -> int:
+    """Mark ``executing`` rows whose lease ran out ``ambiguous``; returns how many.
+
+    Otherwise only a later claim of the same slot does this, and that claim may never come: a
+    turn recovered within the lease gets ``busy`` at the slot and finishes without it. The row
+    would then stay ``executing`` forever, outside :func:`list_open`. As ``ambiguous`` it is
+    listed for an operator, a non-idempotent write is never rerun, and an idempotent one is
+    still retaken by its next claim. A late settle by the old holder fails on its token.
+    """
+    from nexus import database
+
+    async with database.tenant_session(company_id) as db:
+        now = await _db_now(db)
+        rows = list(
+            (
+                await db.execute(
+                    select(ToolEffect)
+                    .where(
+                        ToolEffect.company_id == company_id,
+                        ToolEffect.status == "executing",
+                        ToolEffect.lease_expires_at <= now,
+                    )
+                    .order_by(ToolEffect.lease_expires_at)
+                    .limit(limit)
+                )
+            ).scalars()
+        )
+        expired = 0
+        for row in rows:
+            moved = await db.execute(
+                _cas(row, status="ambiguous", claim_token=None, lease_expires_at=None,
+                     error="lease expired before the call settled; it may have run")
+            )
+            if moved.rowcount == 1:
+                await _audit(db, row, "ambiguous", must=True, came_from="executing")
+                expired += 1
+        await db.commit()
+    return expired
+
+
 async def claim_notice(company_id: uuid.UUID, invocation_key: str) -> bool:
     """True exactly once per logical invocation: the caller that gets it may send the notice.
 

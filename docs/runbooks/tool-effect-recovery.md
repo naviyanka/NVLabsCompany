@@ -225,6 +225,7 @@ if the remaining work is still wanted, start it in a new turn.
 executing -> succeeded | failed | ambiguous
 executing (lease expired) -> manual_recovery_required            non-idempotent
 executing (lease expired) -> executing (attempt + 1)             idempotent
+executing (lease expired) -> ambiguous                           system runtime, no claim needed
 failed -> executing (attempt + 1)                                the tool proved it did nothing
 ambiguous -> manual_recovery_required                            non-idempotent, on the next claim
 ambiguous -> executing (attempt + 1)                             idempotent
@@ -417,6 +418,10 @@ POST /api/v1/tool-effects/{effect_id}/resolve
 - **Lease.** `LEASE_SECONDS` is 900. There is no heartbeat, so a call that runs longer is
   treated as interrupted by a later claim: an idempotent call is retried, a non-idempotent one
   waits for an operator.
+  A turn recovered within the lease finds the slot `busy` and may never claim it again, so the
+  system runtime operation `tool_effect_lease_expiry` (every 60 s) marks every `executing` row
+  whose lease ran out `ambiguous`. It then appears in `GET /api/v1/tool-effects/open`; the old
+  holder can no longer settle it, and an idempotent row is still retried by its next claim.
 - **Migration.** `c5e8a3b71d94` creates `tool_effects`, `tool_notifications` and
   `tool_bridge_slots` with forced row level security and the usual `tenant_isolation` policy on
   PostgreSQL. `tool_effects.turn_attempt` records the execution that claimed each slot. No
