@@ -27,6 +27,7 @@ import { Settings } from '@/pages/Settings';
 import { Setup } from '@/pages/Setup';
 import { Skills } from '@/pages/Skills';
 import { Tasks } from '@/pages/Tasks';
+import { ToolEffectRecovery } from '@/pages/ToolEffectRecovery';
 import { Work } from '@/pages/Work';
 import { Tools } from '@/pages/Tools';
 import { Workflows } from '@/pages/Workflows';
@@ -92,6 +93,7 @@ export default function App() {
               <Route path="/knowledge" element={<KnowledgeBase />} />
               <Route path="/knowledge-base" element={<KnowledgeBase />} />
               <Route path="/approvals" element={<Approvals />} />
+              <Route path="/tool-effects" element={<ToolEffectRecovery />} />
               <Route path="/budgets" element={<Budgets />} />
               <Route path="/governance/access" element={<GovernanceAccess />} />
               <Route path="/evolution" element={<Evolution />} />
