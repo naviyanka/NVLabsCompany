@@ -5,7 +5,7 @@ from datetime import timezone, datetime
 from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException, status
-from pydantic import BaseModel
+from pydantic import AliasChoices, BaseModel, Field
 from sqlalchemy import select, update, delete, func
 
 from nexus.api.deps import CurrentCompanyId, DbSession
@@ -37,7 +37,11 @@ class NotificationResponse(BaseModel):
     read: bool
     dismissed: bool
     agent_id: uuid.UUID | None = None
-    metadata: dict[str, Any] | None = None
+    # The column is ``notification_metadata``: on the ORM row ``metadata`` is SQLAlchemy's
+    # declarative MetaData, which failed validation and made every list with a row a 500.
+    metadata: dict[str, Any] | None = Field(
+        default=None, validation_alias=AliasChoices("notification_metadata", "metadata")
+    )
     created_at: datetime
 
 
