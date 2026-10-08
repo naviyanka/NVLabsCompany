@@ -122,6 +122,36 @@ async def budget_reservation_reap(discovery: DiscoveryFactory, now: datetime) ->
     return result
 
 
+# -- tool_effect_lease_expiry ---------------------------------------------------------
+
+
+async def tool_effect_lease_expiry(discovery: DiscoveryFactory, now: datetime) -> OpResult:
+    """Make tool calls whose lease ran out ``ambiguous``, so the recovery console lists them."""
+    from nexus.models.tool_effect import ToolEffect
+    from nexus.tools import effects
+
+    async with discovery() as db:
+        ids = (
+            (
+                await db.execute(
+                    select(ToolEffect.company_id)
+                    .where(ToolEffect.status == "executing", ToolEffect.lease_expires_at <= now)
+                    .distinct()
+                    .limit(OPERATIONS["tool_effect_lease_expiry"].batch_size)
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+    async def work(company_id: uuid.UUID) -> Counter:
+        return Counter(expired=await effects.expire_leases(company_id))
+
+    result = OpResult()
+    await _per_company(result, ids, work)
+    return result
+
+
 # -- task_recovery -------------------------------------------------------------------
 
 
@@ -365,5 +395,6 @@ OPERATIONS: dict[str, Operation] = {
         Operation("task_attempt_recovery", 15, 50, 60, task_attempt_recovery),
         Operation("watchdog_patrol", 60, 20, 60, watchdog_patrol),
         Operation("org_snapshot_refresh", 60, 20, 120, org_snapshot_refresh),
+        Operation("tool_effect_lease_expiry", 60, 50, 60, tool_effect_lease_expiry),
     )
 }

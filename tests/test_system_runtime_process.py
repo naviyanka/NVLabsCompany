@@ -256,6 +256,7 @@ def test_the_catalogue_is_the_expected_allow_list():
         "task_attempt_recovery",
         "watchdog_patrol",
         "org_snapshot_refresh",
+        "tool_effect_lease_expiry",
     }
 
 

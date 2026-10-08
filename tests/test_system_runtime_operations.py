@@ -1,4 +1,4 @@
-"""Each of the seven system-runtime operations, run against real rows.
+"""Each of the eight system-runtime operations, run against real rows.
 
 The catalogue is an allow-list, so every entry gets the same guarantees checked the same
 way (``OPS`` below seeds each operation's trigger rows):
@@ -40,6 +40,7 @@ from nexus.models.heartbeat_run import HeartbeatRun
 from nexus.models.organization_snapshot import OrganizationSnapshot, OrganizationSnapshotState
 from nexus.models.task import Goal, Task
 from nexus.models.task_attempt import TaskAttempt
+from nexus.models.tool_effect import ToolEffect
 from nexus.runtime import watchdog_service, work_hints
 from nexus.system_runtime import audit, status
 from nexus.system_runtime.ops import OPERATIONS
@@ -140,6 +141,21 @@ async def _probe_attempt(s, cid):
     return tuple(row)
 
 
+async def _seed_effect(s, cid, due):
+    lease = _now() - timedelta(hours=1) if due else _now() + timedelta(hours=1)
+    s.add(ToolEffect(
+        company_id=cid, turn_id=uuid.uuid4(), round_index=0, invocation_index=0,
+        tool_name="t", effect_class="non_idempotent_write", invocation_key=uuid.uuid4().hex,
+        arguments_digest="d", claim_token="c", lease_expires_at=lease, result={"x": SECRET},
+    ))
+
+
+async def _probe_effect(s, cid):
+    return (
+        await s.execute(select(ToolEffect.status).where(ToolEffect.company_id == cid))
+    ).scalar()
+
+
 async def _seed_watchdog(s, cid, due):
     agent = Agent(company_id=cid, name="w", role="r", model="m")
     s.add(agent)
@@ -201,6 +217,7 @@ CASES = {
     "task_attempt_recovery": Case(_seed_attempt, _probe_attempt),
     "watchdog_patrol": Case(_seed_watchdog, _probe_watchdog, passes=3),
     "org_snapshot_refresh": Case(_seed_org, _probe_org),
+    "tool_effect_lease_expiry": Case(_seed_effect, _probe_effect),
 }
 
 

@@ -409,6 +409,60 @@ async def test_a_lease_the_database_says_expired_is_retaken_despite_a_slow_clock
     assert row.attempt_count == 2 and row.status == "succeeded"
 
 
+async def test_an_interrupted_write_whose_slot_is_never_claimed_again_reaches_the_operator(
+    factory, world
+):
+    gate = asyncio.Event()
+    holder = Tool(gate=gate)  # the crashed worker: it never settles while the lease runs
+    task = asyncio.create_task(go(world, holder))
+    for _ in range(200):
+        if holder.runs:
+            break
+        await asyncio.sleep(0.01)
+    # The turn is recovered within the lease: the slot is busy, and the turn finishes without it.
+    assert (await go(world, Tool()))["status"] == "effect_in_progress"
+    assert await effects.expire_leases(world["acme"]) == 0
+    assert (await effects.list_open(world["acme"]))["items"] == []
+
+    (row,) = await rows(factory)
+    await expire_lease(factory, row.id)
+    assert await effects.expire_leases(world["acme"]) == 1
+    assert await effects.expire_leases(world["acme"]) == 0
+    (item,) = (await effects.list_open(world["acme"]))["items"]
+    assert item["id"] == str(row.id) and item["status"] == "ambiguous"
+    assert await effects.expire_leases(world["other"]) == 0
+
+    gate.set()  # the old holder finishing late cannot settle a row it no longer holds
+    await task
+    (row,) = await rows(factory)
+    assert row.status == "ambiguous" and holder.runs == 1
+    assert any(a.action == "tool_effect.ambiguous" for a in await audit_rows(factory))
+
+    await effects.resolve_manual_recovery(
+        world["acme"], row.id, "applied", actor="operator", reason="checked the target"
+    )
+    (row,) = await rows(factory)
+    assert row.status == "succeeded"
+
+
+async def test_an_expired_idempotent_write_is_still_retaken_by_its_next_claim(factory, world):
+    gate = asyncio.Event()
+    task = asyncio.create_task(go(world, Tool(gate=gate), effect=IDEM))
+    for _ in range(200):
+        if await rows(factory):
+            break
+        await asyncio.sleep(0.01)
+    (row,) = await rows(factory)
+    await expire_lease(factory, row.id)
+    assert await effects.expire_leases(world["acme"]) == 1
+    taker = Tool()
+    assert (await go(world, taker, effect=IDEM))["status"] == "success" and taker.runs == 1
+    gate.set()
+    await task
+    (row,) = await rows(factory)
+    assert row.status == "succeeded"
+
+
 # --- one sealed form of every result ----------------------------------------------------------
 
 
