@@ -55,6 +55,10 @@ ERROR = "error"
 class ProviderError(Exception):
     """A turn that must fail; the message carries a stable code and no secret."""
 
+    # Tokens of the rounds that finished before the failure: the provider billed
+    # them even though the turn failed. Set by ``run``.
+    usage: dict[str, int] | None = None
+
 
 @dataclass(frozen=True)
 class Event:
@@ -247,14 +251,17 @@ async def run(
 ) -> LoopResult:
     """Drive rounds until the model answers without tool calls."""
     emit = _Emitter(on_event)
+    usage: dict[str, int] = {"prompt_tokens": 0, "completion_tokens": 0}
     try:
         result = await _loop(
-            prepared, task_id, messages, transport, limits, meter, emit, cancelled, on_tool_verified
+            prepared, task_id, messages, transport, limits, meter, emit, cancelled,
+            on_tool_verified, usage,
         )
     except asyncio.CancelledError:
         emit(Event(CANCELLED))
         raise
     except ProviderError as exc:
+        exc.usage = dict(usage)
         code = _stable(str(exc))
         emit(Event(CANCELLED if code.endswith("_CANCELLED") else ERROR, error=code))
         raise
@@ -272,6 +279,7 @@ async def _loop(
     emit: _Emitter,
     cancelled: Callable[[], bool] | None,
     on_tool_verified: Callable[[], None] | None,
+    usage: dict[str, int],
 ) -> LoopResult:
     from nexus.tools import manager_bridge
     from nexus.tools.effects import ToolSlot
@@ -282,7 +290,6 @@ async def _loop(
     tools = tool_schemas(prepared.offered)
     seen: set[str] = set()
     artifacts: list[dict[str, Any]] = []
-    usage: dict[str, int] = {"prompt_tokens": 0, "completion_tokens": 0}
 
     def check_cancel() -> None:
         if cancelled is not None and cancelled():

@@ -296,6 +296,13 @@ class TestFailClosed:
         fake, _ = await self._fails(provider, db, c, script, "too many model iterations", ran=True)
         assert len(fake.requests) == 2
 
+    async def test_a_failed_turn_reports_the_tokens_it_was_billed(self, provider, db, c, monkeypatch):  # noqa: F811
+        monkeypatch.setattr(hp, "MAX_ITERATIONS", 2)
+        billed = chunk(usage={"prompt_tokens": 100, "completion_tokens": 5})
+        script = [[*tool_response((f"c{i}", "ceo_list_managers", {})), billed] for i in range(3)]
+        _, result = await self._fails(provider, db, c, script, "too many model iterations", ran=True)
+        assert (result.input_tokens, result.output_tokens) == (200, 10)  # both finished rounds
+
     async def test_a_cancelled_turn_runs_no_tool(self, provider, db, c):  # noqa: F811
         await _appoint(c, c["chief"])
         turn = await _turn(db, c["chief"], cancelled=True)
