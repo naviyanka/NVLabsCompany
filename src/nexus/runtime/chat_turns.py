@@ -1105,7 +1105,7 @@ async def _safe_renew(turn: ChatTurn, worker_id: str) -> str:
 
 def _failure(exc: BaseException) -> dict[str, Any]:
     """The turn columns for an execution that raised, without secrets or tracebacks."""
-    from nexus.models_router.preflight import BudgetInfraUnavailable
+    from nexus.models_router.preflight import BudgetExceededError, BudgetInfraUnavailable
 
     if isinstance(exc, HTTPException):
         detail = exc.detail
@@ -1121,6 +1121,13 @@ def _failure(exc: BaseException) -> dict[str, Any]:
             "error_code": "BUDGET_UNAVAILABLE",
             "error_message": "Budget ledger unavailable; the call was refused",
             "result": {"http_status": 503},
+        }
+    if isinstance(exc, BudgetExceededError):
+        # A cap refusal is not a provider outage: retrying cannot help, and the call never left.
+        return {
+            "error_code": "BUDGET_EXCEEDED",
+            "error_message": "Budget cap reached; the call was refused before reaching the provider",
+            "result": {"http_status": 429},
         }
     from nexus.api.routes.chat import PROVIDER_UNAVAILABLE_MESSAGE
 
