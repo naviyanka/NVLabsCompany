@@ -337,6 +337,45 @@ class TestLifecycle:
         row2 = await _get(co, TaskAttempt, attempt2.id)
         assert row2.status == "failed" and row2.output_summary is None
 
+    @pytest.mark.parametrize("failure", ["reported", "raised"])
+    async def test_provider_fallback_reply_is_not_a_deliverable(self, co, monkeypatch, failure):
+        # The real _call_llm answers a provider failure with fixed server text; that text
+        # used to be submitted for review as if the employee had written it.
+        class Adapter:
+            async def create_session(self, agent_id, config):
+                return SimpleNamespace(agent_id=agent_id, session_id=uuid.uuid4())
+
+            async def execute_task(self, session, task_id, payload):
+                if failure == "raised":
+                    raise RuntimeError("transport down")
+                return SimpleNamespace(
+                    success=False, output="", input_tokens=0, output_tokens=0,
+                    artifacts=[], error="HERMES_NATIVE_KEY_MISSING: no API key",
+                )
+
+            async def terminate(self, session):
+                pass
+
+        async def _none(*args, **kw):
+            return None
+
+        monkeypatch.setattr(chat_routes, "_call_llm", REAL_CALL_LLM)
+        monkeypatch.setattr(AdapterRegistry, "create_adapter", lambda self, *a, **kw: Adapter())
+        monkeypatch.setattr(
+            chat_routes, "_resolve_adapter_type", lambda *a, **kw: ("hermes", {"model": "m"})
+        )
+        monkeypatch.setattr(chat_routes, "_reserve_budget", _none)
+        monkeypatch.setattr(chat_routes, "_settle_budget", _none)
+        monkeypatch.setattr(chat_routes, "_remember_response", _none)
+        work = await _order(co)
+        await _delegate(co, work)
+        task, attempt, _ = await _assign(co, work, attempts_cap=1)
+        await ta.drain()
+        row = await _get(co, TaskAttempt, attempt.id)
+        assert (row.status, row.error_code) == ("failed", "PROVIDER_UNAVAILABLE")
+        assert row.output_summary is None
+        assert (await _get(co, Task, task.id)).status == "failed"
+
 
 class TestReplay:
     async def test_create_delegate_assign_replay_is_one_item(self, co):
