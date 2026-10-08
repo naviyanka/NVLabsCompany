@@ -160,6 +160,9 @@ class Settings(BaseSettings):
     llm_connection_host_allowlist: str = ""
     # R12 inversion switch: budget-infra failure fails closed unless True.
     budget_fail_open: bool = False
+    # API requests per minute for one company, shared by all of its users and tabs
+    # (GovernanceMiddleware). One dashboard page load makes about 20 requests.
+    company_rate_limit_per_minute: int = 100
     # Gateway model-discovery cache TTL, seconds.
     gateway_catalog_refresh_seconds: int = 900
     # Opt-in company-wide halt on a Tier 1 quota-exhaustion webhook.
