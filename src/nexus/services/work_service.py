@@ -452,12 +452,13 @@ async def assign_task(
 # ---------------------------------------------------------------------------
 
 
-async def _reply_text(attempt: TaskAttempt, turn: Any) -> str:
+async def _reply(attempt: TaskAttempt, turn: Any) -> tuple[str, dict[str, Any]]:
+    """The reply's text and the execution provenance stored with it."""
     from nexus.database import tenant_session
     from nexus.models.chat import ChatMessage
 
     if turn.response_message_id is None:
-        return ""
+        return "", {}
     async with tenant_session(attempt.company_id) as db:
         reply = (
             await db.execute(
@@ -467,16 +468,29 @@ async def _reply_text(attempt: TaskAttempt, turn: Any) -> str:
                 )
             )
         ).scalar_one_or_none()
-    return (reply.text or "") if reply else ""
+    if reply is None:
+        return "", {}
+    return reply.text or "", (reply.payload or {}).get("execution") or {}
 
 
 async def submit_from_turn(attempt: TaskAttempt, worker_id: str, spec: WorkSpec, turn: Any) -> bool:
     """Turn the finished chat turn's reply into the attempt's deliverable.
 
-    An empty reply is a failure, not a deliverable. The text is clipped to the
-    spec's cap. Model text alone never completes the task.
+    An empty reply is a failure, not a deliverable, and so is the server's own
+    "provider unavailable" reply. The text is clipped to the spec's cap. Model
+    text alone never completes the task.
     """
-    text = (await _reply_text(attempt, turn)).strip()
+    raw, execution = await _reply(attempt, turn)
+    text = raw.strip()
+    if execution.get("error_code") == "PROVIDER_UNAVAILABLE":
+        return await task_attempts._finish(
+            attempt,
+            worker_id,
+            "failed",
+            "error",
+            error_code="PROVIDER_UNAVAILABLE",
+            error="The model provider could not be reached; nothing was delivered",
+        )
     if not text:
         return await task_attempts._finish(
             attempt,
