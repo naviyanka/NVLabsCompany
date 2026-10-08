@@ -1307,6 +1307,10 @@ async def _call_llm(
                     "LLM call reported an error: code=%s adapter=%s agent=%s",
                     PROVIDER_UNAVAILABLE_CODE, registry_key, agent.id,
                 )
+                if execution is not None:
+                    # The reply below is server text, not the model's: a work attempt must
+                    # not submit it as a deliverable (work_service.submit_from_turn).
+                    execution["error_code"] = PROVIDER_UNAVAILABLE_CODE
                 return (
                     PROVIDER_UNAVAILABLE_MESSAGE,
                     config.get("model", "unknown"),
@@ -1332,6 +1336,8 @@ async def _call_llm(
             PROVIDER_UNAVAILABLE_CODE, registry_key, type(e).__name__, agent.id, turn_id,
             (execution or {}).get("execution_id"),
         )
+        if execution is not None:
+            execution["error_code"] = PROVIDER_UNAVAILABLE_CODE
         # A fixed, server-owned reply: deterministic, no model call, nothing from the failure.
         return PROVIDER_UNAVAILABLE_MESSAGE, "fallback", 0
 
