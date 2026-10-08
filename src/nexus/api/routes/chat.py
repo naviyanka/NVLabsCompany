@@ -1277,11 +1277,27 @@ async def _call_llm(
                 await _remember_response(agent, response_text, turn_id=turn_id)
                 return response_text, model_used, tokens
             elif result.error:
+                # Rounds billed before the failure (e.g. a tool loop that hit its
+                # iteration cap) settle the hold at their cost instead of releasing it.
+                failed_cents = 0
+                if result.input_tokens or result.output_tokens:
+                    from nexus.models_router.pricing import TokenSplit, estimate_cost_usd
+
+                    failed_usd = estimate_cost_usd(
+                        model_name, TokenSplit(result.input_tokens, result.output_tokens)
+                    )
+                    failed_cents = max(1, round(failed_usd * 100))
+                    spend.update(
+                        cost_cents=failed_cents,
+                        input=result.input_tokens,
+                        output=result.output_tokens,
+                        model=model_name,
+                    )
                 record_llm_usage(
                     llm_span,
                     input_tokens=result.input_tokens,
                     output_tokens=result.output_tokens,
-                    cost_cents=0,
+                    cost_cents=failed_cents,
                     finish_reason="error",
                     model=model_name,
                 )
