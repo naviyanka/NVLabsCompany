@@ -227,7 +227,7 @@ UNSCOPED_COMPANY_ROUTES = {
     "plaza": 2,
     "tools": 2,
     "triggers": 2,
-    "workflows": 1,
+    "workflows": 0,
     "workspaces": 2,
 }
 
