@@ -21,6 +21,7 @@ from typing import Any
 import httpx
 import pytest
 import sqlalchemy as sa
+from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlmodel import select
 
@@ -28,6 +29,7 @@ from nexus.api.routes import chat as chat_routes
 from nexus.auth import middleware as auth_middleware
 from nexus.auth.users import create_user
 from nexus.config import settings
+from nexus.database import tenant_session
 from nexus.models.agent import Agent
 from nexus.models.budget import BudgetPolicy
 from nexus.models.company import Company
@@ -37,7 +39,8 @@ from nexus.models.task import Goal, Project, Task
 from nexus.models.task_attempt import TaskAttempt
 from nexus.runtime import chat_turns
 from nexus.runtime import task_attempts as ta
-from nexus.services import ceo_service
+from nexus.services import ceo_service, work_service
+from nexus.services import manager_service as ms
 from nexus.tools import manager_tools
 from nexus.tools.context import INBOUND_MCP, ExecutionContext
 from tests.test_postgres_integration import (  # noqa: F401 -- module fixtures
@@ -255,6 +258,12 @@ async def _submit(stack, co, who, *, key="w1", title="Quarterly report"):
     return work, first["task_id"], first["attempt"]["id"], assign
 
 
+async def _finalize(co, work):
+    return await manager_tools.call(
+        _ctx(co["company"], co["lead"]), "manager_finalize_plan", {"work_id": str(work)}
+    )
+
+
 async def _work(who, work_id):
     reply = await who.call("GET", f"/api/v1/work/{work_id}")
     assert reply.status_code == 200, reply.text
@@ -348,6 +357,9 @@ class TestAcceptance:
         done = await stack.one(TaskAttempt, uuid.UUID(attempt))
         assert done.status == "completed"
         assert (await stack.one(Task, uuid.UUID(task))).status == "completed"
+        # A verified child does not close an open plan; the manager's finalize does.
+        assert (await stack.one(Task, uuid.UUID(work))).status == "in_progress"
+        await _finalize(a, work)
         assert (await stack.one(Task, uuid.UUID(work))).status == "completed"
         assert len(await stack.rows(TaskAttempt, TaskAttempt.company_id == a["company"])) == 1
         assert stack.model.calls == calls_before
@@ -566,6 +578,7 @@ class TestFailures:
             lead, "manager_review_work", {"attempt_id": str(second.id), "decision": "verify"}
         )
         assert done["changed"] is True
+        await _finalize(a, work)
         assert (await stack.one(Task, uuid.UUID(work))).status == "completed"
 
     async def test_cancel_work_awaiting_review(self, stack):
@@ -748,3 +761,271 @@ class TestFailures:
         assert linked.status_code == 201
         assert (await stack.one(Task, uuid.UUID(linked.json()["id"]))).goal_id == ids["own_goal"]
         assert (await stack.one(Project, ids["foreign_project"])).company_id == b["company"]
+
+
+# ---------------------------------------------------------------------------
+# Plan finalization: assignment, finalize and roll-up serialize on the work order's row
+# ---------------------------------------------------------------------------
+
+HOLD_SECONDS = 15  # a guard against a hang, never a timing assumption
+
+# Every lock some backend of this database is waiting for, by lock type.
+_WAITING = sa.text(
+    "SELECT l.locktype FROM pg_locks l JOIN pg_stat_activity a ON a.pid = l.pid "
+    "WHERE NOT l.granted AND a.datname = current_database()"
+)
+
+
+class _Hold:
+    """Pause a real transaction right after it writes the audit row ``action``.
+
+    Until ``go`` is set the transaction stays open: the row locks its UPDATEs took and the
+    company's audit-chain lock are held, and nothing it wrote is visible to other sessions.
+    """
+
+    def __init__(self, monkeypatch, module, name: str, action: str) -> None:
+        self.held, self.go = asyncio.Event(), asyncio.Event()
+        real = getattr(module, name)
+
+        async def audit(*args, **kwargs):
+            await real(*args, **kwargs)
+            if args[2] == action and not self.held.is_set():
+                self.held.set()
+                await self.go.wait()
+
+        monkeypatch.setattr(module, name, audit)
+
+    async def wait(self) -> None:
+        await asyncio.wait_for(self.held.wait(), HOLD_SECONDS)
+
+
+async def _blocked(stack) -> set[str]:
+    """Wait until a second session is blocked on a lock; return the lock types it waits on.
+
+    Only the two racing transactions run (the worker is drained), so a waiter is the follower.
+    """
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + HOLD_SECONDS
+    while loop.time() < deadline:
+        async with stack.admin_db() as s:
+            kinds = set((await s.execute(_WAITING)).scalars())
+        if kinds:
+            return kinds
+        await asyncio.sleep(0.02)
+    pytest.fail("the second transaction never blocked behind the first")
+
+
+async def _plan(stack, co, key: str) -> str:
+    """A work order delegated to the manager, with no task yet."""
+    admin = await stack.login(co["admin"])
+    made = await admin.call("POST", "/api/v1/work", {"title": f"Plan {key}"}, key=key)
+    assert made.status_code == 201, made.text
+    work = made.json()["id"]
+    await manager_tools.call(
+        _ctx(co["company"], co["ceo"]),
+        "ceo_delegate_task_to_manager",
+        {"task_id": work, "manager_id": str(co["lead"])},
+    )
+    return work
+
+
+async def _assign(co, work: str, key: str) -> dict[str, Any]:
+    return await manager_tools.call(
+        _ctx(co["company"], co["lead"]),
+        "manager_assign_work",
+        {
+            "work_id": work,
+            "employee_id": str(co["eve"]),
+            "title": f"Part {key}",
+            "objective": OBJECTIVE,
+            "idempotency_key": key,
+        },
+    )
+
+
+async def _verify(co, attempt: str) -> dict[str, Any]:
+    return await manager_tools.call(
+        _ctx(co["company"], co["lead"]),
+        "manager_review_work",
+        {"attempt_id": attempt, "decision": "verify"},
+    )
+
+
+async def _children(stack, work: str) -> list[str]:
+    rows = await stack.rows(Task, Task.parent_task_id == uuid.UUID(work))
+    return sorted(r.title for r in rows)
+
+
+async def _audits(stack, co, action: str) -> list[AuditLog]:
+    return await stack.rows(
+        AuditLog, AuditLog.company_id == co["company"], AuditLog.action == action
+    )
+
+
+def _refused(caught) -> tuple[int, str]:
+    return caught.value.status_code, caught.value.detail["code"]
+
+
+class TestPlanFinalization:
+    async def test_assignment_committed_before_finalize_is_kept(self, stack):
+        a = await stack.seed("A")
+        work = await _plan(stack, a, "kept")
+        first = await _assign(a, work, "p1")
+        await ta.drain()
+
+        done = await _finalize(a, work)
+        assert done["changed"] is True and done["status"] == "in_progress"
+        order = await stack.one(Task, uuid.UUID(work))
+        assert order.work_spec["plan_finalized_at"]
+        assert order.work_spec["plan_finalized_by"] == str(a["lead"])
+        assert await _children(stack, work) == ["Part p1"]
+        (audit,) = await _audits(stack, a, "work.plan_finalized")
+        assert audit.details["tasks"] == 1
+
+        # Replaying the committed assignment after finalize is the same task, not a new one.
+        again = await _assign(a, work, "p1")
+        assert again["created"] is False and again["task_id"] == first["task_id"]
+        assert await _children(stack, work) == ["Part p1"]
+
+    async def test_assignment_after_finalize_is_work_closed(self, stack):
+        a = await stack.seed("A")
+        work = await _plan(stack, a, "closed")
+        await _assign(a, work, "p1")
+        await ta.drain()
+        await _finalize(a, work)
+        before = len(await stack.rows(TaskAttempt, TaskAttempt.company_id == a["company"]))
+
+        with pytest.raises(HTTPException) as caught:
+            await _assign(a, work, "p2")
+        assert _refused(caught) == (409, "WORK_CLOSED")
+        assert await _children(stack, work) == ["Part p1"]
+        assert len(await _audits(stack, a, "work.assigned")) == 1
+        after = await stack.rows(TaskAttempt, TaskAttempt.company_id == a["company"])
+        assert len(after) == before
+
+    async def test_assign_blocked_behind_a_finalize_gets_work_closed(self, stack, monkeypatch):
+        """The assign read the plan as open, then waits on the order's row; the finalize
+        commits, the conditional UPDATE matches nothing, and no child is created."""
+        a = await stack.seed("A")
+        work = await _plan(stack, a, "race-f")
+        await _assign(a, work, "p1")
+        await ta.drain()
+
+        hold = _Hold(monkeypatch, ms, "audit", "work.plan_finalized")
+        finalize = asyncio.create_task(_finalize(a, work))
+        await hold.wait()  # the plan is stamped and the order's row locked, uncommitted
+        assign = asyncio.create_task(_assign(a, work, "p2"))
+        assert await _blocked(stack) <= {"transactionid", "tuple"}  # a row lock, not a chain lock
+        hold.go.set()
+
+        assert (await finalize)["changed"] is True
+        with pytest.raises(HTTPException) as caught:
+            await assign
+        assert _refused(caught) == (409, "WORK_CLOSED")
+        assert await _children(stack, work) == ["Part p1"]
+        assert len(await _audits(stack, a, "work.assigned")) == 1
+        (audit,) = await _audits(stack, a, "work.plan_finalized")
+        assert audit.details["tasks"] == 1
+        assert (await stack.one(Task, uuid.UUID(work))).work_spec["plan_finalized_at"]
+
+    async def test_finalize_blocked_behind_an_assign_includes_its_child(self, stack, monkeypatch):
+        """The finalize waits on the order's row; once the assign commits it stamps a plan that
+        counts the new child. No child is ever attached to a plan already final."""
+        a = await stack.seed("A")
+        work = await _plan(stack, a, "race-a")
+        await _assign(a, work, "p1")
+        await ta.drain()
+
+        hold = _Hold(monkeypatch, ms, "audit", "work.assigned")
+        assign = asyncio.create_task(_assign(a, work, "p2"))
+        await hold.wait()  # the child is inserted and the order's row locked, uncommitted
+        finalize = asyncio.create_task(_finalize(a, work))
+        assert await _blocked(stack) <= {"transactionid", "tuple"}
+        hold.go.set()
+
+        assert (await assign)["created"] is True
+        assert (await finalize)["changed"] is True
+        await ta.drain()
+        assert await _children(stack, work) == ["Part p1", "Part p2"]
+        (audit,) = await _audits(stack, a, "work.plan_finalized")
+        assert audit.details["tasks"] == 2
+        order = await stack.one(Task, uuid.UUID(work))
+        assert order.work_spec["plan_finalized_at"] and order.status == "in_progress"
+
+    async def test_finalized_plan_waits_for_every_outstanding_child(self, stack):
+        a = await stack.seed("A")
+        work = await _plan(stack, a, "rollup")
+        one, two = await _assign(a, work, "p1"), await _assign(a, work, "p2")
+        await ta.drain()
+
+        assert (await _finalize(a, work))["status"] == "in_progress"
+        assert (await _verify(a, one["attempt"]["id"]))["changed"] is True
+        order = await stack.one(Task, uuid.UUID(work))
+        assert order.status == "in_progress" and order.completed_at is None
+
+        assert (await _verify(a, two["attempt"]["id"]))["changed"] is True
+        order = await stack.one(Task, uuid.UUID(work))
+        assert (order.status, order.completion_reason) == ("completed", "goal")
+        assert order.completed_at is not None and order.result.count(DELIVERABLE) == 2
+
+    @pytest.mark.parametrize("leader", ["finalize", "verify"])
+    async def test_finalize_racing_the_last_verification_completes_the_order(
+        self, stack, monkeypatch, leader
+    ):
+        """Whichever commits first, the other sees it and the order completes."""
+        a = await stack.seed("A")
+        work = await _plan(stack, a, f"last-{leader}")
+        child = await _assign(a, work, "p1")
+        await ta.drain()
+        attempt = child["attempt"]["id"]
+
+        if leader == "finalize":
+            hold = _Hold(monkeypatch, ms, "audit", "work.plan_finalized")
+            first, second = (lambda: _finalize(a, work)), (lambda: _verify(a, attempt))
+        else:
+            hold = _Hold(monkeypatch, ta, "_audit", "work.verified")
+            first, second = (lambda: _verify(a, attempt)), (lambda: _finalize(a, work))
+        leading = asyncio.create_task(first())
+        await hold.wait()
+        following = asyncio.create_task(second())
+        await _blocked(stack)
+        hold.go.set()
+        assert (await leading)["changed"] is True
+        assert (await following)["changed"] is True
+
+        order = await stack.one(Task, uuid.UUID(work))
+        assert (order.status, order.completion_reason) == ("completed", "goal")
+        assert DELIVERABLE in order.result
+        assert (await stack.one(Task, uuid.UUID(child["task_id"]))).status == "completed"
+        assert len(await _audits(stack, a, "work.plan_finalized")) == 1
+
+    async def test_repeated_finalize_and_terminal_events_change_nothing(self, stack):
+        a = await stack.seed("A")
+        work = await _plan(stack, a, "replay")
+        child = await _assign(a, work, "p1")
+        await ta.drain()
+        attempt = child["attempt"]["id"]
+
+        both = await asyncio.gather(_finalize(a, work), _finalize(a, work))
+        assert sorted(r["changed"] for r in both) == [False, True]
+        assert len(await _audits(stack, a, "work.plan_finalized")) == 1
+        await _verify(a, attempt)
+
+        def state(row: Task) -> tuple:
+            return (row.status, row.completed_at, row.result, row.updated_at, row.work_spec)
+
+        settled = state(await stack.one(Task, uuid.UUID(work)))
+        assert settled[0] == "completed"
+
+        again = await _finalize(a, work)
+        assert (again["changed"], again["status"]) == (False, "completed")
+        assert (await _verify(a, attempt))["changed"] is False
+        # The attempt's terminal event delivered to the roll-up a second time.
+        async with tenant_session(a["company"]) as db:
+            row = await db.get(TaskAttempt, uuid.UUID(attempt))
+            await work_service.after_terminal(db, row)
+            await db.commit()
+
+        assert state(await stack.one(Task, uuid.UUID(work))) == settled
+        assert len(await _audits(stack, a, "work.plan_finalized")) == 1
+        assert await _children(stack, work) == ["Part p1"]

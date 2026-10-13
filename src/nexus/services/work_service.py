@@ -5,17 +5,31 @@ A *work order* is a top-level ``Task`` stamped with :data:`WORK_ORDER` in its
 forbids the ``kind`` key, so the stamp cannot be forged through the task routes).
 An ordinary top-level ``Task`` carries no stamp and never enters this lifecycle.
 The CEO delegates it to a manager
-(``delegated``); the manager assigns one child ``Task`` to a direct report with
-a text ``WorkSpec``; the employee's attempt answers it; the attempt then waits
-for a manager's review before anything counts as done::
+(``delegated``); the manager assigns child ``Task`` rows to direct reports, each
+with its own full ``WorkSpec`` (any mode); each employee's attempt answers its
+child; a text child then waits for a manager's review before it counts as done::
 
-    pending -> delegated -> in_progress -> (employee works) -> in_review
-                                   verify -> completed        reject -> failed (retry within cap)
+    child:  pending -> in_progress -> (employee works) -> in_review
+                   verify -> completed        reject -> failed (retry within cap)
+    order:  pending -> delegated -> in_progress -> completed | failed
+
+A work order completes only after its manager calls :func:`finalize_plan` and
+every child has completed. Finalizing stamps ``plan_finalized_at`` and
+``plan_finalized_by`` into the order's ``work_spec``; it takes no new child
+afterwards (409 ``WORK_CLOSED``). :func:`after_terminal` rolls each finished
+attempt up to its order, the same way for every mode: a completed child
+completes a finalized order whose children are all completed, and a child out
+of attempts fails the order.
 
 Rules this module enforces:
 
 * Every transition is one conditional UPDATE, so a replay or a race has exactly
   one winner and the loser reads the winner's state.
+* :func:`assign_task`, :func:`finalize_plan` and :func:`after_terminal` each
+  lock the order's row with that UPDATE before reading its plan flag or its
+  children, so an assignment either lands before the finalize (and the order
+  waits for it) or sees the finalized plan and is refused; no child can attach
+  to a finalized plan, and none is missed by the completion check.
 * Submission is not completion. Only :func:`review` (verify) completes a text
   task, and the reviewer is never the executor.
 * Audit rows hold ids, sizes and a digest, never the deliverable or a prompt.
