@@ -76,15 +76,18 @@ async def test_execute_activity_runs_in_process_outside_a_workflow():
     assert calls == [21], "activity should have been awaited directly, not dispatched"
 
 
-async def test_execute_task_activity_simulates_without_a_registered_adapter():
+async def test_execute_task_activity_blocks_without_a_registered_adapter():
+    """An unregistered adapter ran nothing, so the result must not read as done."""
     task_id = str(uuid.uuid4())
     out = await execute_task_activity(
         ExecuteTaskInput(task_id=task_id, agent_id="agent-1", adapter_type="not-registered")
     )
 
-    assert out.success is True
+    assert out.success is False
     assert out.task_id == task_id
-    assert out.status == "success"
+    assert out.status == "blocked"
+    assert out.output == ""
+    assert out.error == "Adapter unavailable: not-registered"
 
 
 async def test_task_flow_execution_goes_through_the_activity(monkeypatch):

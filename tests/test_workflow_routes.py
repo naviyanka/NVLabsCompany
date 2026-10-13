@@ -1,288 +1,222 @@
-"""Tests for the DB-backed workflow routes (W-01 gap closure).
+"""The legacy workflow routes can no longer start ungoverned work.
 
-Covers:
-- Serialization of engine traces/executions into API shapes
-- Company/task flow start endpoints persisting WorkflowRun rows
-- Background completion persistence, including the cancel-overwrite guard
-- Tenant coercion from legacy body overrides
+``POST /api/v1/workflows/company`` and ``/task`` used to run CompanyWorkflow /
+TaskFlow in an in-process ``asyncio`` task with no budget reservation, approval
+gate, lease or recovery. They now answer ``410 Gone`` and create nothing. The
+read routes stay tenant scoped and never execute anything.
+
+Requests go through the real router; the principal is placed in the ASGI scope
+the way ``AuthenticationMiddleware`` does, and the DB session is a recorder, so
+any row the routes tried to create or any engine they tried to start is visible.
 """
 
-import asyncio
 import uuid
-from contextlib import asynccontextmanager
-from datetime import datetime, timezone
-from unittest.mock import AsyncMock, MagicMock
+from datetime import UTC, datetime
 
+import httpx
 import pytest
+from fastapi import FastAPI
 
+from nexus.api.deps import get_db
 from nexus.api.routes import workflows as wf_routes
+from nexus.auth.principal import Principal
 from nexus.models.workflow_run import WorkflowRun
-from nexus.workflows.company_flow import WorkflowStep
-from nexus.workflows.task_flow import TaskExecution, TaskStatus
 
 COMPANY_ID = uuid.uuid4()
+OTHER_COMPANY_ID = uuid.uuid4()
 
 
-def _naive(dt: datetime) -> datetime:
-    return dt.replace(tzinfo=None)
+class _Result:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def scalar_one_or_none(self):
+        return self._rows[0] if self._rows else None
+
+    def scalars(self):
+        return self
+
+    def all(self):
+        return list(self._rows)
 
 
-class _FakeStep:
-    def __init__(self, **overrides):
-        self.step_id = overrides.get("step_id", "step-1")
-        self.agent_role = overrides.get("agent_role", "ceo")
-        self.action = overrides.get("action", "create_strategy")
-        self.status = overrides.get("status", "completed")
-        self.cost_cents = overrides.get("cost_cents", 12)
-        self.started_at = overrides.get("started_at")
-        self.completed_at = overrides.get("completed_at")
-        self.error = overrides.get("error")
+class _RecordingSession:
+    """Answers every query with ``rows`` and records writes."""
+
+    def __init__(self, rows=()):
+        self.rows = list(rows)
+        self.added: list = []
+        self.queries = 0
+
+    async def execute(self, _stmt):
+        self.queries += 1
+        return _Result(self.rows)
+
+    def add(self, obj):
+        self.added.append(obj)
 
 
-class _FakeTrace:
-    def __init__(self):
-        self.workflow_id = "wf-123"
-        self.status = type("S", (), {"value": "completed"})()
-        self.steps = [_FakeStep()]
-        self.total_cost_cents = 42
-        self.completed_at = _naive(datetime.now(timezone.utc))
-
-
-def test_steps_to_dicts_serializes_engine_steps():
-    started = _naive(datetime.now(timezone.utc))
-    step = WorkflowStep(step_id="s1", agent_role="cto", action="decompose", status="done", cost_cents=5)
-    step.started_at = started
-    dicts = wf_routes._steps_to_dicts([step])
-    assert dicts[0]["step_id"] == "s1"
-    assert dicts[0]["agent_role"] == "cto"
-    assert dicts[0]["started_at"] == started.isoformat()
-    assert dicts[0]["error"] is None
-
-
-def test_steps_to_dicts_handles_empty():
-    assert wf_routes._steps_to_dicts([]) == []
-    assert wf_routes._steps_to_dicts(None) == []
-
-
-def test_execution_to_step_dicts_maps_task_execution():
-    execution = TaskExecution(
-        execution_id="exec-1",
-        task_id="task-1",
-        agent_id="agent-9",
-        adapter_type="anthropic",
-        status=TaskStatus.COMPLETED,
-        cost_cents=7,
-    )
-    dicts = wf_routes._execution_to_step_dicts(execution)
-    assert dicts[0]["step_id"] == "exec-1"
-    assert dicts[0]["agent_role"] == "agent-9"
-    assert dicts[0]["action"] == "execute_task:anthropic"
-    assert dicts[0]["status"] == "completed"
-    assert dicts[0]["cost_cents"] == 7
-
-
-def test_coerce_company_uuid_never_leaves_the_authenticated_company():
-    from fastapi import HTTPException
-
-    assert wf_routes._coerce_company_uuid(None, COMPANY_ID) == COMPANY_ID
-    assert wf_routes._coerce_company_uuid(str(COMPANY_ID), COMPANY_ID) == COMPANY_ID
-    # A body naming another tenant (or garbage) is refused, not honoured.
-    for other in (str(uuid.uuid4()), "not-a-uuid"):
-        with pytest.raises(HTTPException) as exc:
-            wf_routes._coerce_company_uuid(other, COMPANY_ID)
-        assert exc.value.status_code == 403
-
-
-@pytest.mark.asyncio
-async def test_start_company_flow_persists_row_and_returns_shape(monkeypatch):
-    session = AsyncMock()
-    monkeypatch.setattr(wf_routes, "_run_company_flow", AsyncMock())
-
-    body = wf_routes.StartCompanyFlowRequest(objective="Ship the thing", estimated_cost_cents=100)
-    response = await wf_routes.start_company_flow(body, session, COMPANY_ID)
-
-    assert response["status"] == "running"
-    assert response["objective"] == "Ship the thing"
-    session.add.assert_called_once()
-    run = session.add.call_args[0][0]
-    assert isinstance(run, WorkflowRun)
-    assert run.workflow_type == "company"
-    assert run.company_id == COMPANY_ID
-    assert run.status == "running"
-    assert run.steps and run.steps[0]["agent_role"] == "ceo"
-
-
-@pytest.mark.asyncio
-async def test_start_task_flow_uses_principal_company_and_persists(monkeypatch):
-    session = AsyncMock()
-    monkeypatch.setattr(wf_routes, "_run_task_flow", AsyncMock())
-
-    body = wf_routes.StartTaskFlowRequest(
-        objective="Write tests",
-        required_capabilities=["code_generation"],
-        max_attempts=2,
-    )
-    response = await wf_routes.start_task_flow(body, session, COMPANY_ID)
-
-    assert response["status"] == "running"
-    session.add.assert_called_once()
-    run = session.add.call_args[0][0]
-    assert run.workflow_type == "task"
-    assert run.company_id == COMPANY_ID
-    assert run.input_payload["task_id"]
-
-
-@pytest.mark.asyncio
-async def test_start_company_flow_refuses_a_body_company_override(monkeypatch):
-    """The legacy body field may repeat the caller's company, never name another."""
-    from fastapi import HTTPException
-
-    session = AsyncMock()
-    monkeypatch.setattr(wf_routes, "_run_company_flow", AsyncMock())
-
-    body = wf_routes.StartCompanyFlowRequest(objective="obj", company_id=str(uuid.uuid4()))
-    with pytest.raises(HTTPException) as exc:
-        await wf_routes.start_company_flow(body, session, COMPANY_ID)
-    assert exc.value.status_code == 403
-    session.add.assert_not_called()
-
-    same = wf_routes.StartCompanyFlowRequest(objective="obj", company_id=str(COMPANY_ID))
-    await wf_routes.start_company_flow(same, session, COMPANY_ID)
-    assert session.add.call_args[0][0].company_id == COMPANY_ID
-
-
-def _make_run_factory(status_value):
-    row = {
-        "run": None,
-    }
-
-    def factory():
-        class _Result:
-            def scalar_one_or_none(self_inner):
-                return row["run"]
-
-        session = AsyncMock()
-        session.execute = AsyncMock(return_value=_Result())
-
-        @asynccontextmanager
-        async def ctx():
-            yield session
-
-        return ctx()
-
-    return row, factory
-
-
-@pytest.mark.asyncio
-async def test_persist_completion_updates_running_row(monkeypatch):
-    run = WorkflowRun(company_id=COMPANY_ID, status="running")
-    row, factory = _make_run_factory("running")
-    row["run"] = run
-    monkeypatch.setattr("nexus.database.async_session_factory", factory)
-
-    completed = _naive(datetime.now(timezone.utc))
-    await wf_routes._persist_completion(
-        uuid.uuid4(),
-        COMPANY_ID,
-        status_value="completed",
-        steps=[{"step_id": "s"}],
-        total_cost_cents=9,
-        completed_at=completed,
-    )
-
-    assert run.status == "completed"
-    assert run.total_cost_cents == 9
-    assert run.completed_at == completed
-    run_session_add_called = True
-    assert run_session_add_called
-
-
-@pytest.mark.asyncio
-async def test_persist_completion_never_overwrites_cancelled(monkeypatch):
-    run = WorkflowRun(company_id=COMPANY_ID, status="cancelled")
-    row, factory = _make_run_factory("cancelled")
-    row["run"] = run
-    monkeypatch.setattr("nexus.database.async_session_factory", factory)
-
-    original_completed_at = run.completed_at
-    await wf_routes._persist_completion(
-        uuid.uuid4(),
-        COMPANY_ID,
-        status_value="completed",
-        total_cost_cents=999,
-    )
-
-    assert run.status == "cancelled"
-    assert run.completed_at == original_completed_at
-    assert run.total_cost_cents == 0
-
-
-@pytest.mark.asyncio
-async def test_run_company_flow_reports_failure_on_engine_error(monkeypatch):
-    class _ExplodingEngine:
-        def __init__(self, **kwargs):
-            pass
-
-        async def execute(self, *args, **kwargs):
-            raise RuntimeError("adapter exploded")
-
-    monkeypatch.setattr("nexus.adapters.registry.AdapterRegistry", _ExplodingEngine, raising=False)
-    fake_registry = MagicMock()
-    monkeypatch.setitem(__import__("sys").modules, "nexus.adapters.registry", fake_registry)
-    # Re-import inside the route module happens at call time; patch the symbol the runner uses.
-    import nexus.workflows.company_flow as cf
-    monkeypatch.setattr(cf, "CompanyWorkflow", _ExplodingEngine)
-
-    persisted = {}
-    row, factory = _make_run_factory("running")
-    run_row = WorkflowRun(company_id=COMPANY_ID, status="running")
-    row["run"] = run_row
-    monkeypatch.setattr("nexus.database.async_session_factory", factory)
-
-    async def fake_persist(run_id, company_id, **kwargs):
-        persisted.update(kwargs)
-
-    monkeypatch.setattr(wf_routes, "_persist_completion", fake_persist)
-
-    await wf_routes._run_company_flow(uuid.uuid4(), COMPANY_ID, "obj", 0, None)
-
-    assert persisted["status_value"] == "failed"
-    assert "adapter exploded" in persisted["error"]
-
-
-@pytest.mark.asyncio
-async def test_cancel_workflow_marks_and_cancels_task():
-    session = AsyncMock()
-    run = WorkflowRun(
+def _run(status_value="running", company_id=COMPANY_ID) -> WorkflowRun:
+    return WorkflowRun(
         id=uuid.uuid4(),
-        company_id=COMPANY_ID,
+        company_id=company_id,
         workflow_type="company",
-        status="running",
+        status=status_value,
         objective="obj",
+        steps=[],
+        total_cost_cents=0,
+        started_at=datetime.now(UTC).replace(tzinfo=None),
     )
 
-    class _Result:
-        def scalar_one_or_none(self):
-            return run
 
-    session.execute = AsyncMock(return_value=_Result())
+def _client(session: _RecordingSession, principal: Principal | None) -> httpx.AsyncClient:
+    app = FastAPI()
+    app.include_router(wf_routes.router)
 
-    started = asyncio.Event()
+    async def _db():
+        yield session
 
-    async def never_ends():
-        started.set()
-        await asyncio.sleep(3600)
+    app.dependency_overrides[get_db] = _db
 
-    task = asyncio.ensure_future(never_ends())
-    await started.wait()
-    wf_routes._running_tasks[str(run.id)] = task
+    async def asgi(scope, receive, send):
+        if principal is not None:
+            scope.setdefault("state", {})["principal"] = principal
+        await app(scope, receive, send)
 
-    with pytest.raises(Exception):
-        await wf_routes.cancel_workflow("not-a-uuid", session, COMPANY_ID)
+    return httpx.AsyncClient(transport=httpx.ASGITransport(app=asgi), base_url="http://t")
 
-    response = await wf_routes.cancel_workflow(str(run.id), session, COMPANY_ID)
-    assert response["status"] == "cancelled"
+
+def _member(company_id=COMPANY_ID, role="admin") -> Principal:
+    return Principal(kind="user", company_id=company_id, role=role, user_id=uuid.uuid4())
+
+
+@pytest.fixture
+def no_engines(monkeypatch):
+    """Fail loudly if anything constructs a legacy engine during a request."""
+    import nexus.workflows.company_flow as company_flow
+    import nexus.workflows.task_flow as task_flow
+
+    def boom(*_a, **_k):
+        raise AssertionError("legacy engine constructed")
+
+    monkeypatch.setattr(company_flow.CompanyWorkflow, "__init__", boom)
+    monkeypatch.setattr(task_flow.TaskFlow, "__init__", boom)
+
+
+START_ROUTES = ("/api/v1/workflows/company", "/api/v1/workflows/task")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("path", START_ROUTES)
+async def test_start_routes_are_gone_and_create_nothing(path, no_engines):
+    session = _RecordingSession()
+    async with _client(session, _member()) as client:
+        # Retries of the same request: each one is refused, none creates work.
+        for _ in range(3):
+            response = await client.post(path, json={"objective": "Ship the thing"})
+            assert response.status_code == 410
+            assert response.json()["code"] == wf_routes.LEGACY_WORKFLOW_START_DISABLED
+            assert "/api/v1/work" in response.json()["detail"]
+    assert session.added == []
+    assert session.queries == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("path", START_ROUTES)
+async def test_start_routes_still_require_authentication(path, no_engines):
+    session = _RecordingSession()
+    async with _client(session, None) as client:
+        response = await client.post(path, json={"objective": "x"})
+    assert response.status_code == 401
+    assert session.added == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("path", START_ROUTES)
+async def test_start_routes_refuse_any_body_including_a_foreign_company(path, no_engines):
+    session = _RecordingSession()
+    async with _client(session, _member()) as client:
+        response = await client.post(
+            path, json={"objective": "x", "company_id": str(OTHER_COMPANY_ID)}
+        )
+    assert response.status_code == 410
+    assert session.added == []
+
+
+def test_no_background_runner_remains():
+    """The in-process runners and their task registry are gone, not just unused."""
+    for name in (
+        "_running_tasks",
+        "_run_company_flow",
+        "_run_task_flow",
+        "_register_company_agents",
+        "_persist_completion",
+    ):
+        assert not hasattr(wf_routes, name), name
+
+
+@pytest.mark.asyncio
+async def test_read_routes_return_rows_without_executing(no_engines):
+    run = _run("running")
+    session = _RecordingSession([run])
+    async with _client(session, _member()) as client:
+        status_resp = await client.get(f"/api/v1/workflows/{run.id}/status")
+        trace_resp = await client.get(f"/api/v1/workflows/{run.id}/trace")
+        list_resp = await client.get(f"/api/v1/companies/{COMPANY_ID}/workflows")
+    assert status_resp.status_code == 200
+    assert status_resp.json()["status"] == "running"
+    assert trace_resp.status_code == 200
+    assert list_resp.status_code == 200
+    assert isinstance(list_resp.json(), list)
+    assert run.status == "running"
+    assert session.added == []
+
+
+@pytest.mark.asyncio
+async def test_list_refuses_another_companys_id():
+    session = _RecordingSession([_run(company_id=OTHER_COMPANY_ID)])
+    async with _client(session, _member()) as client:
+        response = await client.get(f"/api/v1/companies/{OTHER_COMPANY_ID}/workflows")
+    assert response.status_code == 403
+    assert session.queries == 0
+
+
+@pytest.mark.asyncio
+async def test_status_of_unknown_or_malformed_id_is_404():
+    session = _RecordingSession([])
+    async with _client(session, _member()) as client:
+        assert (await client.get("/api/v1/workflows/not-a-uuid/status")).status_code == 404
+        assert (await client.get(f"/api/v1/workflows/{uuid.uuid4()}/trace")).status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_cancel_marks_a_stranded_run_cancelled(no_engines):
+    run = _run("running")
+    session = _RecordingSession([run])
+    async with _client(session, _member()) as client:
+        response = await client.post(f"/api/v1/workflows/{run.id}/cancel")
+    assert response.status_code == 200
+    assert response.json()["status"] == "cancelled"
     assert run.status == "cancelled"
+    assert run.completed_at is not None
 
-    await asyncio.sleep(0.05)
-    assert task.cancelled()
+
+@pytest.mark.asyncio
+async def test_cancel_never_rewrites_a_terminal_run():
+    run = _run("failed")
+    session = _RecordingSession([run])
+    async with _client(session, _member()) as client:
+        response = await client.post(f"/api/v1/workflows/{run.id}/cancel")
+    assert response.status_code == 200
+    assert run.status == "failed"
+    assert session.added == []
+
+
+@pytest.mark.asyncio
+async def test_cancel_requires_write_permission():
+    run = _run("running")
+    session = _RecordingSession([run])
+    async with _client(session, _member(role="viewer")) as client:
+        response = await client.post(f"/api/v1/workflows/{run.id}/cancel")
+    assert response.status_code == 403
+    assert run.status == "running"

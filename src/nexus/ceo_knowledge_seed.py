@@ -48,7 +48,7 @@ API_KNOWLEDGE = [
     },
     # Workflows
     {
-        "content": "WORKFLOWS API: POST /api/v1/workflows/company — start company workflow (objective, strategy). POST /api/v1/workflows/task — start task flow (task_id, agent_capabilities). GET /api/v1/companies/{id}/workflows/runs — list workflow runs. GET /api/v1/workflows/runs/{id} — get run status/trace. POST /api/v1/workflows/runs/{id}/cancel — cancel running workflow.",
+        "content": "WORKFLOWS API (legacy, read-only): POST /api/v1/workflows/company and POST /api/v1/workflows/task are retired and return 410 Gone; submit governed work via POST /api/v1/work. GET /api/v1/companies/{id}/workflows — list past workflow runs. GET /api/v1/workflows/{id}/status and /trace — run status and trace. POST /api/v1/workflows/{id}/cancel — mark a stranded run cancelled.",
         "scope": "api_reference",
         "importance": 0.85,
         "tags": "workflows,execution,company,task",
