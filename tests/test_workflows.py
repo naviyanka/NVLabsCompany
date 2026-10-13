@@ -14,6 +14,7 @@ Tests cover:
 """
 
 import asyncio
+import types
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -38,6 +39,51 @@ from nexus.workflows.task_flow import (
 def _run(coro):
     """Run an async coroutine synchronously."""
     return asyncio.run(coro)
+
+
+class _FakeAdapter:
+    """In-memory adapter: no network, no provider bill."""
+
+    def __init__(self, success=True, output="Implemented and tested", cost_cents=7, raises=None):
+        self.success, self.output = success, output
+        self.cost_cents, self.raises = cost_cents, raises
+        self.terminated = 0
+
+    async def create_session(self, agent_id, config):
+        return types.SimpleNamespace(context=None)
+
+    async def execute_task(self, session, task_id, payload):
+        if self.raises is not None:
+            raise self.raises
+        return types.SimpleNamespace(
+            success=self.success, output=self.output, cost_cents=self.cost_cents
+        )
+
+    async def terminate(self, session):
+        self.terminated += 1
+
+
+class _FakeRegistry:
+    def __init__(self, adapter=None, registered=True):
+        self.adapter = adapter or _FakeAdapter()
+        self.registered = registered
+
+    def is_registered(self, adapter_type):
+        return self.registered
+
+    def create_adapter(self, adapter_type, config):
+        return self.adapter
+
+
+async def _real_result(execution, agent):
+    """Stand-in for the activity dispatch: a real-looking, validated result."""
+    return True, {
+        "task_id": execution.task_id,
+        "agent_id": agent["agent_id"],
+        "adapter_type": agent["adapter_type"],
+        "output": f"Delivered {execution.task_id}",
+        "status": "success",
+    }
 
 
 class TestCompanyWorkflow:
@@ -84,6 +130,7 @@ class TestCompanyWorkflow:
         """execute runs CEO -> CTO -> Engineer -> QA and completes."""
         workflow = CompanyWorkflow(
             company_id=company_id,
+            adapter_registry=_FakeRegistry(),
             event_bus=event_bus,
         )
 
@@ -97,7 +144,7 @@ class TestCompanyWorkflow:
 
     def test_strategy_step_for_ceo(self, company_id):
         """First step in trace is CEO creating strategy."""
-        workflow = CompanyWorkflow(company_id=company_id)
+        workflow = CompanyWorkflow(company_id=company_id, adapter_registry=_FakeRegistry())
 
         trace = _run(workflow.execute("Design a system"))
 
@@ -109,7 +156,7 @@ class TestCompanyWorkflow:
 
     def test_task_breakdown_for_cto(self, company_id):
         """Second step in trace is CTO decomposing tasks."""
-        workflow = CompanyWorkflow(company_id=company_id)
+        workflow = CompanyWorkflow(company_id=company_id, adapter_registry=_FakeRegistry())
 
         trace = _run(workflow.execute("Implement feature"))
 
@@ -121,7 +168,7 @@ class TestCompanyWorkflow:
 
     def test_execution_delegation_to_engineer(self, company_id):
         """Engineer steps execute tasks from CTO decomposition."""
-        workflow = CompanyWorkflow(company_id=company_id)
+        workflow = CompanyWorkflow(company_id=company_id, adapter_registry=_FakeRegistry())
 
         trace = _run(workflow.execute("Build module"))
 
@@ -133,7 +180,7 @@ class TestCompanyWorkflow:
 
     def test_qa_review_step(self, company_id):
         """QA step reviews execution results."""
-        workflow = CompanyWorkflow(company_id=company_id)
+        workflow = CompanyWorkflow(company_id=company_id, adapter_registry=_FakeRegistry())
 
         trace = _run(workflow.execute("Complete feature"))
 
@@ -145,7 +192,7 @@ class TestCompanyWorkflow:
 
     def test_full_trace_recording(self, company_id):
         """WorkflowTrace records all steps with timing and cost."""
-        workflow = CompanyWorkflow(company_id=company_id)
+        workflow = CompanyWorkflow(company_id=company_id, adapter_registry=_FakeRegistry())
 
         trace = _run(workflow.execute("Full test", estimated_cost_cents=200))
 
@@ -162,6 +209,7 @@ class TestCompanyWorkflow:
         """Budget enforcer is called during engineer execution."""
         workflow = CompanyWorkflow(
             company_id=company_id,
+            adapter_registry=_FakeRegistry(),
             budget_enforcer=budget_enforcer,
         )
 
@@ -182,6 +230,7 @@ class TestCompanyWorkflow:
 
         workflow = CompanyWorkflow(
             company_id=company_id,
+            adapter_registry=_FakeRegistry(),
             budget_enforcer=denied_enforcer,
         )
 
@@ -195,11 +244,15 @@ class TestCompanyWorkflow:
         assert "Budget denied" in (denied_step[0].error or "")
         # No cost should be accumulated for denied tasks
         assert trace.total_cost_cents == 0
+        # A budget-blocked run must not continue to QA and read as completed
+        assert trace.status == WorkflowStatus.BLOCKED
+        assert not [s for s in trace.steps if s.agent_role == "qa"]
 
     def test_event_emission_at_state_transitions(self, company_id, event_bus):
         """Events are emitted at workflow start, steps, and completion."""
         workflow = CompanyWorkflow(
             company_id=company_id,
+            adapter_registry=_FakeRegistry(),
             event_bus=event_bus,
         )
 
@@ -213,7 +266,7 @@ class TestCompanyWorkflow:
 
     def test_workflow_trace_stored(self, company_id):
         """Executed workflow trace is retrievable via get_trace."""
-        workflow = CompanyWorkflow(company_id=company_id)
+        workflow = CompanyWorkflow(company_id=company_id, adapter_registry=_FakeRegistry())
 
         trace = _run(workflow.execute("Stored workflow"))
 
@@ -223,7 +276,7 @@ class TestCompanyWorkflow:
 
     def test_metadata_attached_to_trace(self, company_id):
         """Custom metadata is attached to the WorkflowTrace."""
-        workflow = CompanyWorkflow(company_id=company_id)
+        workflow = CompanyWorkflow(company_id=company_id, adapter_registry=_FakeRegistry())
 
         trace = _run(workflow.execute(
             "Meta test",
@@ -262,7 +315,9 @@ class TestTaskFlow:
         flow = TaskFlow(
             company_id=company_id,
             event_bus=event_bus,
+            adapter_registry=_FakeRegistry(),
         )
+        flow._do_execute = _real_result  # type: ignore
         flow.register_agent(
             agent_id="engineer-1",
             capabilities=["code_generation", "testing"],
@@ -422,7 +477,9 @@ class TestTaskFlow:
 
     def test_escalation_after_max_retries(self, company_id, event_bus):
         """Task is escalated after max retries are exhausted."""
-        flow = TaskFlow(company_id=company_id, event_bus=event_bus)
+        flow = TaskFlow(
+            company_id=company_id, event_bus=event_bus, adapter_registry=_FakeRegistry()
+        )
         flow.register_agent(
             agent_id="junior-1",
             capabilities=["code_generation"],
@@ -456,7 +513,9 @@ class TestTaskFlow:
 
     def test_retry_on_failure(self, company_id, event_bus):
         """Task retries up to max_attempts before escalation."""
-        flow = TaskFlow(company_id=company_id, event_bus=event_bus)
+        flow = TaskFlow(
+            company_id=company_id, event_bus=event_bus, adapter_registry=_FakeRegistry()
+        )
         flow.register_agent(
             agent_id="agent-retry",
             capabilities=["code_generation"],
@@ -501,7 +560,10 @@ class TestTaskFlow:
 
     def test_set_kill_switch(self, company_id, event_bus):
         """set_kill_switch dynamically controls execution blocking."""
-        flow = TaskFlow(company_id=company_id, event_bus=event_bus)
+        flow = TaskFlow(
+            company_id=company_id, event_bus=event_bus, adapter_registry=_FakeRegistry()
+        )
+        flow._do_execute = _real_result  # type: ignore
         flow.register_agent(
             agent_id="agent-1",
             capabilities=["code_generation"],

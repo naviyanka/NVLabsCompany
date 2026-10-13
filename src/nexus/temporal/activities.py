@@ -213,8 +213,7 @@ async def execute_task_activity(input: ExecuteTaskInput) -> ExecuteTaskOutput:
     This is ``TaskFlow._do_execute`` lifted out of the façade. The adapter
     session is created and terminated inside the activity so a crash cannot
     leak it across a workflow replay. When the adapter type is not registered,
-    the simulated result is returned — the same demo/testing behaviour the
-    façade had.
+    the result is an unsuccessful ``blocked`` output; nothing is simulated.
     """
     from nexus.adapters.registry import AdapterRegistry
     from nexus.tools.context import ExecutionContext
@@ -249,19 +248,21 @@ async def execute_task_activity(input: ExecuteTaskInput) -> ExecuteTaskOutput:
                 error=result.error,
             )
         except Exception as e:
-            logger.error("Execute task activity failed: %s", e)
+            # Type only, in the log and the result: adapter messages can echo
+            # credentials, prompts or provider response bodies.
+            logger.error("Execute task activity failed: %s", type(e).__name__)
             return ExecuteTaskOutput(
                 task_id=input.task_id,
                 success=False,
-                error=f"Adapter execution failed: {type(e).__name__}: {e}",
+                error=f"Adapter execution failed: {type(e).__name__}",
             )
 
-    # No registered adapter — simulated execution for demo/testing.
+    # No registered adapter: the task did not run, so it must not read as done.
     return ExecuteTaskOutput(
         task_id=input.task_id,
-        success=True,
-        output=f"Executed task {input.task_id}",
-        status="success",
+        success=False,
+        status="blocked",
+        error=f"Adapter unavailable: {input.adapter_type}",
     )
 
 

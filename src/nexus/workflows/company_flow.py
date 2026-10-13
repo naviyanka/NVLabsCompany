@@ -13,9 +13,10 @@ The workflow integrates with:
 - AuditLogger: recording all workflow actions
 """
 
+import asyncio
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 from enum import Enum
 from typing import Any, Protocol
 
@@ -187,9 +188,8 @@ class CompanyWorkflow:
             event_bus: Optional EventBus for publishing state transitions.
             approval_engine: Optional ApprovalEngine for gating high-risk actions.
             budget_enforcer: Optional BudgetEnforcer for cost checking.
-            adapter_registry: Optional AdapterRegistry for real adapter execution.
-                If provided, engineer execution steps are wired through the
-                registry. If None, execution is simulated.
+            adapter_registry: AdapterRegistry for real adapter execution.
+                If None, engineer steps are blocked; nothing is simulated.
             principal: The authenticated caller that started the workflow;
                 engineer tool calls are authorised as this principal.
         """
@@ -250,16 +250,19 @@ class CompanyWorkflow:
             results = await self._engineers_execute(
                 trace, tasks, estimated_cost_cents
             )
-            if trace.status == WorkflowStatus.FAILED:
+            # A blocked run (budget, approval, no adapter) must not reach QA:
+            # QA would reset the status and pass the partial results.
+            if trace.status in (WorkflowStatus.FAILED, WorkflowStatus.BLOCKED):
+                trace.completed_at = datetime.now(UTC)
                 return trace
 
             # Step 4: QA reviews results
             await self._qa_review(trace, results)
 
-            # Mark completed if QA passed
+            # Mark completed if QA passed; a QA failure is terminal too.
             if trace.status != WorkflowStatus.FAILED:
                 trace.status = WorkflowStatus.COMPLETED
-                trace.completed_at = datetime.now(timezone.utc)
+            trace.completed_at = datetime.now(UTC)
 
             await self._emit_event(
                 "workflow_completed",
@@ -270,6 +273,11 @@ class CompanyWorkflow:
                 },
             )
 
+        except asyncio.CancelledError:
+            # Cancellation is terminal and never reads as success.
+            trace.status = WorkflowStatus.FAILED
+            trace.completed_at = datetime.now(UTC)
+            raise
         except Exception as exc:
             trace.status = WorkflowStatus.FAILED
             trace.completed_at = datetime.now(timezone.utc)
@@ -277,7 +285,8 @@ class CompanyWorkflow:
                 "workflow_failed",
                 {
                     "workflow_id": trace.workflow_id,
-                    "error": str(exc),
+                    # Type only: the message can echo provider responses.
+                    "error": type(exc).__name__,
                 },
             )
 
@@ -489,34 +498,42 @@ class CompanyWorkflow:
                 },
             )
 
-            # Execute via adapter registry if available, otherwise simulate
             result = await self._execute_engineer_task(task)
             results.append(result)
 
+            # The step reports what the adapter did, never an assumed success.
+            spent = result["cost_cents"]
             step.output_data = result
-            step.status = "completed"
-            step.cost_cents = task_cost
+            step.status = result["status"]
+            step.error = result.get("error")
+            step.cost_cents = spent
             step.completed_at = datetime.now(timezone.utc)
-            trace.total_cost_cents += task_cost
+            trace.total_cost_cents += spent
 
-            # Record cost event
-            if self._budget_enforcer is not None:
+            # Record what the adapter actually billed
+            if self._budget_enforcer is not None and spent:
                 self._budget_enforcer.on_cost_event(
                     "company",
                     uuid.UUID(self.company_id) if self._is_valid_uuid(self.company_id) else uuid.uuid4(),
-                    task_cost,
+                    spent,
                     f"Task execution: {task.get('task_id', '')}",
                 )
+
+            if result["status"] == "blocked":
+                trace.status = WorkflowStatus.BLOCKED
+                return results
 
         return results
 
     async def _execute_engineer_task(
         self, task: dict[str, Any]
     ) -> dict[str, Any]:
-        """Execute a single engineer task, optionally through the adapter registry.
+        """Execute a single engineer task through the adapter registry.
 
-        If an adapter_registry is available, attempts real execution. Otherwise
-        falls back to simulated results for demo/testing purposes.
+        Only a successful adapter run with real output is ``completed``. A
+        missing registry or adapter is ``blocked``; an exception, a failed run
+        or an empty output is ``failed``. Nothing is ever simulated: a result
+        here is reported upward as delivered work.
 
         Args:
             task: Task specification dictionary.
@@ -524,42 +541,54 @@ class CompanyWorkflow:
         Returns:
             Execution result dictionary.
         """
-        task_cost = task.get("estimated_cost_cents", 0)
+        task_id = task.get("task_id")
+        # Use ollama (local, zero-cost) by default for engineer tasks
+        adapter_type = task.get("adapter_type", "ollama")
+        config = task.get("adapter_config", {"model": "codellama"})
 
-        if self._adapter_registry is not None:
+        if self._adapter_registry is None or not self._adapter_registry.is_registered(adapter_type):
+            return {
+                "task_id": task_id,
+                "status": "blocked",
+                "output": "",
+                "cost_cents": 0,
+                "error": f"Adapter unavailable: {adapter_type}",
+            }
+
+        try:
+            adapter = self._adapter_registry.create_adapter(adapter_type, config)
+            session = await adapter.create_session(uuid.uuid4(), config)
+            session.context = self._execution_context(adapter_type)
             try:
-                # Use ollama (local, zero-cost) by default for engineer tasks
-                adapter_type = task.get("adapter_type", "ollama")
-                config = task.get("adapter_config", {"model": "codellama"})
+                task_result = await adapter.execute_task(
+                    session, uuid.uuid4(), {"prompt": task.get("description", "")}
+                )
+            finally:
+                await adapter.terminate(session)
+        except Exception as exc:
+            # Type only: adapter messages can echo credentials or provider bodies.
+            return {
+                "task_id": task_id,
+                "status": "failed",
+                "output": "",
+                "cost_cents": 0,
+                "error": f"Adapter execution failed: {type(exc).__name__}",
+            }
 
-                if self._adapter_registry.is_registered(adapter_type):
-                    adapter = self._adapter_registry.create_adapter(adapter_type, config)
-                    agent_id = uuid.uuid4()
-                    session = await adapter.create_session(agent_id, config)
-                    session.context = self._execution_context(adapter_type)
-
-                    task_uuid = uuid.uuid4()
-                    task_result = await adapter.execute_task(
-                        session, task_uuid, {"prompt": task.get("description", "")}
-                    )
-                    await adapter.terminate(session)
-
-                    return {
-                        "task_id": task.get("task_id"),
-                        "status": "completed" if task_result.success else "failed",
-                        "output": task_result.output or f"Completed: {task.get('description', '')}",
-                        "cost_cents": task_result.cost_cents or task_cost,
-                    }
-            except Exception:
-                # Fall through to simulated execution on adapter failure
-                pass
-
-        # Simulated execution (no adapter registry or adapter failure)
+        output = task_result.output or ""
+        completed = bool(task_result.success and output)
+        if completed:
+            error = None
+        elif not task_result.success:
+            error = "Adapter reported failure"
+        else:
+            error = "Adapter returned no output"
         return {
-            "task_id": task.get("task_id"),
-            "status": "completed",
-            "output": f"Completed: {task.get('description', '')}",
-            "cost_cents": task_cost,
+            "task_id": task_id,
+            "status": "completed" if completed else "failed",
+            "output": output,
+            "cost_cents": task_result.cost_cents or 0,
+            "error": error,
         }
 
     async def _qa_review(
@@ -594,9 +623,13 @@ class CompanyWorkflow:
         # QA validates results - check for failures
         failed_tasks = [r for r in results if r.get("status") != "completed"]
 
-        if failed_tasks:
+        if failed_tasks or not results:
             step.status = "failed"
-            step.error = f"{len(failed_tasks)} tasks failed review"
+            step.error = (
+                f"{len(failed_tasks)} tasks failed review"
+                if results
+                else "No task results to review"
+            )
             step.output_data = {"passed": False, "failed_count": len(failed_tasks)}
             trace.status = WorkflowStatus.FAILED
         else:

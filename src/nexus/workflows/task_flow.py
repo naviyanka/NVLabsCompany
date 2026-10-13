@@ -21,9 +21,10 @@ Post-execution:
 - Error handling with retry/escalation
 """
 
+import asyncio
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 from enum import Enum
 from typing import Any, Protocol
 
@@ -155,9 +156,8 @@ class TaskFlow:
     to reporting. Integrates with budget, approval, and event systems
     to ensure governed, observable, and auditable execution.
 
-    When an adapter_registry is provided, execution is wired through the
-    registry to create real adapter instances. Without a registry, execution
-    falls back to simulated results for demo/testing purposes.
+    Execution is wired through the adapter registry. Without a registry the
+    task is BLOCKED; no result is ever simulated.
 
     Features:
     - Agent selection based on required capabilities
@@ -201,8 +201,8 @@ class TaskFlow:
             budget_enforcer: Optional BudgetEnforcer for cost checking.
             approval_engine: Optional ApprovalEngine for approval gates.
             kill_switch_active: Whether the kill switch is engaged.
-            adapter_registry: Optional AdapterRegistry for real adapter execution.
-                If None, execution is simulated.
+            adapter_registry: AdapterRegistry for real adapter execution.
+                If None, every task is BLOCKED.
             principal: The authenticated caller that started the flow. Tool
                 calls are authorised as this principal; ``None`` means the
                 flow is autonomous and each agent acts as itself.
@@ -313,6 +313,13 @@ class TaskFlow:
         execution.agent_id = agent["agent_id"]
         execution.adapter_type = agent["adapter_type"]
 
+        # No registry, no execution: never simulate a result.
+        if self._adapter_registry is None:
+            execution.status = TaskStatus.BLOCKED
+            execution.error = "Adapter registry unavailable - task not executed"
+            execution.completed_at = datetime.now(UTC)
+            return execution
+
         # Execute with retry
         for attempt in range(1, max_attempts + 1):
             execution.attempt = attempt
@@ -329,8 +336,24 @@ class TaskFlow:
                 },
             )
 
-            # Execute (in real implementation, this calls the adapter)
-            success, result = await self._do_execute(execution, agent)
+            try:
+                success, result = await self._do_execute(execution, agent)
+            except asyncio.CancelledError:
+                # Cancellation is terminal and never reads as success.
+                execution.status = TaskStatus.FAILED
+                execution.error = "Execution cancelled"
+                execution.completed_at = datetime.now(UTC)
+                raise
+            except Exception as e:
+                # Type only: adapter messages can echo credentials or prompts.
+                success, result = False, {"error": f"Execution failed: {type(e).__name__}"}
+
+            if not success and result.get("status") == "blocked":
+                # The adapter is unavailable; retrying cannot change that.
+                execution.status = TaskStatus.BLOCKED
+                execution.error = result.get("error") or "Adapter unavailable"
+                execution.completed_at = datetime.now(UTC)
+                return execution
 
             if success:
                 # Validate result
@@ -539,9 +562,8 @@ class TaskFlow:
     ) -> tuple[bool, dict[str, Any]]:
         """Execute the task via the selected adapter.
 
-        If an adapter_registry is available, creates a real adapter instance,
-        establishes a session, and executes the task through it. Otherwise,
-        falls back to simulated results for demo/testing purposes.
+        Dispatches the execute_task activity, which creates a real adapter
+        instance, establishes a session, and executes the task through it.
 
         Args:
             execution: The current execution record.
@@ -554,17 +576,6 @@ class TaskFlow:
         from nexus.temporal.activities import ExecuteTaskInput, execute_task_activity
 
         adapter_type = agent["adapter_type"]
-
-        # No registry injected — keep the simulated result the façade always
-        # returned for demo/testing, without paying for an activity dispatch.
-        if self._adapter_registry is None:
-            return True, {
-                "task_id": execution.task_id,
-                "agent_id": agent["agent_id"],
-                "adapter_type": adapter_type,
-                "output": f"Executed task {execution.task_id}",
-                "status": "success",
-            }
 
         # An adapter run bills, so it is dispatched once only.
         output = await execute_activity(
@@ -624,12 +635,8 @@ class TaskFlow:
         """
         if not result:
             return False
-        status = result.get("status", "")
-        if status in ("success", "completed"):
-            return True
-        if result.get("output"):
-            return True
-        return False
+        # A success status with no output is not a deliverable.
+        return result.get("status") in ("success", "completed") and bool(result.get("output"))
 
     def _escalate(
         self, execution: TaskExecution, required_capabilities: list[str]
