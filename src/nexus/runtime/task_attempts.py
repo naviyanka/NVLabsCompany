@@ -1059,10 +1059,9 @@ async def _finish_in(
         if record is not None and record.status in session_service.OPEN_STATUSES:
             session_service.transition(record, "completed")
             await release_session_worktree(db, record)
-    if (fresh.context_snapshot or {}).get("work_spec", {}).get("mode") == "text":
-        from nexus.services import work_service
+    from nexus.services import work_service
 
-        await work_service.after_terminal(db, fresh)
+    await work_service.after_terminal(db, fresh)
     attempt.status = attempt_status
     return True
 

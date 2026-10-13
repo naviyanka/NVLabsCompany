@@ -155,6 +155,13 @@ async def _assign(co, work, key="a1", employee="acme_eve", manager="acme_lead", 
         )
 
 
+async def _finalize(co, work, manager="acme_lead", company="acme"):
+    async with co["db"]() as s:
+        return await work_service.finalize_plan(
+            s, co[company], co[manager], work, actor="agent:lead"
+        )
+
+
 async def _review(co, attempt, decision="verify", reviewer="acme_lead", company="acme", **kw):
     async with co["db"]() as s:
         return await work_service.review(
@@ -212,8 +219,11 @@ class TestLifecycle:
         done, changed = await _review(co, attempt)
         assert changed and done.status == "completed"
         assert (await _get(co, Task, task)).status == "completed"
+        # One verified child does not close the order: the manager has not finalized the plan.
+        assert (await _get(co, Task, work)).status == "in_progress"
+        _, changed = await _finalize(co, work)
         parent = await _get(co, Task, work)
-        assert parent.status == "completed" and DELIVERABLE in parent.result
+        assert changed and parent.status == "completed" and DELIVERABLE in parent.result
         # The employee ran it, the manager did not.
         assert done.agent_id == co["acme_eve"]
 
@@ -289,6 +299,8 @@ class TestLifecycle:
         with_text = await _status(co, with_deliverable=True)
         assert _item(with_text, work)["tasks"][0]["attempt"]["deliverable"] == DELIVERABLE
         await _review(co, attempt)
+        assert _item(await _status(co), work)["status"] == "in_progress"
+        await _finalize(co, work)
         done = _item(await _status(co), work)
         assert done["status"] == "completed" and DELIVERABLE in done["result"]
 
@@ -447,6 +459,7 @@ class TestRejectAndRetry:
         assert second.status == "verifying"
         assert (await _get(co, Task, task)).status == "in_review"
         await _review(co, second.id)
+        await _finalize(co, work)
         assert (await _get(co, Task, work)).status == "completed"
 
     async def test_retry_is_capped(self, co):
@@ -481,6 +494,7 @@ class TestCancel:
     async def test_completed_work_cannot_be_cancelled(self, co):
         work, _, attempt = await _submitted(co)
         await _review(co, attempt)
+        await _finalize(co, work)
         async with co["db"]() as s:
             assert await _code(work_service.cancel_work(s, co["acme"], work, actor="op")) == 409
         assert (await _get(co, Task, work)).status == "completed"
@@ -587,6 +601,12 @@ class TestTools:
         )
         assert verdict["changed"] is True
         status = await manager_tools.call(ceo, "ceo_get_work_status", {})
+        assert _item(status, work_id)["status"] == "in_progress"
+        fin = await manager_tools.call(lead, "manager_finalize_plan", {"work_id": work_id})
+        assert (fin["changed"], fin["status"], fin["plan_finalized"]) == (True, "completed", True)
+        again = await manager_tools.call(lead, "manager_finalize_plan", {"work_id": work_id})
+        assert again["changed"] is False
+        status = await manager_tools.call(ceo, "ceo_get_work_status", {})
         assert _item(status, work_id)["status"] == "completed"
         assert "deliverable" not in str(status)
 
@@ -678,6 +698,8 @@ class TestRoutes:
         first = (await api("POST", url, body)).json()
         again = (await api("POST", url, body)).json()
         assert (first["changed"], again["changed"]) == (True, False)
+        assert (await api("GET", f"/api/v1/work/{work}")).json()["status"] == "in_progress"
+        await _finalize(co, work)
         done = (await api("GET", f"/api/v1/work/{work}")).json()
         assert done["status"] == "completed"
         assert (await api("POST", f"/api/v1/work/{work}/cancel")).status_code == 409

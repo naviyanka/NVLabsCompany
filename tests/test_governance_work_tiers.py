@@ -29,12 +29,18 @@ from tests.test_governance_presets import _draft, _make, _publish
 from tests.test_governance_studio import _eff, _policy, api  # noqa: F401 -- fixtures, helpers
 from tests.test_tool_access import ctx, factory, t  # noqa: F401 -- fixtures
 
-WORK_TOOLS = ("manager_delegate_task", "manager_assign_work", "manager_review_work")
+WORK_TOOLS = (
+    "manager_delegate_task",
+    "manager_assign_work",
+    "manager_finalize_plan",
+    "manager_review_work",
+)
 MANAGER_TOOLS = WORK_TOOLS
 FIRST_LEVEL = {
     "ceo_get_work_status": 0,
     "manager_delegate_task": 3,
     "manager_assign_work": 3,
+    "manager_finalize_plan": 3,
     "manager_review_work": 3,
     "manager_request_hire": 4,
     "ceo_create_goal_or_work_order": 5,

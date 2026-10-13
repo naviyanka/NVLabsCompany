@@ -11,6 +11,9 @@ precomputed snapshot and needs an explicit policy for more than the team.
 the inbound default policy they stay denied until the company allows them. A
 manager cannot create an agent directly: it can only file a hiring request,
 which the hiring policy and a human decide.
+
+A delegated work order closes only when its manager calls ``manager_finalize_plan``
+and every task under it is completed: finishing one task never completes the order.
 """
 
 from __future__ import annotations
@@ -23,7 +26,13 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from nexus.runtime.task_attempts import MAX_DELIVERABLE_CHARS, attempt_view
+from nexus.runtime.task_attempts import (
+    MAX_DELIVERABLE_CHARS,
+    Criterion,
+    RelPath,
+    VerificationStep,
+    attempt_view,
+)
 from nexus.services import hiring_service, org_snapshot, work_service
 from nexus.services import manager_service as ms
 from nexus.tools.effects import (
@@ -80,10 +89,23 @@ class AssignWork(BaseModel):
     employee_id: uuid.UUID
     title: str = Field(min_length=1, max_length=255)
     objective: str = Field(min_length=1, max_length=4000)
+    # The rest is the child's WorkSpec; WorkSpec itself validates the combination (a text task
+    # takes the deliverable caps, a write or read_only task a repository and its checks).
+    mode: Literal["text", "write", "read_only"] = "text"
+    repository_id: uuid.UUID | None = None
+    deliverables: list[RelPath] = Field(default_factory=list, max_length=50)
+    verification: list[VerificationStep] = Field(default_factory=list, max_length=10)
+    acceptance_criteria: list[Criterion] = Field(default_factory=list, max_length=30)
     expected_deliverable: str | None = Field(default=None, max_length=500)
     max_deliverable_chars: int | None = Field(default=None, ge=100, le=MAX_DELIVERABLE_CHARS)
     max_attempts: int | None = Field(default=None, ge=1, le=5)
     idempotency_key: str = Field(min_length=1, max_length=200)
+
+
+class FinalizePlan(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    work_id: uuid.UUID
 
 
 class ReviewWork(BaseModel):
@@ -100,11 +122,22 @@ async def _assign_work(db, company_id, manager_id, args, actor):
     task, attempt, created = await work_service.assign_task(
         db, company_id, manager_id, args.work_id, args.employee_id,
         title=args.title, objective=args.objective, idempotency_key=args.idempotency_key,
+        mode=args.mode, repository_id=args.repository_id,
+        deliverables=args.deliverables, verification=args.verification,
+        acceptance_criteria=args.acceptance_criteria,
         expected_deliverable=args.expected_deliverable,
         max_deliverable_chars=args.max_deliverable_chars,
         attempts_cap=args.max_attempts, principal=principal,
     )
     return {"created": created, "task_id": str(task.id), "attempt": attempt_view(attempt)}
+
+
+async def _finalize_plan(db, company_id, manager_id, args, actor):
+    order, changed = await work_service.finalize_plan(
+        db, company_id, manager_id, args.work_id, actor=actor
+    )
+    return {"changed": changed, "work_id": str(order.id), "status": order.status,
+            "plan_finalized": True}
 
 
 async def _review_work(db, company_id, manager_id, args, actor):
@@ -181,6 +214,17 @@ MANAGER_TOOLS: dict[str, ManagerTool] = {
         (),
         _assign_work,
         AssignWork,
+        effect=EffectClass.IDEMPOTENT_WRITE,
+    ),
+    "manager_finalize_plan": ManagerTool(
+        "Declare that you have assigned every task your work order needs. After this no more "
+        "tasks can be added to it, and it completes once all its tasks are verified complete. "
+        "Until you call it the work order stays open however many tasks finish. Needs at "
+        "least one assigned task. Idempotent.",
+        "write",
+        (),
+        _finalize_plan,
+        FinalizePlan,
         effect=EffectClass.IDEMPOTENT_WRITE,
     ),
     "manager_review_work": ManagerTool(

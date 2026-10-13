@@ -72,6 +72,13 @@ _T: dict[str, tuple[str, str, str | None, tuple[str, ...]]] = {
         "it to a direct report, naming the deliverable expected. Repeating the request with "
         "the same idempotency key does not create a duplicate.",
         "Only direct reports, and only the manager's own delegated work orders.", ()),
+    "org.manager_finalize_plan": (
+        "Finalize a Work Plan",
+        "Allows a manager to declare that they have assigned every task their work order needs. "
+        "No more tasks can be added after that, and the work order completes once all its tasks "
+        "are verified complete. Repeating the request changes nothing.",
+        "Only the manager's own delegated work orders, and only after at least one task is "
+        "assigned.", ()),
     "org.manager_review_work": (
         "Verify or Reject Submitted Work",
         "Allows a manager to verify or reject a deliverable submitted by one of their direct "

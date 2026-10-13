@@ -86,6 +86,7 @@ TABLE: dict[str, Proof] = {
     "manager_delegate_task": Proof(IDEM, INTRINSIC, "one task attempt per manager/employee key"),
     "manager_request_hire": Proof(IDEM, LEDGER_KEY, "hiring dedupes on the ledger key"),
     "manager_assign_work": Proof(IDEM, LEDGER_KEY, "child task id derives from the ledger key"),
+    "manager_finalize_plan": Proof(IDEM, INTRINSIC, "one conditional update sets the plan flag"),
     "manager_review_work": Proof(IDEM, INTRINSIC, "one conditional update decides"),
     "ceo_delegate_task_to_manager": Proof(IDEM, INTRINSIC, "one task attempt per key"),
     "ceo_create_goal_or_work_order": Proof(IDEM, LEDGER_KEY, "id derives from the ledger key"),
