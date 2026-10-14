@@ -5,17 +5,31 @@ A *work order* is a top-level ``Task`` stamped with :data:`WORK_ORDER` in its
 forbids the ``kind`` key, so the stamp cannot be forged through the task routes).
 An ordinary top-level ``Task`` carries no stamp and never enters this lifecycle.
 The CEO delegates it to a manager
-(``delegated``); the manager assigns one child ``Task`` to a direct report with
-a text ``WorkSpec``; the employee's attempt answers it; the attempt then waits
-for a manager's review before anything counts as done::
+(``delegated``); the manager assigns child ``Task`` rows to direct reports, each
+with its own full ``WorkSpec`` (any mode); each employee's attempt answers its
+child; a text child then waits for a manager's review before it counts as done::
 
-    pending -> delegated -> in_progress -> (employee works) -> in_review
-                                   verify -> completed        reject -> failed (retry within cap)
+    child:  pending -> in_progress -> (employee works) -> in_review
+                   verify -> completed        reject -> failed (retry within cap)
+    order:  pending -> delegated -> in_progress -> completed | failed
+
+A work order completes only after its manager calls :func:`finalize_plan` and
+every child has completed. Finalizing stamps ``plan_finalized_at`` and
+``plan_finalized_by`` into the order's ``work_spec``; it takes no new child
+afterwards (409 ``WORK_CLOSED``). :func:`after_terminal` rolls each finished
+attempt up to its order, the same way for every mode: a completed child
+completes a finalized order whose children are all completed, and a child out
+of attempts fails the order.
 
 Rules this module enforces:
 
 * Every transition is one conditional UPDATE, so a replay or a race has exactly
   one winner and the loser reads the winner's state.
+* :func:`assign_task`, :func:`finalize_plan` and :func:`after_terminal` each
+  lock the order's row with that UPDATE before reading its plan flag or its
+  children, so an assignment either lands before the finalize (and the order
+  waits for it) or sees the finalized plan and is refused; no child can attach
+  to a finalized plan, and none is missed by the completion check.
 * Submission is not completion. Only :func:`review` (verify) completes a text
   task, and the reviewer is never the executor.
 * Audit rows hold ids, sizes and a digest, never the deliverable or a prompt.
@@ -61,6 +75,11 @@ DIGEST_MAX_CHARS = 4000
 OPEN_LIMIT = 25
 CLOSED_LIMIT = 10
 WORK_ORDER: dict[str, Any] = {"kind": WORK_ORDER_KIND}
+# The manager closes its plan by stamping these into the work order's own ``work_spec``
+# (no migration). Until then the order is never completed, whatever its children do.
+PLAN_FINALIZED_AT = "plan_finalized_at"
+PLAN_FINALIZED_BY = "plan_finalized_by"
+OPEN_PARENT_STATUSES = ("delegated", "in_progress", "in_review", "pending")
 
 
 def is_work_order(task: Task) -> bool:
@@ -74,6 +93,20 @@ def _work_order_clause() -> Any:
         Task.parent_task_id.is_(None),
         Task.work_spec["kind"].as_string() == WORK_ORDER_KIND,
     )
+
+
+def is_plan_finalized(task: Task) -> bool:
+    """Whether the work order's manager has closed its plan to new children."""
+    return isinstance(task.work_spec, dict) and bool(task.work_spec.get(PLAN_FINALIZED_AT))
+
+
+def _plan_open_clause() -> Any:
+    """SQL form of ``not is_plan_finalized``."""
+    return Task.work_spec[PLAN_FINALIZED_AT].as_string().is_(None)
+
+
+def _plan_final_clause() -> Any:
+    return Task.work_spec[PLAN_FINALIZED_AT].as_string().is_not(None)
 
 
 def _kind_clause(task: Any) -> Any:
@@ -356,6 +389,11 @@ async def assign_task(
     title: str,
     objective: str,
     idempotency_key: str,
+    mode: str = "text",
+    repository_id: uuid.UUID | None = None,
+    deliverables: list[str] | None = None,
+    verification: list[Any] | None = None,
+    acceptance_criteria: list[Any] | None = None,
     expected_deliverable: str | None = None,
     max_deliverable_chars: int | None = None,
     attempts_cap: int | None = None,
@@ -363,15 +401,31 @@ async def assign_task(
 ) -> tuple[Task, TaskAttempt, bool]:
     """The manager creates one task under its work order and assigns it to a report.
 
-    Replaying the same key returns the same task and attempt; the same key with
-    another employee or title is a 409. Returns ``(task, attempt, created)``.
+    The child's ``WorkSpec`` is validated whole by :class:`WorkSpec` (422
+    ``INVALID_WORK_SPEC``) and stored as validated. Replaying the same key returns the same
+    task and attempt; the same key with another employee, title or spec is a 409. A plan the
+    manager has finalized (:func:`finalize_plan`) takes no new child: 409 ``WORK_CLOSED``.
+    Returns ``(task, attempt, created)``.
     """
     actor = principal.display_name
-    await ms.require_report(db, company_id, manager_id, employee_id)
+    employee = await ms.require_report(db, company_id, manager_id, employee_id)
     parent = await _row(db, company_id, work_order_id)
     if parent.assigned_agent_id != manager_id or not is_work_order(parent):
         # Not this manager's work order: indistinguishable from a missing one.
         raise _error(404, "TASK_NOT_FOUND", f"Task {work_order_id} not found")
+    fields = {
+        "mode": mode,
+        "objective": objective,
+        "repository_id": repository_id,
+        "deliverables": deliverables,
+        "verification": verification,
+        "acceptance_criteria": acceptance_criteria,
+        "expected_deliverable": expected_deliverable,
+        "max_deliverable_chars": max_deliverable_chars,
+        "max_attempts": attempts_cap,
+    }
+    spec = task_attempts.parse_work_spec({k: v for k, v in fields.items() if v is not None})
+    stored = spec.model_dump(mode="json")
     child_id = uuid.uuid5(NAMESPACE, f"{company_id}:{manager_id}:assigned:{idempotency_key}")
     child = (
         await db.execute(select(Task).where(Task.id == child_id, Task.company_id == company_id))
@@ -382,6 +436,7 @@ async def assign_task(
             child.parent_task_id != parent.id
             or child.assigned_agent_id != employee_id
             or child.title != title
+            or child.work_spec != stored
         ):
             raise _error(
                 409,
@@ -389,15 +444,27 @@ async def assign_task(
                 "This idempotency key was used for a different request",
             )
     else:
-        if parent.status in CLOSED_STATUSES or parent.status == "failed":
-            raise _error(409, "WORK_CLOSED", f"The work order is {parent.status}")
-        spec = WorkSpec(
-            mode="text",
-            objective=objective,
-            expected_deliverable=expected_deliverable,
-            max_deliverable_chars=max_deliverable_chars,
-            max_attempts=attempts_cap,
+        _require_open_for_children(parent)
+        # Everything the attempt would refuse is refused now, before a child exists.
+        await task_service.require_work_spec_references(db, company_id, stored)
+        task_attempts.check_employee(employee, spec.mode)
+        # Take the work order's row lock before the insert: a concurrent finalize either
+        # commits first (this update then matches nothing) or waits for this commit.
+        locked = await db.execute(
+            update(Task)
+            .where(
+                Task.id == parent.id,
+                Task.company_id == company_id,
+                Task.status.not_in((*CLOSED_STATUSES, "failed")),
+                _plan_open_clause(),
+            )
+            .values(updated_at=_now())
+            .execution_options(synchronize_session=False)
         )
+        if locked.rowcount != 1:
+            await db.rollback()
+            _require_open_for_children(await _row(db, company_id, work_order_id))
+            raise _error(409, "WORK_CLOSED", "The work order is not open for new tasks")
         child = Task(
             id=child_id,
             company_id=company_id,
@@ -407,7 +474,7 @@ async def assign_task(
             assigned_agent_id=employee_id,
             parent_task_id=parent.id,
             goal_id=parent.goal_id,
-            work_spec=spec.model_dump(mode="json"),
+            work_spec=stored,
         )
         try:
             async with db.begin_nested():
@@ -438,6 +505,7 @@ async def assign_task(
                 employee_id=employee_id,
                 work_order_id=parent.id,
                 idempotency_key=idempotency_key,
+                mode=spec.mode,
             )
             await db.commit()
     # Always run: a crash between the task and its attempt is healed by the replay.
@@ -445,6 +513,115 @@ async def assign_task(
         db, company_id, manager_id, employee_id, child_id, principal
     )
     return await _row(db, company_id, child_id), attempt, created or queued
+
+
+def _require_open_for_children(parent: Task) -> None:
+    """409 ``WORK_CLOSED`` unless the order is open and its plan not finalized."""
+    if parent.status in CLOSED_STATUSES or parent.status == "failed":
+        raise _error(409, "WORK_CLOSED", f"The work order is {parent.status}")
+    if is_plan_finalized(parent):
+        raise _error(409, "WORK_CLOSED", "The plan is finalized; no more tasks can be added")
+
+
+async def finalize_plan(
+    db: Any, company_id: uuid.UUID, manager_id: uuid.UUID, work_order_id: uuid.UUID, *, actor: str
+) -> tuple[Task, bool]:
+    """The manager declares its plan complete: no new child, and the order may now close.
+
+    Only the manager that owns the order may do it (404 otherwise, like a missing order). A
+    plan with no task is refused (409 ``PLAN_EMPTY``) and a closed or failed order is
+    ``WORK_CLOSED``. Finalizing is one conditional UPDATE on the order's row, so a replay or a
+    race has one winner and the loser reads the winner's state. If every child has already
+    completed, the order completes here. Returns ``(order, changed)``; commits.
+    """
+    parent = await _row(db, company_id, work_order_id)
+    if parent.assigned_agent_id != manager_id or not is_work_order(parent):
+        raise _error(404, "TASK_NOT_FOUND", f"Task {work_order_id} not found")
+    changed = False
+    if not is_plan_finalized(parent):
+        if parent.status in CLOSED_STATUSES or parent.status == "failed":
+            raise _error(409, "WORK_CLOSED", f"The work order is {parent.status}")
+        stamped = {
+            **parent.work_spec,
+            PLAN_FINALIZED_AT: _now().isoformat(),
+            PLAN_FINALIZED_BY: str(manager_id),
+        }
+        won = await db.execute(
+            update(Task)
+            .where(
+                Task.id == parent.id,
+                Task.company_id == company_id,
+                Task.status.not_in((*CLOSED_STATUSES, "failed")),
+                _plan_open_clause(),
+            )
+            .values(work_spec=stamped, updated_at=_now())
+            .execution_options(synchronize_session=False)
+        )
+        if won.rowcount == 1:
+            children = (
+                await db.execute(
+                    select(func.count())
+                    .select_from(Task)
+                    .where(Task.parent_task_id == parent.id, Task.company_id == company_id)
+                )
+            ).scalar_one()
+            if children == 0:
+                await db.rollback()
+                raise _error(409, "PLAN_EMPTY", "Assign at least one task before finalizing")
+            await ms.audit(
+                db, company_id, "work.plan_finalized", actor, "task", parent.id,
+                manager_id=manager_id, tasks=children,
+            )
+            changed = True
+        else:
+            await db.rollback()
+            if not is_plan_finalized(await _row(db, company_id, work_order_id)):
+                raise _error(409, "WORK_CLOSED", "The work order is not open")
+    # The order's row is locked by now (our UPDATE), or already final: a replay changes
+    # nothing except completing an order that a crash left finalized and done.
+    await _complete_if_done(db, company_id, parent.id)
+    await db.commit()
+    return await _row(db, company_id, work_order_id), changed
+
+
+async def _complete_if_done(db: Any, company_id: uuid.UUID, parent_id: uuid.UUID) -> None:
+    """Complete a finalized, open work order whose every child completed. Does not commit.
+
+    A conditional UPDATE: a replay, an open plan, a closed order and a child that is not
+    completed (failed, blocked, cancelled or still running) all change nothing. Callers hold
+    the order's row lock, so the flag and the children are read after any concurrent writer
+    has committed; a child created later is impossible once the plan is final.
+    """
+    rows = (
+        await db.execute(
+            select(Task.status, Task.result).where(
+                Task.parent_task_id == parent_id, Task.company_id == company_id
+            )
+        )
+    ).all()
+    if not rows or any(status != "completed" for status, _ in rows):
+        return
+    now = _now()
+    result = "\n---\n".join((r or "")[: SUMMARY_CHARS * 4] for _, r in rows)[:4000]
+    await db.execute(
+        update(Task)
+        .where(
+            Task.id == parent_id,
+            Task.company_id == company_id,
+            Task.status.in_(OPEN_PARENT_STATUSES),
+            _work_order_clause(),
+            _plan_final_clause(),
+        )
+        .values(
+            status="completed",
+            completion_reason="goal",
+            completed_at=now,
+            result=result or None,
+            error=None,
+            updated_at=now,
+        )
+        .execution_options(synchronize_session=False)
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -734,44 +911,43 @@ class _Actor:
 
 
 async def after_terminal(db: Any, attempt: TaskAttempt) -> None:
-    """Settle the parent work order after a text attempt ends. Called inside ``_finish_in``.
+    """Settle the parent work order after an attempt ends. Called inside ``_finish_in``,
+    before its first audit, so the order's row is locked before the audit chain.
 
-    All children completed completes the order; a child out of attempts fails
-    it (fail fast). Conditional UPDATEs: replays are no-ops.
+    Every mode follows one rule, and only a work order is settled (a child of an ordinary
+    task never reaches it). A completed child completes the order only once its manager
+    finalized the plan and every child completed; an open plan stays open. A child out of
+    attempts fails the order (fail fast). Conditional UPDATEs: replays are no-ops.
     """
     spec = (attempt.context_snapshot or {}).get("work_spec") or {}
-    if spec.get("mode") != "text":
-        return
-    child = await _row(db, attempt.company_id, attempt.task_id)
-    if child.parent_task_id is None:
+    # No task row (recovery of an orphaned attempt) or no parent: nothing to settle.
+    parent_id = (
+        await db.execute(
+            select(Task.parent_task_id).where(
+                Task.id == attempt.task_id, Task.company_id == attempt.company_id
+            )
+        )
+    ).scalar_one_or_none()
+    if parent_id is None:
         return
     now = _now()
-    open_parent = Task.status.in_(("delegated", "in_progress", "in_review", "pending"))
-    where = (Task.id == child.parent_task_id, Task.company_id == attempt.company_id, open_parent)
+    where = (
+        Task.id == parent_id,
+        Task.company_id == attempt.company_id,
+        Task.status.in_(OPEN_PARENT_STATUSES),
+        _work_order_clause(),
+    )
     if attempt.status == "completed":
-        rows = (
-            await db.execute(
-                select(Task.status, Task.result).where(
-                    Task.parent_task_id == child.parent_task_id,
-                    Task.company_id == attempt.company_id,
-                )
-            )
-        ).all()
-        if rows and all(status == "completed" for status, _ in rows):
-            result = "\n---\n".join((r or "")[: SUMMARY_CHARS * 4] for _, r in rows)[:4000]
-            await db.execute(
-                update(Task)
-                .where(*where)
-                .values(
-                    status="completed",
-                    completion_reason="goal",
-                    completed_at=now,
-                    result=result or None,
-                    error=None,
-                    updated_at=now,
-                )
-                .execution_options(synchronize_session=False)
-            )
+        # Lock the order before reading its flag and children, so a finalize racing this
+        # completion cannot miss it (see ``finalize_plan``).
+        locked = await db.execute(
+            update(Task)
+            .where(*where)
+            .values(updated_at=now)
+            .execution_options(synchronize_session=False)
+        )
+        if locked.rowcount == 1:
+            await _complete_if_done(db, attempt.company_id, parent_id)
     elif attempt.status in ("failed", "blocked", "expired") and (
         attempt.attempt_number >= (spec.get("max_attempts") or DEFAULT_MAX_ATTEMPTS)
     ):

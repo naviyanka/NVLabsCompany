@@ -412,6 +412,37 @@
    "governance_overlay"
   ],
   "category": "organization",
+  "effect_class": "write",
+  "explicit_allow_required": true,
+  "feature_gates": [
+   {
+    "name": "tool_binding_enforcement"
+   }
+  ],
+  "id": "org.manager_finalize_plan",
+  "name": "manager_finalize_plan",
+  "risk": "write",
+  "scope_schema": {
+   "conditions": [
+    "risk_level",
+    "tool_name",
+    "agent_id",
+    "time_of_day"
+   ]
+  },
+  "support": "enforced",
+  "tags": [],
+  "toggleable": true,
+  "tool_name": "manager_finalize_plan"
+ },
+ {
+  "approval_support": true,
+  "backends": [
+   "tool_policy",
+   "rbac",
+   "governance_overlay"
+  ],
+  "category": "organization",
   "effect_class": "read",
   "explicit_allow_required": false,
   "feature_gates": [

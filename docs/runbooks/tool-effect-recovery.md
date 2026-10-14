@@ -41,6 +41,7 @@ the ledger.
 | --- | --- | --- | --- |
 | Manager | `manager_delegate_task` | idempotent | intrinsic: one task attempt per manager and employee key (unique `(company, task, key)` on `task_attempts`) |
 | Manager | `manager_assign_work` | idempotent | ledger key: `AssignWork.idempotency_key`; the child task id derives from it, a repeat returns the same task and attempt, and the same key for another employee or title is `IDEMPOTENCY_KEY_REUSED` |
+| Manager | `manager_finalize_plan` | idempotent | intrinsic: one conditional update sets the work order's plan-finalized flag, a repeat returns `changed: false` |
 | Manager | `manager_review_work` | idempotent | intrinsic: one conditional update decides the attempt, a repeat of the winning decision returns the stored result, and the one bounded retry has its own key (`review:<attempt>:retry`) |
 | Manager | `manager_request_hire` | idempotent | ledger key: `HireRequest.idempotency_key`; the hire id derives from it and a repeat returns the same request |
 | Manager | `manager_list_reports`, `manager_employee_status`, `manager_task_evidence`, `manager_rollup`, `manager_list_hiring_requests`, `manager_get_hiring_request` | read only | no effect |
@@ -181,7 +182,7 @@ therefore carries an immutable epoch, `(execution_id, attempt)`:
 
 ### New write tools
 
-The work-lifecycle tools (`manager_assign_work`, `manager_review_work`, `ceo_get_work_status`) are
+The work-lifecycle tools (`manager_assign_work`, `manager_finalize_plan`, `manager_review_work`, `ceo_get_work_status`) are
 classified in the table above. Any tool added after this change must declare: its `EffectClass`, which `ManagerTool` already requires at
 construction; the bridge invocation argument if it is exposed over the HTTP bridge, which
 `bridge_input_schema` adds for every write and which

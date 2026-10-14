@@ -1002,6 +1002,12 @@ async def _finish_in(
         .values(**task_values)
         .execution_options(synchronize_session=False)
     )
+    from nexus.services import work_service
+
+    # Roll up to the parent work order before the first audit: the roll-up locks the
+    # order's row and every audit takes the company's audit-chain lock until commit.
+    # ``finalize_plan`` takes the row first, then the chain; the reverse order deadlocks.
+    await work_service.after_terminal(db, fresh)
     await _audit(
         db,
         fresh,
@@ -1059,10 +1065,6 @@ async def _finish_in(
         if record is not None and record.status in session_service.OPEN_STATUSES:
             session_service.transition(record, "completed")
             await release_session_worktree(db, record)
-    if (fresh.context_snapshot or {}).get("work_spec", {}).get("mode") == "text":
-        from nexus.services import work_service
-
-        await work_service.after_terminal(db, fresh)
     attempt.status = attempt_status
     return True
 
