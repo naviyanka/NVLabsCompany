@@ -911,7 +911,8 @@ class _Actor:
 
 
 async def after_terminal(db: Any, attempt: TaskAttempt) -> None:
-    """Settle the parent work order after an attempt ends. Called inside ``_finish_in``.
+    """Settle the parent work order after an attempt ends. Called inside ``_finish_in``,
+    before its first audit, so the order's row is locked before the audit chain.
 
     Every mode follows one rule, and only a work order is settled (a child of an ordinary
     task never reaches it). A completed child completes the order only once its manager

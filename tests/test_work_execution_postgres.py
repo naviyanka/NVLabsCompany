@@ -774,6 +774,11 @@ _WAITING = sa.text(
     "SELECT l.locktype FROM pg_locks l JOIN pg_stat_activity a ON a.pid = l.pid "
     "WHERE NOT l.granted AND a.datname = current_database()"
 )
+# The statement each blocked backend is running.
+_WAITING_QUERIES = sa.text(
+    "SELECT DISTINCT a.query FROM pg_locks l JOIN pg_stat_activity a ON a.pid = l.pid "
+    "WHERE NOT l.granted AND a.datname = current_database()"
+)
 
 
 class _Hold:
@@ -998,6 +1003,45 @@ class TestPlanFinalization:
         assert DELIVERABLE in order.result
         assert (await stack.one(Task, uuid.UUID(child["task_id"]))).status == "completed"
         assert len(await _audits(stack, a, "work.plan_finalized")) == 1
+
+    async def test_terminal_attempt_locks_the_order_before_the_audit_chain(
+        self, stack, monkeypatch
+    ):
+        """Finalize takes the order's row, then the audit chain. A terminal attempt must take
+        them in the same order: held right after its ``task.attempt_completed`` audit, it
+        already owns the order's row, so the finalize waits on that row, never on the chain
+        lock (which, taken first, would deadlock against the roll-up)."""
+        a = await stack.seed("A")
+        work = await _plan(stack, a, "lock-order")
+        child = await _assign(a, work, "p1")
+        await ta.drain()
+        attempt = child["attempt"]["id"]
+
+        hold = _Hold(monkeypatch, ta, "_audit", "task.attempt_completed")
+        verify = asyncio.create_task(_verify(a, attempt))
+        try:
+            await hold.wait()  # child and attempt terminal, audit chain held, uncommitted
+            finalize = asyncio.create_task(_finalize(a, work))
+            assert await _blocked(stack) <= {"transactionid", "tuple"}, "waits on the chain lock"
+            async with stack.admin_db() as s:
+                (waiting,) = (await s.execute(_WAITING_QUERIES)).scalars()
+            assert waiting.lstrip().upper().startswith("UPDATE TASKS"), waiting
+        finally:
+            hold.go.set()
+
+        assert (await verify)["changed"] is True
+        done = await finalize
+        assert (done["changed"], done["status"]) == (True, "completed")
+
+        order = await stack.one(Task, uuid.UUID(work))
+        assert (order.status, order.completion_reason) == ("completed", "goal")
+        assert order.work_spec["plan_finalized_at"] and DELIVERABLE in order.result
+        assert (await stack.one(Task, uuid.UUID(child["task_id"]))).status == "completed"
+        assert (await stack.one(TaskAttempt, uuid.UUID(attempt))).status == "completed"
+        (finalized,) = await _audits(stack, a, "work.plan_finalized")
+        assert finalized.details["tasks"] == 1
+        assert len(await _audits(stack, a, "task.attempt_completed")) == 1
+        assert len(await _audits(stack, a, "work.verified")) == 1
 
     async def test_repeated_finalize_and_terminal_events_change_nothing(self, stack):
         a = await stack.seed("A")
